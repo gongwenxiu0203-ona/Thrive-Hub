@@ -13,6 +13,7 @@ import {
   CUSTOMER_STATUS_COLORS,
   RATING_LABELS,
   RATING_COLORS,
+  AMAZON_CATEGORIES,
   PROMO_PLATFORMS,
   PROMOTION_GOALS,
   labelOf,
@@ -159,10 +160,7 @@ export default async function CustomersPage({
   const uniq = (xs: (string | null | undefined)[]) =>
     [...new Set(xs.filter((x): x is string => !!x))];
 
-  const statusOptions = uniq(opts("status").map((c) => c.status)).map((s) => ({
-    value: s,
-    label: labelOf(CUSTOMER_STATUS_LABELS, s),
-  }));
+  const statusOptions = Object.entries(CUSTOMER_STATUS_LABELS).map(([value, label]) => ({ value, label }));
   const platformPool = opts("platform").flatMap((c) =>
     parseStringArray(c.targetPlatforms),
   );
@@ -185,9 +183,7 @@ export default async function CustomersPage({
   const backendOptions = uniq(
     opts("backend").map((c) => c.backendOwnerId),
   ).map((id) => ({ value: id, label: userName.get(id) ?? id }));
-  const categoryOptions = uniq(opts("category").map((c) => c.category)).map(
-    (cat) => ({ value: cat, label: cat }),
-  );
+  const categoryOptions = AMAZON_CATEGORIES.map((cat) => ({ value: cat, label: cat }));
 
   const userOptions = users.map((u) => ({ id: u.id, name: u.name }));
 

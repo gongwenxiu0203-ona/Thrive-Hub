@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { ChevronLeft, ExternalLink } from "lucide-react";
+import { ExternalLink } from "lucide-react";
+import { BackButton } from "@/components/BackButton";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { AFFILIATE_DEV_STATUS_COLORS } from "@/lib/constants";
@@ -103,9 +104,7 @@ export default async function AffiliateDetailPage({
   return (
     <div className="space-y-6">
       {/* Back */}
-      <Link href="/affiliates" className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-brand-600">
-        <ChevronLeft className="h-4 w-4" />返回资源库
-      </Link>
+      <BackButton label="返回资源库" chevron />
 
       {/* Header */}
       <div className="flex flex-wrap items-start gap-4">

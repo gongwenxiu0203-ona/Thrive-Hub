@@ -53,7 +53,11 @@
       "Bash(DATABASE_URL=\"file:./prisma/dev.db\" node \"/c/Users/17863/Desktop/claude-workspace/node_modules/prisma/build/index.js\" migrate deploy)",
       "Bash(xargs grep -l \"ArrowLeft\\\\|返回\\\\|router.back\\\\|ChevronLeft\")",
       "Bash(git add *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(npx prisma *)",
+      "Bash(node_modules/.bin/prisma db *)",
+      "PowerShell(cd \"C:\\\\Users\\\\17863\\\\Desktop\\\\claude-workspace\"; powershell -ExecutionPolicy Bypass -Command \"npx prisma db push --skip-generate\" 2>&1 | Select-Object -Last 10)",
+      "PowerShell(cd \"C:\\\\Users\\\\17863\\\\Desktop\\\\claude-workspace\"; $nodeExe = \"C:\\\\Program Files\\\\nodejs\\\\node.exe\"; & $nodeExe \"C:\\\\Users\\\\17863\\\\Desktop\\\\claude-workspace\\\\node_modules\\\\prisma\\\\bin.js\" db push --skip-generate 2>&1 | Select-Object -Last 10)"
     ]
   }
 }

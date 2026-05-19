@@ -61,30 +61,21 @@ export const CUSTOMER_STATUS_COLORS: Record<string, string> = {
 // ---- Customer: Amazon 品类 --------------------------------------------------
 
 export const AMAZON_CATEGORIES = [
-  "Appliances（家用电器）",
-  "Arts, Crafts & Sewing（工艺美术）",
-  "Automotive（汽车配件）",
-  "Baby（婴儿用品）",
-  "Beauty & Personal Care（美容个护）",
-  "Books（图书）",
-  "Camera & Photo（相机摄影）",
-  "Cell Phones & Accessories（手机配件）",
-  "Clothing, Shoes & Jewelry（服装鞋靴珠宝）",
-  "Computers（电脑）",
-  "Electronics（消费电子）",
-  "Garden & Outdoor（园艺户外）",
-  "Grocery & Gourmet Food（食品杂货）",
-  "Health & Household（健康家居）",
-  "Home & Kitchen（家居厨房）",
-  "Industrial & Scientific（工业科学）",
-  "Luggage & Travel Gear（行李旅行）",
-  "Musical Instruments（乐器）",
-  "Office Products（办公用品）",
-  "Pet Supplies（宠物用品）",
-  "Sports & Outdoors（运动户外）",
-  "Tools & Home Improvement（工具装修）",
-  "Toys & Games（玩具游戏）",
-  "Video Games（电子游戏）",
+  "宠物用品",
+  "家居与厨房",
+  "美妆个护",
+  "运动户外",
+  "鞋服珠宝",
+  "工具与家庭装修",
+  "办公用品",
+  "食品杂货及美食",
+  "电子产品",
+  "母婴",
+  "玩具与游戏",
+  "庭院草坪和花园",
+  "健康与家庭",
+  "家用电器",
+  "手机及配件",
   "其他",
 ] as const;
 
@@ -218,6 +209,7 @@ export const TASK_CATEGORY_LABELS: Record<string, string> = {
   GENERAL: "普通任务",
   DEMO_PLAN: "Demo方案制定",
   MEETING_BOOKING: "客户会议预约",
+  CONTRACT_REVIEW: "合同审核",
 };
 
 export const MEETING_MODE_LABELS: Record<string, string> = {

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { BackButton } from "@/components/BackButton";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { Badge } from "@/components/ui/Badge";
@@ -86,12 +86,7 @@ export default async function ContractDetailPage({
   return (
     <div className="space-y-6">
       <div>
-        <Link
-          href="/contracts"
-          className="mb-3 inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700"
-        >
-          <ArrowLeft className="h-4 w-4" /> 返回合同列表
-        </Link>
+        <BackButton label="返回合同列表" />
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-semibold text-slate-900">
@@ -229,6 +224,10 @@ export default async function ContractDetailPage({
           contractStatus={contract.status}
           isAdmin={isAdmin}
           fields={reviewStates}
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          lockedFieldKeys={(() => { try { return JSON.parse((contract as any).lockedFields ?? "[]"); } catch { return []; } })()}
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          reviewComment={(contract as any).reviewComment ?? ""}
         />
       </section>
 

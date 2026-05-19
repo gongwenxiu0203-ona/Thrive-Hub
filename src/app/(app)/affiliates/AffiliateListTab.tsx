@@ -43,6 +43,25 @@ interface Props {
 const toOpts = (xs: string[]) => xs.filter(Boolean).map((v) => ({ value: v, label: v }));
 const PAGE_SIZE = 50;
 
+function SortableHeader({ label, sortKey: key, current, dir, onSort }: {
+  label: string; sortKey: string; current: string | null; dir: "asc" | "desc"; onSort: (k: string) => void;
+}) {
+  const active = current === key;
+  return (
+    <th
+      className="whitespace-nowrap py-3 px-3 text-left text-xs font-medium text-slate-500 cursor-pointer select-none hover:text-slate-800 group"
+      onClick={() => onSort(key)}
+    >
+      <span className="flex items-center gap-1">
+        {label}
+        <span className={`text-[10px] ${active ? "text-brand-600" : "text-slate-300 group-hover:text-slate-400"}`}>
+          {active ? (dir === "asc" ? "▲" : "▼") : "⇅"}
+        </span>
+      </span>
+    </th>
+  );
+}
+
 export default function AffiliateListTab({ options }: Props) {
   const router = useRouter();
   const pathname = usePathname();
@@ -51,6 +70,8 @@ export default function AffiliateListTab({ options }: Props) {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState(sp.get("q") ?? "");
+  const [sortKey, setSortKey] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const page = parseInt(sp.get("page") ?? "1", 10);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
 
@@ -87,6 +108,31 @@ export default function AffiliateListTab({ options }: Props) {
     p.set("page", String(n));
     router.push(`${pathname}?${p.toString()}`);
   }
+
+  function handleSort(key: string) {
+    if (sortKey === key) {
+      if (sortDir === "asc") setSortDir("desc");
+      else if (sortDir === "desc") { setSortKey(null); }
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  }
+
+  const sorted = sortKey ? [...data].sort((a, b) => {
+    let av: string | number | null = null;
+    let bv: string | number | null = null;
+    if (sortKey === "platformAffiliateName") { av = a.platformAffiliateName; bv = b.platformAffiliateName; }
+    else if (sortKey === "affiliateType") { av = a.affiliateType ?? ""; bv = b.affiliateType ?? ""; }
+    else if (sortKey === "developmentStatus") { av = a.developmentStatus ?? ""; bv = b.developmentStatus ?? ""; }
+    else if (sortKey === "personInCharge") { av = a.personInCharge?.name ?? ""; bv = b.personInCharge?.name ?? ""; }
+    else if (sortKey === "insFollowers") { av = a.insFollowers ?? -1; bv = b.insFollowers ?? -1; }
+    else if (sortKey === "tiktokFollowers") { av = a.tiktokFollowers ?? -1; bv = b.tiktokFollowers ?? -1; }
+    else if (sortKey === "youtubeFollowers") { av = a.youtubeFollowers ?? -1; bv = b.youtubeFollowers ?? -1; }
+    if (av === null || av === bv) return 0;
+    if (typeof av === "number") return sortDir === "asc" ? (av as number) - (bv as number) : (bv as number) - (av as number);
+    return sortDir === "asc" ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
+  }) : data;
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
@@ -145,24 +191,24 @@ export default function AffiliateListTab({ options }: Props) {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-slate-100 bg-slate-50 text-xs text-slate-500">
-              <th className="px-4 py-2.5 text-left font-medium">平台联盟商名称</th>
+              <SortableHeader label="平台联盟商名称" sortKey="platformAffiliateName" current={sortKey} dir={sortDir} onSort={handleSort} />
               <th className="px-4 py-2.5 text-left font-medium">内部名称</th>
               <th className="px-4 py-2.5 text-left font-medium">来源</th>
               <th className="px-4 py-2.5 text-left font-medium">类目</th>
-              <th className="px-4 py-2.5 text-left font-medium">类型</th>
+              <SortableHeader label="联盟商类型" sortKey="affiliateType" current={sortKey} dir={sortDir} onSort={handleSort} />
               <th className="px-4 py-2.5 text-left font-medium">标签</th>
               <th className="px-4 py-2.5 text-left font-medium">社媒粉丝(K)</th>
-              <th className="px-4 py-2.5 text-left font-medium">开发状态</th>
-              <th className="px-4 py-2.5 text-left font-medium">负责人</th>
+              <SortableHeader label="开发状态" sortKey="developmentStatus" current={sortKey} dir={sortDir} onSort={handleSort} />
+              <SortableHeader label="负责人" sortKey="personInCharge" current={sortKey} dir={sortDir} onSort={handleSort} />
               <th className="px-4 py-2.5 text-left font-medium">链接</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr><td colSpan={10} className="py-10 text-center text-slate-400">加载中…</td></tr>
-            ) : data.length === 0 ? (
+            ) : sorted.length === 0 ? (
               <tr><td colSpan={10} className="py-10 text-center text-slate-400">暂无数据</td></tr>
-            ) : data.map((a) => {
+            ) : sorted.map((a) => {
               const tags = parseTags(a.tags);
               const statusColor = AFFILIATE_DEV_STATUS_COLORS[a.developmentStatus ?? ""] ?? "bg-slate-100 text-slate-600";
               return (

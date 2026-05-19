@@ -147,27 +147,39 @@ export async function deleteContract(id: string) {
 
 /** 合同推进中 → 合同审核中. Seeds the per-field review rows + notifies reviewer. */
 export async function submitForReview(id: string) {
-  await requireSession();
-  const contract = await prisma.contract.findUnique({ where: { id } });
+  const session = await requireSession();
+  const contract = await prisma.contract.findUnique({
+    where: { id },
+    include: { fieldReviews: true },
+  });
   if (!contract) throw new Error("合同不存在");
   if (contract.status !== "IN_PROGRESS") {
     throw new Error("仅「合同推进中」状态可提交审核");
   }
 
-  // Ensure a review row exists for every field, defaulting to APPROVED.
+  // On re-submission: reset previously REJECTED fields to APPROVED so reviewer
+  // can evaluate them again. APPROVED fields remain locked (persisted in lockedFields).
+  const existingByField = new Map(contract.fieldReviews.map((r) => [r.fieldName, r]));
   for (const field of CONTRACT_REVIEW_FIELDS) {
-    await prisma.contractFieldReview.upsert({
-      where: {
-        contractId_fieldName: { contractId: id, fieldName: field.key },
-      },
-      create: {
-        contractId: id,
-        fieldName: field.key,
-        decision: "APPROVED",
-        reviewerId: contract.reviewerId,
-      },
-      update: {},
-    });
+    const existing = existingByField.get(field.key);
+    if (existing) {
+      // Only reset REJECTED ones — APPROVED fields stay as-is (locked for reviewer)
+      if (existing.decision === "REJECTED") {
+        await prisma.contractFieldReview.update({
+          where: { contractId_fieldName: { contractId: id, fieldName: field.key } },
+          data: { decision: "APPROVED", modification: null },
+        });
+      }
+    } else {
+      await prisma.contractFieldReview.create({
+        data: {
+          contractId: id,
+          fieldName: field.key,
+          decision: "APPROVED",
+          reviewerId: contract.reviewerId,
+        },
+      });
+    }
   }
 
   await prisma.contract.update({
@@ -186,6 +198,30 @@ export async function submitForReview(id: string) {
         createdById: contract.createdById,
       },
     });
+
+    // Create a CONTRACT_REVIEW task for the reviewer (skip if one already exists).
+    const existingTask = await prisma.task.findFirst({
+      where: { contractId: id, category: "CONTRACT_REVIEW", status: { not: "DONE" } },
+    });
+    if (!existingTask) {
+      await prisma.task.create({
+        data: {
+          title: `审核合同 ${contract.contractNo}`,
+          category: "CONTRACT_REVIEW",
+          status: "TODO",
+          ownerId: contract.reviewerId,
+          publisherId: session.userId,
+          contractId: contract.id,
+          priority: "HIGH",
+        },
+      });
+    } else {
+      // Reset the task to TODO on re-submission
+      await prisma.task.update({
+        where: { id: existingTask.id },
+        data: { status: "TODO" },
+      });
+    }
   }
 
   revalidatePath("/contracts");
@@ -238,9 +274,24 @@ export async function finalizeReview(contractId: string) {
   });
   const hasRejected = reviews.some((r) => r.decision === "REJECTED");
 
-  await prisma.contract.update({
+  // When rejecting: lock the currently-APPROVED fields so they can't be re-reviewed
+  const newLockedFields = hasRejected
+    ? reviews.filter((r) => r.decision === "APPROVED").map((r) => r.fieldName)
+    : [];
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (prisma.contract.update as any)({
     where: { id: contractId },
-    data: { status: hasRejected ? "IN_PROGRESS" : "SIGNING" },
+    data: {
+      status: hasRejected ? "IN_PROGRESS" : "SIGNING",
+      lockedFields: JSON.stringify(newLockedFields),
+    },
+  });
+
+  // Mark the review task as DONE
+  await prisma.task.updateMany({
+    where: { contractId, category: "CONTRACT_REVIEW", status: { not: "DONE" } },
+    data: { status: "DONE" },
   });
 
   // Notify the contract owner of the outcome.
@@ -262,6 +313,18 @@ export async function finalizeReview(contractId: string) {
   }
 
   revalidatePath("/contracts");
+  revalidatePath(`/contracts/${contractId}`);
+}
+
+/** Save overall reviewer comment on a contract. */
+export async function saveReviewComment(contractId: string, comment: string) {
+  const session = await requireSession();
+  if (session.role !== "ADMIN") throw new Error("仅管理员可填写审核意见");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (prisma.contract.update as any)({
+    where: { id: contractId },
+    data: { reviewComment: comment.trim() || null },
+  });
   revalidatePath(`/contracts/${contractId}`);
 }
 

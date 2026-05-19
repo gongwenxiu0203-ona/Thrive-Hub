@@ -17,7 +17,7 @@ import {
 } from "recharts";
 import { useState } from "react";
 import { PanelCard } from "@/components/ui/PanelCard";
-import { formatCurrency, formatNumber } from "@/lib/utils";
+import { formatCurrencyWith, formatNumber } from "@/lib/utils";
 
 type SortState = { k: string; d: "asc" | "desc" };
 function toggleSort(s: SortState, k: string): SortState {
@@ -80,6 +80,7 @@ export function SalesDashboard({
   publisherTrend,
   brandTrend,
   acosTrend,
+  currencyCode = "USD",
 }: {
   programDist: Pair[];
   platformDist: Pair[];
@@ -121,7 +122,9 @@ export function SalesDashboard({
   publisherTrend: SeriesPoint[];
   brandTrend: SeriesPoint[];
   acosTrend: SeriesPoint[];
+  currencyCode?: string;
 }) {
+  const formatCurrency = (n: number | null | undefined) => formatCurrencyWith(n, currencyCode);
   const [trendTab, setTrendTab] = useState<"daily" | "weekly" | "monthly">(
     "daily",
   );
@@ -168,7 +171,7 @@ export function SalesDashboard({
           }))}
           exportName="affiliate-program-gmv"
         >
-          <PieChartView data={programDist} />
+          <PieChartView data={programDist} currencyCode={currencyCode} />
         </PanelCard>
 
         <PanelCard
@@ -192,7 +195,7 @@ export function SalesDashboard({
           }))}
           exportName="platform-gmv"
         >
-          <PieChartView data={platformDist} />
+          <PieChartView data={platformDist} currencyCode={currencyCode} />
         </PanelCard>
       </div>
 
@@ -207,7 +210,7 @@ export function SalesDashboard({
           }))}
           exportName="affiliate-type-gmv"
         >
-          <PieChartView data={typeDist} />
+          <PieChartView data={typeDist} currencyCode={currencyCode} />
         </PanelCard>
 
         <PanelCard
@@ -245,7 +248,7 @@ export function SalesDashboard({
           subtitle="近期首次出单的联盟商"
           exportRows={newAffiliates.map((a) => ({
             平台联盟商名称: a.name,
-            "销售金额(USD)": a.revenue,
+            [`销售金额(${currencyCode})`]: a.revenue,
             首单日期: a.firstDate,
           }))}
           exportName="new-affiliates"
@@ -580,9 +583,11 @@ export function SalesDashboard({
 function PieChartView({
   data,
   valueFormat = "currency",
+  currencyCode = "USD",
 }: {
   data: Pair[];
   valueFormat?: "currency" | "number";
+  currencyCode?: string;
 }) {
   return (
     <ResponsiveContainer width="100%" height="100%">
@@ -608,7 +613,7 @@ function PieChartView({
         <Tooltip
           formatter={(v: number) =>
             valueFormat === "currency"
-              ? formatCurrency(v)
+              ? formatCurrencyWith(v, currencyCode)
               : formatNumber(v)
           }
           contentStyle={{ fontSize: 12, borderRadius: 8 }}

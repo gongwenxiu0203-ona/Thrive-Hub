@@ -126,6 +126,9 @@ model Contract {
   startDate DateTime? // 合作期限-开始
   endDate   DateTime? // 合作期限-结束
 
+  reviewComment String? // 审核人整体意见反馈
+  lockedFields  String  @default("[]") // JSON: field keys locked after prior approval round
+
   createdById String
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

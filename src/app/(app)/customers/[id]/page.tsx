@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Building2, Calendar, Tag } from "lucide-react";
+import { Building2, Calendar, Tag } from "lucide-react";
+import { BackButton } from "@/components/BackButton";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import {
@@ -101,12 +102,7 @@ export default async function CustomerDetailPage({
   return (
     <div className="space-y-6">
       {/* ── Back nav ── */}
-      <Link
-        href="/customers"
-        className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-brand-600"
-      >
-        <ArrowLeft className="h-4 w-4" /> 返回客户列表
-      </Link>
+      <BackButton label="返回客户列表" />
 
       {/* ── Header card ── */}
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">

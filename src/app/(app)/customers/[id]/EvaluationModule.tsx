@@ -259,7 +259,7 @@ export function EvaluationModule({
           </div>
         ) : (
           /* Edit / scoring mode */
-          <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
             {/* 1 收入评估 */}
             <DimensionCard index="1" title="收入评估" score={data.revenueScore} maxScore={20}>
               <p className="mb-2 text-xs text-slate-500">
@@ -340,6 +340,7 @@ export function EvaluationModule({
             </DimensionCard>
 
             {/* 5 品类匹配度 */}
+            <div className="col-span-2">
             <DimensionCard index="5" title="品类匹配度" score={data.categoryScore} maxScore={20}>
               <p className="mb-2 text-xs text-slate-500">进入联盟资源库匹配，统计头部联盟商（历史销售超过 $20万）数量</p>
               <div className="mb-2 max-w-xs">
@@ -353,9 +354,10 @@ export function EvaluationModule({
                 <ScoreOption score={0} label="<7个 资源匮乏，需从零开挖" selected={data.categoryScore === 0 && data.categoryMatches > 0} onClick={() => set("categoryMatches", 0)} />
               </div>
             </DimensionCard>
+            </div>
 
             {/* Total */}
-            <div className="flex items-center justify-between rounded-xl border-2 border-brand-200 bg-brand-50 px-4 py-3">
+            <div className="col-span-2"><div className="flex items-center justify-between rounded-xl border-2 border-brand-200 bg-brand-50 px-4 py-3">
               <span className="text-sm font-semibold text-slate-700">综合得分</span>
               <div className="flex items-center gap-3">
                 <div className="flex gap-2">
@@ -371,7 +373,7 @@ export function EvaluationModule({
                   {grade}级
                 </span>
               </div>
-            </div>
+            </div></div>
           </div>
         )}
       </div>

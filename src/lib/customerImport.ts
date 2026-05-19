@@ -13,17 +13,17 @@ export const CUSTOMER_IMPORT_FIELDS: ImportField[] = [
     key: "brandName",
     label: "品牌/店铺名称",
     required: true,
-    aliases: ["品牌/店铺名称", "品牌名称", "店铺名称", "品牌", "brandName", "Brand"],
+    aliases: ["品牌/店铺名称", "品牌名称", "店铺名称", "品牌", "名称", "客户名称", "brandName", "Brand Name", "Brand"],
   },
   {
     key: "category",
     label: "品类",
-    aliases: ["品类", "类目", "category"],
+    aliases: ["品类", "类目", "Amazon品类", "产品类目", "category", "Category"],
   },
   {
     key: "mainSites",
     label: "主营站点",
-    aliases: ["主营站点", "站点", "mainSites", "Site"],
+    aliases: ["主营站点", "主站", "站点", "销售站点", "mainSites", "Sites", "Site"],
   },
   {
     key: "competitor",
@@ -83,17 +83,17 @@ export const CUSTOMER_IMPORT_FIELDS: ImportField[] = [
   {
     key: "contactName",
     label: "联系人姓名",
-    aliases: ["联系人姓名", "联系人", "contactName"],
+    aliases: ["联系人姓名", "联系人", "对接人", "contactName", "Contact"],
   },
   {
     key: "contactEmail",
     label: "联系邮箱",
-    aliases: ["联系邮箱", "邮箱", "contactEmail", "Email"],
+    aliases: ["联系邮箱", "邮箱", "Email", "email", "E-mail", "电子邮件", "contactEmail"],
   },
   {
     key: "contactPhone",
     label: "联系电话",
-    aliases: ["联系电话", "电话", "contactPhone", "Phone"],
+    aliases: ["联系电话", "电话", "手机号", "contactPhone", "Phone", "Mobile"],
   },
 ];
 

@@ -28,13 +28,38 @@ export function formatDateTime(d: Date | string | null | undefined): string {
   });
 }
 
-export function formatCurrency(n: number | null | undefined): string {
-  if (n == null) return "$0";
+const REGION_CURRENCY: Record<string, string> = {
+  US: "USD",
+  CA: "USD",
+  UK: "GBP",
+  DE: "EUR",
+  JP: "JPY",
+  FR: "EUR",
+  IT: "EUR",
+  ES: "EUR",
+  AU: "AUD",
+};
+
+export function getCurrencyCode(regions: string[]): string {
+  if (regions.length === 1) return REGION_CURRENCY[regions[0]] ?? "USD";
+  return "USD";
+}
+
+export function formatCurrencyWith(n: number | null | undefined, currencyCode = "USD"): string {
+  if (n == null) return currencyCode === "JPY" ? "¥0" : `${currencySymbol(currencyCode)}0`;
   return new Intl.NumberFormat("en-US", {
     style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 2,
+    currency: currencyCode,
+    maximumFractionDigits: currencyCode === "JPY" ? 0 : 2,
   }).format(n);
+}
+
+function currencySymbol(code: string): string {
+  return ({ USD: "$", GBP: "£", EUR: "€", JPY: "¥", AUD: "A$" } as Record<string, string>)[code] ?? "$";
+}
+
+export function formatCurrency(n: number | null | undefined): string {
+  return formatCurrencyWith(n, "USD");
 }
 
 export function formatNumber(n: number | null | undefined): string {

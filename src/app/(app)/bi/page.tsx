@@ -10,7 +10,7 @@ import { SalesDashboard } from "./SalesCharts";
 import { UploadPanel } from "./UploadPanel";
 import { CleanupPanel } from "./CleanupPanel";
 import { AsinMappingPanel } from "./AsinMappingPanel";
-import { formatCurrency, formatNumber, formatDateTime, cn } from "@/lib/utils";
+import { formatCurrencyWith, getCurrencyCode, formatNumber, formatDateTime, cn } from "@/lib/utils";
 import { requireSession } from "@/lib/session";
 
 export const metadata = { title: "推广数据BI · 联盟营销管理系统" };
@@ -223,6 +223,7 @@ export default async function BIPage({
           where={where}
           isChannel={isChannel}
           isBrand={isBrand}
+          regions={csv(sp, "regions")}
         />
       )}
       {tab === "detail" && isStaff(role) && (
@@ -242,11 +243,13 @@ async function DashboardTab({
   where,
   isChannel = false,
   isBrand = false,
+  regions = [],
 }: {
   filterOptions: FilterOptions;
   where: Prisma.SalesRecordWhereInput;
   isChannel?: boolean;
   isBrand?: boolean;
+  regions?: string[];
 }) {
   const records = await prisma.salesRecord.findMany({
     where,
@@ -551,6 +554,9 @@ async function DashboardTab({
       }
     : filterOptions;
 
+  const currencyCode = getCurrencyCode(regions);
+  const fmtCurrency = (n: number | null | undefined) => formatCurrencyWith(n, currencyCode);
+
   return (
     <>
       <BIFilters options={channelFilterOptions} isChannel={isChannel} />
@@ -558,13 +564,13 @@ async function DashboardTab({
       <div className="grid gap-4 lg:grid-cols-3">
         <StatCard
           label="总销售额"
-          value={formatCurrency(totalRevenue)}
+          value={fmtCurrency(totalRevenue)}
           icon={<DollarSign className="h-5 w-5" />}
           accent="text-brand-600"
         />
         <StatCard
           label="联盟商佣金"
-          value={formatCurrency(totalCommission)}
+          value={fmtCurrency(totalCommission)}
           icon={<Percent className="h-5 w-5" />}
           accent="text-emerald-600"
         />
@@ -591,6 +597,7 @@ async function DashboardTab({
         publisherTrend={publisherTrend}
         brandTrend={brandTrend}
         acosTrend={acosTrend}
+        currencyCode={currencyCode}
       />
     </>
   );

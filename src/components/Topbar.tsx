@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { LogOut, ChevronDown } from "lucide-react";
+import Link from "next/link";
+import { LogOut, ChevronDown, Settings } from "lucide-react";
 import { logoutAction } from "@/actions/auth";
 import { ROLE_LABELS } from "@/lib/constants";
 import { initials } from "@/lib/utils";
@@ -53,6 +54,14 @@ export function Topbar({
               <p className="text-sm font-medium text-slate-800">{name}</p>
               <p className="text-xs text-slate-400">{email}</p>
             </div>
+            <Link
+              href="/settings"
+              onClick={() => setOpen(false)}
+              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
+            >
+              <Settings className="h-4 w-4" />
+              账号设置
+            </Link>
             <form action={logoutAction}>
               <button
                 type="submit"
