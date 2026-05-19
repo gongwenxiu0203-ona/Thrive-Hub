@@ -1,0 +1,110 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import {
+  LayoutDashboard,
+  Users,
+  KanbanSquare,
+  FileText,
+  Bell,
+  BarChart3,
+  Handshake,
+  Link2,
+  ShieldCheck,
+  type LucideIcon,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+
+type NavItem = {
+  href: string;
+  label: string;
+  icon: LucideIcon;
+};
+
+const NAV: NavItem[] = [
+  { href: "/dashboard", label: "工作台", icon: LayoutDashboard },
+  { href: "/customers", label: "客户管理", icon: Users },
+  { href: "/tasks", label: "任务管理", icon: KanbanSquare },
+  { href: "/contracts", label: "合同管理", icon: FileText },
+  { href: "/reminders", label: "提醒管理", icon: Bell },
+  { href: "/bi", label: "推广数据BI", icon: BarChart3 },
+  { href: "/affiliates", label: "联盟资源库", icon: Handshake },
+];
+
+export function Sidebar({
+  unreadCount = 0,
+  role = "",
+}: {
+  unreadCount?: number;
+  role?: string;
+}) {
+  const pathname = usePathname();
+
+  return (
+    <aside className="flex w-60 shrink-0 flex-col border-r border-slate-200 bg-white">
+      <div className="flex h-16 items-center gap-2 border-b border-slate-200 px-5">
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-sm font-bold text-white">
+          AM
+        </div>
+        <div>
+          <p className="text-sm font-semibold text-slate-900">联盟营销系统</p>
+          <p className="text-[11px] text-slate-400">Affiliate Marketing</p>
+        </div>
+      </div>
+
+      <nav className="flex-1 space-y-1 px-3 py-4">
+        {NAV.map((item) => {
+          const active =
+            pathname === item.href || pathname.startsWith(item.href + "/");
+          const Icon = item.icon;
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={cn(
+                "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                active
+                  ? "bg-brand-50 text-brand-700"
+                  : "text-slate-600 hover:bg-slate-100",
+              )}
+            >
+              <Icon className="h-[18px] w-[18px]" />
+              <span className="flex-1">{item.label}</span>
+              {item.href === "/reminders" && unreadCount > 0 && (
+                <span className="badge bg-rose-100 text-rose-700">
+                  {unreadCount}
+                </span>
+              )}
+            </Link>
+          );
+        })}
+      </nav>
+
+      <div className="border-t border-slate-200 px-3 py-4 space-y-1">
+        {role === "ADMIN" && (
+          <Link
+            href="/admin"
+            className={cn(
+              "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+              pathname === "/admin" || pathname.startsWith("/admin/")
+                ? "bg-brand-50 text-brand-700"
+                : "text-slate-600 hover:bg-slate-100",
+            )}
+          >
+            <ShieldCheck className="h-[18px] w-[18px]" />
+            管理员面板
+          </Link>
+        )}
+        <Link
+          href="/intake"
+          target="_blank"
+          className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+        >
+          <Link2 className="h-[18px] w-[18px]" />
+          客户门户表单
+        </Link>
+      </div>
+    </aside>
+  );
+}

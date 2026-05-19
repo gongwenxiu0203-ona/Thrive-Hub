@@ -1,0 +1,400 @@
+"use client";
+
+import { useState, useRef, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import {
+  UploadCloud,
+  Trash2,
+  FileSpreadsheet,
+  ArrowLeft,
+  AlertCircle,
+  Download,
+} from "lucide-react";
+import { deleteBatch } from "@/actions/sales";
+import { getMappableFields } from "@/lib/salesImport";
+import { PLATFORM_NAMES } from "@/lib/platformMappings";
+import { formatDateTime, formatNumber } from "@/lib/utils";
+
+type Batch = {
+  id: string;
+  fileName: string;
+  recordCount: number;
+  platform: string | null;
+  customerName: string | null;
+  uploaderName: string;
+  createdAt: string;
+};
+
+type ParseResult = {
+  fileName: string;
+  columns: string[];
+  rows: Record<string, unknown>[];
+  rowCount: number;
+  suggestedMapping: Record<string, string>;
+};
+
+type CustomerOption = { id: string; brandName: string };
+
+const MAPPABLE = getMappableFields();
+
+export function UploadPanel({
+  batches,
+  customers,
+}: {
+  batches: Batch[];
+  customers: CustomerOption[];
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [pending, startTransition] = useTransition();
+  const [customerId, setCustomerId] = useState("");
+  const [platform, setPlatform] = useState("");
+  const [parsed, setParsed] = useState<ParseResult | null>(null);
+  const [mapping, setMapping] = useState<Record<string, string>>({});
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+  const router = useRouter();
+
+  function resetFlow() {
+    setParsed(null);
+    setMapping({});
+    setError(null);
+    setDone(null);
+  }
+
+  function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setError(null);
+    setDone(null);
+    if (!platform) {
+      setError("请先选择联盟平台 (Affiiate Network Platform)");
+      if (inputRef.current) inputRef.current.value = "";
+      return;
+    }
+    startTransition(async () => {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("platform", platform);
+      const res = await fetch("/api/sales/parse", {
+        method: "POST",
+        body: fd,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "解析失败");
+      } else {
+        setParsed(data);
+        // re-map on platform change by using suggestedMapping
+        setMapping(data.suggestedMapping);
+      }
+      if (inputRef.current) inputRef.current.value = "";
+    });
+  }
+
+  function confirmImport() {
+    if (!parsed) return;
+    const missing = MAPPABLE.filter((f) => f.required && !mapping[f.key]);
+    if (missing.length > 0) {
+      setError(
+        `以下必填字段尚未映射：${missing
+          .map((f) => `「${f.label}」`)
+          .join("、")}`,
+      );
+      return;
+    }
+    setError(null);
+    startTransition(async () => {
+      const res = await fetch("/api/sales/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rows: parsed.rows,
+          mapping,
+          platform,
+          customerId: customerId || null,
+          fileName: parsed.fileName,
+        }),
+      });
+      let data: Record<string, unknown> = {};
+      try {
+        data = await res.json();
+      } catch {
+        setError(`服务器返回了非预期响应（HTTP ${res.status}），请检查控制台日志或联系管理员。`);
+        return;
+      }
+      if (!res.ok) {
+        setError((data.error as string) ?? "导入失败");
+        return;
+      }
+      const skippedNote =
+        data.skipped?.length > 0
+          ? `，跳过 ${data.skipped.length} 行（缺失必填值）`
+          : "";
+      setDone(`成功导入 ${data.imported} 条销售记录${skippedNote}`);
+      setParsed(null);
+      setMapping({});
+      router.refresh();
+    });
+  }
+
+  function onDelete(id: string) {
+    if (!confirm("确认删除该批次？该批次下的所有销售记录将一并删除。")) return;
+    startTransition(async () => {
+      try {
+        await deleteBatch(id);
+        router.refresh();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "删除失败");
+      }
+    });
+  }
+
+  return (
+    <div className="space-y-6">
+      <section className="card p-6">
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".xlsx,.xls,.csv"
+          className="hidden"
+          onChange={onFile}
+        />
+
+        {/* Pre-upload setup: customer + platform */}
+        <div className="mb-4 grid gap-3 sm:grid-cols-3">
+          <div>
+            <label className="label">关联客户</label>
+            <select
+              className="input"
+              value={customerId}
+              onChange={(e) => setCustomerId(e.target.value)}
+              disabled={!!parsed}
+            >
+              <option value="">未选择（可选）</option>
+              {customers.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.brandName}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="label">
+              联盟平台 <span className="text-rose-500">*</span>
+            </label>
+            <select
+              className={`input ${!platform ? "border-amber-300" : ""}`}
+              value={platform}
+              onChange={(e) => {
+                setPlatform(e.target.value);
+                setParsed(null);
+                setMapping({});
+              }}
+              disabled={!!parsed}
+            >
+              <option value="">请选择联盟平台</option>
+              {PLATFORM_NAMES.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-end">
+            {platform ? (
+              <a
+                href={`/api/sales/template?platform=${encodeURIComponent(platform)}`}
+                className="btn-secondary w-full justify-center"
+              >
+                <Download className="h-4 w-4" />
+                下载{platform}模板
+              </a>
+            ) : (
+              <button className="btn-secondary w-full" disabled>
+                <Download className="h-4 w-4" /> 先选择平台
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* step indicator */}
+        <div className="mb-4 flex items-center gap-2 text-sm">
+          <span
+            className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold ${
+              parsed
+                ? "bg-emerald-100 text-emerald-700"
+                : "bg-brand-600 text-white"
+            }`}
+          >
+            1
+          </span>
+          <span className={parsed ? "text-slate-400" : "text-slate-800"}>
+            上传文件
+          </span>
+          <span className="text-slate-300">—</span>
+          <span
+            className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold ${
+              parsed ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-400"
+            }`}
+          >
+            2
+          </span>
+          <span className={parsed ? "text-slate-800" : "text-slate-400"}>
+            确认字段映射
+          </span>
+        </div>
+
+        {!parsed ? (
+          <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 px-6 py-10 text-center">
+            <UploadCloud className="h-10 w-10 text-slate-300" />
+            <p className="mt-3 text-sm font-medium text-slate-600">
+              上传联盟推广销售数据（Excel / CSV）
+            </p>
+            <p className="mt-1 text-xs text-slate-400">
+              首行需为表头。系统将按{platform || "所选平台"}
+              的字段映射规则自动建议对应关系，可手动调整每个字段。
+            </p>
+            <button
+              className="btn-primary mt-4"
+              disabled={pending || !platform}
+              onClick={() => inputRef.current?.click()}
+            >
+              <UploadCloud className="h-4 w-4" />
+              {pending ? "解析中…" : "选择文件"}
+            </button>
+          </div>
+        ) : (
+          <div>
+            <p className="mb-3 text-sm text-slate-500">
+              已读取 <b>{parsed.rowCount}</b> 行、{parsed.columns.length}{" "}
+              个列。系统已按 <b>{platform}</b> 平台规则自动匹配映射，请核对并调整必填字段（
+              <span className="text-rose-500">*</span>）。
+            </p>
+            <div className="max-h-[46vh] overflow-y-auto rounded-lg border border-slate-200">
+              <table className="data w-full">
+                <thead>
+                  <tr>
+                    <th>系统字段</th>
+                    <th>对应表格列</th>
+                    <th>数据预览</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {MAPPABLE.map((field) => {
+                    const col = mapping[field.key] ?? "";
+                    const preview = col
+                      ? String(parsed.rows[0]?.[col] ?? "")
+                      : "";
+                    return (
+                      <tr key={field.key}>
+                        <td className="font-medium text-slate-700">
+                          {field.label}
+                          {field.required && (
+                            <span className="ml-1 text-rose-500">*</span>
+                          )}
+                        </td>
+                        <td>
+                          <select
+                            className={`input ${
+                              field.required && !col ? "border-rose-400" : ""
+                            }`}
+                            value={col}
+                            onChange={(e) =>
+                              setMapping((m) => ({
+                                ...m,
+                                [field.key]: e.target.value,
+                              }))
+                            }
+                          >
+                            <option value="">— 不导入 —</option>
+                            {parsed.columns.map((c) => (
+                              <option key={c} value={c}>
+                                {c}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="max-w-[12rem] truncate text-xs text-slate-400">
+                          {preview || "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-4">
+              <button className="btn-secondary" onClick={resetFlow}>
+                <ArrowLeft className="h-4 w-4" /> 重新上传
+              </button>
+              <button
+                className="btn-primary"
+                disabled={pending}
+                onClick={confirmImport}
+              >
+                {pending ? "导入中…" : `确认导入 ${parsed.rowCount} 条`}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {error && (
+          <div className="mt-3 flex gap-2 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              <p className="font-medium">导入未完成</p>
+              <p className="mt-0.5 text-xs">{error}</p>
+              <p className="mt-1 text-xs text-rose-500/80">
+                指引：请确认 ①已选择联盟平台 ②文件首行为列名 ③必填字段（订单日期/联盟商名称/销售金额）已正确映射 ④日期与金额列格式正确。
+              </p>
+            </div>
+          </div>
+        )}
+        {done && (
+          <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-600">
+            {done}
+          </p>
+        )}
+      </section>
+
+      <section className="card p-5">
+        <h2 className="mb-4 font-semibold text-slate-900">
+          数据批次管理（{batches.length}）
+        </h2>
+        {batches.length === 0 ? (
+          <p className="py-6 text-center text-sm text-slate-400">
+            暂无上传批次
+          </p>
+        ) : (
+          <ul className="space-y-2">
+            {batches.map((b) => (
+              <li
+                key={b.id}
+                className="flex items-center gap-3 rounded-lg border border-slate-200 px-4 py-3"
+              >
+                <FileSpreadsheet className="h-5 w-5 shrink-0 text-emerald-500" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-slate-700">
+                    {b.fileName}
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    {formatNumber(b.recordCount)} 条 · {b.platform ?? "—"} ·{" "}
+                    {b.customerName ?? "未关联客户"} · {b.uploaderName} ·{" "}
+                    {formatDateTime(b.createdAt)}
+                  </p>
+                </div>
+                <button
+                  className="btn-danger btn-sm"
+                  disabled={pending}
+                  onClick={() => onDelete(b.id)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" /> 删除批次
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </div>
+  );
+}

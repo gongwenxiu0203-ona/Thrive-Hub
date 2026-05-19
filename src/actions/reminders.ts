@@ -1,0 +1,72 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { prisma } from "@/lib/prisma";
+import { requireSession } from "@/lib/session";
+
+function str(fd: FormData, key: string): string {
+  return String(fd.get(key) ?? "").trim();
+}
+
+export async function createReminder(fd: FormData) {
+  const session = await requireSession();
+  const title = str(fd, "title");
+  const remindDate = str(fd, "remindDate");
+  if (!title) throw new Error("提醒标题为必填项");
+  if (!remindDate) throw new Error("提醒日期为必填项");
+
+  await prisma.reminder.create({
+    data: {
+      title,
+      content: str(fd, "content") || null,
+      remindDate: new Date(remindDate),
+      type: str(fd, "type") || "FOLLOWUP",
+      targetId: str(fd, "targetId") || session.userId,
+      createdById: session.userId,
+    },
+  });
+  revalidatePath("/reminders");
+}
+
+export async function updateReminder(id: string, fd: FormData) {
+  await requireSession();
+  const title = str(fd, "title");
+  const remindDate = str(fd, "remindDate");
+  if (!title) throw new Error("提醒标题为必填项");
+  if (!remindDate) throw new Error("提醒日期为必填项");
+
+  await prisma.reminder.update({
+    where: { id },
+    data: {
+      title,
+      content: str(fd, "content") || null,
+      remindDate: new Date(remindDate),
+      type: str(fd, "type") || "FOLLOWUP",
+      targetId: str(fd, "targetId"),
+    },
+  });
+  revalidatePath("/reminders");
+}
+
+export async function deleteReminder(id: string) {
+  await requireSession();
+  await prisma.reminder.delete({ where: { id } });
+  revalidatePath("/reminders");
+}
+
+export async function toggleRead(id: string, isRead: boolean) {
+  await requireSession();
+  await prisma.reminder.update({ where: { id }, data: { isRead } });
+  revalidatePath("/reminders");
+  revalidatePath("/dashboard");
+}
+
+export async function markAllRead() {
+  const session = await requireSession();
+  await prisma.reminder.updateMany({
+    where: { targetId: session.userId, isRead: false },
+    data: { isRead: true },
+  });
+  revalidatePath("/reminders");
+  revalidatePath("/dashboard");
+}

@@ -1,0 +1,427 @@
+// Affiliate Marketing Management System — data model
+// DB: SQLite (swap `provider`/`DATABASE_URL` to postgresql to migrate).
+// SQLite has no native enums/arrays: enum-like fields are String with the
+// allowed values documented inline; list/object fields are JSON-encoded strings.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         String   @default("USER") // ADMIN | USER | LYNQ_STAFF | BRAND | CHANNEL
+  status       String   @default("APPROVED") // PENDING | APPROVED | REJECTED
+  brandName    String?  // for BRAND role: which brand they belong to
+  channelUserId String? // for CHANNEL role: their userId (self-referential for filtering)
+  uniqueCode   String?  @unique // auto-generated user identification code
+  // Integration authorizations chosen at registration time.
+  feishuAuth   Boolean  @default(false) // 飞书日历同步授权
+  googleAuth   Boolean  @default(false) // Google 日历同步授权
+  emailAuth    Boolean  @default(false) // 邮件收发授权
+  createdAt    DateTime @default(now())
+
+  customersAsBusiness Customer[]            @relation("BusinessOwner")
+  customersAsBackend  Customer[]            @relation("BackendOwner")
+  tasksOwned          Task[]                @relation("TaskOwner")
+  tasksPublished      Task[]                @relation("TaskPublisher")
+  remindersReceived   Reminder[]            @relation("ReminderTarget")
+  remindersCreated    Reminder[]            @relation("ReminderCreator")
+  affiliatesOwned     Affiliate[]           @relation("AffiliatePersonInCharge")
+  contractsCreated    Contract[]            @relation("ContractCreator")
+  contractsOwned      Contract[]            @relation("ContractOwner")
+  contractsReviewing  Contract[]            @relation("ContractReviewer")
+  fieldReviews        ContractFieldReview[]
+  salesBatches        SalesBatch[]
+  affiliateBatches    AffiliateBatch[]
+  attachments         Attachment[]
+}
+
+model Customer {
+  id String @id @default(cuid())
+
+  // ① 基础信息
+  brandName  String // 品牌/店铺名称
+  mainSites  String @default("[]") // JSON array: US | UK | DE | CA | JP
+  siteLinks  String @default("{}") // JSON: { US: { link, price, asin }, ... }
+  competitor String? // 品牌竞品（名称/链接）
+
+  // ② 推广平台信息
+  targetPlatforms String @default("[]") // JSON array: 独立站 | Amazon | 沃尔玛
+  platformGmv     String @default("{}") // JSON: { 独立站: "区间", Amazon: "...", 沃尔玛: "..." }
+
+  // ③ 历史推广
+  amazonAcos         String? // 亚马逊站内广告 ACOS
+  socialMediaInfo    String? // 社媒推广情况
+  affiliateHistory   String? // 是否做过联盟营销及相关情况
+  affiliatePlatforms String? // 具体用的平台（ACC / Levanta / PartnerBoost 等）
+
+  // ④ 目标与预算
+  promotionGoals String  @default("[]") // JSON array: 新品推广 | 老品增量 | 全店业务增量
+  targetGmv      String? // 目标 GMV 或单量（月）
+  channelBudget  String? // 优质渠道固定费用预算（单渠道范围）
+  affiliateTeam  String? // 是否有联盟团队及负责工作
+
+  // 内部管理
+  category        String? // 品类
+  status          String   @default("UNASSIGNED") // 见 CUSTOMER_STATUS_LABELS
+  statusChangedAt DateTime @default(now()) // 用于状态超时自动流转
+  rating          String   @default("PENDING") // S | A | B | C | PENDING(待评估)
+  evaluationData  String?  // JSON: { revenueScore, bsrScore, mediaBuyScore, commissionScore, categoryScore, ... }
+  businessOwnerId String?
+  backendOwnerId  String?
+  channelUserId   String? // 渠道商 userId（关联渠道商用户）
+  createdById     String? // 创建者 userId
+
+  // 联系人（非必填）
+  contactName  String?
+  contactEmail String?
+  contactPhone String?
+
+  source    String   @default("INTERNAL") // INTERNAL | INTAKE
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  businessOwner User?         @relation("BusinessOwner", fields: [businessOwnerId], references: [id])
+  backendOwner  User?         @relation("BackendOwner", fields: [backendOwnerId], references: [id])
+  contracts     Contract[]
+  tasks         Task[]
+  salesBatches  SalesBatch[]
+  salesRecords  SalesRecord[]
+}
+
+model Contract {
+  id         String @id @default(cuid())
+  contractNo String @unique
+  customerId String // 必须从客户管理中选取
+  type       String @default("CHANNEL") // CHANNEL 渠道商 | BRAND 品牌方 | REBATE 返佣
+  status     String @default("IN_PROGRESS") // IN_PROGRESS 推进中 | REVIEWING 审核中 | SIGNING 签署中 | COMPLETED 签署完成
+
+  ownerId    String? // 合同负责人（提交审核人）
+  reviewerId String? // 审核人
+
+  fileUrl      String?
+  contractText String? // 提取出的合同全文，用于「原文对照」
+  extractedBy  String? // RULE | AI — 字段抽取方式
+
+  // 自动提取 / 人工填写的审核字段
+  partyA           String? // 甲方合同主体
+  accountingPeriod String? // 核算周期（原文）
+  feeCycle         String? // 固费周期：无 | 月度 | 季度
+  feeAmount        String? // 固费金额（¥）
+  commissionRate   String? // 抽佣比例（带 %）
+  affiliateRule    String? // 联盟佣金规则（原文）
+  paymentCycle     String? // 付款周期（原文）
+  invoiceReq       String? // 发票要求（原文，无则「无」）
+  lateLiability    String? // 逾期责任（原文）
+  remark           String? // 备注（人工填写）
+
+  startDate DateTime? // 合作期限-开始
+  endDate   DateTime? // 合作期限-结束
+
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  customer     Customer              @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  createdBy    User                  @relation("ContractCreator", fields: [createdById], references: [id])
+  owner        User?                 @relation("ContractOwner", fields: [ownerId], references: [id])
+  reviewer     User?                 @relation("ContractReviewer", fields: [reviewerId], references: [id])
+  fieldReviews ContractFieldReview[]
+}
+
+model ContractFieldReview {
+  id           String  @id @default(cuid())
+  contractId   String
+  fieldName    String // partyA | accountingPeriod | feeCycle | feeAmount | commissionRate | affiliateRule | paymentCycle | invoiceReq | lateLiability | remark | contractPeriod
+  decision     String  @default("APPROVED") // APPROVED 通过 | REJECTED 驳回（默认通过）
+  modification String? // 修改意见
+  reviewerId   String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  contract Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  reviewer User?    @relation(fields: [reviewerId], references: [id])
+
+  @@unique([contractId, fieldName])
+}
+
+model Task {
+  id          String  @id @default(cuid())
+  title       String
+  description String?
+  customerId  String?
+  contractId  String? // 关联合同（合同提交类任务）
+  ownerId     String?
+  publisherId String?
+  priority    String  @default("MID") // LOW | MID | HIGH | URGENT
+  category    String  @default("GENERAL") // GENERAL | DEMO_PLAN | MEETING_BOOKING
+  status      String  @default("TODO") // TODO | IN_PROGRESS | REVIEW | DONE | RETURNED | CANCELLED
+  returnReason String? // 退回理由
+
+  externalLinks   String  @default("[]") // JSON array of {label, url}
+
+  // 客户会议预约类任务的结构化信息
+  meetingTime     DateTime?
+  meetingMode     String? // ONLINE 线上 | OFFLINE 线下
+  meetingLocation String? // 线下会议地点
+  attendees       String  @default("[]") // JSON array of user ids
+
+  sortOrder Int       @default(0)
+  dueDate   DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  customer  Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  owner     User?     @relation("TaskOwner", fields: [ownerId], references: [id])
+  publisher User?     @relation("TaskPublisher", fields: [publisherId], references: [id])
+}
+
+model Reminder {
+  id          String   @id @default(cuid())
+  title       String
+  content     String?
+  remindDate  DateTime
+  type        String   @default("FOLLOWUP") // DELIVERY | MEETING | CONTRACT_EXPIRY | REVIEW | FOLLOWUP | STATUS_CHECK
+  isRead      Boolean  @default(false)
+  targetId    String
+  createdById String
+  createdAt   DateTime @default(now())
+
+  target    User @relation("ReminderTarget", fields: [targetId], references: [id])
+  createdBy User @relation("ReminderCreator", fields: [createdById], references: [id])
+}
+
+// 联盟资源库 — 字段与「资源库字段.xlsx」第一行完全对应
+model Affiliate {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // 核心身份 (Excel B-G)
+  platformAffiliateName String  // 平台联盟商名称 Affiliate Name on Network
+  internalAffiliateName String? // 内部联盟商名称 Internal Affiliate Name (相同=关联账号)
+  source                String? // 联盟商来源: LTK|Iconically|Levanta|ACC|PartnerBoost|Amazon Tag search|Wayward
+  category              String? // 一级类目: Network|Publisher
+  affiliateType         String? // 联盟商类型 Type
+  tags                  String  @default("[]") // JSON string[]: 联盟商标签 (多选)
+
+  // Website (Excel H-L)
+  websiteLink       String?
+  websiteTraffic    Float?  // 【单位K】月流量Monthly Traffic
+  websitePlacements String  @default("[]") // JSON [{placement,flatfee}]: Website版位+Flatfee
+  websiteNote       String? // website备注
+
+  // Instagram (Excel M-Q)
+  instagramLink        String?
+  insFollowers         Float?  // 【单位K】INS粉丝数 Followers
+  instagramPlacements  String  @default("[]") // JSON [{placement,flatfee}]: INS版位+Flatfee
+  insNote              String? // INS备注
+
+  // Facebook (Excel R-V)
+  facebookLink        String?
+  fbFollowers         Float?  // 【单位K】FB粉丝数 Followers
+  facebookPlacements  String  @default("[]") // JSON [{placement,flatfee}]: Facebook版位+Flatfee
+  fbNote              String? // FB备注
+
+  // YouTube (Excel W-Z)
+  youtubeLink        String?
+  youtubeFollowers   Float?  // 【单位K】YouTube粉丝数 Followers
+  youtubePlacements  String  @default("[]") // JSON [{placement,flatfee}]: YouTube版位+Flatfee
+
+  // TikTok (Excel AA-AD)
+  tiktokLink        String?
+  tiktokFollowers   Float?  // 【单位K】TikTok粉丝数 Followers
+  tiktokPlacements  String  @default("[]") // JSON [{placement,flatfee}]: TikTok版位+Flatfee
+
+  // Amazon Storefront (Excel AE-AH)
+  amazonStorefrontLink String?
+  topCreator           String? // Top Creator: 是|否
+  storefrontFlatfee    Float?  // Storefront flatfee
+  storefrontNote       String? // Storefront备注
+
+  // LTK (Excel AI-AJ)
+  ltkLink    String?
+  ltkFlatfee Float?
+
+  // Pinterest (Excel AK-AL)
+  pinterestLink    String?
+  pinterestFlatfee Float?
+
+  // 其他费用与备注 (Excel AM-AN)
+  flatfeeSupplementary String? // Flatfee合作费用 【补充】
+  note                 String? // 备注
+
+  // 联系与开发
+  contactInfo       String? // 联系方式 contact information
+  brand             String? // 品牌 Brand
+  developmentStatus String? // 开发状态Status
+  developmentDesc   String? // 开发情况描述
+  contactEmail      String? // 负责人建联邮箱
+  personInChargeId  String? // 负责人 Person in Charge
+  cooperationMode   String  @default("[]") // JSON string[]: 合作模式 (多选)
+  sampleShipping    String? // 样品寄送: 是|否|均可
+
+  // 合作客户 (新增字段 — 由合作审核写入)
+  customerCooperations String @default("[]") // JSON [{customerId,customerName,status}]
+
+  // 多品牌开发记录 (每条包含:customerId?,brandName,developmentStatus?,personInChargeId?,personInChargeName?,contactEmail?)
+  brandEntries String @default("[]")
+
+  // 批次管理
+  batchId String? // 关联 AffiliateBatch
+
+  personInCharge User?                 @relation("AffiliatePersonInCharge", fields: [personInChargeId], references: [id])
+  batch          AffiliateBatch?       @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  coopReviews    AffiliateCoopReview[]
+}
+
+// 联盟商批量导入批次
+model AffiliateBatch {
+  id          String   @id @default(cuid())
+  fileName    String
+  recordCount Int      @default(0)
+  uploaderId  String
+  createdAt   DateTime @default(now())
+
+  uploader   User        @relation(fields: [uploaderId], references: [id])
+  affiliates Affiliate[]
+}
+
+// 合作审核记录
+model AffiliateCoopReview {
+  id          String   @id @default(cuid())
+  affiliateId String
+  customerId  String?  // 关联客户
+  customerName String? // 快照客户名称
+  platform    String?  // 合作平台
+  fee         Float?   // 合作费用
+  blurBrands  Boolean  @default(false) // 往期数据品牌模糊化
+  notes       String?  // 备注
+  reviewerId  String?  // 审核人 User id
+  reviewerName String? // 审核人名称快照
+  customerStatus String? // 写回联盟商合作客户的状态
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  affiliate Affiliate @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
+}
+
+model SalesBatch {
+  id                String   @id @default(cuid())
+  fileName          String
+  customerId        String? // 上传时选择的客户
+  affiliatePlatform String? // 上传时选择的联盟平台
+  recordCount       Int      @default(0)
+  uploaderId        String
+  createdAt         DateTime @default(now())
+
+  customer Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  uploader User          @relation(fields: [uploaderId], references: [id])
+  records  SalesRecord[]
+}
+
+// 推广销售记录 — 字段与「各平台数据标头字段映射」表第一行 1:1 对应
+model SalesRecord {
+  id                String   @id @default(cuid())
+  batchId           String
+
+  // 标识维度
+  affiliatePlatform String // 联盟平台 Affiiate Network Platform
+  affiliateProgram  String? // 联盟类型 Affiliate Program
+  store             String? // 店铺
+  asin              String? // ASIN
+  brand             String // 品牌 Brand
+  affiliateName     String // 平台联盟商名称 Affiliate Name on Network
+  region            String? // 地区 Region
+
+  // 时间
+  orderDate DateTime // 订单日期 Order Date
+
+  // 销售数字
+  orders         Int     @default(0) // 订单数 Orders
+  unitsSold      Int     @default(0) // 销售数量 Unit Sold
+  revenue        Float   @default(0) // 销售金额 Revenue
+  commission     Float   @default(0) // 联盟商佣金 Commission for Publishers
+  commissionRate Float   @default(0) // 联盟商佣金比例 Commission Rate %
+  platformFee    Float   @default(0) // 平台销售额佣金
+  totalFee       Float   @default(0) // 总费用 Total Fee（公式计算）
+  affiliateFlatfee Float @default(0) // 联盟商固定费用 Flatfee
+  platformFlatfee  Float @default(0) // 平台固定费用 Flatfee
+  sampleFee        Float @default(0) // 样品费用 Sample
+
+  // 流量数字
+  clicks         Int   @default(0) // 点击量 Clicks
+  addToCarts     Int   @default(0) // 加入购物车 Add to Carts
+  conversionRate Float @default(0) // 转化率 Conversion Rate（公式）
+  epc            Float @default(0) // EPC（公式）
+  acos           Float @default(0) // ACOS（公式）
+
+  // Campaign 信息
+  campaignIdName    String? // campaign Id/name
+  campaignSubtitle  String?
+  campaignStartDate DateTime? // Campaign Start Date 开始日期
+  campaignEndDate   DateTime? // Campaign End Date 结束日期
+  campaignBudget    Float?    @default(0) // Campaign Budget 预算
+
+  // 自动匹配的字段
+  parentAsin           String? // Parent Asin（通过 AsinMapping 匹配）
+  storeProductLabel    String? // 链接标签 Store-Product Label（通过 AsinMapping 匹配）
+  affiliateType        String? // 联盟商类型 Type（从联盟资源库匹配）
+  internalAffiliateName String? // 内部联盟商名称 Internal Affiliate Name
+
+  // 同环比
+  revenueMoM Float @default(0) // 销售金额月度环比
+  revenueYoY Float @default(0) // 销售金额月度同比
+
+  promotionLink String? // 推广链接 promotion link
+  customerId    String? // 关联客户
+
+  createdAt DateTime @default(now()) // 上传时间
+
+  batch    SalesBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  customer Customer?  @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  @@index([affiliatePlatform])
+  @@index([brand])
+  @@index([region])
+  @@index([orderDate])
+}
+
+// Parent Asin / 链接标签匹配表 —— 品牌+店铺+地区+ASIN 唯一
+model AsinMapping {
+  id                String   @id @default(cuid())
+  brand             String
+  store             String
+  region            String
+  storeProductLabel String? // 链接标签名字 / 项目名称
+  parentAsin        String?
+  asin              String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([brand, store, region, asin])
+  @@index([asin])
+}
+
+model Attachment {
+  id           String   @id @default(cuid())
+  fileName     String
+  fileUrl      String
+  fileSize     Int      @default(0)
+  entityType   String // CUSTOMER | TASK | CONTRACT | CUSTOMER_DEMO
+  entityId     String
+  uploadedById String?
+  createdAt    DateTime @default(now())
+
+  uploadedBy User? @relation(fields: [uploadedById], references: [id])
+
+  @@index([entityType, entityId])
+}
