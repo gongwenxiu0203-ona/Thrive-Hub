@@ -1,0 +1,358 @@
+// ============================================================
+//  生产环境 Prisma Schema — MySQL（腾讯云）
+//  使用方法：
+//    cp prisma/schema.mysql.prisma prisma/schema.prisma
+//    DATABASE_URL="mysql://..." npx prisma migrate deploy
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         String   @default("USER") @db.VarChar(20)
+  status       String   @default("APPROVED") @db.VarChar(20)
+  brandName    String?
+  channelUserId String?
+  uniqueCode   String?  @unique
+  feishuAuth   Boolean  @default(false)
+  googleAuth   Boolean  @default(false)
+  emailAuth    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  customersAsBusiness Customer[]            @relation("BusinessOwner")
+  customersAsBackend  Customer[]            @relation("BackendOwner")
+  tasksOwned          Task[]                @relation("TaskOwner")
+  tasksPublished      Task[]                @relation("TaskPublisher")
+  remindersReceived   Reminder[]            @relation("ReminderTarget")
+  remindersCreated    Reminder[]            @relation("ReminderCreator")
+  affiliatesOwned     Affiliate[]           @relation("AffiliatePersonInCharge")
+  contractsCreated    Contract[]            @relation("ContractCreator")
+  contractsOwned      Contract[]            @relation("ContractOwner")
+  contractsReviewing  Contract[]            @relation("ContractReviewer")
+  fieldReviews        ContractFieldReview[]
+  salesBatches        SalesBatch[]
+  affiliateBatches    AffiliateBatch[]
+  attachments         Attachment[]
+}
+
+model Customer {
+  id              String   @id @default(cuid())
+  brandName       String
+  mainSites       String   @default("[]") @db.Text
+  siteLinks       String   @default("{}") @db.Text
+  competitor      String?  @db.Text
+  targetPlatforms String   @default("[]") @db.Text
+  platformGmv     String   @default("{}") @db.Text
+  amazonAcos      String?
+  socialMediaInfo String?  @db.Text
+  affiliateHistory String? @db.Text
+  affiliatePlatforms String?
+  promotionGoals  String   @default("[]") @db.Text
+  targetGmv       String?
+  channelBudget   String?
+  affiliateTeam   String?  @db.Text
+  category        String?
+  status          String   @default("UNASSIGNED") @db.VarChar(30)
+  statusChangedAt DateTime @default(now())
+  rating          String   @default("PENDING") @db.VarChar(10)
+  evaluationData  String?  @db.Text
+  businessOwnerId String?
+  backendOwnerId  String?
+  channelUserId   String?
+  createdById     String?
+  contactName     String?
+  contactEmail    String?
+  contactPhone    String?
+  source          String   @default("INTERNAL") @db.VarChar(20)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  businessOwner User?         @relation("BusinessOwner", fields: [businessOwnerId], references: [id])
+  backendOwner  User?         @relation("BackendOwner", fields: [backendOwnerId], references: [id])
+  contracts     Contract[]
+  tasks         Task[]
+  salesBatches  SalesBatch[]
+  salesRecords  SalesRecord[]
+}
+
+model Contract {
+  id               String    @id @default(cuid())
+  contractNo       String    @unique
+  customerId       String
+  type             String    @default("CHANNEL") @db.VarChar(20)
+  status           String    @default("IN_PROGRESS") @db.VarChar(20)
+  ownerId          String?
+  reviewerId       String?
+  fileUrl          String?
+  contractText     String?   @db.LongText
+  extractedBy      String?   @db.VarChar(10)
+  partyA           String?
+  accountingPeriod String?   @db.Text
+  feeCycle         String?   @db.VarChar(20)
+  feeAmount        String?
+  commissionRate   String?
+  affiliateRule    String?   @db.Text
+  paymentCycle     String?   @db.Text
+  invoiceReq       String?   @db.Text
+  lateLiability    String?   @db.Text
+  remark           String?   @db.Text
+  startDate        DateTime?
+  endDate          DateTime?
+  reviewComment    String?   @db.Text
+  lockedFields     String    @default("[]") @db.Text
+  createdById      String
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  customer     Customer              @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  createdBy    User                  @relation("ContractCreator", fields: [createdById], references: [id])
+  owner        User?                 @relation("ContractOwner", fields: [ownerId], references: [id])
+  reviewer     User?                 @relation("ContractReviewer", fields: [reviewerId], references: [id])
+  fieldReviews ContractFieldReview[]
+}
+
+model ContractFieldReview {
+  id           String   @id @default(cuid())
+  contractId   String
+  fieldName    String   @db.VarChar(40)
+  decision     String   @default("APPROVED") @db.VarChar(10)
+  modification String?  @db.Text
+  reviewerId   String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  contract Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  reviewer User?    @relation(fields: [reviewerId], references: [id])
+
+  @@unique([contractId, fieldName])
+}
+
+model Task {
+  id              String    @id @default(cuid())
+  title           String
+  description     String?   @db.Text
+  customerId      String?
+  contractId      String?
+  ownerId         String?
+  publisherId     String?
+  priority        String    @default("MID") @db.VarChar(10)
+  category        String    @default("GENERAL") @db.VarChar(30)
+  status          String    @default("TODO") @db.VarChar(20)
+  returnReason    String?   @db.Text
+  externalLinks   String    @default("[]") @db.Text
+  meetingTime     DateTime?
+  meetingMode     String?   @db.VarChar(10)
+  meetingLocation String?
+  attendees       String    @default("[]") @db.Text
+  sortOrder       Int       @default(0)
+  dueDate         DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  customer  Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  owner     User?     @relation("TaskOwner", fields: [ownerId], references: [id])
+  publisher User?     @relation("TaskPublisher", fields: [publisherId], references: [id])
+}
+
+model Reminder {
+  id          String   @id @default(cuid())
+  title       String
+  content     String?  @db.Text
+  remindDate  DateTime
+  type        String   @default("FOLLOWUP") @db.VarChar(20)
+  isRead      Boolean  @default(false)
+  targetId    String
+  createdById String
+  createdAt   DateTime @default(now())
+
+  target    User @relation("ReminderTarget", fields: [targetId], references: [id])
+  createdBy User @relation("ReminderCreator", fields: [createdById], references: [id])
+}
+
+model Affiliate {
+  id                    String   @id @default(cuid())
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  platformAffiliateName String
+  internalAffiliateName String?
+  source                String?
+  category              String?
+  affiliateType         String?  @db.Text
+  tags                  String   @default("[]") @db.Text
+  websiteLink           String?
+  websiteTraffic        Float?
+  websitePlacements     String   @default("[]") @db.Text
+  websiteNote           String?  @db.Text
+  instagramLink         String?
+  insFollowers          Float?
+  instagramPlacements   String   @default("[]") @db.Text
+  insNote               String?  @db.Text
+  facebookLink          String?
+  fbFollowers           Float?
+  facebookPlacements    String   @default("[]") @db.Text
+  fbNote                String?  @db.Text
+  youtubeLink           String?
+  youtubeFollowers      Float?
+  youtubePlacements     String   @default("[]") @db.Text
+  tiktokLink            String?
+  tiktokFollowers       Float?
+  tiktokPlacements      String   @default("[]") @db.Text
+  amazonStorefrontLink  String?
+  topCreator            String?  @db.VarChar(5)
+  storefrontFlatfee     Float?
+  storefrontNote        String?  @db.Text
+  ltkLink               String?
+  ltkFlatfee            Float?
+  pinterestLink         String?
+  pinterestFlatfee      Float?
+  flatfeeSupplementary  String?  @db.Text
+  note                  String?  @db.Text
+  contactInfo           String?  @db.Text
+  brand                 String?
+  developmentStatus     String?
+  developmentDesc       String?  @db.Text
+  contactEmail          String?
+  personInChargeId      String?
+  cooperationMode       String   @default("[]") @db.Text
+  sampleShipping        String?  @db.VarChar(10)
+  customerCooperations  String   @default("[]") @db.Text
+  brandEntries          String   @default("[]") @db.Text
+  batchId               String?
+
+  personInCharge User?                 @relation("AffiliatePersonInCharge", fields: [personInChargeId], references: [id])
+  batch          AffiliateBatch?       @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  coopReviews    AffiliateCoopReview[]
+}
+
+model AffiliateBatch {
+  id          String   @id @default(cuid())
+  fileName    String
+  recordCount Int      @default(0)
+  uploaderId  String
+  createdAt   DateTime @default(now())
+
+  uploader   User        @relation(fields: [uploaderId], references: [id])
+  affiliates Affiliate[]
+}
+
+model AffiliateCoopReview {
+  id             String   @id @default(cuid())
+  affiliateId    String
+  customerId     String?
+  customerName   String?
+  platform       String?
+  fee            Float?
+  blurBrands     Boolean  @default(false)
+  notes          String?  @db.Text
+  reviewerId     String?
+  reviewerName   String?
+  customerStatus String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  affiliate Affiliate @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
+}
+
+model SalesBatch {
+  id                String   @id @default(cuid())
+  fileName          String
+  customerId        String?
+  affiliatePlatform String?
+  recordCount       Int      @default(0)
+  uploaderId        String
+  createdAt         DateTime @default(now())
+
+  customer Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  uploader User          @relation(fields: [uploaderId], references: [id])
+  records  SalesRecord[]
+}
+
+model SalesRecord {
+  id                    String    @id @default(cuid())
+  batchId               String
+  affiliatePlatform     String
+  affiliateProgram      String?
+  store                 String?
+  asin                  String?
+  brand                 String
+  affiliateName         String
+  region                String?   @db.VarChar(10)
+  orderDate             DateTime
+  orders                Int       @default(0)
+  unitsSold             Int       @default(0)
+  revenue               Float     @default(0)
+  commission            Float     @default(0)
+  commissionRate        Float     @default(0)
+  platformFee           Float     @default(0)
+  totalFee              Float     @default(0)
+  affiliateFlatfee      Float     @default(0)
+  platformFlatfee       Float     @default(0)
+  sampleFee             Float     @default(0)
+  clicks                Int       @default(0)
+  addToCarts            Int       @default(0)
+  conversionRate        Float     @default(0)
+  epc                   Float     @default(0)
+  acos                  Float     @default(0)
+  campaignIdName        String?
+  campaignSubtitle      String?
+  campaignStartDate     DateTime?
+  campaignEndDate       DateTime?
+  campaignBudget        Float?    @default(0)
+  parentAsin            String?
+  storeProductLabel     String?
+  affiliateType         String?
+  internalAffiliateName String?
+  revenueMoM            Float     @default(0)
+  revenueYoY            Float     @default(0)
+  promotionLink         String?
+  customerId            String?
+  createdAt             DateTime  @default(now())
+
+  batch    SalesBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  customer Customer?  @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  @@index([affiliatePlatform])
+  @@index([brand])
+  @@index([region])
+  @@index([orderDate])
+}
+
+model AsinMapping {
+  id                String   @id @default(cuid())
+  brand             String
+  store             String
+  region            String
+  storeProductLabel String?
+  parentAsin        String?
+  asin              String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([brand, store, region, asin])
+  @@index([asin])
+}
+
+model Attachment {
+  id           String   @id @default(cuid())
+  fileName     String
+  fileUrl      String
+  fileSize     Int      @default(0)
+  entityType   String   @db.VarChar(20)
+  entityId     String
+  uploadedById String?
+  createdAt    DateTime @default(now())
+
+  uploadedBy User? @relation(fields: [uploadedById], references: [id])
+
+  @@index([entityType, entityId])
+}

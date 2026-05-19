@@ -1,41 +1,61 @@
-# dependencies
+# ===== 依赖 =====
 /node_modules
 /.pnp
 .pnp.js
 
-# next.js
+# ===== Next.js 构建产物 =====
 /.next/
 /out/
+/build
 next-env.d.ts
 
-# production
-/build
+# ===== 环境变量（绝不提交，含数据库密码/密钥）=====
+.env
+.env.*
+!.env.example
 
-# misc
-.DS_Store
-*.pem
-
-# debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# env
-.env*.local
-
-# database
+# ===== 数据库（本地 SQLite 开发库）=====
 /prisma/*.db
 /prisma/*.db-journal
+/prisma/*.db-shm
+/prisma/*.db-wal
 /prisma/migrations/dev.db*
+*.sqlite
+*.sqlite3
 
-# uploads
+# ===== 上传文件（用户上传内容不进版本库）=====
 /uploads/*
 !/uploads/.gitkeep
 
-# typescript
-*.tsbuildinfo
+# ===== 日志 =====
+/logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
 
-# spec working files
+# ===== 临时 / 测试文件 =====
+*.tmp
+*.temp
+*.bak
+*.orig
+/tmp/
+/temp/
 /_spec/
 /_spec_unpacked/
 temp.txt
+
+# ===== 系统 / 编辑器 =====
+.DS_Store
+Thumbs.db
+desktop.ini
+*.pem
+.vscode/
+.idea/
+
+# ===== TypeScript =====
+*.tsbuildinfo
+
+# ===== PM2 =====
+.pm2/
