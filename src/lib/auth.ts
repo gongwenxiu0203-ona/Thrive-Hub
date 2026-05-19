@@ -1,7 +1,7 @@
 import { SignJWT, jwtVerify } from "jose";
 
 const SECRET = new TextEncoder().encode(
-  process.env.AUTH_SECRET || "dev-secret-change-me",
+  process.env.JWT_SECRET || "dev-secret-change-me",
 );
 
 export const SESSION_COOKIE = "ams_session";

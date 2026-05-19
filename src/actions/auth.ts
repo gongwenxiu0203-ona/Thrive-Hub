@@ -22,7 +22,7 @@ export async function guestLoginAction() {
   });
   store.set(SESSION_COOKIE, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: process.env.COOKIE_SECURE === "true",
     sameSite: "lax",
     maxAge: SESSION_MAX_AGE,
     path: "/",
@@ -58,7 +58,7 @@ async function setSessionCookie(user: {
   store.set(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: process.env.COOKIE_SECURE === "true",
     maxAge: SESSION_MAX_AGE,
     path: "/",
   });
