@@ -23,6 +23,8 @@ export async function GET(req: NextRequest) {
   const statuses = multi("statuses");
   const modes = multi("modes");
   const owners = multi("owners");
+  const names = multi("names");        // 联盟商名称 (platformAffiliateName)
+  const pics = multi("pics");          // 负责人 (matches User.name OR personInChargeName text)
   // Sales-linked filters (brand / affiliateType from SalesRecord)
   const salesBrands = multi("salesBrands");
   const salesTypes = multi("salesTypes");
@@ -43,10 +45,28 @@ export async function GET(req: NextRequest) {
   if (brands.length) where.brand = { in: brands };
   if (statuses.length) where.developmentStatus = { in: statuses };
   if (owners.length) where.personInChargeId = { in: owners };
+  if (names.length) where.platformAffiliateName = { in: names };
+
+  // pic filter spans User-linked name and uploaded text — wrap in AND so it
+  // composes with any pre-existing where.OR (e.g., from the q search).
+  if (pics.length) {
+    where.AND = [
+      ...(where.AND ?? []),
+      {
+        OR: [
+          { personInCharge: { name: { in: pics } } },
+          { personInChargeName: { in: pics } },
+        ],
+      },
+    ];
+  }
 
   // tags is stored as JSON string — use contains per tag
   if (tags.length) {
-    where.AND = tags.map((t: string) => ({ tags: { contains: t } }));
+    where.AND = [
+      ...(where.AND ?? []),
+      ...tags.map((t: string) => ({ tags: { contains: t } })),
+    ];
   }
   // cooperationMode is stored as JSON string
   if (modes.length) {
@@ -70,7 +90,16 @@ export async function GET(req: NextRequest) {
     if (nameFilter.length === 0) {
       return NextResponse.json({ data: [], total: 0, page, pageSize });
     }
-    where.platformAffiliateName = { in: nameFilter };
+    // Intersect with any name filter already applied
+    if (names.length) {
+      const intersect = nameFilter.filter((n) => names.includes(n));
+      if (intersect.length === 0) {
+        return NextResponse.json({ data: [], total: 0, page, pageSize });
+      }
+      where.platformAffiliateName = { in: intersect };
+    } else {
+      where.platformAffiliateName = { in: nameFilter };
+    }
   }
 
   const [total, data] = await Promise.all([

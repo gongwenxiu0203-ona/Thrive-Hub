@@ -8,8 +8,10 @@ export const metadata = { title: "联盟资源库 · 联盟营销管理系统" }
 
 async function loadOptions() {
   const [affiliates, users, customers] = await Promise.all([
-    prisma.affiliate.findMany({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (prisma.affiliate.findMany as any)({
       select: {
+        platformAffiliateName: true,
         source: true,
         category: true,
         affiliateType: true,
@@ -18,6 +20,8 @@ async function loadOptions() {
         developmentStatus: true,
         cooperationMode: true,
         personInChargeId: true,
+        personInChargeName: true,
+        personInCharge: { select: { name: true } },
       },
     }),
     prisma.user.findMany({ select: { id: true, name: true } }),
@@ -39,14 +43,23 @@ async function loadOptions() {
     return [...set].sort();
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const affRows = affiliates as any[];
+  const picNames = distinct([
+    ...affRows.map((a) => a.personInCharge?.name ?? null),
+    ...affRows.map((a) => a.personInChargeName ?? null),
+  ]).sort();
+
   return {
-    sources: distinct(affiliates.map((a) => a.source)),
-    categories: distinct(affiliates.map((a) => a.category)),
-    types: distinct(affiliates.map((a) => a.affiliateType)),
-    tags: flatJson(affiliates.map((a) => a.tags)),
-    brands: distinct(affiliates.map((a) => a.brand)),
-    statuses: distinct(affiliates.map((a) => a.developmentStatus)),
-    modes: flatJson(affiliates.map((a) => a.cooperationMode)),
+    sources: distinct(affRows.map((a) => a.source)),
+    categories: distinct(affRows.map((a) => a.category)),
+    types: distinct(affRows.map((a) => a.affiliateType)),
+    tags: flatJson(affRows.map((a) => a.tags)),
+    brands: distinct(affRows.map((a) => a.brand)),
+    statuses: distinct(affRows.map((a) => a.developmentStatus)),
+    modes: flatJson(affRows.map((a) => a.cooperationMode)),
+    names: distinct(affRows.map((a) => a.platformAffiliateName)).sort(),
+    pics: picNames,
     users: users.map((u) => ({ id: u.id, name: u.name })),
     customers: customers.map((c) => ({ id: c.id, brandName: c.brandName })),
   };

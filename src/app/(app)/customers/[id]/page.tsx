@@ -102,7 +102,7 @@ export default async function CustomerDetailPage({
   return (
     <div className="space-y-6">
       {/* ── Back nav ── */}
-      <BackButton label="返回客户列表" />
+      <BackButton label="返回客户列表" fallbackHref="/customers" />
 
       {/* ── Header card ── */}
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">

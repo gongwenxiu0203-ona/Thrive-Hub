@@ -86,7 +86,7 @@ export default async function ContractDetailPage({
   return (
     <div className="space-y-6">
       <div>
-        <BackButton label="返回合同列表" />
+        <BackButton label="返回合同列表" fallbackHref="/contracts" />
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-semibold text-slate-900">

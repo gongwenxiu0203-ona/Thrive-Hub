@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { BarChart3, List, Upload } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import AffiliateDashboard from "./AffiliateDashboard";
@@ -26,6 +26,8 @@ interface Options {
   brands: string[];
   statuses: string[];
   modes: string[];
+  names: string[];
+  pics: string[];
   users: { id: string; name: string }[];
   customers: { id: string; brandName: string }[];
 }
@@ -37,9 +39,19 @@ interface Props {
 }
 
 export default function AffiliatesClient({ options, currentUserId }: Props) {
-  const [tab, setTab] = useState<TabKey>("dashboard");
-  const [showCreate, setShowCreate] = useState(false);
   const router = useRouter();
+  const pathname = usePathname();
+  const sp = useSearchParams();
+  // Tab state is URL-backed so browser back/forward preserves it
+  // (and detail-page Back returns to the list tab, not the dashboard default).
+  const tabParam = sp.get("tab");
+  const tab: TabKey = (TABS.some((t) => t.key === tabParam) ? tabParam : "dashboard") as TabKey;
+  function setTab(key: TabKey) {
+    const params = new URLSearchParams(sp.toString());
+    params.set("tab", key);
+    router.replace(`${pathname}?${params.toString()}`);
+  }
+  const [showCreate, setShowCreate] = useState(false);
 
   return (
     <div>

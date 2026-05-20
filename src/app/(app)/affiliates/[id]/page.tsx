@@ -104,7 +104,7 @@ export default async function AffiliateDetailPage({
   return (
     <div className="space-y-6">
       {/* Back */}
-      <BackButton label="返回资源库" chevron />
+      <BackButton label="返回资源库" chevron fallbackHref="/affiliates?tab=list" />
 
       {/* Header */}
       <div className="flex flex-wrap items-start gap-4">

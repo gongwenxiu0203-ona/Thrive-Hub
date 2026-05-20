@@ -36,6 +36,8 @@ interface Props {
     brands: string[];
     statuses: string[];
     modes: string[];
+    names: string[];
+    pics: string[];
     users: { id: string; name: string }[];
   };
 }
@@ -162,6 +164,12 @@ export default function AffiliateListTab({ options }: Props) {
           <span className="text-xs text-slate-500">共 {total} 条</span>
         </div>
         <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+          <FilterCell label="联盟商名称">
+            <MultiSelectFilter paramKey="names" placeholder="请选择" options={toOpts(options.names ?? [])} width="w-full" />
+          </FilterCell>
+          <FilterCell label="负责人">
+            <MultiSelectFilter paramKey="pics" placeholder="请选择" options={toOpts(options.pics ?? [])} width="w-full" />
+          </FilterCell>
           <FilterCell label="联盟商来源">
             <MultiSelectFilter paramKey="sources" placeholder="请选择" options={toOpts(options.sources)} width="w-full" />
           </FilterCell>
