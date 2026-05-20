@@ -49,7 +49,16 @@ export async function DELETE(
     return NextResponse.json({ error: "不能删除自己的账号" }, { status: 400 });
   }
 
-  await prisma.user.delete({ where: { id } });
+  // Nullify all FK references before deleting to avoid constraint violations.
+  await prisma.$transaction([
+    prisma.task.updateMany({ where: { ownerId: id }, data: { ownerId: null } }),
+    prisma.task.updateMany({ where: { publisherId: id }, data: { publisherId: null } }),
+    prisma.reminder.deleteMany({ where: { userId: id } }),
+    prisma.salesBatch.updateMany({ where: { uploaderId: id }, data: { uploaderId: null } }),
+    prisma.customer.updateMany({ where: { businessOwnerId: id }, data: { businessOwnerId: null } }),
+    prisma.customer.updateMany({ where: { backendOwnerId: id }, data: { backendOwnerId: null } }),
+    prisma.user.delete({ where: { id } }),
+  ]);
 
   return NextResponse.json({ ok: true });
 }
