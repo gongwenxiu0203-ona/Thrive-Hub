@@ -66,11 +66,6 @@ export function UploadPanel({
     if (!file) return;
     setError(null);
     setDone(null);
-    if (!platform) {
-      setError("请先选择联盟平台 (Affiiate Network Platform)");
-      if (inputRef.current) inputRef.current.value = "";
-      return;
-    }
     startTransition(async () => {
       const fd = new FormData();
       fd.append("file", file);
@@ -183,7 +178,7 @@ export function UploadPanel({
               联盟平台 <span className="text-rose-500">*</span>
             </label>
             <select
-              className={`input ${!platform ? "border-amber-300" : ""}`}
+              className="input"
               value={platform}
               onChange={(e) => {
                 setPlatform(e.target.value);
@@ -251,12 +246,11 @@ export function UploadPanel({
               上传联盟推广销售数据（Excel / CSV）
             </p>
             <p className="mt-1 text-xs text-slate-400">
-              首行需为表头。系统将按{platform || "所选平台"}
-              的字段映射规则自动建议对应关系，可手动调整每个字段。
+              首行需为表头。{platform ? `系统将按 ${platform} 平台规则自动建议字段映射，` : "未选择平台时字段映射需手动配置，"}可手动调整每个字段。
             </p>
             <button
               className="btn-primary mt-4"
-              disabled={pending || !platform}
+              disabled={pending}
               onClick={() => inputRef.current?.click()}
             >
               <UploadCloud className="h-4 w-4" />
@@ -267,7 +261,7 @@ export function UploadPanel({
           <div>
             <p className="mb-3 text-sm text-slate-500">
               已读取 <b>{parsed.rowCount}</b> 行、{parsed.columns.length}{" "}
-              个列。系统已按 <b>{platform}</b> 平台规则自动匹配映射，请核对并调整必填字段（
+              个列。{platform ? <>系统已按 <b>{platform}</b> 平台规则自动匹配映射，</> : "未选择平台，请手动配置映射，"}请核对并调整必填字段（
               <span className="text-rose-500">*</span>）。
             </p>
             <div className="max-h-[46vh] overflow-y-auto rounded-lg border border-slate-200">
@@ -345,7 +339,7 @@ export function UploadPanel({
               <p className="font-medium">导入未完成</p>
               <p className="mt-0.5 text-xs">{error}</p>
               <p className="mt-1 text-xs text-rose-500/80">
-                指引：请确认 ①已选择联盟平台 ②文件首行为列名 ③必填字段（订单日期/联盟商名称/销售金额）已正确映射 ④日期与金额列格式正确。
+                指引：请确认 ①文件首行为列名 ②必填字段（订单日期/联盟商名称/销售金额）已正确映射 ③日期与金额列格式正确。
               </p>
             </div>
           </div>

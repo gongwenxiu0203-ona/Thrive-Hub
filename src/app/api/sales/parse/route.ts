@@ -19,13 +19,6 @@ export async function POST(req: Request) {
       { status: 400 },
     );
   }
-  if (!platform) {
-    return NextResponse.json(
-      { error: "请先选择联盟平台 (Affiiate Network Platform)" },
-      { status: 400 },
-    );
-  }
-
   let rows;
   try {
     rows = parseSheet(await file.arrayBuffer());
