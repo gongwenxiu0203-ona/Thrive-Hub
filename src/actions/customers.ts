@@ -179,7 +179,13 @@ export async function setBusinessOwner(customerId: string, userId: string) {
     const existingMeeting = await prisma.task.findFirst({
       where: { customerId, category: "MEETING_BOOKING" },
     });
-    if (!existingMeeting) {
+    if (existingMeeting) {
+      // Update existing task owner to match the new business owner
+      await prisma.task.update({
+        where: { id: existingMeeting.id },
+        data: { ownerId: newOwnerId, publisherId: newOwnerId },
+      });
+    } else {
       await createMeetingTask(customerId, customer.brandName, newOwnerId);
     }
     await sendOwnerAssignmentNotification({
@@ -221,7 +227,12 @@ export async function setBackendOwner(
     const existingDemo = await prisma.task.findFirst({
       where: { customerId, category: "DEMO_PLAN" },
     });
-    if (!existingDemo) {
+    if (existingDemo) {
+      await prisma.task.update({
+        where: { id: existingDemo.id },
+        data: { ownerId: newOwnerId, publisherId: newOwnerId },
+      });
+    } else {
       await createDemoTask(
         customerId,
         customer.brandName,
