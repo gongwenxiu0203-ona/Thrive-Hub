@@ -450,6 +450,14 @@ export const AFFILIATE_FIELDS: AffiliateField[] = [
     templateCol: true,
   },
   {
+    key: "personInChargeName",
+    label: "负责人 Person in Charge",
+    type: "text",
+    group: "开发管理",
+    uploadable: true,
+    templateCol: true,
+  },
+  {
     key: "contactEmail",
     label: "负责人建联邮箱",
     type: "email",

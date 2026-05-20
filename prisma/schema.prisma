@@ -268,7 +268,8 @@ model Affiliate {
   developmentStatus String? // 开发状态Status
   developmentDesc   String? // 开发情况描述
   contactEmail      String? // 负责人建联邮箱
-  personInChargeId  String? // 负责人 Person in Charge
+  personInChargeId  String? // 负责人 Person in Charge (User FK)
+  personInChargeName String? // 负责人姓名 (上传时的原始文本，未关联系统用户)
   cooperationMode   String  @default("[]") // JSON string[]: 合作模式 (多选)
   sampleShipping    String? // 样品寄送: 是|否|均可
 

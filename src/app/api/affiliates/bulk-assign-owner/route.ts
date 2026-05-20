@@ -4,6 +4,10 @@ import { getSession } from "@/lib/session";
 
 // POST /api/affiliates/bulk-assign-owner
 // Body: { fromPersonInChargeIds: (string|null)[], toPersonInChargeId: string }
+// The "from" list may contain mixed entries:
+//   - "<userId>"          → match Affiliate.personInChargeId = userId
+//   - "name:<text>"       → match Affiliate.personInChargeName = text (uploaded owners not yet linked)
+//   - "__unassigned__" / null → match affiliates without any owner
 export async function POST(req: NextRequest) {
   const auth = await getSession();
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -18,22 +22,46 @@ export async function POST(req: NextRequest) {
     : [fromPersonInChargeIds];
 
   const includesNull = ids.includes(null) || ids.includes("__unassigned__");
-  const realIds = ids.filter((id) => id !== null && id !== "__unassigned__") as string[];
+  const userIds = ids.filter(
+    (id) =>
+      id !== null &&
+      id !== "__unassigned__" &&
+      !(typeof id === "string" && id.startsWith("name:")),
+  ) as string[];
+  const uploadedNames = ids
+    .filter((id) => typeof id === "string" && id.startsWith("name:"))
+    .map((id) => (id as string).slice(5));
 
   let updated = 0;
 
   if (includesNull) {
-    const r = await prisma.affiliate.updateMany({
-      where: { personInChargeId: null },
+    // Only truly-unassigned (no id AND no uploaded name) — avoids overlap with uploaded-name branch
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const r = await (prisma.affiliate.updateMany as any)({
+      where: { personInChargeId: null, personInChargeName: null },
       data: { personInChargeId: toPersonInChargeId },
     });
     updated += r.count;
   }
 
-  if (realIds.length > 0) {
+  if (userIds.length > 0) {
     const r = await prisma.affiliate.updateMany({
-      where: { personInChargeId: { in: realIds } },
+      where: { personInChargeId: { in: userIds } },
       data: { personInChargeId: toPersonInChargeId },
+    });
+    updated += r.count;
+  }
+
+  if (uploadedNames.length > 0) {
+    // Link these uploaded text owners to the chosen User; clear the text field so they
+    // no longer appear as an "uploaded" option on next refresh.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const r = await (prisma.affiliate.updateMany as any)({
+      where: {
+        personInChargeId: null,
+        personInChargeName: { in: uploadedNames },
+      },
+      data: { personInChargeId: toPersonInChargeId, personInChargeName: null },
     });
     updated += r.count;
   }

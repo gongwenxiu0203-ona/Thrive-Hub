@@ -150,6 +150,7 @@ export async function POST(req: NextRequest) {
         developmentStatus: fields["developmentStatus"] || null,
         developmentDesc: fields["developmentDesc"] || null,
         contactEmail: fields["contactEmail"] || null,
+        personInChargeName: fields["personInChargeName"] || null,
         cooperationMode: parseMulti("cooperationMode"),
         sampleShipping: fields["sampleShipping"] || null,
       },
