@@ -55,23 +55,30 @@ export async function sendOwnerAssignmentNotification(opts: {
   customerName: string;
   assignedById: string;
 }): Promise<void> {
-  const owner = await prisma.user.findUnique({ where: { id: opts.ownerId } });
-  if (!owner) return;
+  const [owner, assigner] = await Promise.all([
+    prisma.user.findUnique({ where: { id: opts.ownerId } }),
+    prisma.user.findUnique({ where: { id: opts.assignedById } }),
+  ]);
+  if (!owner || !assigner) return;
 
   const roleLabel = opts.ownerRole === "business" ? "商务负责人" : "后端负责人";
   const title = `您已被指派为「${opts.customerName}」的${roleLabel}`;
   const body = `系统通知：您已被指派为客户「${opts.customerName}」的${roleLabel}，请登录系统查看相关任务。`;
 
-  await prisma.reminder.create({
-    data: {
-      title,
-      content: body,
-      remindDate: new Date(),
-      type: "FOLLOWUP",
-      targetId: opts.ownerId,
-      createdById: opts.assignedById,
-    },
-  });
+  try {
+    await prisma.reminder.create({
+      data: {
+        title,
+        content: body,
+        remindDate: new Date(),
+        type: "FOLLOWUP",
+        targetId: opts.ownerId,
+        createdById: opts.assignedById,
+      },
+    });
+  } catch (e) {
+    console.error("[notify] reminder.create failed:", e);
+  }
 
   await dispatchEmail({ to: owner.email, subject: `【指派通知】${title}`, body });
 }
@@ -103,18 +110,26 @@ export async function sendMeetingInvite(opts: {
 
   const body = `会议主题：${opts.taskTitle}${customerLine}\n会议时间：${when}\n会议形式：${modeLabel}${locationLine}`;
 
+  const organizer = await prisma.user.findUnique({ where: { id: opts.organizerId } });
+
   for (const user of attendees) {
     // 1. In-system reminder (always).
-    await prisma.reminder.create({
-      data: {
-        title: `会议邀请：${opts.taskTitle}`,
-        content: body,
-        remindDate: opts.meetingTime,
-        type: "MEETING",
-        targetId: user.id,
-        createdById: opts.organizerId,
-      },
-    });
+    if (organizer) {
+      try {
+        await prisma.reminder.create({
+          data: {
+            title: `会议邀请：${opts.taskTitle}`,
+            content: body,
+            remindDate: opts.meetingTime,
+            type: "MEETING",
+            targetId: user.id,
+            createdById: opts.organizerId,
+          },
+        });
+      } catch (e) {
+        console.error("[notify] reminder.create failed:", e);
+      }
+    }
     // 2. Email invite (stubbed dispatch).
     await dispatchEmail({
       to: user.email,
