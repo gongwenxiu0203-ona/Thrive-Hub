@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 import { convertRow, getMappableFields } from "@/lib/salesImport";
-import { getPlatform } from "@/lib/platformMappings";
 
 type Row = Record<string, unknown>;
 
@@ -36,20 +35,8 @@ export async function POST(req: Request) {
   const platform = (body.platform ?? "").trim();
   const customerId = body.customerId || null;
 
-  if (!platform) {
-    return NextResponse.json(
-      { error: "请先选择联盟平台 (Affiiate Network Platform)" },
-      { status: 400 },
-    );
-  }
   if (rows.length === 0) {
     return NextResponse.json({ error: "没有可导入的数据行" }, { status: 400 });
-  }
-  if (!getPlatform(platform)) {
-    return NextResponse.json(
-      { error: `未识别的联盟平台「${platform}」` },
-      { status: 400 },
-    );
   }
 
   // Required user-mapped fields.
@@ -110,8 +97,8 @@ export async function POST(req: Request) {
 
   const batch = await prisma.salesBatch.create({
     data: {
-      fileName: body.fileName || `${platform}-导入数据.xlsx`,
-      affiliatePlatform: platform,
+      fileName: body.fileName || `${platform || "未知平台"}-导入数据.xlsx`,
+      affiliatePlatform: platform || null,
       customerId,
       uploaderId: session.userId,
       recordCount: 0,
