@@ -12,6 +12,7 @@ import { parseStringArray } from "@/lib/customer";
 import type { AttachmentItem } from "@/components/FileUploader";
 import { TaskFormModal } from "./TaskFormModal";
 import { KanbanBoard, type KanbanTask } from "./KanbanBoard";
+import { ViewAsSelector } from "./ViewAsSelector";
 
 export const metadata = { title: "任务管理 · 联盟营销管理系统" };
 
@@ -33,6 +34,7 @@ export default async function TasksPage({
 }) {
   const session = await requireSession();
   const sp = await searchParams;
+  const isAdmin = session.role === "ADMIN";
 
   const ownerFilter = csv(sp, "owner");
   const customerFilter = csv(sp, "customer");
@@ -41,8 +43,11 @@ export default async function TasksPage({
   const statusFilter = csv(sp, "status");
   const q = sp.q?.trim() ?? "";
 
-  // Default: show current user's tasks (unless explicitly cleared with owner=all)
-  const defaultToCurrentUser = !sp.owner && sp.owner !== "all";
+  // Default: show current user's tasks.
+  // Admin: can switch to a specific user via ?owner=userId (single value).
+  // Non-admin: always filter to own tasks regardless of params.
+  const viewAsId = isAdmin && sp.owner ? sp.owner : session.userId;
+  const defaultToCurrentUser = viewAsId === session.userId;
 
   const [allTasks, customers, users] = await Promise.all([
     prisma.task.findMany({
@@ -53,10 +58,11 @@ export default async function TasksPage({
     prisma.user.findMany({ orderBy: { name: "asc" } }),
   ]);
 
-  // Client filtering with multi-select support
+  // Client filtering
   const tasks = allTasks
     .filter((t) => {
-      if (defaultToCurrentUser && t.ownerId !== session.userId) return false;
+      // Always filter to viewAsId (current user or admin-selected user)
+      if (t.ownerId !== viewAsId) return false;
       if (ownerFilter.length && !ownerFilter.includes(t.ownerId ?? "")) return false;
       if (customerFilter.length && !customerFilter.includes(t.customerId ?? "")) return false;
       if (priorityFilter.length && !priorityFilter.includes(t.priority)) return false;
@@ -136,18 +142,13 @@ export default async function TasksPage({
         title="任务管理"
         description={
           defaultToCurrentUser
-            ? `显示你的任务 · 共 ${tasks.length} 项 — 拖拽卡片切换状态`
-            : `共 ${tasks.length} / ${allTasks.length} 项任务`
+            ? `显示我的任务 · 共 ${tasks.length} 项 — 拖拽卡片切换状态`
+            : `查看 ${users.find((u) => u.id === viewAsId)?.name ?? ""} 的任务 · 共 ${tasks.length} 项`
         }
         actions={
           <div className="flex items-center gap-2">
-            {defaultToCurrentUser && (
-              <a
-                href="/tasks?owner=all"
-                className="btn-secondary text-xs"
-              >
-                查看所有人任务
-              </a>
+            {isAdmin && (
+              <ViewAsSelector users={userOptions} currentUserId={session.userId} />
             )}
             <TaskFormModal customers={customerOptions} users={userOptions} />
           </div>
@@ -156,11 +157,13 @@ export default async function TasksPage({
 
       <FilterBar>
         <SearchFilter placeholder="搜索任务标题 / 品牌" />
-        <MultiSelectFilter
-          paramKey="owner"
-          placeholder="负责人"
-          options={userOptions.map((u) => ({ value: u.id, label: u.name }))}
-        />
+        {isAdmin && (
+          <MultiSelectFilter
+            paramKey="owner"
+            placeholder="负责人"
+            options={userOptions.map((u) => ({ value: u.id, label: u.name }))}
+          />
+        )}
         <MultiSelectFilter
           paramKey="customer"
           placeholder="关联品牌"
