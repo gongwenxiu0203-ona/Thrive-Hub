@@ -10,7 +10,7 @@ import { SalesDashboard } from "./SalesCharts";
 import { UploadPanel } from "./UploadPanel";
 import { CleanupPanel } from "./CleanupPanel";
 import { AsinMappingPanel } from "./AsinMappingPanel";
-import { formatCurrencyWith, getCurrencyCode, formatNumber, formatDateTime, cn } from "@/lib/utils";
+import { formatCurrencyWith, formatCurrency, getCurrencyCode, formatNumber, formatDateTime, cn } from "@/lib/utils";
 import { requireSession } from "@/lib/session";
 
 export const metadata = { title: "推广数据BI · 联盟营销管理系统" };

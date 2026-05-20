@@ -9,8 +9,9 @@ function createPrismaClient() {
     log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
   });
   // Enable WAL mode and busy timeout for better SQLite concurrency.
-  client.$executeRawUnsafe("PRAGMA journal_mode=WAL;").catch(() => {});
-  client.$executeRawUnsafe("PRAGMA busy_timeout=5000;").catch(() => {});
+  // PRAGMA journal_mode returns a result row, so use $queryRawUnsafe.
+  client.$queryRawUnsafe("PRAGMA journal_mode=WAL;").catch(() => {});
+  client.$queryRawUnsafe("PRAGMA busy_timeout=5000;").catch(() => {});
   return client;
 }
 
