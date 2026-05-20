@@ -175,7 +175,7 @@ export function UploadPanel({
           </div>
           <div>
             <label className="label">
-              联盟平台 <span className="text-rose-500">*</span>
+              联盟平台 <span className="text-slate-400 text-xs font-normal">（可选）</span>
             </label>
             <select
               className="input"
