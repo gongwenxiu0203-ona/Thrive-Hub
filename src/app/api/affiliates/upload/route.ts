@@ -99,6 +99,15 @@ export async function POST(req: NextRequest) {
       return JSON.stringify(v.split(/[,，]/).map((s) => s.trim()).filter(Boolean));
     };
 
+    // Combine virtual {platform}Placement + {platform}Flatfee columns into
+    // a single-entry JSON for the *Placements field. Returns "[]" if no placement.
+    const buildPlacements = (placementKey: string, flatfeeKey: string) => {
+      const p = (fields[placementKey] ?? "").trim();
+      if (!p) return "[]";
+      const fee = parseFloat(fields[flatfeeKey] ?? "");
+      return JSON.stringify([{ placement: p, flatfee: isNaN(fee) ? null : fee }]);
+    };
+
     await prisma.affiliate.create({
       data: {
         batchId: batch.id,
@@ -110,17 +119,22 @@ export async function POST(req: NextRequest) {
         tags: parseMulti("tags"),
         websiteLink: fields["websiteLink"] || null,
         websiteTraffic: parseNum("websiteTraffic"),
+        websitePlacements: buildPlacements("websitePlacement", "websiteFlatfee"),
         websiteNote: fields["websiteNote"] || null,
         instagramLink: fields["instagramLink"] || null,
         insFollowers: parseNum("insFollowers"),
+        instagramPlacements: buildPlacements("instagramPlacement", "instagramFlatfee"),
         insNote: fields["insNote"] || null,
         facebookLink: fields["facebookLink"] || null,
         fbFollowers: parseNum("fbFollowers"),
+        facebookPlacements: buildPlacements("facebookPlacement", "facebookFlatfee"),
         fbNote: fields["fbNote"] || null,
         youtubeLink: fields["youtubeLink"] || null,
         youtubeFollowers: parseNum("youtubeFollowers"),
+        youtubePlacements: buildPlacements("youtubePlacement", "youtubeFlatfee"),
         tiktokLink: fields["tiktokLink"] || null,
         tiktokFollowers: parseNum("tiktokFollowers"),
+        tiktokPlacements: buildPlacements("tiktokPlacement", "tiktokFlatfee"),
         amazonStorefrontLink: fields["amazonStorefrontLink"] || null,
         topCreator: fields["topCreator"] || null,
         storefrontFlatfee: parseNum("storefrontFlatfee"),
