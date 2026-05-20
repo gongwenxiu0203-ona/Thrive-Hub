@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
+import { isRouteBlocked, getRoleLanding } from "@/lib/permissions";
 
 // Routes accessible without a session.
 const PUBLIC_PREFIXES = [
@@ -21,14 +22,14 @@ export async function middleware(req: NextRequest) {
   const token = req.cookies.get(SESSION_COOKIE)?.value;
   const session = token ? await verifySessionToken(token) : null;
 
-  // Already signed in but visiting /login or /register → send to dashboard.
+  // Already signed in but visiting /login or /register → send to role landing.
   // Guest sessions are excluded — guests should be able to reach /login to upgrade.
   if ((pathname === "/login" || pathname === "/register") && session && session.role !== "GUEST") {
     const userStatus = session.status ?? "APPROVED";
     if (userStatus === "PENDING") {
       return NextResponse.redirect(new URL("/pending", req.url));
     }
-    return NextResponse.redirect(new URL("/dashboard", req.url));
+    return NextResponse.redirect(new URL(getRoleLanding(session.role), req.url));
   }
 
   if (isPublic) return NextResponse.next();
@@ -49,6 +50,11 @@ export async function middleware(req: NextRequest) {
       return NextResponse.json({ error: "账号审核中，请等待管理员审批" }, { status: 403 });
     }
     return NextResponse.redirect(new URL("/pending", req.url));
+  }
+
+  // Block roles from pages they shouldn't access (BRAND / CHANNEL restrictions).
+  if (!pathname.startsWith("/api/") && isRouteBlocked(pathname, session.role)) {
+    return NextResponse.redirect(new URL(getRoleLanding(session.role), req.url));
   }
 
   return NextResponse.next();

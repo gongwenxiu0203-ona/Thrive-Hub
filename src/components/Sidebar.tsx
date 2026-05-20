@@ -15,6 +15,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { visibleNavForRole } from "@/lib/permissions";
 
 type NavItem = {
   href: string;
@@ -40,6 +41,10 @@ export function Sidebar({
   role?: string;
 }) {
   const pathname = usePathname();
+  const visibleHrefs = visibleNavForRole(role);
+  const navItems = visibleHrefs
+    ? NAV.filter((n) => visibleHrefs.includes(n.href))
+    : NAV;
 
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r border-slate-200 bg-white">
@@ -54,7 +59,7 @@ export function Sidebar({
       </div>
 
       <nav className="flex-1 space-y-1 px-3 py-4">
-        {NAV.map((item) => {
+        {navItems.map((item) => {
           const active =
             pathname === item.href || pathname.startsWith(item.href + "/");
           const Icon = item.icon;

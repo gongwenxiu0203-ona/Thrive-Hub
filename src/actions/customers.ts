@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { MAIN_SITES, PROMO_PLATFORMS } from "@/lib/constants";
 import { sendOwnerAssignmentNotification } from "@/lib/notify";
+import { canDeleteCustomer } from "@/lib/permissions";
 
 export type SaveResult = {
   ok: boolean;
@@ -139,7 +140,7 @@ export async function updateCustomer(
 
 export async function deleteCustomer(id: string) {
   const session = await requireSession();
-  if (session.role !== "ADMIN") throw new Error("仅管理员可删除客户");
+  if (!canDeleteCustomer(session.role)) throw new Error("无权删除客户");
   await prisma.customer.delete({ where: { id } });
   revalidatePath("/customers");
   redirect("/customers");
