@@ -11,7 +11,8 @@ import {
 import { parseStringArray } from "@/lib/customer";
 import type { AttachmentItem } from "@/components/FileUploader";
 import { TaskFormModal } from "./TaskFormModal";
-import { KanbanBoard, type KanbanTask } from "./KanbanBoard";
+import type { KanbanTask } from "./KanbanBoard";
+import { KanbanBoardWrapper } from "./KanbanBoardWrapper";
 import { ViewAsSelector } from "./ViewAsSelector";
 
 export const metadata = { title: "任务管理 · 联盟营销管理系统" };
@@ -174,7 +175,7 @@ export default async function TasksPage({
         <MultiSelectFilter paramKey="status" placeholder="任务状态" options={statusOptions} />
       </FilterBar>
 
-      <KanbanBoard
+      <KanbanBoardWrapper
         initialTasks={kanbanTasks}
         users={userOptions}
         attachmentsByTask={attachmentsByTask}
