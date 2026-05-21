@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { RegisterForm } from "./RegisterForm";
 
+export const dynamic = "force-dynamic";
 export const metadata = { title: "注册 · 联盟营销管理系统" };
 
 export default function RegisterPage() {

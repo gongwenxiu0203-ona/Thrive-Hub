@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { LoginForm } from "./LoginForm";
 
+export const dynamic = "force-dynamic";
 export const metadata = { title: "登录 · 联盟营销管理系统" };
 
 export default function LoginPage() {
