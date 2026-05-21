@@ -2,171 +2,248 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 import { convertRow, getMappableFields } from "@/lib/salesImport";
-
-type Row = Record<string, unknown>;
+import { readFile, unlink } from "fs/promises";
+import path from "path";
+import os from "os";
 
 // Step 2 of the BI import flow.
 //
-// Body: { rows, mapping, platform, customerId?, fileName? }
-// Server matches:
-//   - 联盟商类型 / 内部联盟商名称 from 联盟资源库 (by affiliate name)
-//   - Parent Asin / 链接标签 from AsinMapping (品牌+店铺+地区+ASIN)
-// Brand is system-matched from the selected customer when source has none.
+// Body: { tempId, mapping, platform, customerId?, fileName? }
+// Reads parsed rows from the server-side temp file created in step 1 (parse),
+// converts them, then writes to DB inside a single transaction.
+// Temp file is deleted after processing (success or validation failure).
+
+type Row = Record<string, unknown>;
+
+const TEMP_PREFIX = "sales-parse-";
+/** Max records per createMany call — avoids DB variable-count limits. */
+const CHUNK_SIZE = 500;
+
+/** Validate UUID format to prevent path traversal. */
+function isSafeUUID(id: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id);
+}
+
+function tempFilePath(tempId: string): string {
+  return path.join(os.tmpdir(), `${TEMP_PREFIX}${tempId}.json`);
+}
+
+async function readTempRows(tempId: string): Promise<Row[] | null> {
+  if (!isSafeUUID(tempId)) return null;
+  try {
+    const content = await readFile(tempFilePath(tempId), "utf-8");
+    return JSON.parse(content) as Row[];
+  } catch {
+    return null;
+  }
+}
+
+function deleteTempFile(tempId: string): void {
+  if (!isSafeUUID(tempId)) return;
+  unlink(tempFilePath(tempId)).catch(() => {});
+}
+
 export async function POST(req: Request) {
   try {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
+    const session = await getSession();
+    if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
 
-  let body: {
-    rows?: Row[];
-    mapping?: Record<string, string>;
-    platform?: string;
-    customerId?: string;
-    fileName?: string;
-  };
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "请求格式错误" }, { status: 400 });
-  }
-
-  const rows = body.rows ?? [];
-  const mapping = body.mapping ?? {};
-  const platform = (body.platform ?? "").trim();
-  const customerId = body.customerId || null;
-
-  if (rows.length === 0) {
-    return NextResponse.json({ error: "没有可导入的数据行" }, { status: 400 });
-  }
-
-  // Required user-mapped fields.
-  const required = getMappableFields().filter((f) => f.required);
-  const missing = required.filter((f) => !mapping[f.key]);
-  if (missing.length > 0) {
-    return NextResponse.json(
-      {
-        error: `以下必填字段尚未映射：${missing
-          .map((f) => `「${f.label}」`)
-          .join("、")}`,
-      },
-      { status: 400 },
-    );
-  }
-
-  // Load look-up tables once.
-  const [customer, affiliates, asinMappings] = await Promise.all([
-    customerId
-      ? prisma.customer.findUnique({ where: { id: customerId } })
-      : Promise.resolve(null),
-    prisma.affiliate.findMany({
-      select: {
-        platformAffiliateName: true,
-        internalAffiliateName: true,
-        affiliateType: true,
-      },
-    }),
-    prisma.asinMapping.findMany({
-      select: {
-        brand: true,
-        store: true,
-        region: true,
-        asin: true,
-        parentAsin: true,
-        storeProductLabel: true,
-      },
-    }),
-  ]);
-
-  const affMap = new Map<string, { type: string; internalName: string | null }>();
-  for (const a of affiliates) {
-    affMap.set(a.platformAffiliateName.toLowerCase().trim(), {
-      type: a.affiliateType ?? "",
-      internalName: a.internalAffiliateName,
-    });
-  }
-  const asinMap = new Map<string, { parentAsin: string | null; storeProductLabel: string | null }>();
-  for (const m of asinMappings) {
-    const key = [m.brand, m.store, m.region, m.asin]
-      .map((x) => (x ?? "").toString().trim().toLowerCase())
-      .join("||");
-    asinMap.set(key, {
-      parentAsin: m.parentAsin,
-      storeProductLabel: m.storeProductLabel,
-    });
-  }
-
-  const batch = await prisma.salesBatch.create({
-    data: {
-      fileName: body.fileName || `${platform || "未知平台"}-导入数据.xlsx`,
-      affiliatePlatform: platform || null,
-      customerId,
-      uploaderId: session.userId,
-      recordCount: 0,
-    },
-  });
-
-  const records = [];
-  const skipped: number[] = [];
-  const errors: string[] = [];
-
-  for (let i = 0; i < rows.length; i++) {
-    const result = convertRow(rows[i], mapping, platform, customerId);
-    if (!result) {
-      skipped.push(i + 2);
-      continue;
+    let body: {
+      tempId?: string;
+      mapping?: Record<string, string>;
+      platform?: string;
+      customerId?: string | null;
+      fileName?: string;
+    };
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json({ error: "请求格式错误" }, { status: 400 });
     }
-    const r = result.record;
 
-    // Brand fallback to customer.
-    if (!r.brand && customer) r.brand = customer.brandName ?? "";
+    const tempId = body.tempId ?? "";
+    const mapping = body.mapping ?? {};
+    const platform = (body.platform ?? "").trim();
+    const customerId = body.customerId || null;
+    const fileName = body.fileName;
 
-    // Affiliate type / internal name lookup.
-    const key = (r.affiliateName ?? "").toLowerCase().trim();
-    if (key) {
-      const a = affMap.get(key);
-      if (a) {
-        r.affiliateType = a.type;
-        r.internalAffiliateName = a.internalName;
+    if (!tempId) {
+      return NextResponse.json({ error: "缺少上传会话标识" }, { status: 400 });
+    }
+
+    // Read parsed rows from temp file (written by parse step).
+    const rows = await readTempRows(tempId);
+    if (!rows) {
+      return NextResponse.json(
+        {
+          error:
+            "上传会话已过期或无效，请重新选择文件并映射字段后再次导入",
+        },
+        { status: 400 },
+      );
+    }
+
+    if (rows.length === 0) {
+      deleteTempFile(tempId);
+      return NextResponse.json({ error: "没有可导入的数据行" }, { status: 400 });
+    }
+
+    // Required user-mapped fields.
+    const required = getMappableFields().filter((f) => f.required);
+    const missing = required.filter((f) => !mapping[f.key]);
+    if (missing.length > 0) {
+      deleteTempFile(tempId);
+      return NextResponse.json(
+        {
+          error: `以下必填字段尚未映射：${missing
+            .map((f) => `「${f.label}」`)
+            .join("、")}`,
+        },
+        { status: 400 },
+      );
+    }
+
+    // Load look-up tables once.
+    const [customer, affiliates, asinMappings] = await Promise.all([
+      customerId
+        ? prisma.customer.findUnique({ where: { id: customerId } })
+        : Promise.resolve(null),
+      prisma.affiliate.findMany({
+        select: {
+          platformAffiliateName: true,
+          internalAffiliateName: true,
+          affiliateType: true,
+        },
+      }),
+      prisma.asinMapping.findMany({
+        select: {
+          brand: true,
+          store: true,
+          region: true,
+          asin: true,
+          parentAsin: true,
+          storeProductLabel: true,
+        },
+      }),
+    ]);
+
+    const affMap = new Map<
+      string,
+      { type: string; internalName: string | null }
+    >();
+    for (const a of affiliates) {
+      affMap.set(a.platformAffiliateName.toLowerCase().trim(), {
+        type: a.affiliateType ?? "",
+        internalName: a.internalAffiliateName,
+      });
+    }
+    const asinMap = new Map<
+      string,
+      { parentAsin: string | null; storeProductLabel: string | null }
+    >();
+    for (const m of asinMappings) {
+      const key = [m.brand, m.store, m.region, m.asin]
+        .map((x) => (x ?? "").toString().trim().toLowerCase())
+        .join("||");
+      asinMap.set(key, {
+        parentAsin: m.parentAsin,
+        storeProductLabel: m.storeProductLabel,
+      });
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const records: any[] = [];
+    const skipped: number[] = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const result = convertRow(rows[i], mapping, platform, customerId);
+      if (!result) {
+        skipped.push(i + 2);
+        continue;
       }
+      const r = result.record;
+
+      // Brand fallback to customer.
+      if (!r.brand && customer) r.brand = customer.brandName ?? "";
+
+      // Affiliate type / internal name lookup.
+      const affKey = (r.affiliateName ?? "").toLowerCase().trim();
+      if (affKey) {
+        const a = affMap.get(affKey);
+        if (a) {
+          r.affiliateType = a.type;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (r as any).internalAffiliateName = a.internalName;
+        }
+      }
+
+      // Parent Asin / Store-Product Label lookup.
+      const asinKey = [r.brand, r.store, r.region, r.asin]
+        .map((x) => (x ?? "").toString().trim().toLowerCase())
+        .join("||");
+      const am = asinMap.get(asinKey);
+      if (am) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (r as any).parentAsin = am.parentAsin;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (r as any).storeProductLabel = am.storeProductLabel;
+      }
+
+      records.push(r);
     }
 
-    // Parent Asin / Store-Product Label lookup.
-    const asinKey = [r.brand, r.store, r.region, r.asin]
-      .map((x) => (x ?? "").toString().trim().toLowerCase())
-      .join("||");
-    const am = asinMap.get(asinKey);
-    if (am) {
-      r.parentAsin = am.parentAsin;
-      r.storeProductLabel = am.storeProductLabel;
+    if (records.length === 0) {
+      deleteTempFile(tempId);
+      return NextResponse.json(
+        {
+          error:
+            "未能识别任何有效数据行。请确认「订单日期 / 联盟商名称 / 销售金额」列已正确映射且数据非空。",
+          skipped,
+        },
+        { status: 400 },
+      );
     }
 
-    records.push({ ...r, batchId: batch.id });
-  }
+    // Write batch + records in a single transaction for data consistency.
+    // Chunk createMany to stay within DB variable-count limits (SQLite ≤ 32766).
+    const batchId = await prisma.$transaction(
+      async (tx) => {
+        const batch = await tx.salesBatch.create({
+          data: {
+            fileName: fileName || `${platform || "未知平台"}-导入数据.xlsx`,
+            affiliatePlatform: platform || null,
+            customerId,
+            uploaderId: session.userId,
+            recordCount: 0,
+          },
+        });
 
-  if (records.length === 0) {
-    await prisma.salesBatch.delete({ where: { id: batch.id } });
-    return NextResponse.json(
-      {
-        error:
-          "未能识别任何有效数据行。请确认「订单日期 / 联盟商名称 / 销售金额」列已正确映射且数据非空。",
-        skipped,
+        const withBatch = records.map((r) => ({ ...r, batchId: batch.id }));
+        for (let i = 0; i < withBatch.length; i += CHUNK_SIZE) {
+          await tx.salesRecord.createMany({
+            data: withBatch.slice(i, i + CHUNK_SIZE),
+          });
+        }
+
+        await tx.salesBatch.update({
+          where: { id: batch.id },
+          data: { recordCount: records.length },
+        });
+
+        return batch.id;
       },
-      { status: 400 },
+      { timeout: 60_000 },
     );
-  }
 
-  await prisma.salesRecord.createMany({ data: records });
-  await prisma.salesBatch.update({
-    where: { id: batch.id },
-    data: { recordCount: records.length },
-  });
+    // Clean up temp file after successful import.
+    deleteTempFile(tempId);
 
-  return NextResponse.json({
-    imported: records.length,
-    skipped,
-    errors,
-    batchId: batch.id,
-  });
+    return NextResponse.json({
+      imported: records.length,
+      skipped,
+      errors: [],
+      batchId,
+    });
   } catch (err) {
     console.error("[sales/upload] unhandled error:", err);
     const msg = err instanceof Error ? err.message : String(err);

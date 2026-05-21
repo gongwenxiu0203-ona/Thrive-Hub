@@ -26,9 +26,12 @@ type Batch = {
 };
 
 type ParseResult = {
+  tempId: string;
   fileName: string;
   columns: string[];
-  rows: Record<string, unknown>[];
+  // Only the first few rows are returned for mapping preview (full data is
+  // held server-side as a temp file referenced by tempId).
+  sampleRows: Record<string, unknown>[];
   rowCount: number;
   suggestedMapping: Record<string, string>;
 };
@@ -67,22 +70,32 @@ export function UploadPanel({
     setError(null);
     setDone(null);
     startTransition(async () => {
-      const fd = new FormData();
-      fd.append("file", file);
-      fd.append("platform", platform);
-      const res = await fetch("/api/sales/parse", {
-        method: "POST",
-        body: fd,
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error ?? "解析失败");
-      } else {
-        setParsed(data);
-        // re-map on platform change by using suggestedMapping
-        setMapping(data.suggestedMapping);
+      try {
+        const fd = new FormData();
+        fd.append("file", file);
+        fd.append("platform", platform);
+        const res = await fetch("/api/sales/parse", {
+          method: "POST",
+          body: fd,
+        });
+        let data: Record<string, unknown> = {};
+        try {
+          data = await res.json();
+        } catch {
+          setError(`文件解析请求失败（HTTP ${res.status}），请检查文件格式后重试`);
+          return;
+        }
+        if (!res.ok) {
+          setError((data.error as string) ?? "解析失败");
+        } else {
+          setParsed(data as unknown as ParseResult);
+          setMapping((data.suggestedMapping as Record<string, string>) ?? {});
+        }
+      } catch {
+        setError("网络请求失败，请检查网络连接后重试");
+      } finally {
+        if (inputRef.current) inputRef.current.value = "";
       }
-      if (inputRef.current) inputRef.current.value = "";
     });
   }
 
@@ -99,17 +112,25 @@ export function UploadPanel({
     }
     setError(null);
     startTransition(async () => {
-      const res = await fetch("/api/sales/upload", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          rows: parsed.rows,
-          mapping,
-          platform,
-          customerId: customerId || null,
-          fileName: parsed.fileName,
-        }),
-      });
+      let res: Response;
+      try {
+        res = await fetch("/api/sales/upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          // Send the server-side tempId instead of all rows — avoids a huge
+          // request body that would hit proxy / server size limits.
+          body: JSON.stringify({
+            tempId: parsed.tempId,
+            mapping,
+            platform,
+            customerId: customerId || null,
+            fileName: parsed.fileName,
+          }),
+        });
+      } catch {
+        setError("网络请求失败，请检查网络连接后重试");
+        return;
+      }
       let data: Record<string, unknown> = {};
       try {
         data = await res.json();
@@ -122,8 +143,8 @@ export function UploadPanel({
         return;
       }
       const skippedNote =
-        data.skipped?.length > 0
-          ? `，跳过 ${data.skipped.length} 行（缺失必填值）`
+        (data.skipped as unknown[])?.length > 0
+          ? `，跳过 ${(data.skipped as unknown[]).length} 行（缺失必填值）`
           : "";
       setDone(`成功导入 ${data.imported} 条销售记录${skippedNote}`);
       setParsed(null);
@@ -277,7 +298,7 @@ export function UploadPanel({
                   {MAPPABLE.map((field) => {
                     const col = mapping[field.key] ?? "";
                     const preview = col
-                      ? String(parsed.rows[0]?.[col] ?? "")
+                      ? String(parsed.sampleRows[0]?.[col] ?? "")
                       : "";
                     return (
                       <tr key={field.key}>
