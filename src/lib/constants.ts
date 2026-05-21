@@ -4,6 +4,10 @@
 export const ROLE_LABELS: Record<string, string> = {
   ADMIN: "管理员",
   USER: "普通员工",
+  LYNQ_STAFF: "内部员工",
+  BRAND: "品牌方",
+  CHANNEL: "渠道商",
+  GUEST: "游客",
 };
 
 // ---- Customer: 基础信息 ----------------------------------------------------

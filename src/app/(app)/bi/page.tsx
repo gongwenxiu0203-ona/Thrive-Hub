@@ -582,23 +582,25 @@ async function DashboardTab({
         />
       </div>
 
-      <SalesDashboard
-        programDist={programDist}
-        platformDist={platformDist}
-        typeDist={typeDist}
-        commissionRateDist={commissionRateDist}
-        brandBars={brandBars}
-        newAffiliates={newAffiliates}
-        topCreators={topCreators}
-        topProducts={topProducts}
-        daily={daily}
-        weekly={weekly}
-        monthly={monthly}
-        publisherTrend={publisherTrend}
-        brandTrend={brandTrend}
-        acosTrend={acosTrend}
-        currencyCode={currencyCode}
-      />
+      {!isChannel && (
+        <SalesDashboard
+          programDist={programDist}
+          platformDist={platformDist}
+          typeDist={typeDist}
+          commissionRateDist={commissionRateDist}
+          brandBars={brandBars}
+          newAffiliates={newAffiliates}
+          topCreators={topCreators}
+          topProducts={topProducts}
+          daily={daily}
+          weekly={weekly}
+          monthly={monthly}
+          publisherTrend={publisherTrend}
+          brandTrend={brandTrend}
+          acosTrend={acosTrend}
+          currencyCode={currencyCode}
+        />
+      )}
     </>
   );
 }
