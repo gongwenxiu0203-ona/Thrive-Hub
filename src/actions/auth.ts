@@ -10,6 +10,7 @@ import {
   SESSION_MAX_AGE,
 } from "@/lib/auth";
 import { verifyPassword, hashPassword } from "@/lib/password";
+import { sendMail } from "@/lib/mailer";
 
 export async function guestLoginAction() {
   const store = await cookies();
@@ -183,4 +184,137 @@ export async function logoutAction(): Promise<void> {
   const store = await cookies();
   store.delete(SESSION_COOKIE);
   redirect("/login");
+}
+
+// ─── Password Reset ────────────────────────────────────────────────────────
+
+/** Step 1: user submits their email to request a reset link. */
+export async function forgotPasswordAction(
+  _prev: { error?: string; success?: boolean } | undefined,
+  formData: FormData,
+): Promise<{ error?: string; success?: boolean }> {
+  const email = String(formData.get("email") ?? "")
+    .trim()
+    .toLowerCase();
+
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return { error: "请输入有效的邮箱地址" };
+  }
+
+  // Look up user — but always return the same success message to prevent
+  // email enumeration attacks.
+  const user = await prisma.user.findUnique({ where: { email } });
+
+  if (user) {
+    const token = randomBytes(32).toString("hex");
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+    // Replace any existing tokens for this email (idempotent).
+    await prisma.passwordResetToken.deleteMany({ where: { email } });
+    await prisma.passwordResetToken.create({
+      data: { email, token, expiresAt },
+    });
+
+    const appUrl =
+      process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+    const resetUrl = `${appUrl}/reset-password?token=${token}`;
+
+    await sendMail({
+      to: email,
+      subject: "【联盟营销管理系统】密码重置申请",
+      text:
+        `您好 ${user.name}，\n\n` +
+        `我们收到了重置您账户密码的请求。\n` +
+        `请点击以下链接完成密码重置（链接有效期 1 小时）：\n\n` +
+        `${resetUrl}\n\n` +
+        `如果您未提交此申请，请忽略本邮件，您的密码不会发生任何变化。\n\n` +
+        `—— 联盟营销管理系统`,
+      html: `
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:'PingFang SC',Helvetica,Arial,sans-serif">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:40px 0">
+    <tr><td align="center">
+      <table width="480" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.08)">
+        <!-- header -->
+        <tr><td style="background:#6366f1;padding:28px 32px;text-align:center">
+          <div style="width:48px;height:48px;background:#ffffff22;border-radius:10px;display:inline-block;line-height:48px;font-size:20px;font-weight:700;color:#fff">AM</div>
+          <p style="margin:10px 0 0;font-size:15px;color:#e0e7ff;font-weight:500">联盟营销管理系统</p>
+        </td></tr>
+        <!-- body -->
+        <tr><td style="padding:32px">
+          <h2 style="margin:0 0 12px;font-size:20px;color:#1e293b">密码重置申请</h2>
+          <p style="margin:0 0 8px;font-size:14px;color:#475569;line-height:1.7">您好，<strong>${user.name}</strong>，</p>
+          <p style="margin:0 0 24px;font-size:14px;color:#475569;line-height:1.7">
+            我们收到了重置您账户密码的申请。请点击下方按钮完成密码重置，链接有效期为 <strong>1 小时</strong>。
+          </p>
+          <div style="text-align:center;margin:0 0 28px">
+            <a href="${resetUrl}" style="display:inline-block;background:#6366f1;color:#ffffff;text-decoration:none;padding:13px 36px;border-radius:8px;font-size:15px;font-weight:600">重置密码</a>
+          </div>
+          <p style="margin:0 0 8px;font-size:12px;color:#94a3b8;line-height:1.7">
+            如果按钮无法点击，请复制以下链接到浏览器：<br>
+            <a href="${resetUrl}" style="color:#6366f1;word-break:break-all">${resetUrl}</a>
+          </p>
+          <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0">
+          <p style="margin:0;font-size:12px;color:#94a3b8;line-height:1.7">
+            如果您未提交此申请，请忽略本邮件，您的密码不会发生任何变化。
+          </p>
+        </td></tr>
+        <!-- footer -->
+        <tr><td style="background:#f8fafc;padding:16px 32px;text-align:center">
+          <p style="margin:0;font-size:12px;color:#94a3b8">© 2025 联盟营销管理系统 · 此邮件由系统自动发送，请勿回复</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`,
+    }).catch((err) =>
+      console.error("[forgotPassword] email send failed:", err),
+    );
+  }
+
+  // Always return success — prevents revealing whether the email exists.
+  return { success: true };
+}
+
+/** Step 2: user submits a new password via the token link. */
+export async function resetPasswordAction(
+  _prev: { error?: string; success?: boolean } | undefined,
+  formData: FormData,
+): Promise<{ error?: string; success?: boolean }> {
+  const token = String(formData.get("token") ?? "").trim();
+  const password = String(formData.get("password") ?? "");
+  const confirm = String(formData.get("confirm") ?? "");
+
+  if (!token) return { error: "重置链接无效，请重新申请" };
+  if (password.length < 6) return { error: "新密码至少需要 6 位字符" };
+  if (password !== confirm) return { error: "两次输入的密码不一致" };
+
+  const record = await prisma.passwordResetToken.findUnique({
+    where: { token },
+  });
+
+  if (!record || record.expiresAt < new Date()) {
+    // Delete expired token if found
+    if (record) {
+      await prisma.passwordResetToken.delete({ where: { token } }).catch(
+        () => {},
+      );
+    }
+    return { error: "重置链接已过期或无效，请重新申请" };
+  }
+
+  const passwordHash = await hashPassword(password);
+
+  await prisma.user.update({
+    where: { email: record.email },
+    data: { passwordHash },
+  });
+
+  // Consume the token so it can't be reused
+  await prisma.passwordResetToken.delete({ where: { token } }).catch(() => {});
+
+  redirect("/login?reset=1");
 }

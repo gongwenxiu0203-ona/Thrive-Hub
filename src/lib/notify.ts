@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { MEETING_MODE_LABELS, labelOf } from "@/lib/constants";
+import { sendMail } from "@/lib/mailer";
 
 // In-system notification layer.
 //
@@ -25,9 +26,13 @@ async function dispatchEmail(opts: {
   subject: string;
   body: string;
 }): Promise<void> {
-  // TODO: wire up SMTP / provider here. For now, log so it is observable.
-  console.info(
-    `[email] → ${opts.to} | ${opts.subject}\n${opts.body}`,
+  await sendMail({
+    to: opts.to,
+    subject: opts.subject,
+    html: `<pre style="font-family:sans-serif;white-space:pre-wrap">${opts.body}</pre>`,
+    text: opts.body,
+  }).catch((err) =>
+    console.error(`[notify] email dispatch failed to ${opts.to}:`, err),
   );
 }
 

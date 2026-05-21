@@ -2,6 +2,7 @@
 
 import { useActionState, useTransition } from "react";
 import { useFormStatus } from "react-dom";
+import Link from "next/link";
 import { loginAction, guestLoginAction } from "@/actions/auth";
 
 function SubmitButton() {
@@ -39,9 +40,18 @@ export function LoginForm() {
           />
         </div>
         <div>
-          <label className="label" htmlFor="password">
-            密码
-          </label>
+          <div className="flex items-center justify-between mb-1">
+            <label className="label mb-0" htmlFor="password">
+              密码
+            </label>
+            <Link
+              href="/forgot-password"
+              className="text-xs text-brand-600 hover:underline"
+              tabIndex={-1}
+            >
+              忘记密码？
+            </Link>
+          </div>
           <input
             id="password"
             name="password"

@@ -415,6 +415,16 @@ model AsinMapping {
   @@index([asin])
 }
 
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  email     String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([email])
+}
+
 model Attachment {
   id           String   @id @default(cuid())
   fileName     String
