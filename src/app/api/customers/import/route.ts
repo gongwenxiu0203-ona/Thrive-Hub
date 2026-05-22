@@ -82,6 +82,14 @@ export async function POST(req: Request) {
         targetPlatforms: JSON.stringify(
           pickMulti(cell(row, mapping.targetPlatforms), PROMO_PLATFORMS),
         ),
+        platformGmv: (() => {
+          // If the value looks like a JSON object/array keep it; otherwise wrap
+          // it as { raw: "..." } so the field remains valid JSON.
+          const v = cell(row, mapping.platformGmv);
+          if (!v) return "{}";
+          if (v.startsWith("{") || v.startsWith("[")) return v;
+          return JSON.stringify({ raw: v });
+        })(),
         amazonAcos: cell(row, mapping.amazonAcos) || null,
         socialMediaInfo: cell(row, mapping.socialMediaInfo) || null,
         affiliateHistory: cell(row, mapping.affiliateHistory) || null,
