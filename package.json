@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && prisma migrate deploy && next build",
+    "build": "prisma generate && node scripts/pre-migrate-backup.js && prisma migrate deploy && next build",
     "build:prod": "cp prisma/schema.mysql.prisma prisma/schema.prisma && prisma generate && prisma migrate deploy && next build",
     "start": "next start",
     "lint": "next lint",
