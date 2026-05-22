@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { hashPassword } from "@/lib/password";
 
 function isAdmin(role: string) {
   return role === "ADMIN";
@@ -17,12 +18,18 @@ export async function PATCH(
 
   const { id } = await params;
   const body = await req.json();
-  const { role, status, brandName } = body;
+  const { role, status, brandName, newPassword } = body;
 
   const updateData: Record<string, unknown> = {};
   if (role !== undefined) updateData.role = role;
   if (status !== undefined) updateData.status = status;
   if (brandName !== undefined) updateData.brandName = brandName;
+  if (newPassword !== undefined) {
+    if (typeof newPassword !== "string" || newPassword.length < 6) {
+      return NextResponse.json({ error: "新密码至少需要 6 位字符" }, { status: 400 });
+    }
+    updateData.passwordHash = await hashPassword(newPassword);
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const user = await (prisma.user.update as any)({

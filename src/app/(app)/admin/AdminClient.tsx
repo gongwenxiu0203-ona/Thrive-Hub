@@ -91,6 +91,7 @@ export function AdminClient({ initialUsers }: { initialUsers: UserRecord[] }) {
   const [editRole, setEditRole] = useState("");
   const [editStatus, setEditStatus] = useState("");
   const [editBrandName, setEditBrandName] = useState("");
+  const [editNewPassword, setEditNewPassword] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
   const [newEmail, setNewEmail] = useState("");
@@ -116,23 +117,33 @@ export function AdminClient({ initialUsers }: { initialUsers: UserRecord[] }) {
     setEditRole(u.role);
     setEditStatus(u.status);
     setEditBrandName(u.brandName ?? "");
+    setEditNewPassword("");
     setError("");
   }
 
   function saveEdit(id: string) {
     startTransition(async () => {
       setError("");
+      const body: Record<string, unknown> = {
+        role: editRole,
+        status: editStatus,
+        brandName: editBrandName || null,
+      };
+      if (editNewPassword.trim()) {
+        if (editNewPassword.length < 6) {
+          setError("新密码至少需要 6 位字符");
+          return;
+        }
+        body.newPassword = editNewPassword.trim();
+      }
       const res = await fetch(`/api/admin/users/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          role: editRole,
-          status: editStatus,
-          brandName: editBrandName || null,
-        }),
+        body: JSON.stringify(body),
       });
       if (res.ok) {
         setEditingId(null);
+        setEditNewPassword("");
         await refreshUsers();
       } else {
         const d = await res.json();
@@ -266,6 +277,7 @@ export function AdminClient({ initialUsers }: { initialUsers: UserRecord[] }) {
                   onChange={(e) => setNewRole(e.target.value)}
                 >
                   <option value="ADMIN">管理员</option>
+                  <option value="USER">普通员工</option>
                   <option value="LYNQ_STAFF">LYNQ内部员工</option>
                   <option value="BRAND">品牌方</option>
                   <option value="CHANNEL">渠道商</option>
@@ -359,6 +371,7 @@ export function AdminClient({ initialUsers }: { initialUsers: UserRecord[] }) {
                   <th>角色</th>
                   <th>状态</th>
                   <th>品牌名称</th>
+                  <th>新密码</th>
                   <th>用户编码</th>
                   <th>注册时间</th>
                   <th>操作</th>
@@ -377,6 +390,7 @@ export function AdminClient({ initialUsers }: { initialUsers: UserRecord[] }) {
                           onChange={(e) => setEditRole(e.target.value)}
                         >
                           <option value="ADMIN">管理员</option>
+                          <option value="USER">普通员工</option>
                           <option value="LYNQ_STAFF">LYNQ内部员工</option>
                           <option value="BRAND">品牌方</option>
                           <option value="CHANNEL">渠道商</option>
@@ -414,6 +428,20 @@ export function AdminClient({ initialUsers }: { initialUsers: UserRecord[] }) {
                         />
                       ) : (
                         <span className="text-slate-500">{u.brandName ?? "—"}</span>
+                      )}
+                    </td>
+                    <td>
+                      {editingId === u.id ? (
+                        <input
+                          className="input text-xs"
+                          type="password"
+                          value={editNewPassword}
+                          onChange={(e) => setEditNewPassword(e.target.value)}
+                          placeholder="留空则不修改"
+                          autoComplete="new-password"
+                        />
+                      ) : (
+                        <span className="text-slate-300 text-xs">—</span>
                       )}
                     </td>
                     <td>

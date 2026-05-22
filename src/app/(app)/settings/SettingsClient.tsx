@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { User, Mail, Shield, Bell, CheckCircle2 } from "lucide-react";
+import { User, Mail, Shield, Bell, CheckCircle2, Lock, Eye, EyeOff } from "lucide-react";
 
 interface Props {
   id: string;
@@ -20,6 +20,17 @@ export function SettingsClient({ id, name, email, role, feishuAuth, googleAuth, 
   const [pending, startTransition] = useTransition();
   const router = useRouter();
 
+  // Password change state
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showCurrent, setShowCurrent] = useState(false);
+  const [showNew, setShowNew] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [pwError, setPwError] = useState("");
+  const [pwSaved, setPwSaved] = useState(false);
+  const [pwPending, startPwTransition] = useTransition();
+
   function saveName() {
     if (!displayName.trim() || displayName === name) return;
     startTransition(async () => {
@@ -30,6 +41,27 @@ export function SettingsClient({ id, name, email, role, feishuAuth, googleAuth, 
       });
       setSaved(true);
       setTimeout(() => { setSaved(false); router.refresh(); }, 2000);
+    });
+  }
+
+  function changePassword() {
+    setPwError("");
+    startPwTransition(async () => {
+      const res = await fetch("/api/settings/password", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentPassword, newPassword, confirmPassword }),
+      });
+      if (res.ok) {
+        setPwSaved(true);
+        setCurrentPassword("");
+        setNewPassword("");
+        setConfirmPassword("");
+        setTimeout(() => setPwSaved(false), 3000);
+      } else {
+        const d = await res.json();
+        setPwError(d.error ?? "修改失败，请重试");
+      }
     });
   }
 
@@ -74,6 +106,100 @@ export function SettingsClient({ id, name, email, role, feishuAuth, googleAuth, 
           <input className="input bg-slate-50 text-slate-500 cursor-not-allowed" value={role} readOnly />
           <p className="mt-1 text-[11px] text-slate-400">角色由管理员分配，不可自行修改</p>
         </div>
+      </div>
+
+      {/* Security card — change password */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 space-y-4">
+        <div className="flex items-center gap-2 mb-4">
+          <Lock className="h-4 w-4 text-brand-500" />
+          <h2 className="text-sm font-semibold text-slate-700">安全设置</h2>
+        </div>
+
+        {pwSaved && (
+          <div className="flex items-center gap-2 rounded-lg bg-emerald-50 px-3 py-2.5 text-sm text-emerald-700">
+            <CheckCircle2 className="h-4 w-4 shrink-0" />
+            密码已修改成功
+          </div>
+        )}
+
+        <div>
+          <label className="label text-xs">当前密码</label>
+          <div className="relative">
+            <input
+              type={showCurrent ? "text" : "password"}
+              className="input pr-10"
+              value={currentPassword}
+              onChange={e => setCurrentPassword(e.target.value)}
+              placeholder="输入当前密码"
+              autoComplete="current-password"
+            />
+            <button
+              type="button"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+              onClick={() => setShowCurrent(v => !v)}
+              tabIndex={-1}
+            >
+              {showCurrent ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <label className="label text-xs">新密码</label>
+          <div className="relative">
+            <input
+              type={showNew ? "text" : "password"}
+              className="input pr-10"
+              value={newPassword}
+              onChange={e => setNewPassword(e.target.value)}
+              placeholder="至少 6 位字符"
+              autoComplete="new-password"
+            />
+            <button
+              type="button"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+              onClick={() => setShowNew(v => !v)}
+              tabIndex={-1}
+            >
+              {showNew ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <label className="label text-xs">确认新密码</label>
+          <div className="relative">
+            <input
+              type={showConfirm ? "text" : "password"}
+              className="input pr-10"
+              value={confirmPassword}
+              onChange={e => setConfirmPassword(e.target.value)}
+              placeholder="再次输入新密码"
+              autoComplete="new-password"
+            />
+            <button
+              type="button"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+              onClick={() => setShowConfirm(v => !v)}
+              tabIndex={-1}
+            >
+              {showConfirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          </div>
+        </div>
+
+        {pwError && (
+          <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">{pwError}</p>
+        )}
+
+        <button
+          type="button"
+          onClick={changePassword}
+          disabled={pwPending || !currentPassword || !newPassword || !confirmPassword}
+          className="btn-primary text-sm disabled:opacity-50"
+        >
+          {pwPending ? "修改中…" : "修改密码"}
+        </button>
       </div>
 
       {/* Authorizations card */}
