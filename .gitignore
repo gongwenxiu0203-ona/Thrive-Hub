@@ -19,9 +19,13 @@ next-env.d.ts
 /prisma/*.db-journal
 /prisma/*.db-shm
 /prisma/*.db-wal
+/prisma/prisma/
 /prisma/migrations/dev.db*
 *.sqlite
 *.sqlite3
+
+# ===== 备份文件 =====
+/backups/
 
 # ===== 上传文件（用户上传内容不进版本库）=====
 /uploads/*
