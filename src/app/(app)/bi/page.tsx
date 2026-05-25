@@ -371,16 +371,18 @@ async function DashboardTab({
   const typeDist = group((r) => resolveType(r.affiliateName, r.affiliateType) || "未分类");
   const brandBars = group((r) => r.brand).slice(0, 12);
 
-  // Commission rate distribution: bucket by percentage rounded to 5% step.
-  // Keys are stored as "5%", "10%", etc. for human-readable pie-chart labels.
+  // Commission rate distribution: bucket by percentage with 2-decimal precision.
+  // Round to nearest 0.01% (0.0001 of raw rate) so e.g. 0.01 → "1.00%",
+  // 0.001 → "0.10%", 0.015 → "1.50%". No coarse 5%-step bucketing.
   const rateCounts = new Map<string, number>();
   for (const r of records) {
-    const pct = Math.round(r.commissionRate * 20) / 20; // 0.05 step
-    const key = `${Math.round(pct * 100)}%`; // e.g. 0.05 → "5%", 0.10 → "10%"
+    // Multiply by 10000, round, then divide by 100 → 2-decimal percentage value
+    const pctVal = Math.round(r.commissionRate * 10000) / 100;
+    const key = `${pctVal.toFixed(2)}%`; // e.g. 0.01 → "1.00%", 0.001 → "0.10%"
     rateCounts.set(key, (rateCounts.get(key) ?? 0) + 1);
   }
   const commissionRateDist = [...rateCounts.entries()]
-    // parseFloat("5%") = 5, parseFloat("10%") = 10 — correct numeric sort
+    // parseFloat("1.00%") = 1, parseFloat("10.00%") = 10 — correct numeric sort
     .sort((a, b) => parseFloat(a[0]) - parseFloat(b[0]))
     .map(([name, value]) => ({ name, value }));
 
