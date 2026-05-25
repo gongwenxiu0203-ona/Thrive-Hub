@@ -39,6 +39,11 @@ function csv(sp: Record<string, string | undefined>, key: string): string[] {
 
 function buildWhere(
   sp: Record<string, string | undefined>,
+  // Affiliate names that match the selected types (resolved from the affiliate
+  // library). When provided, type filtering uses affiliateName OR stored
+  // affiliateType so records whose type was not stored but is now resolvable
+  // are still included.
+  typeAffNames?: string[],
 ): Prisma.SalesRecordWhereInput {
   const where: Prisma.SalesRecordWhereInput = {};
   const platforms = csv(sp, "platforms");
@@ -54,7 +59,18 @@ function buildWhere(
   const aff = csv(sp, "affiliateNames");
   if (aff.length) where.affiliateName = { in: aff };
   const types = csv(sp, "types");
-  if (types.length) where.affiliateType = { in: types };
+  if (types.length) {
+    if (typeAffNames !== undefined) {
+      // Prefer affiliate-library lookup: match by name OR stored affiliateType
+      const orClauses: Prisma.SalesRecordWhereInput[] = [];
+      if (typeAffNames.length > 0)
+        orClauses.push({ affiliateName: { in: typeAffNames } });
+      orClauses.push({ affiliateType: { in: types } });
+      where.OR = orClauses;
+    } else {
+      where.affiliateType = { in: types };
+    }
+  }
   const asins = csv(sp, "asins");
   if (asins.length) where.asin = { in: asins };
   const parents = csv(sp, "parentAsins");
@@ -71,6 +87,35 @@ function buildWhere(
     }
   }
   return where;
+}
+
+/**
+ * Builds a function that resolves an affiliate's type from the affiliate
+ * library, with case-sensitive match first and lowercase fallback.
+ * Falls back to the stored value if no library entry found.
+ */
+function buildAffTypeResolver(
+  affiliates: { platformAffiliateName: string; affiliateType: string | null }[],
+) {
+  const exact = new Map<string, string>();
+  const lower = new Map<string, string>();
+  for (const a of affiliates) {
+    const type = (a.affiliateType ?? "").trim();
+    if (type) {
+      exact.set(a.platformAffiliateName.trim(), type);
+      lower.set(a.platformAffiliateName.trim().toLowerCase(), type);
+    }
+  }
+  return (name: string, stored?: string | null): string => {
+    const n = (name ?? "").trim();
+    if (n) {
+      const e = exact.get(n);
+      if (e) return e;
+      const l = lower.get(n.toLowerCase());
+      if (l) return l;
+    }
+    return (stored ?? "").trim();
+  };
 }
 
 function exportQueryString(
@@ -133,28 +178,45 @@ export default async function BIPage({
     baseWhere.customerId = { in: customerIds };
   }
 
-  // Merge user filters with base role-based where
-  const userWhere = buildWhere(sp);
+  // Fetch distinct filter values AND affiliate library in parallel.
+  // The affiliate library is used to resolve affiliate types at display time,
+  // ensuring types are up-to-date even for records imported before the library
+  // was populated.
+  const [allDistinct, affLibrary] = await Promise.all([
+    prisma.salesRecord.findMany({
+      where: baseWhere,
+      select: {
+        affiliatePlatform: true,
+        affiliateProgram: true,
+        brand: true,
+        region: true,
+        store: true,
+        affiliateName: true,
+        affiliateType: true,
+        asin: true,
+        parentAsin: true,
+        storeProductLabel: true,
+      },
+    }),
+    prisma.affiliate.findMany({
+      select: { platformAffiliateName: true, affiliateType: true },
+    }),
+  ]);
+  const resolveTypePage = buildAffTypeResolver(affLibrary);
+
+  // Build type-aware WHERE clause: use affiliate library lookup so that records
+  // whose affiliateType was not stored but is now resolvable are still matched.
+  const typeFilter = csv(sp, "types");
+  const typeAffNames = typeFilter.length
+    ? affLibrary
+        .filter((a) => typeFilter.includes(resolveTypePage(a.platformAffiliateName, null)))
+        .map((a) => a.platformAffiliateName.trim())
+    : undefined;
+  const userWhere = buildWhere(sp, typeAffNames);
   const where: Prisma.SalesRecordWhereInput = {
     AND: [baseWhere, userWhere],
   };
 
-  // Distinct values for filter dropdowns
-  const allDistinct = await prisma.salesRecord.findMany({
-    where: baseWhere,
-    select: {
-      affiliatePlatform: true,
-      affiliateProgram: true,
-      brand: true,
-      region: true,
-      store: true,
-      affiliateName: true,
-      affiliateType: true,
-      asin: true,
-      parentAsin: true,
-      storeProductLabel: true,
-    },
-  });
   const uniq = (xs: (string | null)[]) =>
     [...new Set(xs.filter((x): x is string => !!x && x.trim() !== ""))].sort();
   const filterOptions: FilterOptions = {
@@ -164,7 +226,9 @@ export default async function BIPage({
     regions: uniq(allDistinct.map((r) => r.region)),
     stores: uniq(allDistinct.map((r) => r.store)),
     affiliateNames: uniq(allDistinct.map((r) => r.affiliateName)),
-    types: uniq(allDistinct.map((r) => r.affiliateType)),
+    // Resolve types from the affiliate library so the dropdown shows current
+    // types even if stored affiliateType fields are empty.
+    types: uniq(allDistinct.map((r) => resolveTypePage(r.affiliateName, r.affiliateType))),
     asins: uniq(allDistinct.map((r) => r.asin)),
     parentAsins: uniq(allDistinct.map((r) => r.parentAsin)),
     labels: uniq(allDistinct.map((r) => r.storeProductLabel)),
@@ -251,10 +315,13 @@ async function DashboardTab({
   isBrand?: boolean;
   regions?: string[];
 }) {
-  const records = await prisma.salesRecord.findMany({
-    where,
-    orderBy: { orderDate: "asc" },
-  });
+  const [records, affLibrary] = await Promise.all([
+    prisma.salesRecord.findMany({ where, orderBy: { orderDate: "asc" } }),
+    prisma.affiliate.findMany({
+      select: { platformAffiliateName: true, affiliateType: true },
+    }),
+  ]);
+  const resolveType = buildAffTypeResolver(affLibrary);
 
   if (records.length === 0) {
     const emptyChannelOpts: FilterOptions = isChannel
@@ -301,18 +368,20 @@ async function DashboardTab({
 
   const programDist = group((r) => r.affiliateProgram ?? "未知");
   const platformDist = group((r) => r.affiliatePlatform);
-  const typeDist = group((r) => r.affiliateType ?? "未分类");
+  const typeDist = group((r) => resolveType(r.affiliateName, r.affiliateType) || "未分类");
   const brandBars = group((r) => r.brand).slice(0, 12);
 
-  // Commission rate distribution: bucket by percentage rounded to step 0.05
+  // Commission rate distribution: bucket by percentage rounded to 5% step.
+  // Keys are stored as "5%", "10%", etc. for human-readable pie-chart labels.
   const rateCounts = new Map<string, number>();
   for (const r of records) {
     const pct = Math.round(r.commissionRate * 20) / 20; // 0.05 step
-    const key = pct.toFixed(2);
+    const key = `${Math.round(pct * 100)}%`; // e.g. 0.05 → "5%", 0.10 → "10%"
     rateCounts.set(key, (rateCounts.get(key) ?? 0) + 1);
   }
   const commissionRateDist = [...rateCounts.entries()]
-    .sort((a, b) => Number(a[0]) - Number(b[0]))
+    // parseFloat("5%") = 5, parseFloat("10%") = 10 — correct numeric sort
+    .sort((a, b) => parseFloat(a[0]) - parseFloat(b[0]))
     .map(([name, value]) => ({ name, value }));
 
   // Top creators by revenue
@@ -333,7 +402,7 @@ async function DashboardTab({
       platform: r.affiliatePlatform,
       program: r.affiliateProgram ?? "",
       name: r.affiliateName,
-      type: r.affiliateType ?? "",
+      type: resolveType(r.affiliateName, r.affiliateType),
       revenue: 0,
       unitsSold: 0,
       commission: 0,
@@ -615,7 +684,7 @@ async function DetailTab({
   sp: Record<string, string | undefined>;
 }) {
   const page = Math.max(1, Number(sp.page) || 1);
-  const [records, total] = await Promise.all([
+  const [records, total, affLibrary] = await Promise.all([
     prisma.salesRecord.findMany({
       where,
       orderBy: { orderDate: "desc" },
@@ -623,7 +692,11 @@ async function DetailTab({
       take: PAGE_SIZE,
     }),
     prisma.salesRecord.count({ where }),
+    prisma.affiliate.findMany({
+      select: { platformAffiliateName: true, affiliateType: true },
+    }),
   ]);
+  const resolveType = buildAffTypeResolver(affLibrary);
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
@@ -667,7 +740,7 @@ async function DetailTab({
                     <td>{r.store ?? "—"}</td>
                     <td>{r.brand}</td>
                     <td>{r.affiliateName}</td>
-                    <td>{r.affiliateType ?? "—"}</td>
+                    <td>{resolveType(r.affiliateName, r.affiliateType) || "—"}</td>
                     <td>{r.region ?? "—"}</td>
                     <td>{r.asin ?? "—"}</td>
                     <td>{r.parentAsin ?? "—"}</td>
