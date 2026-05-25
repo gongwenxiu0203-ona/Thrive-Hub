@@ -580,6 +580,42 @@ export function SalesDashboard({
   );
 }
 
+/**
+ * Custom pie label renderer.
+ * - Only renders for slices ≥ 5% of total to prevent crowding.
+ * - Positions labels proportionally outside the pie edge using RADIAN math
+ *   so they scale correctly in both normal and full-screen (zoomed) views.
+ * - labelLine is set to false; the outward position makes the slice association clear.
+ */
+function renderPieLabel(props: {
+  cx: number;
+  cy: number;
+  midAngle: number;
+  outerRadius: number;
+  name: string;
+  percent: number;
+}) {
+  const { cx, cy, midAngle, outerRadius, name, percent } = props;
+  if (percent < 0.05) return null; // hide tiny slices — shown in legend instead
+  const RADIAN = Math.PI / 180;
+  // Place label 22% beyond the outer edge (scales proportionally with pie size)
+  const r = outerRadius * 1.22;
+  const x = cx + r * Math.cos(-midAngle * RADIAN);
+  const y = cy + r * Math.sin(-midAngle * RADIAN);
+  return (
+    <text
+      x={x}
+      y={y}
+      fill="#374151"
+      textAnchor={x > cx ? "start" : "end"}
+      dominantBaseline="central"
+      fontSize={11}
+    >
+      {`${name}: ${(percent * 100).toFixed(1)}%`}
+    </text>
+  );
+}
+
 function PieChartView({
   data,
   valueFormat = "currency",
@@ -591,20 +627,17 @@ function PieChartView({
 }) {
   return (
     <ResponsiveContainer width="100%" height="100%">
+      {/* cy="40%" shifts pie upward to leave room for the legend below */}
       <PieChart>
         <Pie
           data={data}
           dataKey="value"
           nameKey="name"
           cx="50%"
-          cy="50%"
-          outerRadius={88}
-          label={(e) => {
-            const p = e as { name?: string; percent?: number };
-            return `${p.name ?? ""}: ${((p.percent ?? 0) * 100).toFixed(2)}%`;
-          }}
+          cy="40%"
+          outerRadius="48%"
           labelLine={false}
-          fontSize={10}
+          label={renderPieLabel}
         >
           {data.map((_, i) => (
             <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
@@ -617,6 +650,17 @@ function PieChartView({
               : formatNumber(v)
           }
           contentStyle={{ fontSize: 12, borderRadius: 8 }}
+        />
+        {/* Legend shows ALL categories (including small slices with no inline label) */}
+        <Legend
+          layout="horizontal"
+          verticalAlign="bottom"
+          align="center"
+          iconSize={10}
+          wrapperStyle={{ fontSize: 11, lineHeight: 1.6 }}
+          formatter={(value) => (
+            <span style={{ color: "#374151" }}>{value}</span>
+          )}
         />
       </PieChart>
     </ResponsiveContainer>
