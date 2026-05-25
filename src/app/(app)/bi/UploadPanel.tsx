@@ -70,6 +70,9 @@ export function UploadPanel({
     setError(null);
     setDone(null);
     startTransition(async () => {
+      // AbortController lets us cancel a stuck request and show a clear error.
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 90_000); // 90 s safety net
       try {
         const fd = new FormData();
         fd.append("file", file);
@@ -77,6 +80,7 @@ export function UploadPanel({
         const res = await fetch("/api/sales/parse", {
           method: "POST",
           body: fd,
+          signal: controller.signal,
         });
         let data: Record<string, unknown> = {};
         try {
@@ -91,9 +95,14 @@ export function UploadPanel({
           setParsed(data as unknown as ParseResult);
           setMapping((data.suggestedMapping as Record<string, string>) ?? {});
         }
-      } catch {
-        setError("网络请求失败，请检查网络连接后重试");
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") {
+          setError("文件解析超时，请尝试拆分文件后分批上传，或检查文件是否损坏。");
+        } else {
+          setError("网络请求失败，请检查网络连接后重试");
+        }
       } finally {
+        clearTimeout(timer);
         if (inputRef.current) inputRef.current.value = "";
       }
     });
@@ -101,6 +110,10 @@ export function UploadPanel({
 
   function confirmImport() {
     if (!parsed) return;
+    if (!customerId) {
+      setError("请先选择关联客户后再导入数据。");
+      return;
+    }
     const missing = MAPPABLE.filter((f) => f.required && !mapping[f.key]);
     if (missing.length > 0) {
       setError(
@@ -179,14 +192,16 @@ export function UploadPanel({
         {/* Pre-upload setup: customer + platform */}
         <div className="mb-4 grid gap-3 sm:grid-cols-3">
           <div>
-            <label className="label">关联客户</label>
+            <label className="label">
+              关联客户 <span className="text-rose-500">*</span>
+            </label>
             <select
-              className="input"
+              className={`input ${!customerId ? "border-rose-300" : ""}`}
               value={customerId}
               onChange={(e) => setCustomerId(e.target.value)}
               disabled={!!parsed}
             >
-              <option value="">未选择（可选）</option>
+              <option value="">请选择关联客户</option>
               {customers.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.brandName}

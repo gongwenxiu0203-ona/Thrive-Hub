@@ -73,6 +73,50 @@ export function parseSheet(buffer: ArrayBuffer): Row[] {
   return XLSX.utils.sheet_to_json<Row>(sheet, { defval: "", raw: false });
 }
 
+/**
+ * Fast partial parse: reads ONLY the header row + up to maxSampleRows data rows.
+ * Uses XLSX's sheetRows option so the library skips all remaining rows —
+ * critical for large files (10k+ rows) to avoid blocking the Node.js event loop.
+ *
+ * The sheet's <dimension> element is read before row data, so sheet["!ref"]
+ * still reflects the full sheet dimensions even with sheetRows applied.
+ * This lets us return an accurate totalRows count without parsing everything.
+ *
+ * Used in Step 1 (parse) of the BI import flow for column detection and
+ * mapping suggestions. The raw file buffer must be saved to temp so that
+ * Step 2 (upload) can call parseSheet() for the full data.
+ */
+export function parseSheetSample(
+  buffer: ArrayBuffer,
+  maxSampleRows = 5,
+): { columns: string[]; sampleRows: Row[]; totalRows: number } {
+  const wb = XLSX.read(buffer, {
+    type: "array",
+    sheetRows: maxSampleRows + 1, // +1 to include the header row
+  });
+  const sheetName = wb.SheetNames[0];
+  if (!sheetName) return { columns: [], sampleRows: [], totalRows: 0 };
+  const sheet = wb.Sheets[sheetName];
+
+  // !ref is populated from the XML <dimension> element which the parser reads
+  // before row data — it is NOT affected by the sheetRows limit.
+  let totalRows = 0;
+  if (sheet["!ref"]) {
+    const range = XLSX.utils.decode_range(sheet["!ref"]);
+    // range.e.r is the 0-based last row index; row 0 is the header row, so
+    // data row count = range.e.r (equals the 1-based last data row number).
+    totalRows = Math.max(0, range.e.r);
+  }
+
+  const rows = XLSX.utils.sheet_to_json<Row>(sheet, { defval: "", raw: false });
+  if (rows.length === 0) return { columns: [], sampleRows: [], totalRows };
+
+  const columns = Object.keys(rows[0]);
+  // Fall back to sample length when !ref was unavailable.
+  if (totalRows === 0) totalRows = rows.length;
+  return { columns, sampleRows: rows.slice(0, maxSampleRows), totalRows };
+}
+
 /** Build an xlsx file buffer from row objects. */
 export function buildSheet(rows: Row[], sheetName = "Sheet1"): Buffer {
   const ws = XLSX.utils.json_to_sheet(rows);

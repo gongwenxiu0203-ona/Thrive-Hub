@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 import { convertRow, getMappableFields } from "@/lib/salesImport";
+import { parseSheet } from "@/lib/excel";
 import { readFile, unlink } from "fs/promises";
 import path from "path";
 import os from "os";
@@ -16,6 +17,9 @@ import os from "os";
 type Row = Record<string, unknown>;
 
 const TEMP_PREFIX = "sales-parse-";
+// Temp files are now raw binary (file buffer), not parsed JSON.
+// The .bin extension matches what parse/route.ts writes.
+const TEMP_EXT = ".bin";
 /** Max records per createMany call — avoids DB variable-count limits. */
 const CHUNK_SIZE = 500;
 
@@ -25,14 +29,21 @@ function isSafeUUID(id: string): boolean {
 }
 
 function tempFilePath(tempId: string): string {
-  return path.join(os.tmpdir(), `${TEMP_PREFIX}${tempId}.json`);
+  return path.join(os.tmpdir(), `${TEMP_PREFIX}${tempId}${TEMP_EXT}`);
 }
 
 async function readTempRows(tempId: string): Promise<Row[] | null> {
   if (!isSafeUUID(tempId)) return null;
   try {
-    const content = await readFile(tempFilePath(tempId), "utf-8");
-    return JSON.parse(content) as Row[];
+    // Read the raw binary buffer saved by Step 1 (parse) and do the full
+    // xlsx parse here. This is where the CPU-intensive work now happens,
+    // keeping Step 1 near-instant for large files.
+    const buf = await readFile(tempFilePath(tempId));
+    const arrayBuffer = buf.buffer.slice(
+      buf.byteOffset,
+      buf.byteOffset + buf.byteLength,
+    ) as ArrayBuffer;
+    return parseSheet(arrayBuffer) as Row[];
   } catch {
     return null;
   }
@@ -69,6 +80,9 @@ export async function POST(req: Request) {
 
     if (!tempId) {
       return NextResponse.json({ error: "缺少上传会话标识" }, { status: 400 });
+    }
+    if (!customerId) {
+      return NextResponse.json({ error: "请选择关联客户后再导入" }, { status: 400 });
     }
 
     // Read parsed rows from temp file (written by parse step).
@@ -232,7 +246,7 @@ export async function POST(req: Request) {
 
         return batch.id;
       },
-      { timeout: 60_000 },
+      { timeout: 120_000 }, // 2 min — full xlsx parse now happens in upload step
     );
 
     // Clean up temp file after successful import.
