@@ -78,9 +78,9 @@ export function parseSheet(buffer: ArrayBuffer): Row[] {
  * Uses XLSX's sheetRows option so the library skips all remaining rows —
  * critical for large files (10k+ rows) to avoid blocking the Node.js event loop.
  *
- * The sheet's <dimension> element is read before row data, so sheet["!ref"]
- * still reflects the full sheet dimensions even with sheetRows applied.
- * This lets us return an accurate totalRows count without parsing everything.
+ * The xlsx library clips sheet["!ref"] to the parsed rows when sheetRows is
+ * set, but preserves the original range in sheet["!fullref"]. We use !fullref
+ * to return an accurate totalRows count without parsing all rows.
  *
  * Used in Step 1 (parse) of the BI import flow for column detection and
  * mapping suggestions. The raw file buffer must be saved to temp so that
@@ -98,13 +98,15 @@ export function parseSheetSample(
   if (!sheetName) return { columns: [], sampleRows: [], totalRows: 0 };
   const sheet = wb.Sheets[sheetName];
 
-  // !ref is populated from the XML <dimension> element which the parser reads
-  // before row data — it is NOT affected by the sheetRows limit.
+  // When sheetRows is active, xlsx clips !ref to the parsed rows only.
+  // !fullref preserves the original sheet range (from the XML <dimension>
+  // element) regardless of the sheetRows limit — use it for the accurate count.
+  const fullRef =
+    (sheet["!fullref"] as string | undefined) ?? sheet["!ref"] ?? "";
   let totalRows = 0;
-  if (sheet["!ref"]) {
-    const range = XLSX.utils.decode_range(sheet["!ref"]);
-    // range.e.r is the 0-based last row index; row 0 is the header row, so
-    // data row count = range.e.r (equals the 1-based last data row number).
+  if (fullRef) {
+    const range = XLSX.utils.decode_range(fullRef);
+    // range.e.r is 0-based last row index; row 0 is header, so data rows = range.e.r
     totalRows = Math.max(0, range.e.r);
   }
 
