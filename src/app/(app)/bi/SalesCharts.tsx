@@ -15,7 +15,7 @@ import {
   BarChart,
   Bar,
 } from "recharts";
-import { useState } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { PanelCard } from "@/components/ui/PanelCard";
 import { formatCurrencyWith, formatNumber } from "@/lib/utils";
 
@@ -580,42 +580,116 @@ export function SalesDashboard({
   );
 }
 
-/**
- * Custom pie label renderer.
- * - Only renders for slices ≥ 5% of total to prevent crowding.
- * - Positions labels proportionally outside the pie edge using RADIAN math
- *   so they scale correctly in both normal and full-screen (zoomed) views.
- * - labelLine is set to false; the outward position makes the slice association clear.
- */
-function renderPieLabel(props: {
-  cx: number;
-  cy: number;
-  midAngle: number;
-  outerRadius: number;
+const PIE_RADIAN = Math.PI / 180;
+
+type PieLabelInfo = {
   name: string;
   percent: number;
-}) {
-  const { cx, cy, midAngle, outerRadius, name, percent } = props;
-  if (percent < 0.05) return null; // hide tiny slices — shown in legend instead
-  const RADIAN = Math.PI / 180;
-  // Place label 22% beyond the outer edge (scales proportionally with pie size)
-  const r = outerRadius * 1.22;
-  const x = cx + r * Math.cos(-midAngle * RADIAN);
-  const y = cy + r * Math.sin(-midAngle * RADIAN);
-  return (
-    <text
-      x={x}
-      y={y}
-      fill="#374151"
-      textAnchor={x > cx ? "start" : "end"}
-      dominantBaseline="central"
-      fontSize={11}
-    >
-      {`${name}: ${(percent * 100).toFixed(1)}%`}
-    </text>
-  );
+  /** Initial angle-based position (before spreading) */
+  x: number;
+  yInit: number;
+  /** Adjusted y after overlap-avoidance spreading */
+  y: number;
+  midAngle: number;
+  side: "left" | "right";
+  outerRadius: number;
+  cx: number;
+  cy: number;
+  color: string;
+};
+
+/**
+ * Pre-computes all pie label positions from data + container dimensions,
+ * then runs an overlap-avoidance "spreading" algorithm:
+ *   1. Separate labels into left-side and right-side groups.
+ *   2. Sort each group by their initial y position.
+ *   3. Forward pass: push any label that would overlap the previous one downward.
+ *   4. Backward pass: push any label that would overlap the next one upward.
+ *   5. Clamp to container bounds.
+ *
+ * This runs outside React so it stays pure and re-computes only when data or
+ * container size changes (via useMemo).
+ */
+function computePieLabels(
+  data: Pair[],
+  width: number,
+  height: number,
+): PieLabelInfo[] {
+  const total = data.reduce((s, d) => s + d.value, 0);
+  if (total === 0 || width === 0 || height === 0) return [];
+
+  // Match Recharts' percentage-based radius computation:
+  //   maxRadius = min(containerWidth, containerHeight) / 2
+  //   outerRadius = percent * maxRadius
+  const maxR = Math.min(width, height) / 2;
+  const outerRadius = 0.48 * maxR;
+  const cx = width / 2;
+  // cy="50%" centers the pie; 40% leaves room for label overflow top/bottom
+  const cy = height * 0.50;
+  // Labels placed at 130% of the outer radius
+  const labelR = outerRadius * 1.35;
+
+  // Recharts default: startAngle=0 (3 o'clock), goes counterclockwise in
+  // screen coords. midAngle is in the same convention.
+  let cumAngle = 0;
+  const raw: PieLabelInfo[] = data.map((d, i) => {
+    const sweep = (d.value / total) * 360;
+    const midAngle = cumAngle + sweep / 2;
+    cumAngle += sweep;
+
+    const x = cx + labelR * Math.cos(-midAngle * PIE_RADIAN);
+    const y = cy + labelR * Math.sin(-midAngle * PIE_RADIAN);
+    return {
+      name: d.name,
+      percent: d.value / total,
+      x,
+      yInit: y,
+      y,
+      midAngle,
+      side: x >= cx ? "right" : "left",
+      outerRadius,
+      cx,
+      cy,
+      color: PIE_COLORS[i % PIE_COLORS.length],
+    };
+  });
+
+  const MIN_GAP = 14; // px — minimum vertical spacing between adjacent labels
+  const PAD = 6;      // px — keep labels inside container bounds
+
+  function spread(arr: PieLabelInfo[]): PieLabelInfo[] {
+    const a = arr.map(l => ({ ...l })).sort((a, b) => a.y - b.y);
+    // Forward pass: push overlapping labels downward
+    for (let i = 1; i < a.length; i++) {
+      if (a[i].y - a[i - 1].y < MIN_GAP) a[i].y = a[i - 1].y + MIN_GAP;
+    }
+    // Backward pass: pull labels upward if they were pushed too far down
+    for (let i = a.length - 2; i >= 0; i--) {
+      if (a[i + 1].y - a[i].y < MIN_GAP) a[i].y = a[i + 1].y - MIN_GAP;
+    }
+    // Clamp to container
+    a.forEach(l => {
+      l.y = Math.max(PAD, Math.min(height - PAD, l.y));
+    });
+    return a;
+  }
+
+  const right = spread(raw.filter(l => l.side === "right"));
+  const left  = spread(raw.filter(l => l.side === "left"));
+  return [...right, ...left];
 }
 
+/**
+ * Pie chart with fully non-overlapping labels.
+ *
+ * Renders the Recharts Pie without built-in labels, then draws an SVG
+ * overlay with labels connected by polylines. Label positions are computed
+ * by `computePieLabels` which uses a spreading algorithm to guarantee every
+ * label is visible and non-overlapping at any container size.
+ *
+ * The `outerRadius` is percentage-based so the pie scales proportionally
+ * when the PanelCard is zoomed to full-screen.
+ */
 function PieChartView({
   data,
   valueFormat = "currency",
@@ -625,44 +699,102 @@ function PieChartView({
   valueFormat?: "currency" | "number";
   currencyCode?: string;
 }) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [dims, setDims] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const obs = new ResizeObserver((entries) => {
+      const r = entries[0].contentRect;
+      setDims({ width: r.width, height: r.height });
+    });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+
+  const labels = useMemo(
+    () => computePieLabels(data, dims.width, dims.height),
+    [data, dims],
+  );
+
   return (
-    <ResponsiveContainer width="100%" height="100%">
-      {/* cy="40%" shifts pie upward to leave room for the legend below */}
-      <PieChart>
-        <Pie
-          data={data}
-          dataKey="value"
-          nameKey="name"
-          cx="50%"
-          cy="40%"
-          outerRadius="48%"
-          labelLine={false}
-          label={renderPieLabel}
+    <div ref={wrapRef} style={{ width: "100%", height: "100%", position: "relative" }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <PieChart>
+          <Pie
+            data={data}
+            dataKey="value"
+            nameKey="name"
+            cx="50%"
+            cy="50%"
+            outerRadius="48%"
+            label={false}
+            labelLine={false}
+            isAnimationActive={false}
+          >
+            {data.map((_, i) => (
+              <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+            ))}
+          </Pie>
+          <Tooltip
+            formatter={(v: number) =>
+              valueFormat === "currency"
+                ? formatCurrencyWith(v, currencyCode)
+                : formatNumber(v)
+            }
+            contentStyle={{ fontSize: 12, borderRadius: 8 }}
+          />
+        </PieChart>
+      </ResponsiveContainer>
+
+      {/* SVG overlay: labels with polyline connectors, overlap-free */}
+      {dims.width > 0 && (
+        <svg
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: dims.width,
+            height: dims.height,
+            pointerEvents: "none",
+            overflow: "visible",
+          }}
         >
-          {data.map((_, i) => (
-            <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
-          ))}
-        </Pie>
-        <Tooltip
-          formatter={(v: number) =>
-            valueFormat === "currency"
-              ? formatCurrencyWith(v, currencyCode)
-              : formatNumber(v)
-          }
-          contentStyle={{ fontSize: 12, borderRadius: 8 }}
-        />
-        {/* Legend shows ALL categories (including small slices with no inline label) */}
-        <Legend
-          layout="horizontal"
-          verticalAlign="bottom"
-          align="center"
-          iconSize={10}
-          wrapperStyle={{ fontSize: 11, lineHeight: 1.6 }}
-          formatter={(value) => (
-            <span style={{ color: "#374151" }}>{value}</span>
-          )}
-        />
-      </PieChart>
-    </ResponsiveContainer>
+          {labels.map((l, i) => {
+            // Pie-edge point (start of connector)
+            const px = l.cx + l.outerRadius * Math.cos(-l.midAngle * PIE_RADIAN);
+            const py = l.cy + l.outerRadius * Math.sin(-l.midAngle * PIE_RADIAN);
+            // Elbow point (just outside pie edge, keeping direction)
+            const er = l.outerRadius + 10;
+            const ex = l.cx + er * Math.cos(-l.midAngle * PIE_RADIAN);
+            const ey = l.cy + er * Math.sin(-l.midAngle * PIE_RADIAN);
+            const isRight = l.side === "right";
+            const textX = l.x + (isRight ? 4 : -4);
+
+            return (
+              <g key={i}>
+                <polyline
+                  points={`${px.toFixed(1)},${py.toFixed(1)} ${ex.toFixed(1)},${ey.toFixed(1)} ${l.x.toFixed(1)},${l.y.toFixed(1)}`}
+                  fill="none"
+                  stroke="#94a3b8"
+                  strokeWidth={0.8}
+                />
+                <text
+                  x={textX}
+                  y={l.y}
+                  textAnchor={isRight ? "start" : "end"}
+                  dominantBaseline="central"
+                  fontSize={10}
+                  fill="#374151"
+                >
+                  {`${l.name}: ${(l.percent * 100).toFixed(1)}%`}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+      )}
+    </div>
   );
 }
