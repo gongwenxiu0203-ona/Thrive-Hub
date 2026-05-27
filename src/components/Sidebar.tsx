@@ -12,6 +12,7 @@ import {
   Handshake,
   Link2,
   ShieldCheck,
+  Receipt,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -28,6 +29,7 @@ const NAV: NavItem[] = [
   { href: "/customers", label: "客户管理", icon: Users },
   { href: "/tasks", label: "任务管理", icon: KanbanSquare },
   { href: "/contracts", label: "合同管理", icon: FileText },
+  { href: "/finance", label: "财务对账", icon: Receipt },
   { href: "/reminders", label: "提醒管理", icon: Bell },
   { href: "/bi", label: "推广数据BI", icon: BarChart3 },
   { href: "/affiliates", label: "联盟资源库", icon: Handshake },

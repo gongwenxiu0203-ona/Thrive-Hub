@@ -42,6 +42,13 @@ model User {
   salesBatches        SalesBatch[]
   affiliateBatches    AffiliateBatch[]
   attachments         Attachment[]
+  // Finance module relations
+  reconciliationsCreated   CustomerReconciliation[] @relation("ReconciliationCreator")
+  reconciliationsSubmitted CustomerReconciliation[] @relation("ReconciliationSubmitter")
+  reconciliationReviews    ReconciliationReview[]   @relation("ReconciliationReviewer")
+  settlementsCreated       Settlement[]             @relation("SettlementCreator")
+  channelReconciliationsCreated  ChannelReconciliation[] @relation("ChannelReconciliationCreator")
+  channelReconciliationsAsChannel ChannelReconciliation[] @relation("ChannelUserReconciliations")
 }
 
 model Customer {
@@ -95,6 +102,9 @@ model Customer {
   tasks         Task[]
   salesBatches  SalesBatch[]
   salesRecords  SalesRecord[]
+  // Finance module relations
+  reconciliations        CustomerReconciliation[]
+  channelReconciliations ChannelReconciliation[] @relation("CustomerChannelReconciliations")
 }
 
 model Contract {
@@ -138,6 +148,7 @@ model Contract {
   owner        User?                 @relation("ContractOwner", fields: [ownerId], references: [id])
   reviewer     User?                 @relation("ContractReviewer", fields: [reviewerId], references: [id])
   fieldReviews ContractFieldReview[]
+  reconciliations CustomerReconciliation[]
 }
 
 model ContractFieldReview {
@@ -438,4 +449,147 @@ model Attachment {
   uploadedBy User? @relation(fields: [uploadedById], references: [id])
 
   @@index([entityType, entityId])
+}
+
+// ─── Finance Module ───────────────────────────────────────────────────────────
+
+// 客户对账记录（每月一条）
+model CustomerReconciliation {
+  id         String @id @default(cuid())
+  customerId String
+  contractId String
+
+  // 对账周期
+  periodStart DateTime
+  periodEnd   DateTime
+
+  // 合同条款快照（创建时从合同复制，之后不随合同变更）
+  partyA           String? // 甲方合同主体
+  accountingPeriod String? // 核算周期
+  feeCycle         String? // 固费周期：无 | 月度 | 季度
+  feeAmount        Float   @default(0) // 固费金额（¥）
+  commissionRate   Float   @default(0) // 抽佣比例（小数，0.05 = 5%）
+  affiliateRule    String? // 联盟佣金规则
+  paymentCycle     String? // 付款周期
+
+  // 对赌条款
+  betType        String @default("NONE") // NONE | ORDER_COUNT | SALES_AMOUNT | BOTH
+  betOrderCount  Int?   // 对赌单量
+  betSalesAmount Float? // 对赌销售额（¥）
+
+  // 实际数据（从 BI 自动拉取）
+  actualOrders      Int   @default(0) // 实际单量
+  actualSalesAmount Float @default(0) // 实际销售额（¥）
+
+  // 计算结果（自动）
+  betResult            String? // ACHIEVED | NOT_ACHIEVED | NA
+  actualCommissionRate Float   @default(0) // 实际抽佣比例
+  commissionAmount     Float   @default(0) // 抽佣金额 = 实际销售额 × 实际抽佣比例
+
+  // 工作流状态
+  status        String    @default("DRAFT") // DRAFT | PENDING_REVIEW | DISPUTED | CONFIRMED
+  submittedById String?
+  submittedAt   DateTime?
+
+  // 终版确认数据（CONFIRMED 后锁定，不可修改）
+  finalOrders           Int?
+  finalSalesAmount      Float?
+  finalCommissionAmount Float?
+
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  contract    Contract @relation(fields: [contractId], references: [id])
+  createdBy   User     @relation("ReconciliationCreator", fields: [createdById], references: [id])
+  submittedBy User?    @relation("ReconciliationSubmitter", fields: [submittedById], references: [id])
+  reviews     ReconciliationReview[]
+  settlements Settlement[]
+
+  @@index([customerId])
+  @@index([contractId])
+  @@index([status])
+}
+
+// 对账审核/争议记录（每次提交、确认、争议各一条，保留完整历史）
+model ReconciliationReview {
+  id               String   @id @default(cuid())
+  reconciliationId String
+  reviewerId       String
+  // SUBMITTED 提交对账 | APPROVED 无异议确认 | DISPUTED 提出异议 | FINAL_CONFIRMED 最终确认
+  action           String
+  disputedOrders      Int?   // 争议时填写的己方单量
+  disputedSalesAmount Float? // 争议时填写的己方销售额
+  note             String? // 备注/意见
+  createdAt        DateTime @default(now())
+
+  reconciliation CustomerReconciliation @relation(fields: [reconciliationId], references: [id], onDelete: Cascade)
+  reviewer       User                   @relation("ReconciliationReviewer", fields: [reviewerId], references: [id])
+
+  @@index([reconciliationId])
+}
+
+// 结算跟踪（每条对账对应固费 + 抽佣两条结算记录）
+model Settlement {
+  id               String   @id @default(cuid())
+  reconciliationId String
+  type             String   // FIXED_FEE 固费 | COMMISSION 抽佣
+  amount           Float    @default(0)
+  status           String   @default("PENDING") // PENDING 待结算 | SETTLED 已结算
+  estimatedDate    DateTime? // 预计结算时间
+  actualDate       DateTime? // 实际结算时间（填写后自动变为已结算）
+  reminderSent     Boolean  @default(false) // 预计时间前1天提醒是否已发
+  note             String?
+
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  reconciliation CustomerReconciliation @relation(fields: [reconciliationId], references: [id], onDelete: Cascade)
+  createdBy      User                   @relation("SettlementCreator", fields: [createdById], references: [id])
+  channelSplits  ChannelReconciliation[]
+
+  @@index([reconciliationId])
+  @@index([status])
+}
+
+// 渠道商分账记录（前提：对应客户结算已完成）
+model ChannelReconciliation {
+  id            String @id @default(cuid())
+  customerId    String
+  settlementId  String // 关联的客户结算记录（FIXED_FEE 或 COMMISSION）
+  channelUserId String // 渠道商 User id
+
+  // 基础月费分账
+  fixedFeeShareRate      Float @default(0) // 分账比例（小数）
+  fixedFeeSharePerPeriod Float @default(0) // 分账金额【单期】
+  fixedFeeSharePeriods   Int   @default(1) // 分账期数
+  fixedFeeShareTotal     Float @default(0) // 分账总额
+
+  // GMV 抽佣分账
+  commissionShareRate      Float @default(0)
+  commissionSharePerPeriod Float @default(0)
+  commissionSharePeriods   Int   @default(1)
+  commissionShareTotal     Float @default(0)
+
+  // 合计
+  totalShareAmount Float @default(0)
+
+  status        String    @default("PENDING") // PENDING | SETTLED
+  estimatedDate DateTime?
+  actualDate    DateTime?
+  note          String?
+
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  customer    Customer   @relation("CustomerChannelReconciliations", fields: [customerId], references: [id])
+  channelUser User       @relation("ChannelUserReconciliations", fields: [channelUserId], references: [id])
+  settlement  Settlement @relation(fields: [settlementId], references: [id])
+  createdBy   User       @relation("ChannelReconciliationCreator", fields: [createdById], references: [id])
+
+  @@index([customerId])
+  @@index([channelUserId])
 }

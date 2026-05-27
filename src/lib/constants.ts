@@ -230,6 +230,8 @@ export const REMINDER_TYPE_LABELS: Record<string, string> = {
   REVIEW: "审核",
   FOLLOWUP: "跟进",
   STATUS_CHECK: "状态确认",
+  RECONCILIATION_REVIEW: "对账审核",
+  SETTLEMENT_DUE: "结算提醒",
 };
 
 export const REMINDER_TYPE_COLORS: Record<string, string> = {
@@ -239,6 +241,81 @@ export const REMINDER_TYPE_COLORS: Record<string, string> = {
   REVIEW: "bg-amber-100 text-amber-700",
   FOLLOWUP: "bg-indigo-100 text-indigo-700",
   STATUS_CHECK: "bg-orange-100 text-orange-700",
+  RECONCILIATION_REVIEW: "bg-violet-100 text-violet-700",
+  SETTLEMENT_DUE: "bg-rose-100 text-rose-700",
+};
+
+// ---- Finance: Reconciliation -----------------------------------------------
+
+export const BET_TYPE_LABELS: Record<string, string> = {
+  NONE: "无对赌",
+  ORDER_COUNT: "对赌单量",
+  SALES_AMOUNT: "对赌销售额",
+  BOTH: "单量+销售额",
+};
+
+export const BET_TYPE_OPTIONS = ["NONE", "ORDER_COUNT", "SALES_AMOUNT", "BOTH"] as const;
+
+export const BET_RESULT_LABELS: Record<string, string> = {
+  ACHIEVED: "完成对赌",
+  NOT_ACHIEVED: "未达成对赌",
+  NA: "无对赌",
+};
+
+export const BET_RESULT_COLORS: Record<string, string> = {
+  ACHIEVED: "bg-emerald-100 text-emerald-700",
+  NOT_ACHIEVED: "bg-rose-100 text-rose-700",
+  NA: "bg-slate-100 text-slate-600",
+};
+
+export const RECONCILIATION_STATUS_LABELS: Record<string, string> = {
+  DRAFT: "草稿",
+  PENDING_REVIEW: "待对方确认",
+  DISPUTED: "有异议",
+  CONFIRMED: "已确认",
+};
+
+export const RECONCILIATION_STATUS_COLORS: Record<string, string> = {
+  DRAFT: "bg-slate-100 text-slate-600",
+  PENDING_REVIEW: "bg-amber-100 text-amber-700",
+  DISPUTED: "bg-rose-100 text-rose-700",
+  CONFIRMED: "bg-emerald-100 text-emerald-700",
+};
+
+export const RECONCILIATION_STATUS_ORDER = [
+  "DRAFT",
+  "PENDING_REVIEW",
+  "DISPUTED",
+  "CONFIRMED",
+] as const;
+
+export const REVIEW_ACTION_LABELS: Record<string, string> = {
+  SUBMITTED: "提交对账",
+  APPROVED: "无异议确认",
+  DISPUTED: "提出异议",
+  FINAL_CONFIRMED: "最终确认",
+};
+
+export const REVIEW_ACTION_COLORS: Record<string, string> = {
+  SUBMITTED: "bg-sky-100 text-sky-700",
+  APPROVED: "bg-emerald-100 text-emerald-700",
+  DISPUTED: "bg-rose-100 text-rose-700",
+  FINAL_CONFIRMED: "bg-violet-100 text-violet-700",
+};
+
+export const SETTLEMENT_TYPE_LABELS: Record<string, string> = {
+  FIXED_FEE: "固费",
+  COMMISSION: "抽佣",
+};
+
+export const SETTLEMENT_STATUS_LABELS: Record<string, string> = {
+  PENDING: "待结算",
+  SETTLED: "已结算",
+};
+
+export const SETTLEMENT_STATUS_COLORS: Record<string, string> = {
+  PENDING: "bg-amber-100 text-amber-700",
+  SETTLED: "bg-emerald-100 text-emerald-700",
 };
 
 // ---- Affiliate (exact values from 资源库字段.xlsx) -------------------------
