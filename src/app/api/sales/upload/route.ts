@@ -7,6 +7,9 @@ import { readFile, unlink } from "fs/promises";
 import path from "path";
 import os from "os";
 
+// Allow up to 5 minutes for large xlsx parsing + DB writes
+export const maxDuration = 300;
+
 // Step 2 of the BI import flow.
 //
 // Body: { tempId, mapping, platform, customerId?, fileName? }

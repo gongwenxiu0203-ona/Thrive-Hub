@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["bcryptjs", "pdf-parse", "nodemailer"],
+  serverExternalPackages: ["bcryptjs", "pdf-parse", "nodemailer", "xlsx"],
   eslint: {
     ignoreDuringBuilds: true,
   },

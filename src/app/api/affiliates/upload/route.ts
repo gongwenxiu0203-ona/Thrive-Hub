@@ -4,6 +4,9 @@ import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 import { UPLOADABLE_AFFILIATE_FIELDS, mightBeDuplicate } from "@/lib/affiliateFields";
 
+// Allow up to 5 minutes for large xlsx parsing + DB writes
+export const maxDuration = 300;
+
 export async function POST(req: NextRequest) {
   const auth = await getSession();
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

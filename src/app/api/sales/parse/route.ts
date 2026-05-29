@@ -7,6 +7,9 @@ import { writeFile, readdir, unlink, stat } from "fs/promises";
 import path from "path";
 import os from "os";
 
+// Allow up to 5 minutes for large file parsing
+export const maxDuration = 300;
+
 // Step 1 of the BI import flow:
 //   form fields: file, platform (联盟平台名)
 // Returns: tempId + columns + sampleRows (first 5 rows) + suggestedMapping.
