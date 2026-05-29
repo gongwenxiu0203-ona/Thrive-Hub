@@ -56,16 +56,55 @@ export async function DELETE(
     return NextResponse.json({ error: "不能删除自己的账号" }, { status: 400 });
   }
 
-  // Nullify all FK references before deleting to avoid constraint violations.
-  await prisma.$transaction([
-    prisma.task.updateMany({ where: { ownerId: id }, data: { ownerId: null } }),
-    prisma.task.updateMany({ where: { publisherId: id }, data: { publisherId: null } }),
-    prisma.reminder.deleteMany({ where: { userId: id } }),
-    prisma.salesBatch.updateMany({ where: { uploaderId: id }, data: { uploaderId: null } }),
-    prisma.customer.updateMany({ where: { businessOwnerId: id }, data: { businessOwnerId: null } }),
-    prisma.customer.updateMany({ where: { backendOwnerId: id }, data: { backendOwnerId: null } }),
-    prisma.user.delete({ where: { id } }),
-  ]);
+  // Nullify / reassign all FK references before deleting to avoid constraint violations.
+  await prisma.$transaction(async (tx) => {
+    const adminId = session.userId;
+
+    // ── Self-referential User fields ──────────────────────────────
+    await tx.user.updateMany({ where: { invitedById: id }, data: { invitedById: null } });
+    await tx.user.updateMany({ where: { channelUserId: id }, data: { channelUserId: null } });
+
+    // ── Tasks ─────────────────────────────────────────────────────
+    await tx.task.updateMany({ where: { ownerId: id }, data: { ownerId: null } });
+    await tx.task.updateMany({ where: { publisherId: id }, data: { publisherId: null } });
+
+    // ── Reminders: delete all targeting or created by this user ───
+    await tx.reminder.deleteMany({ where: { targetId: id } });
+    await tx.reminder.deleteMany({ where: { createdById: id } });
+
+    // ── Customers ─────────────────────────────────────────────────
+    await tx.customer.updateMany({ where: { businessOwnerId: id }, data: { businessOwnerId: null } });
+    await tx.customer.updateMany({ where: { backendOwnerId: id }, data: { backendOwnerId: null } });
+    await tx.customer.updateMany({ where: { channelUserId: id }, data: { channelUserId: null } });
+    await tx.customer.updateMany({ where: { createdById: id }, data: { createdById: null } });
+
+    // ── Contracts ─────────────────────────────────────────────────
+    await tx.contract.updateMany({ where: { ownerId: id }, data: { ownerId: null } });
+    await tx.contract.updateMany({ where: { reviewerId: id }, data: { reviewerId: null } });
+    await tx.contract.updateMany({ where: { createdById: id }, data: { createdById: adminId } });
+    await tx.contractFieldReview.updateMany({ where: { reviewerId: id }, data: { reviewerId: null } });
+
+    // ── Sales ─────────────────────────────────────────────────────
+    await tx.salesBatch.updateMany({ where: { uploaderId: id }, data: { uploaderId: adminId } });
+
+    // ── Affiliates ────────────────────────────────────────────────
+    await tx.affiliateBatch.updateMany({ where: { uploaderId: id }, data: { uploaderId: adminId } });
+
+    // ── Finance: CustomerReconciliation + reviews ─────────────────
+    await tx.customerReconciliation.updateMany({ where: { createdById: id }, data: { createdById: adminId } });
+    await tx.customerReconciliation.updateMany({ where: { reviewerId: id }, data: { reviewerId: adminId } });
+    await tx.reconciliationReview.updateMany({ where: { reviewerId: id }, data: { reviewerId: adminId } });
+
+    // ── Finance: Settlement ───────────────────────────────────────
+    await tx.settlement.updateMany({ where: { createdById: id }, data: { createdById: adminId } });
+
+    // ── Finance: ChannelReconciliation ────────────────────────────
+    await tx.channelReconciliation.updateMany({ where: { channelUserId: id }, data: { channelUserId: adminId } });
+    await tx.channelReconciliation.updateMany({ where: { createdById: id }, data: { createdById: adminId } });
+
+    // ── Finally delete the user (UserPermissionOverride cascade) ──
+    await tx.user.delete({ where: { id } });
+  });
 
   return NextResponse.json({ ok: true });
 }
