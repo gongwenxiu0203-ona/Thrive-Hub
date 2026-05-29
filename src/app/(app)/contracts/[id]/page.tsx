@@ -15,6 +15,7 @@ import {
   CONTRACT_STATUS_ORDER,
   CONTRACT_TYPE_LABELS,
   CONTRACT_REVIEW_FIELDS,
+  COMMISSION_TYPE_LABELS,
   labelOf,
 } from "@/lib/constants";
 import { formatDate, formatDateTime } from "@/lib/utils";
@@ -39,6 +40,18 @@ export default async function ContractDetailPage({
   });
   if (!contract) notFound();
 
+  // 行级权限校验
+  if (session.role === "BRAND" && session.brandName) {
+    if (contract.customer.brandName !== session.brandName) notFound();
+  } else if (session.role === "CHANNEL") {
+    if (
+      contract.customer.channelUserId !== session.userId &&
+      contract.customer.createdById !== session.userId
+    ) {
+      notFound();
+    }
+  }
+
   const [users, files] = await Promise.all([
     prisma.user.findMany({ orderBy: { name: "asc" } }),
     prisma.attachment.findMany({
@@ -51,28 +64,79 @@ export default async function ContractDetailPage({
   const isAdmin = session.role === "ADMIN";
   const userOptions = users.map((u) => ({ id: u.id, name: u.name }));
 
-  // Field values keyed for compare view + review panel.
+  // Field values keyed for compare view + review panel (v3 template fields).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const c = contract as any;
+
+  // 阶梯规则展示
+  let tieredText = "";
+  try {
+    if (c.tieredRules) {
+      const obj = JSON.parse(c.tieredRules);
+      const sym = obj.currency === "美金" ? "$" : "¥";
+      tieredText = (obj.tiers ?? [])
+        .map((t: { from: string; to: string; rate: string }, i: number) => {
+          if (i === 0) return `0-${sym}${t.to} → ${t.rate}`;
+          if (t.to) return `${sym}${t.from}-${sym}${t.to} → ${t.rate}`;
+          return `${sym}${t.from} 及以上 → ${t.rate}`;
+        })
+        .join(" / ");
+    }
+  } catch {}
+
   const fieldValues: Record<string, string> = {
     partyA: contract.partyA ?? "",
-    accountingPeriod: contract.accountingPeriod ?? "",
-    feeCycle: contract.feeCycle ?? "",
-    feeAmount: contract.feeAmount ?? "",
-    commissionRate: contract.commissionRate ?? "",
-    affiliateRule: contract.affiliateRule ?? "",
-    paymentCycle: contract.paymentCycle ?? "",
-    invoiceReq: contract.invoiceReq ?? "",
-    lateLiability: contract.lateLiability ?? "",
     contractPeriod: `${formatDate(contract.startDate)} ~ ${formatDate(
       contract.endDate,
     )}`,
-    remark: contract.remark ?? "",
+    promoPlatform: c.promoPlatform ?? "",
+    targetSite: c.targetSite ?? "",
+    feeAmount: contract.feeAmount ?? "",
+    feeCurrency: c.feeCurrency ?? "",
+    paymentMethod: c.paymentMethod ?? "",
+    commissionType: c.commissionType
+      ? labelOf(COMMISSION_TYPE_LABELS, c.commissionType)
+      : "",
+    commissionRate: contract.commissionRate ?? "",
+    thresholdAmount: c.thresholdAmount ?? "",
+    thresholdCurrency: c.thresholdCurrency ?? "",
+    tieredRules: tieredText,
+    excessBaseMonths: c.excessBaseMonths ?? "",
+    excessCommissionRate: c.excessCommissionRate ?? "",
+    gmvSettlementCycle: c.gmvSettlementCycle ?? "",
   };
+
+  // 根据 GMV 佣金结算方式，过滤掉无关字段（v3 模板）
+  const ct = c.commissionType ?? "FIXED";
+  const conditionalKeys: Record<string, string[]> = {
+    FIXED: [],
+    THRESHOLD: ["thresholdAmount", "thresholdCurrency"],
+    TIERED: ["tieredRules"],
+    EXCESS: ["excessBaseMonths", "excessCommissionRate"],
+  };
+  // 所有可能出现的条件字段，用于"非当前类型则隐藏"
+  const allConditionalKeys = new Set([
+    "thresholdAmount",
+    "thresholdCurrency",
+    "tieredRules",
+    "excessBaseMonths",
+    "excessCommissionRate",
+  ]);
+  const activeConditional = new Set(conditionalKeys[ct] ?? []);
+
+  const visibleFields = CONTRACT_REVIEW_FIELDS.filter((f) => {
+    // 条件字段：只在匹配当前 commissionType 时显示
+    if (allConditionalKeys.has(f.key)) return activeConditional.has(f.key);
+    // 其他字段：只在有值时显示（避免空字段一直占位）
+    const v = fieldValues[f.key];
+    return v != null && v !== "" && v !== "—" && !/^\s*~\s*$/.test(v);
+  });
 
   const reviewByField = new Map(
     contract.fieldReviews.map((r) => [r.fieldName, r]),
   );
   const reviewStates: Record<string, ReviewFieldState> = {};
-  for (const f of CONTRACT_REVIEW_FIELDS) {
+  for (const f of visibleFields) {
     const r = reviewByField.get(f.key);
     reviewStates[f.key] = {
       key: f.key,
@@ -110,15 +174,19 @@ export default async function ContractDetailPage({
                   reviewerId: contract.reviewerId,
                   contractText: contract.contractText,
                   partyA: contract.partyA,
-                  accountingPeriod: contract.accountingPeriod,
-                  feeCycle: contract.feeCycle,
+                  promoPlatform: c.promoPlatform ?? null,
+                  targetSite: c.targetSite ?? null,
                   feeAmount: contract.feeAmount,
+                  feeCurrency: c.feeCurrency ?? null,
+                  paymentMethod: c.paymentMethod ?? null,
+                  commissionType: c.commissionType ?? "FIXED",
                   commissionRate: contract.commissionRate,
-                  affiliateRule: contract.affiliateRule,
-                  paymentCycle: contract.paymentCycle,
-                  invoiceReq: contract.invoiceReq,
-                  lateLiability: contract.lateLiability,
-                  remark: contract.remark,
+                  thresholdAmount: c.thresholdAmount ?? null,
+                  thresholdCurrency: c.thresholdCurrency ?? null,
+                  tieredRules: c.tieredRules ?? null,
+                  excessBaseMonths: c.excessBaseMonths ?? null,
+                  excessCommissionRate: c.excessCommissionRate ?? null,
+                  gmvSettlementCycle: c.gmvSettlementCycle ?? null,
                   startDate: contract.startDate,
                   endDate: contract.endDate,
                 }}
@@ -206,7 +274,7 @@ export default async function ContractDetailPage({
       {/* 关键字段 + 原文对照 */}
       <ContractCompare
         contractText={contract.contractText ?? ""}
-        fields={CONTRACT_REVIEW_FIELDS.map((f) => ({
+        fields={visibleFields.map((f) => ({
           key: f.key,
           label: f.label,
           value: fieldValues[f.key] ?? "",

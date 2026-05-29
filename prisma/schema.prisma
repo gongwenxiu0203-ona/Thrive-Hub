@@ -22,6 +22,7 @@ model User {
   brandName    String?  // for BRAND role: which brand they belong to
   channelUserId String? // for CHANNEL role: their userId (self-referential for filtering)
   uniqueCode   String?  @unique // auto-generated user identification code
+  invitedById  String?  // 邀请人 userId（注册时带 ?inviter=... 参数）
   // Integration authorizations chosen at registration time.
   feishuAuth   Boolean  @default(false) // 飞书日历同步授权
   googleAuth   Boolean  @default(false) // Google 日历同步授权
@@ -45,10 +46,41 @@ model User {
   // Finance module relations
   reconciliationsCreated   CustomerReconciliation[] @relation("ReconciliationCreator")
   reconciliationsSubmitted CustomerReconciliation[] @relation("ReconciliationSubmitter")
+  reconciliationsTargeted  CustomerReconciliation[] @relation("ReconciliationTarget")
   reconciliationReviews    ReconciliationReview[]   @relation("ReconciliationReviewer")
   settlementsCreated       Settlement[]             @relation("SettlementCreator")
   channelReconciliationsCreated  ChannelReconciliation[] @relation("ChannelReconciliationCreator")
   channelReconciliationsAsChannel ChannelReconciliation[] @relation("ChannelUserReconciliations")
+  // Permission overrides
+  permissionOverrides            UserPermissionOverride[]
+  invitedBy                      User?  @relation("UserInvitedBy", fields: [invitedById], references: [id])
+  invitedUsers                   User[] @relation("UserInvitedBy")
+}
+
+// 角色级权限配置（每个角色 + 功能 = 一个等级）
+model RolePermission {
+  id        String   @id @default(cuid())
+  role      String   // ADMIN | USER | LYNQ_STAFF | BRAND | CHANNEL | GUEST
+  feature   String   // dashboard | customers | tasks | contracts | finance | reminders | bi | affiliates | admin
+  level     String   // NONE | READ | EDIT | MANAGE
+  updatedAt DateTime @updatedAt
+
+  @@unique([role, feature])
+  @@index([role])
+}
+
+// 用户级权限覆盖（覆盖该用户角色的默认权限）
+model UserPermissionOverride {
+  id        String   @id @default(cuid())
+  userId    String
+  feature   String
+  level     String   // NONE | READ | EDIT | MANAGE
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, feature])
+  @@index([userId])
 }
 
 model Customer {
@@ -126,12 +158,29 @@ model Contract {
   accountingPeriod String? // 核算周期（原文）
   feeCycle         String? // 固费周期：无 | 月度 | 季度
   feeAmount        String? // 固费金额（¥）
+  feeCurrency      String? // 固费货币：人民币 | 美金
+  paymentMethod    String? // 付款方式：月付 | 季度预付
   commissionRate   String? // 抽佣比例（带 %）
+  commissionType   String? // 佣金类型：FIXED | THRESHOLD | TIERED
+  tieredCommission String? // 阶梯式佣金规则（原文）
   affiliateRule    String? // 联盟佣金规则（原文）
   paymentCycle     String? // 付款周期（原文）
+  hasBet           String  @default("false") // 是否有对赌协议：true | false
+  betTarget        String? // 对赌目标（GMV 金额或单量描述）
+  betTargetCurrency String? // 对赌 GMV 货币：人民币 | 美金
   invoiceReq       String? // 发票要求（原文，无则「无」）
   lateLiability    String? // 逾期责任（原文）
   remark           String? // 备注（人工填写）
+
+  // ── 新版项目确认书字段（v3 模板）─────────────────────────────────────────────
+  promoPlatform         String? // 推广平台（独立站 | Amazon | 沃尔玛）
+  targetSite            String? // 目标站点（US | UK | DE | CA | JP）
+  thresholdAmount       String? // THRESHOLD 机制：GMV 门槛金额
+  thresholdCurrency     String? // THRESHOLD 机制：门槛货币（人民币 | 美金）
+  tieredRules           String? // TIERED 机制：阶梯 JSON {currency, tiers:[{from,to,rate}]}
+  excessBaseMonths      String? // EXCESS 机制：基准月数
+  excessCommissionRate  String? // EXCESS 机制：增长服务佣金比例（带 %）
+  gmvSettlementCycle    String? // 联盟归因 GMV 结算周期
 
   startDate DateTime? // 合作期限-开始
   endDate   DateTime? // 合作期限-结束
@@ -149,6 +198,7 @@ model Contract {
   reviewer     User?                 @relation("ContractReviewer", fields: [reviewerId], references: [id])
   fieldReviews ContractFieldReview[]
   reconciliations CustomerReconciliation[]
+  channelReconciliations ChannelReconciliation[] @relation("ContractChannelReconciliations")
 }
 
 model ContractFieldReview {
@@ -486,30 +536,48 @@ model CustomerReconciliation {
   actualCommissionRate Float   @default(0) // 实际抽佣比例
   commissionAmount     Float   @default(0) // 抽佣金额 = 实际销售额 × 实际抽佣比例
 
+  // 待支付货币
+  fixedFeeCurrency   String @default("人民币") // 人民币 | 美金
+  commissionCurrency String @default("人民币") // 人民币 | 美金
+
   // 工作流状态
-  status        String    @default("DRAFT") // DRAFT | PENDING_REVIEW | DISPUTED | CONFIRMED
-  submittedById String?
-  submittedAt   DateTime?
+  status              String    @default("DRAFT") // DRAFT | PENDING_REVIEW | DISPUTED | CONFIRMED
+  submittedById       String?
+  submittedAt         DateTime?
+  submittedToUserId   String?   // 提交给哪个用户审核
+  submittedDeadline   DateTime? // 截止时间
+
+  // 结算7天提醒（CONFIRMED后7天未结算则触发）
+  settlementReminderSent Boolean @default(false)
+
+  // EXCESS 模式手动填写的 GMV 基准值（用于「超额抽佣」计算）
+  gmvBaseline Float?
 
   // 终版确认数据（CONFIRMED 后锁定，不可修改）
   finalOrders           Int?
   finalSalesAmount      Float?
   finalCommissionAmount Float?
 
+  // 软删除：deletedAt 非空表示已删除，7 天后访问列表时永久清理
+  deletedAt DateTime?
+
   createdById String
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  contract    Contract @relation(fields: [contractId], references: [id])
-  createdBy   User     @relation("ReconciliationCreator", fields: [createdById], references: [id])
-  submittedBy User?    @relation("ReconciliationSubmitter", fields: [submittedById], references: [id])
-  reviews     ReconciliationReview[]
-  settlements Settlement[]
+  customer        Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  contract        Contract @relation(fields: [contractId], references: [id])
+  createdBy       User     @relation("ReconciliationCreator", fields: [createdById], references: [id])
+  submittedBy     User?    @relation("ReconciliationSubmitter", fields: [submittedById], references: [id])
+  submittedToUser User?    @relation("ReconciliationTarget", fields: [submittedToUserId], references: [id])
+  reviews         ReconciliationReview[]
+  settlements     Settlement[]
+  channelReconciliations ChannelReconciliation[] @relation("CustomerReconciliationToChannels")
 
   @@index([customerId])
   @@index([contractId])
   @@index([status])
+  @@index([deletedAt])
 }
 
 // 对账审核/争议记录（每次提交、确认、争议各一条，保留完整历史）
@@ -554,26 +622,47 @@ model Settlement {
   @@index([status])
 }
 
-// 渠道商分账记录（前提：对应客户结算已完成）
+// 渠道商分账记录（v2：一条记录含固费+抽佣两侧分账）
 model ChannelReconciliation {
   id            String @id @default(cuid())
   customerId    String
-  settlementId  String // 关联的客户结算记录（FIXED_FEE 或 COMMISSION）
+  contractId    String?  // 关联合同
+  customerReconciliationId String? // 关联月度客户对账（v3）
+  settlementId  String? // legacy 关联（保留向后兼容）
   channelUserId String // 渠道商 User id
 
-  // 基础月费分账
-  fixedFeeShareRate      Float @default(0) // 分账比例（小数）
-  fixedFeeSharePerPeriod Float @default(0) // 分账金额【单期】
-  fixedFeeSharePeriods   Int   @default(1) // 分账期数
-  fixedFeeShareTotal     Float @default(0) // 分账总额
+  // 分账期
+  periodNo    Int       @default(1) // 分账期数
+  periodStart DateTime?
+  periodEnd   DateTime?
 
-  // GMV 抽佣分账
-  commissionShareRate      Float @default(0)
+  // ── 固费分账 ─────────────────────────────────────────────
+  fixedFeeReceived        Float?    // 到账固费金额（实际结算后填写，否则显示"—"）
+  fixedFeeShareRate       Float     @default(0) // 固费分账比例（小数）
+  fixedFeeShareAmount     Float     @default(0) // 自动 = received × rate
+  fixedFeeShareCurrency   String    @default("人民币")
+  fixedFeeEstimatedDate   DateTime?
+  fixedFeeActualDate      DateTime?
+  fixedFeeProofUrl        String?   // 转账截图 URL
+  fixedFeePushedToChannel Boolean   @default(false)
+
+  // ── 抽佣分账 ─────────────────────────────────────────────
+  commissionReceived        Float?
+  commissionShareRate       Float     @default(0)
+  commissionShareAmount     Float     @default(0)
+  commissionShareCurrency   String    @default("人民币")
+  commissionEstimatedDate   DateTime?
+  commissionActualDate      DateTime?
+  commissionProofUrl        String?
+  commissionPushedToChannel Boolean   @default(false)
+
+  // legacy 字段（保留兼容）
+  fixedFeeSharePerPeriod Float @default(0)
+  fixedFeeSharePeriods   Int   @default(1)
+  fixedFeeShareTotal     Float @default(0)
   commissionSharePerPeriod Float @default(0)
   commissionSharePeriods   Int   @default(1)
   commissionShareTotal     Float @default(0)
-
-  // 合计
   totalShareAmount Float @default(0)
 
   status        String    @default("PENDING") // PENDING | SETTLED
@@ -585,11 +674,15 @@ model ChannelReconciliation {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  customer    Customer   @relation("CustomerChannelReconciliations", fields: [customerId], references: [id])
-  channelUser User       @relation("ChannelUserReconciliations", fields: [channelUserId], references: [id])
-  settlement  Settlement @relation(fields: [settlementId], references: [id])
-  createdBy   User       @relation("ChannelReconciliationCreator", fields: [createdById], references: [id])
+  customer               Customer                @relation("CustomerChannelReconciliations", fields: [customerId], references: [id])
+  contract               Contract?               @relation("ContractChannelReconciliations", fields: [contractId], references: [id])
+  customerReconciliation CustomerReconciliation? @relation("CustomerReconciliationToChannels", fields: [customerReconciliationId], references: [id])
+  channelUser            User                    @relation("ChannelUserReconciliations", fields: [channelUserId], references: [id])
+  settlement             Settlement?             @relation(fields: [settlementId], references: [id])
+  createdBy              User                    @relation("ChannelReconciliationCreator", fields: [createdById], references: [id])
 
   @@index([customerId])
   @@index([channelUserId])
+  @@index([customerReconciliationId])
+  @@index([periodStart])
 }

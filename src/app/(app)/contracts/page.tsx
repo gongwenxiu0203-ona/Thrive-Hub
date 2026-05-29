@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Download } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -14,6 +15,8 @@ import {
 } from "@/lib/constants";
 import { formatDate } from "@/lib/utils";
 import { ContractFormModal } from "./ContractFormModal";
+import { ScopeToggle } from "@/components/ScopeToggle";
+import { isStaff } from "@/lib/dataScope";
 
 export const metadata = { title: "合同管理 · 联盟营销管理系统" };
 
@@ -34,12 +37,30 @@ export default async function ContractsPage({
   const customerFilter = csv(sp, "customer");
   const q = sp.q?.trim() ?? "";
 
+  // 行级权限
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { contractScope, customerScope, parseViewScope } = await import(
+    "@/lib/dataScope"
+  );
+  const sess = {
+    userId: session.userId,
+    role: session.role,
+    brandName: session.brandName,
+  };
+  const view = parseViewScope(sp);
+
   const [allContracts, customers, users] = await Promise.all([
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prisma.contract.findMany({
+      where: contractScope(sess, view) as any,
       orderBy: { createdAt: "desc" },
       include: { customer: true, owner: true, reviewer: true },
     }),
-    prisma.customer.findMany({ orderBy: { brandName: "asc" } }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    prisma.customer.findMany({
+      where: customerScope(sess, view) as any,
+      orderBy: { brandName: "asc" },
+    }),
     prisma.user.findMany({ orderBy: { name: "asc" } }),
   ]);
 
@@ -70,13 +91,30 @@ export default async function ContractsPage({
     <div className="space-y-6">
       <PageHeader
         title="合同管理"
-        description="合同创建、多级审核流转、字段级意见标注（含 AI 提取与原文对照）"
+        description={
+          isStaff(session.role)
+            ? view === "all"
+              ? "全部合同视图"
+              : "默认仅显示与你相关的合同，可切换到「全部」"
+            : "合同管理"
+        }
         actions={
-          <ContractFormModal
-            customers={customerOptions}
-            users={userOptions}
-            currentUserId={session.userId}
-          />
+          <div className="flex items-center gap-2">
+            {isStaff(session.role) && <ScopeToggle />}
+            <a
+              href="/templates/contract-template.docx"
+              download="平台联盟营销服务合同模板.docx"
+              className="btn-secondary flex items-center gap-1.5 text-sm"
+            >
+              <Download className="h-4 w-4" />
+              下载合同模板
+            </a>
+            <ContractFormModal
+              customers={customerOptions}
+              users={userOptions}
+              currentUserId={session.userId}
+            />
+          </div>
         }
       />
 

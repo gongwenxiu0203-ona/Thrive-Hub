@@ -33,8 +33,8 @@ const PERMISSIONS = [
 
 const IDENTITIES = [
   {
-    value: "LYNQ_STAFF",
-    label: "LYNQ内部员工",
+    value: "USER",
+    label: "内部员工",
     desc: "联盟营销团队成员，需管理员审核",
   },
   {
@@ -49,12 +49,14 @@ const IDENTITIES = [
   },
 ];
 
-export function RegisterForm() {
+export function RegisterForm({ inviterId = "" }: { inviterId?: string }) {
   const [state, formAction] = useActionState(registerAction, {});
   const [identity, setIdentity] = useState<string>("");
 
   return (
     <form action={formAction} className="space-y-4">
+      {/* 邀请人 ID（隐藏，注册时随请求一起提交） */}
+      <input type="hidden" name="inviter" value={inviterId} />
       {/* Identity selection */}
       <div>
         <label className="label">我的身份</label>

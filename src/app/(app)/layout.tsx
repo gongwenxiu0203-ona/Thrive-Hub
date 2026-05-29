@@ -18,7 +18,11 @@ export default async function AppLayout({
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <Sidebar unreadCount={unreadCount} role={session.role} />
+      <Sidebar
+        unreadCount={unreadCount}
+        role={session.role}
+        userId={session.userId}
+      />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Topbar
           name={session.name}

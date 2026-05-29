@@ -50,12 +50,30 @@ export default async function TasksPage({
   const viewAsId = isAdmin && sp.owner ? sp.owner : session.userId;
   const defaultToCurrentUser = viewAsId === session.userId;
 
+  // 行级权限
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { taskScope, customerScope, parseViewScope } = await import(
+    "@/lib/dataScope"
+  );
+  const sess = {
+    userId: session.userId,
+    role: session.role,
+    brandName: session.brandName,
+  };
+  const view = parseViewScope(sp);
+
   const [allTasks, customers, users] = await Promise.all([
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prisma.task.findMany({
+      where: taskScope(sess, view) as any,
       orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
       include: { customer: true, owner: true, publisher: true },
     }),
-    prisma.customer.findMany({ orderBy: { brandName: "asc" } }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    prisma.customer.findMany({
+      where: customerScope(sess, view) as any,
+      orderBy: { brandName: "asc" },
+    }),
     prisma.user.findMany({ orderBy: { name: "asc" } }),
   ]);
 

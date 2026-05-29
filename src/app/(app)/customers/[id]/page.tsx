@@ -44,6 +44,18 @@ export default async function CustomerDetailPage({
   });
   if (!customer) notFound();
 
+  // 行级权限校验：品牌方只能看自己品牌，渠道商只能看自己的客户
+  if (session.role === "BRAND" && session.brandName) {
+    if (customer.brandName !== session.brandName) notFound();
+  } else if (session.role === "CHANNEL") {
+    if (
+      customer.channelUserId !== session.userId &&
+      customer.createdById !== session.userId
+    ) {
+      notFound();
+    }
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const customerAny = customer as any;
   let evalData: EvaluationData | null = null;

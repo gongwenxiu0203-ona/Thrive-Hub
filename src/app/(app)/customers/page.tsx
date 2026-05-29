@@ -23,26 +23,17 @@ import { CustomerFormModal } from "./CustomerFormModal";
 import { QuickCreateModal } from "./QuickCreateModal";
 import { CustomerImportModal } from "./CustomerImportModal";
 import { requireSession } from "@/lib/session";
+import { customerScope, isStaff, parseViewScope } from "@/lib/dataScope";
+import { ScopeToggle } from "@/components/ScopeToggle";
 
 export const metadata = { title: "客户管理 · 联盟营销管理系统" };
 
 type CustomerRow = Awaited<ReturnType<typeof loadCustomers>>[number];
 
-async function loadCustomers(channelUserId?: string) {
-  if (channelUserId) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (prisma.customer.findMany as any)({
-      where: {
-        OR: [
-          { createdById: channelUserId },
-          { channelUserId: channelUserId },
-        ],
-      },
-      orderBy: { createdAt: "desc" },
-      include: { businessOwner: true, backendOwner: true },
-    });
-  }
-  return prisma.customer.findMany({
+async function loadCustomers(where: Record<string, unknown>) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (prisma.customer.findMany as any)({
+    where,
     orderBy: { createdAt: "desc" },
     include: { businessOwner: true, backendOwner: true },
   });
@@ -126,15 +117,25 @@ export default async function CustomersPage({
 }: {
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
-  // Lazy timer sweep: auto-advance stale customer statuses on each visit.
-  await runCustomerStatusChecks();
-
   const session = await requireSession();
-  const isChannel = session.role === "CHANNEL";
 
+  // 仅内部员工才跑全局客户状态校验，避免外部角色触发昂贵全表扫描
+  if (isStaff(session.role)) await runCustomerStatusChecks();
+
+  const isChannel = session.role === "CHANNEL";
   const sp = await searchParams;
+  const view = parseViewScope(sp);
+  const scope = customerScope(
+    {
+      userId: session.userId,
+      role: session.role,
+      brandName: session.brandName,
+    },
+    view,
+  );
+
   const [customers, users] = await Promise.all([
-    loadCustomers(isChannel ? session.userId : undefined),
+    loadCustomers(scope),
     prisma.user.findMany({ orderBy: { name: "asc" } }),
   ]);
 
@@ -191,9 +192,16 @@ export default async function CustomersPage({
     <div>
       <PageHeader
         title="客户管理"
-        description="品牌客户全生命周期管理 — 录入、筛选、状态跟踪与对外信息收集"
+        description={
+          isStaff(session.role)
+            ? view === "all"
+              ? "全部客户视图"
+              : "默认仅显示与你相关的客户，可切换到「全部」"
+            : "品牌客户管理"
+        }
         actions={
           <>
+            {isStaff(session.role) && <ScopeToggle />}
             <IntakeLinkButton />
             <CustomerImportModal />
             <QuickCreateModal />

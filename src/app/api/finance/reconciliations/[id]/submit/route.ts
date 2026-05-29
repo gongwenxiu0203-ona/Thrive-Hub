@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 
 // POST /api/finance/reconciliations/[id]/submit
-// 提交对账，状态变为 PENDING_REVIEW，通知客户负责人
+// 提交对账，状态变为 PENDING_REVIEW，通知指定审核人（或客户负责人）
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -13,6 +13,8 @@ export async function POST(
     const { id } = await params;
     const body = await req.json().catch(() => ({}));
     const note = body.note ?? "";
+    const submittedToUserId: string | undefined = body.submittedToUserId;
+    const submittedDeadline: string | undefined = body.submittedDeadline;
 
     const rec = await prisma.customerReconciliation.findUnique({
       where: { id },
@@ -21,20 +23,24 @@ export async function POST(
       },
     });
     if (!rec) return NextResponse.json({ error: "Not found" }, { status: 404 });
-    if (rec.status !== "DRAFT") {
-      return NextResponse.json({ error: "只有草稿状态可以提交对账" }, { status: 400 });
+    if (rec.status !== "DRAFT" && rec.status !== "DISPUTED") {
+      return NextResponse.json({ error: "只有草稿或争议状态可以提交对账" }, { status: 400 });
     }
 
     await prisma.$transaction(async (tx) => {
-      // 更新状态
+      // 更新状态，保存提交目标用户和截止时间
+      const updateData: Record<string, unknown> = {
+        status: "PENDING_REVIEW",
+        submittedById: session.userId,
+        submittedAt: new Date(),
+        updatedAt: new Date(),
+      };
+      if (submittedToUserId) updateData.submittedToUserId = submittedToUserId;
+      if (submittedDeadline) updateData.submittedDeadline = new Date(submittedDeadline);
+
       await tx.customerReconciliation.update({
         where: { id },
-        data: {
-          status: "PENDING_REVIEW",
-          submittedById: session.userId,
-          submittedAt: new Date(),
-          updatedAt: new Date(),
-        },
+        data: updateData,
       });
 
       // 写入审核记录
@@ -48,16 +54,20 @@ export async function POST(
         },
       });
 
-      // 给客户负责人创建提醒
-      if (rec.customer.businessOwnerId) {
-        const periodStr = `${rec.periodStart.toISOString().slice(0, 7)}`;
+      // 给审核目标用户创建提醒（优先 submittedToUserId，否则客户负责人）
+      const notifyUserId = submittedToUserId ?? rec.customer.businessOwnerId;
+      if (notifyUserId) {
+        const periodStr = rec.periodStart.toISOString().slice(0, 7);
+        const deadlineStr = submittedDeadline
+          ? `，截止时间：${new Date(submittedDeadline).toLocaleDateString("zh-CN")}`
+          : "";
         await tx.reminder.create({
           data: {
             title: `【对账审核】${rec.customer.brandName} ${periodStr} 月度对账待确认`,
-            content: `${rec.customer.brandName} 的 ${periodStr} 月度对账已提交，请确认实际单量和销售额。`,
+            content: `${rec.customer.brandName} 的 ${periodStr} 月度对账已提交，请确认实际单量和销售额${deadlineStr}。`,
             remindDate: new Date(),
             type: "RECONCILIATION_REVIEW",
-            targetId: rec.customer.businessOwnerId,
+            targetId: notifyUserId,
             createdById: session.userId,
           },
         });

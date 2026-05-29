@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useState } from "react";
 import {
   LayoutDashboard,
   Users,
@@ -13,10 +14,13 @@ import {
   Link2,
   ShieldCheck,
   Receipt,
+  UserPlus,
+  Copy,
+  Check,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { visibleNavForRole } from "@/lib/permissions";
+import { visibleNavForRole, isStaff } from "@/lib/permissions";
 
 type NavItem = {
   href: string;
@@ -38,9 +42,11 @@ const NAV: NavItem[] = [
 export function Sidebar({
   unreadCount = 0,
   role = "",
+  userId = "",
 }: {
   unreadCount?: number;
   role?: string;
+  userId?: string;
 }) {
   const pathname = usePathname();
   const visibleHrefs = visibleNavForRole(role);
@@ -103,6 +109,7 @@ export function Sidebar({
             管理员面板
           </Link>
         )}
+        {isStaff(role) && userId && <InviteButton userId={userId} />}
         <Link
           href="/intake"
           target="_blank"
@@ -113,5 +120,75 @@ export function Sidebar({
         </Link>
       </div>
     </aside>
+  );
+}
+
+// 邀请注册按钮：复制带邀请人参数的注册链接
+function InviteButton({ userId }: { userId: string }) {
+  const [show, setShow] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const url =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/register?inviter=${userId}`
+      : `/register?inviter=${userId}`;
+
+  function copy() {
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setShow(true)}
+        className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+      >
+        <UserPlus className="h-[18px] w-[18px]" />
+        邀请注册
+      </button>
+      {show && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="card w-full max-w-md p-6">
+            <h2 className="mb-1 text-base font-semibold text-slate-900">
+              我的邀请链接
+            </h2>
+            <p className="mb-4 text-xs text-slate-500">
+              发送给被邀请人，他们注册成功后会显示「邀请人：你的姓名」
+            </p>
+            <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+              <span className="flex-1 truncate text-sm text-slate-700">
+                {url}
+              </span>
+              <button
+                type="button"
+                onClick={copy}
+                className="shrink-0 rounded p-1 hover:bg-slate-200"
+              >
+                {copied ? (
+                  <Check className="h-4 w-4 text-emerald-600" />
+                ) : (
+                  <Copy className="h-4 w-4 text-slate-500" />
+                )}
+              </button>
+            </div>
+            {copied && (
+              <p className="mt-2 text-xs text-emerald-600">已复制到剪贴板</p>
+            )}
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                className="btn-secondary text-sm"
+                onClick={() => setShow(false)}
+              >
+                关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

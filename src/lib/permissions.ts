@@ -1,7 +1,7 @@
 // Centralized role-based access policy.
-// Roles: ADMIN | USER | LYNQ_STAFF | BRAND | CHANNEL | GUEST
+// Roles: ADMIN | USER | BRAND | CHANNEL | GUEST
 
-export const STAFF_ROLES = ["ADMIN", "USER", "LYNQ_STAFF"] as const;
+export const STAFF_ROLES = ["ADMIN", "USER"] as const;
 
 export function isStaff(role: string): boolean {
   return (STAFF_ROLES as readonly string[]).includes(role);

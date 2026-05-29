@@ -9,8 +9,22 @@ export async function GET(_req: Request) {
     const list = await prisma.channelReconciliation.findMany({
       include: {
         customer: { select: { id: true, brandName: true } },
-        channelUser: { select: { id: true, name: true } },
-        settlement: { select: { id: true, type: true, amount: true, status: true } },
+        contract: { select: { id: true, contractNo: true } },
+        customerReconciliation: {
+          select: {
+            id: true,
+            periodStart: true,
+            periodEnd: true,
+            status: true,
+            feeAmount: true,
+            commissionAmount: true,
+            finalCommissionAmount: true,
+            settlements: {
+              select: { id: true, type: true, status: true, actualDate: true },
+            },
+          },
+        },
+        channelUser: { select: { id: true, name: true, email: true } },
         createdBy: { select: { id: true, name: true } },
       },
       orderBy: { createdAt: "desc" },
@@ -21,61 +35,95 @@ export async function GET(_req: Request) {
   }
 }
 
-// POST /api/finance/channel-reconciliations — 新建渠道商分账
+// POST /api/finance/channel-reconciliations — 新建渠道商分账（v2）
+// body: { customerId, contractId, customerReconciliationId, channelUserId,
+//         periodNo?, periodStart?, periodEnd?, note?,
+//         fixedFeeShareRate?, commissionShareRate? }
 export async function POST(req: Request) {
   try {
     const session = await requireSession();
     const body = await req.json();
     const {
       customerId,
-      settlementId,
+      contractId,
+      customerReconciliationId,
       channelUserId,
+      periodNo = 1,
+      periodStart,
+      periodEnd,
       fixedFeeShareRate = 0,
-      fixedFeeSharePeriods = 1,
       commissionShareRate = 0,
-      commissionSharePeriods = 1,
+      fixedFeeShareCurrency = "人民币",
+      commissionShareCurrency = "人民币",
       note,
     } = body;
 
-    if (!customerId || !settlementId || !channelUserId) {
-      return NextResponse.json({ error: "缺少必填字段" }, { status: 400 });
+    if (!customerId || !contractId || !channelUserId) {
+      return NextResponse.json(
+        { error: "客户、合同、渠道商为必填项" },
+        { status: 400 },
+      );
     }
 
-    // 确认关联结算已完成
-    const settlement = await prisma.settlement.findUnique({ where: { id: settlementId } });
-    if (!settlement) return NextResponse.json({ error: "结算记录不存在" }, { status: 404 });
-    if (settlement.status !== "SETTLED") {
-      return NextResponse.json({ error: "渠道商分账需要客户结算已完成才能创建" }, { status: 400 });
+    // 关联月度客户对账（可选）— 用于联动到账金额
+    let custRec = null;
+    if (customerReconciliationId) {
+      custRec = await prisma.customerReconciliation.findUnique({
+        where: { id: customerReconciliationId },
+        include: { settlements: true },
+      });
+      if (!custRec) {
+        return NextResponse.json(
+          { error: "关联月度对账不存在" },
+          { status: 404 },
+        );
+      }
     }
 
-    // 计算分账金额
-    const fixedFeeSharePerPeriod = settlement.type === "FIXED_FEE"
-      ? settlement.amount * fixedFeeShareRate
-      : 0;
-    const fixedFeeShareTotal = fixedFeeSharePerPeriod * fixedFeeSharePeriods;
+    // 到账金额：仅当对应 Settlement 已结算才设置
+    const fixedFeeSettlement = custRec?.settlements.find(
+      (s) => s.type === "FIXED_FEE",
+    );
+    const commissionSettlement = custRec?.settlements.find(
+      (s) => s.type === "COMMISSION",
+    );
 
-    const commissionSharePerPeriod = settlement.type === "COMMISSION"
-      ? settlement.amount * commissionShareRate
-      : 0;
-    const commissionShareTotal = commissionSharePerPeriod * commissionSharePeriods;
+    const fixedFeeReceived =
+      fixedFeeSettlement?.status === "SETTLED"
+        ? fixedFeeSettlement.amount
+        : null;
+    const commissionReceived =
+      commissionSettlement?.status === "SETTLED"
+        ? commissionSettlement.amount
+        : null;
 
-    const totalShareAmount = fixedFeeShareTotal + commissionShareTotal;
+    const fixedFeeShareAmount =
+      fixedFeeReceived != null ? fixedFeeReceived * fixedFeeShareRate : 0;
+    const commissionShareAmount =
+      commissionReceived != null
+        ? commissionReceived * commissionShareRate
+        : 0;
 
     const now = new Date();
     const record = await prisma.channelReconciliation.create({
       data: {
         customerId,
-        settlementId,
+        contractId,
+        customerReconciliationId: customerReconciliationId ?? null,
         channelUserId,
+        periodNo,
+        periodStart: periodStart ? new Date(periodStart) : null,
+        periodEnd: periodEnd ? new Date(periodEnd) : null,
+        // 固费
+        fixedFeeReceived,
         fixedFeeShareRate,
-        fixedFeeSharePerPeriod,
-        fixedFeeSharePeriods,
-        fixedFeeShareTotal,
+        fixedFeeShareAmount,
+        fixedFeeShareCurrency,
+        // 抽佣
+        commissionReceived,
         commissionShareRate,
-        commissionSharePerPeriod,
-        commissionSharePeriods,
-        commissionShareTotal,
-        totalShareAmount,
+        commissionShareAmount,
+        commissionShareCurrency,
         note,
         createdById: session.userId,
         createdAt: now,
@@ -83,6 +131,7 @@ export async function POST(req: Request) {
       },
       include: {
         customer: { select: { id: true, brandName: true } },
+        contract: { select: { id: true, contractNo: true } },
         channelUser: { select: { id: true, name: true } },
       },
     });

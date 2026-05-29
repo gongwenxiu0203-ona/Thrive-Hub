@@ -35,6 +35,7 @@ export async function POST(
           finalOrders,
           finalSalesAmount,
           finalCommissionAmount,
+          settlementReminderSent: false,
           updatedAt: new Date(),
         },
       });
@@ -74,6 +75,22 @@ export async function POST(
             createdById: session.userId,
             createdAt: now,
             updatedAt: now,
+          },
+        });
+      }
+
+      // 7天后提醒提交人跟进结算状态
+      if (rec.submittedById) {
+        const remindDate = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+        const periodStr = rec.periodStart.toISOString().slice(0, 7);
+        await tx.reminder.create({
+          data: {
+            title: `【结算跟进】${rec.customer.brandName} ${periodStr} 月度对账结算待处理`,
+            content: `${rec.customer.brandName} 的 ${periodStr} 月度对账已最终确认，请及时跟进固费和佣金的结算状态。`,
+            remindDate,
+            type: "SETTLEMENT_FOLLOWUP",
+            targetId: rec.submittedById,
+            createdById: session.userId,
           },
         });
       }

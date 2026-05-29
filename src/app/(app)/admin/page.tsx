@@ -18,6 +18,8 @@ export default async function AdminPage() {
       status: true,
       brandName: true,
       uniqueCode: true,
+      invitedById: true,
+      invitedBy: { select: { id: true, name: true, email: true } },
       createdAt: true,
     },
   });
@@ -30,12 +32,17 @@ export default async function AdminPage() {
     status: string | null;
     brandName: string | null;
     uniqueCode: string | null;
+    invitedById: string | null;
+    invitedBy: { id: string; name: string; email: string } | null;
     createdAt: Date;
   }>).map((u) => ({
     ...u,
     status: u.status ?? "APPROVED",
     brandName: u.brandName ?? null,
     uniqueCode: u.uniqueCode ?? null,
+    inviter: u.invitedBy
+      ? { id: u.invitedBy.id, name: u.invitedBy.name, email: u.invitedBy.email }
+      : null,
     createdAt: u.createdAt.toISOString(),
   }));
 

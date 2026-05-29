@@ -16,12 +16,37 @@ import {
 } from "@/lib/constants";
 import { formatDate, daysUntil } from "@/lib/utils";
 import { runCustomerStatusChecks, parseStringArray } from "@/lib/customer";
+import {
+  customerScope,
+  contractScope,
+  taskScope,
+  isStaff,
+  parseViewScope,
+} from "@/lib/dataScope";
+import { ScopeToggle } from "@/components/ScopeToggle";
 
 export const metadata = { title: "工作台 · 联盟营销管理系统" };
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | undefined>>;
+}) {
   const session = await requireSession();
-  await runCustomerStatusChecks();
+  const sp = await searchParams;
+  // 仅内部员工才跑全局客户状态自动校验
+  if (isStaff(session.role)) await runCustomerStatusChecks();
+
+  // 行级权限过滤
+  const sessForScope = {
+    userId: session.userId,
+    role: session.role,
+    brandName: session.brandName,
+  };
+  const view = parseViewScope(sp);
+  const custWhere = customerScope(sessForScope, view);
+  const contractWhere = contractScope(sessForScope, view);
+  const taskWhere = taskScope(sessForScope, view);
 
   const [
     customerCount,
@@ -31,21 +56,39 @@ export default async function DashboardPage() {
     recentCustomers,
     urgentTasks,
   ] = await Promise.all([
-    prisma.customer.count(),
-    prisma.task.count({ where: { status: { in: ["TODO", "IN_PROGRESS"] } } }),
-    prisma.contract.count(),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    prisma.customer.count({ where: custWhere as any }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    prisma.task.count({
+      where: {
+        AND: [
+          { status: { in: ["TODO", "IN_PROGRESS"] } },
+          taskWhere as any,
+        ],
+      },
+    }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    prisma.contract.count({ where: contractWhere as any }),
     prisma.reminder.count({
       where: { targetId: session.userId, isRead: false },
     }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prisma.customer.findMany({
+      where: custWhere as any,
       orderBy: { createdAt: "desc" },
       take: 5,
       include: { businessOwner: true },
     }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prisma.task.findMany({
       where: {
-        status: { not: "DONE" },
-        priority: { in: ["HIGH", "URGENT"] },
+        AND: [
+          {
+            status: { not: "DONE" },
+            priority: { in: ["HIGH", "URGENT"] },
+          },
+          taskWhere as any,
+        ],
       },
       orderBy: [{ priority: "asc" }, { dueDate: "asc" }],
       take: 8,
@@ -55,10 +98,19 @@ export default async function DashboardPage() {
 
   return (
     <div>
-      <PageHeader
-        title={`欢迎回来，${session.name}`}
-        description="全局数据汇总快览，展示关键指标与待办"
-      />
+      <div className="mb-4 flex items-end justify-between">
+        <PageHeader
+          title={`欢迎回来，${session.name}`}
+          description={
+            isStaff(session.role)
+              ? view === "all"
+                ? "全部数据视图"
+                : "默认仅显示与你相关的数据，可切换到「全部」查看系统所有数据"
+              : "你的数据快览"
+          }
+        />
+        {isStaff(session.role) && <ScopeToggle />}
+      </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard

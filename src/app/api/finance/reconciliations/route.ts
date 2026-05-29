@@ -34,6 +34,8 @@ export async function GET(req: Request) {
 }
 
 // POST /api/finance/reconciliations — 新建对账记录
+// 只需 customerId + contractId + periodStart + periodEnd
+// 其余字段（金额、对赌、货币）自动从合同基本信息中拉取
 export async function POST(req: Request) {
   try {
     const session = await requireSession();
@@ -43,9 +45,6 @@ export async function POST(req: Request) {
       contractId,
       periodStart,
       periodEnd,
-      betType = "NONE",
-      betOrderCount,
-      betSalesAmount,
     } = body;
 
     if (!customerId || !contractId || !periodStart || !periodEnd) {
@@ -65,6 +64,28 @@ export async function POST(req: Request) {
     const feeAmount = parseMoneyString(contract.feeAmount);
     const commissionRate = parseRateString(contract.commissionRate);
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const cAny = contract as any;
+
+    // 从合同 v3 字段推断 betType / betOrderCount / betSalesAmount
+    // 新逻辑：commissionType=THRESHOLD → 销售额对赌（金额=thresholdAmount）
+    // 其他类型 + 兼容旧合同的 hasBet/betTarget
+    const { betType, betOrderCount, betSalesAmount } = deriveBetFromContract({
+      commissionType: cAny.commissionType ?? null,
+      thresholdAmount: cAny.thresholdAmount ?? null,
+      // 旧字段（向后兼容）
+      hasBet: cAny.hasBet ?? null,
+      betTarget: cAny.betTarget ?? null,
+    });
+
+    // 货币：固费用 contract.feeCurrency；抽佣/销售额用 thresholdCurrency > betTargetCurrency > feeCurrency
+    const fixedFeeCurrency = contract.feeCurrency || "人民币";
+    const commissionCurrency =
+      cAny.thresholdCurrency ||
+      cAny.betTargetCurrency ||
+      contract.feeCurrency ||
+      "人民币";
+
     const reconciliation = await prisma.customerReconciliation.create({
       data: {
         customerId,
@@ -79,10 +100,13 @@ export async function POST(req: Request) {
         commissionRate,
         affiliateRule: contract.affiliateRule,
         paymentCycle: contract.paymentCycle,
-        // 对赌条款
+        // 货币
+        fixedFeeCurrency,
+        commissionCurrency,
+        // 对赌条款（自动从合同推断）
         betType,
-        betOrderCount: betOrderCount ?? null,
-        betSalesAmount: betSalesAmount ?? null,
+        betOrderCount,
+        betSalesAmount,
         createdById: session.userId,
         updatedAt: new Date(),
       },
@@ -98,6 +122,64 @@ export async function POST(req: Request) {
     console.error(e);
     return NextResponse.json({ error: "创建失败" }, { status: 500 });
   }
+}
+
+/**
+ * 从合同字段推断 betType / betOrderCount / betSalesAmount
+ *
+ * 优先 v3 字段（commissionType + thresholdAmount）：
+ *   - commissionType === "THRESHOLD" → 销售额对赌（target = thresholdAmount）
+ *   - 其他类型 → 无对赌
+ *
+ * 旧合同兼容（hasBet + betTarget）：
+ *   - hasBet === "true" 且 betTarget 含 "单" → ORDER_COUNT
+ *   - hasBet === "true" 且其他 → SALES_AMOUNT
+ *
+ * 数字解析支持 "万"（×10000）、"亿"（×1e8）
+ */
+function deriveBetFromContract(c: {
+  commissionType: string | null;
+  thresholdAmount: string | null;
+  hasBet: string | null;
+  betTarget: string | null;
+}): { betType: string; betOrderCount: number | null; betSalesAmount: number | null } {
+  // v3 优先：THRESHOLD 机制 = 销售额对赌
+  if (c.commissionType === "THRESHOLD" && c.thresholdAmount) {
+    const n = parseNumberWithUnit(c.thresholdAmount);
+    return {
+      betType: "SALES_AMOUNT",
+      betOrderCount: null,
+      betSalesAmount: n,
+    };
+  }
+
+  // 旧合同兼容
+  if (c.hasBet === "true" && c.betTarget) {
+    const num = parseNumberWithUnit(c.betTarget);
+    if (/单/.test(c.betTarget)) {
+      return {
+        betType: "ORDER_COUNT",
+        betOrderCount: Math.round(num),
+        betSalesAmount: null,
+      };
+    }
+    return {
+      betType: "SALES_AMOUNT",
+      betOrderCount: null,
+      betSalesAmount: num,
+    };
+  }
+
+  return { betType: "NONE", betOrderCount: null, betSalesAmount: null };
+}
+
+function parseNumberWithUnit(s: string): number {
+  const numMatch = s.match(/[\d,.]+/);
+  let num = numMatch ? Number(numMatch[0].replace(/,/g, "")) : 0;
+  if (!Number.isFinite(num)) num = 0;
+  if (/万/.test(s)) num *= 10000;
+  if (/亿/.test(s)) num *= 100000000;
+  return num;
 }
 
 /** 解析金额字符串，如 "¥5,000" → 5000 */

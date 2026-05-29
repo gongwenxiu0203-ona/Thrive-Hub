@@ -5,6 +5,7 @@ import { Copy, Check, Link } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Badge } from "@/components/ui/Badge";
 import { formatDate } from "@/lib/utils";
+import { PermissionsPanel } from "./PermissionsPanel";
 
 type UserRecord = {
   id: string;
@@ -14,6 +15,7 @@ type UserRecord = {
   status: string;
   brandName: string | null;
   uniqueCode: string | null;
+  inviter: { id: string; name: string; email: string } | null;
   createdAt: string;
 };
 
@@ -59,7 +61,6 @@ function InviteButton() {
 const ROLE_LABELS: Record<string, string> = {
   ADMIN: "管理员",
   USER: "内部员工",
-  LYNQ_STAFF: "LYNQ内部员工",
   BRAND: "品牌方",
   CHANNEL: "渠道商",
 };
@@ -79,14 +80,13 @@ const STATUS_COLORS: Record<string, string> = {
 const ROLE_COLORS: Record<string, string> = {
   ADMIN: "bg-purple-100 text-purple-700",
   USER: "bg-slate-100 text-slate-700",
-  LYNQ_STAFF: "bg-blue-100 text-blue-700",
   BRAND: "bg-orange-100 text-orange-700",
   CHANNEL: "bg-teal-100 text-teal-700",
 };
 
 export function AdminClient({ initialUsers }: { initialUsers: UserRecord[] }) {
   const [users, setUsers] = useState<UserRecord[]>(initialUsers);
-  const [tab, setTab] = useState<"pending" | "all">("pending");
+  const [tab, setTab] = useState<"pending" | "all" | "permissions">("pending");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editRole, setEditRole] = useState("");
   const [editStatus, setEditStatus] = useState("");
@@ -277,8 +277,7 @@ export function AdminClient({ initialUsers }: { initialUsers: UserRecord[] }) {
                   onChange={(e) => setNewRole(e.target.value)}
                 >
                   <option value="ADMIN">管理员</option>
-                  <option value="USER">普通员工</option>
-                  <option value="LYNQ_STAFF">LYNQ内部员工</option>
+                  <option value="USER">内部员工</option>
                   <option value="BRAND">品牌方</option>
                   <option value="CHANNEL">渠道商</option>
                 </select>
@@ -348,7 +347,20 @@ export function AdminClient({ initialUsers }: { initialUsers: UserRecord[] }) {
         >
           全部用户 ({users.length})
         </button>
+        <button
+          type="button"
+          onClick={() => setTab("permissions")}
+          className={`rounded-t-lg px-4 py-2 text-sm font-medium transition-colors ${
+            tab === "permissions"
+              ? "border-b-2 border-brand-600 text-brand-700"
+              : "text-slate-500 hover:text-slate-800"
+          }`}
+        >
+          权限分配
+        </button>
       </div>
+
+      {tab === "permissions" && <PermissionsPanel users={users} />}
 
       {error && !showCreate && (
         <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">
@@ -356,7 +368,7 @@ export function AdminClient({ initialUsers }: { initialUsers: UserRecord[] }) {
         </p>
       )}
 
-      {displayed.length === 0 ? (
+      {tab !== "permissions" && (displayed.length === 0 ? (
         <div className="card p-8 text-center text-slate-400">
           {tab === "pending" ? "暂无待审核用户" : "暂无用户"}
         </div>
@@ -370,6 +382,7 @@ export function AdminClient({ initialUsers }: { initialUsers: UserRecord[] }) {
                   <th>邮箱</th>
                   <th>角色</th>
                   <th>状态</th>
+                  {tab === "pending" && <th>邀请人</th>}
                   <th>品牌名称</th>
                   <th>新密码</th>
                   <th>用户编码</th>
@@ -418,6 +431,22 @@ export function AdminClient({ initialUsers }: { initialUsers: UserRecord[] }) {
                         </Badge>
                       )}
                     </td>
+                    {tab === "pending" && (
+                      <td className="text-xs">
+                        {u.inviter ? (
+                          <div className="leading-tight">
+                            <div className="font-medium text-slate-700">
+                              {u.inviter.name}
+                            </div>
+                            <div className="text-slate-400">
+                              {u.inviter.email}
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="text-slate-300">—</span>
+                        )}
+                      </td>
+                    )}
                     <td>
                       {editingId === u.id ? (
                         <input
@@ -519,7 +548,7 @@ export function AdminClient({ initialUsers }: { initialUsers: UserRecord[] }) {
             </table>
           </div>
         </div>
-      )}
+      ))}
     </div>
   );
 }

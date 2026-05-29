@@ -27,19 +27,28 @@ async function defaultReviewerId(): Promise<string | null> {
 
 function contractFieldsFromForm(fd: FormData) {
   return {
-    type: str(fd, "type") || "CHANNEL",
+    type: str(fd, "type") || "BRAND",
     contractText: str(fd, "contractText") || null,
     extractedBy: str(fd, "extractedBy") || null,
+    // 基本信息
     partyA: str(fd, "partyA") || null,
-    accountingPeriod: str(fd, "accountingPeriod") || null,
-    feeCycle: str(fd, "feeCycle") || null,
+    // 推广信息
+    promoPlatform: str(fd, "promoPlatform") || null,
+    targetSite: str(fd, "targetSite") || null,
+    // 月度服务费
     feeAmount: str(fd, "feeAmount") || null,
+    feeCurrency: str(fd, "feeCurrency") || null,
+    paymentMethod: str(fd, "paymentMethod") || null,
+    // 联盟归因 GMV 佣金
+    commissionType: str(fd, "commissionType") || "FIXED",
     commissionRate: str(fd, "commissionRate") || null,
-    affiliateRule: str(fd, "affiliateRule") || null,
-    paymentCycle: str(fd, "paymentCycle") || null,
-    invoiceReq: str(fd, "invoiceReq") || null,
-    lateLiability: str(fd, "lateLiability") || null,
-    remark: str(fd, "remark") || null,
+    thresholdAmount: str(fd, "thresholdAmount") || null,
+    thresholdCurrency: str(fd, "thresholdCurrency") || null,
+    tieredRules: str(fd, "tieredRules") || null,
+    excessBaseMonths: str(fd, "excessBaseMonths") || null,
+    excessCommissionRate: str(fd, "excessCommissionRate") || null,
+    gmvSettlementCycle: str(fd, "gmvSettlementCycle") || null,
+    // 合作期限
     fileUrl: str(fd, "fileUrl") || null,
     startDate: str(fd, "startDate") ? new Date(str(fd, "startDate")) : null,
     endDate: str(fd, "endDate") ? new Date(str(fd, "endDate")) : null,

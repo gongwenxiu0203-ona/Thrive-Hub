@@ -107,6 +107,7 @@ export async function registerAction(
   const emailAuth = formData.get("emailAuth") === "on";
   const identity = String(formData.get("identity") ?? "").trim(); // LYNQ_STAFF | BRAND | CHANNEL
   const brandNameInput = String(formData.get("brandName") ?? "").trim();
+  const inviter = String(formData.get("inviter") ?? "").trim(); // 邀请人 userId（来自 ?inviter= URL 参数）
 
   if (!name || !email || !password) {
     return { error: "请填写姓名、邮箱和密码" };
@@ -127,7 +128,7 @@ export async function registerAction(
   }
 
   // Determine role and status based on identity selection
-  let role = "LYNQ_STAFF";
+  let role = "USER";
   let status = "PENDING";
   let brandName: string | null = null;
 
@@ -139,8 +140,8 @@ export async function registerAction(
     role = "CHANNEL";
     status = "APPROVED";
   } else {
-    // Default: LYNQ_STAFF (or no identity selected)
-    role = "LYNQ_STAFF";
+    // Default: USER (内部员工)
+    role = "USER";
     status = "PENDING";
   }
 
@@ -148,6 +149,13 @@ export async function registerAction(
   let uniqueCode = generateUniqueCode();
   const codeExists = await prisma.user.findUnique({ where: { uniqueCode } });
   if (codeExists) uniqueCode = generateUniqueCode();
+
+  // 校验邀请人是否存在
+  let invitedById: string | null = null;
+  if (inviter) {
+    const inv = await prisma.user.findUnique({ where: { id: inviter } });
+    if (inv) invitedById = inv.id;
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const user = await (prisma.user.create as any)({
@@ -162,6 +170,7 @@ export async function registerAction(
       emailAuth,
       brandName: brandName ?? undefined,
       uniqueCode,
+      invitedById,
     },
   });
 

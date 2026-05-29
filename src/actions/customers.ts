@@ -334,3 +334,26 @@ async function createMeetingTask(
     },
   });
 }
+
+/**
+ * 财务对账"新建客户对账"专用：更新客户的负责人和联系电话
+ * 由 NewReconciliationModal 调用，仅写入这两个字段
+ */
+export async function setupFinanceCustomerOwner(
+  customerId: string,
+  businessOwnerId: string,
+  contactPhone: string,
+): Promise<SaveResult> {
+  await requireSession();
+  if (!customerId) return { ok: false, error: "缺少 customerId" };
+  await prisma.customer.update({
+    where: { id: customerId },
+    data: {
+      businessOwnerId: businessOwnerId || null,
+      contactPhone: contactPhone?.trim() || null,
+    },
+  });
+  revalidatePath(`/finance/customers/${customerId}`);
+  revalidatePath("/finance");
+  return { ok: true, customerId };
+}

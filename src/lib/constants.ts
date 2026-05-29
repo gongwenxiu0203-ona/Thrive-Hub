@@ -3,8 +3,7 @@
 
 export const ROLE_LABELS: Record<string, string> = {
   ADMIN: "管理员",
-  USER: "普通员工",
-  LYNQ_STAFF: "内部员工",
+  USER: "内部员工",
   BRAND: "品牌方",
   CHANNEL: "渠道商",
   GUEST: "游客",
@@ -132,38 +131,79 @@ export const CONTRACT_STATUS_COLORS: Record<string, string> = {
 
 export const FEE_CYCLE_OPTIONS = ["无", "月度", "季度"];
 
-// Contract review fields, grouped for a tidy review panel.
+export const FEE_CURRENCY_OPTIONS = ["人民币", "美金"];
+
+export const PAYMENT_METHOD_OPTIONS = ["", "月付", "季度预付"];
+
+export const COMMISSION_TYPE_LABELS: Record<string, string> = {
+  FIXED: "固定点数联盟归因GMV佣金",
+  THRESHOLD: "联盟归因GMV门槛佣金机制",
+  TIERED: "阶梯式联盟归因GMV佣金机制",
+  EXCESS: "超额联盟归因GMV佣金机制",
+};
+
+export const COMMISSION_TYPE_OPTIONS = ["FIXED", "THRESHOLD", "TIERED", "EXCESS"] as const;
+
+// 推广平台 & 目标站点（项目确认书 v3 模板）
+export const CONTRACT_PROMO_PLATFORMS = [
+  "亚马逊（Amazon）",
+  "独立站",
+  "沃尔玛（Walmart）",
+] as const;
+
+// 目标站点（与合同中 ☑美国站；□德国站… 对齐，支持多选）
+export const CONTRACT_TARGET_SITES = [
+  "美国站",
+  "英国站",
+  "德国站",
+  "法国",
+  "西班牙",
+  "加拿大",
+  "澳洲",
+  "日本",
+] as const;
+
+// 联盟归因 GMV 结算周期（月 / 季度）
+export const GMV_SETTLEMENT_CYCLE_OPTIONS = ["月度", "季度"] as const;
+
+// Contract review fields, grouped for a tidy review panel (v3 template).
 export const CONTRACT_REVIEW_GROUPS: {
   group: string;
   fields: { key: string; label: string }[];
 }[] = [
   {
-    group: "合同主体",
-    fields: [{ key: "partyA", label: "甲方合同主体" }],
+    group: "基本信息",
+    fields: [
+      { key: "partyA", label: "甲方（客户）" },
+      { key: "contractPeriod", label: "合作期限" },
+    ],
   },
   {
-    group: "核算与收费",
+    group: "推广信息",
     fields: [
-      { key: "accountingPeriod", label: "核算周期" },
-      { key: "feeCycle", label: "固费周期" },
-      { key: "feeAmount", label: "固费金额" },
+      { key: "promoPlatform", label: "推广平台" },
+      { key: "targetSite", label: "目标站点" },
+    ],
+  },
+  {
+    group: "月度服务费",
+    fields: [
+      { key: "feeAmount", label: "月度服务费" },
+      { key: "feeCurrency", label: "月度服务费货币" },
+      { key: "paymentMethod", label: "月度服务费付款周期" },
+    ],
+  },
+  {
+    group: "联盟归因GMV佣金",
+    fields: [
+      { key: "commissionType", label: "GMV佣金结算方式" },
       { key: "commissionRate", label: "抽佣比例" },
-      { key: "affiliateRule", label: "联盟佣金规则" },
-      { key: "paymentCycle", label: "付款周期" },
-    ],
-  },
-  {
-    group: "票据与责任",
-    fields: [
-      { key: "invoiceReq", label: "发票要求" },
-      { key: "lateLiability", label: "逾期责任" },
-    ],
-  },
-  {
-    group: "期限与备注",
-    fields: [
-      { key: "contractPeriod", label: "合同起止时间" },
-      { key: "remark", label: "备注" },
+      { key: "thresholdAmount", label: "GMV门槛金额" },
+      { key: "thresholdCurrency", label: "门槛货币" },
+      { key: "tieredRules", label: "阶梯规则" },
+      { key: "excessBaseMonths", label: "基准月数" },
+      { key: "excessCommissionRate", label: "增长服务佣金比例" },
+      { key: "gmvSettlementCycle", label: "联盟归因GMV结算周期" },
     ],
   },
 ];

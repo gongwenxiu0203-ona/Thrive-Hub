@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { calcBetAndCommission } from "../route";
+import { recalcReconciliation } from "../route";
 
 // POST /api/finance/reconciliations/[id]/review
 // 客户负责人确认或提出异议
@@ -14,7 +14,7 @@ export async function POST(
     const session = await requireSession();
     const { id } = await params;
     const body = await req.json();
-    const { action, disputedOrders, disputedSalesAmount, note } = body;
+    const { action, disputedOrders, disputedSalesAmount, salesAmountCurrency, note } = body;
 
     if (action !== "APPROVED" && action !== "DISPUTED") {
       return NextResponse.json({ error: "action 只能是 APPROVED 或 DISPUTED" }, { status: 400 });
@@ -43,6 +43,7 @@ export async function POST(
             finalOrders,
             finalSalesAmount,
             finalCommissionAmount,
+            settlementReminderSent: false,
             updatedAt: new Date(),
           },
         });
@@ -85,28 +86,43 @@ export async function POST(
             },
           });
         }
+
+        // 7天后提醒提交人跟进结算状态
+        if (rec.submittedById) {
+          const remindDate = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+          const periodStr = rec.periodStart.toISOString().slice(0, 7);
+          await tx.reminder.create({
+            data: {
+              title: `【结算跟进】${rec.customer.brandName} ${periodStr} 月度对账结算待处理`,
+              content: `${rec.customer.brandName} 的 ${periodStr} 月度对账已确认，请及时跟进固费和佣金的结算状态。`,
+              remindDate,
+              type: "SETTLEMENT_FOLLOWUP",
+              targetId: rec.submittedById,
+              createdById: session.userId,
+            },
+          });
+        }
       } else {
-        // 有异议 → 用争议数据重算，状态变为 DISPUTED
+        // 有异议 → 用争议数据重算（v3 逻辑），状态变为 DISPUTED
         const actualOrders = disputedOrders ?? rec.actualOrders;
         const actualSalesAmount = disputedSalesAmount ?? rec.actualSalesAmount;
-        const calc = calcBetAndCommission({
-          betType: rec.betType,
-          betOrderCount: rec.betOrderCount,
-          betSalesAmount: rec.betSalesAmount,
+        const calc = await recalcReconciliation(id, { actualSalesAmount });
+
+        const updateData: Record<string, unknown> = {
+          status: "DISPUTED",
           actualOrders,
           actualSalesAmount,
-          commissionRate: rec.commissionRate,
-        });
+          ...calc,
+          updatedAt: new Date(),
+        };
+        // 同步更新销售额/抽佣货币（如果审核人指定）
+        if (salesAmountCurrency) {
+          updateData.commissionCurrency = salesAmountCurrency;
+        }
 
         await tx.customerReconciliation.update({
           where: { id },
-          data: {
-            status: "DISPUTED",
-            actualOrders,
-            actualSalesAmount,
-            ...calc,
-            updatedAt: new Date(),
-          },
+          data: updateData,
         });
 
         await tx.reconciliationReview.create({

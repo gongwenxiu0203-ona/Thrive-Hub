@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { IcpFooter } from "@/components/IcpFooter";
 
 export const metadata: Metadata = {
   title: "联盟营销管理系统",
@@ -13,7 +14,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="zh-CN">
-      <body>{children}</body>
+      <body>
+        {children}
+        <IcpFooter />
+      </body>
     </html>
   );
 }
