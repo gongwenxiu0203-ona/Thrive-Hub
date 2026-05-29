@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import { Users, KanbanSquare, FileText, Bell, ArrowRight } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
@@ -25,7 +25,7 @@ import {
 } from "@/lib/dataScope";
 import { ScopeToggle } from "@/components/ScopeToggle";
 
-export const metadata = { title: "工作台 · 联盟营销管理系统" };
+export const metadata = { title: "工作台 · Thraive联盟营销系统" };
 
 export default async function DashboardPage({
   searchParams,

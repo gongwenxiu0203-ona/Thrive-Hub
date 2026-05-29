@@ -1,8 +1,8 @@
-import { requireAdmin } from "@/lib/session";
+﻿import { requireAdmin } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { AdminClient } from "./AdminClient";
 
-export const metadata = { title: "管理员面板 · 联盟营销管理系统" };
+export const metadata = { title: "管理员面板 · Thraive联盟营销系统" };
 
 export default async function AdminPage() {
   await requireAdmin();

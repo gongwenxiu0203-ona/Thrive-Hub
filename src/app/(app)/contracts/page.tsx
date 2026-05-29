@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import { Download } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
@@ -18,7 +18,7 @@ import { ContractFormModal } from "./ContractFormModal";
 import { ScopeToggle } from "@/components/ScopeToggle";
 import { isStaff } from "@/lib/dataScope";
 
-export const metadata = { title: "合同管理 · 联盟营销管理系统" };
+export const metadata = { title: "合同管理 · Thraive联盟营销系统" };
 
 function csv(sp: Record<string, string | undefined>, key: string): string[] {
   return (sp[key] ?? "").split(",").map((s) => s.trim()).filter(Boolean);

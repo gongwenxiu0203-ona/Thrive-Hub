@@ -1,7 +1,7 @@
-import { ForgotForm } from "./ForgotForm";
+﻿import { ForgotForm } from "./ForgotForm";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "忘记密码 · 联盟营销管理系统" };
+export const metadata = { title: "忘记密码 · Thraive联盟营销系统" };
 
 export default function ForgotPasswordPage() {
   return (

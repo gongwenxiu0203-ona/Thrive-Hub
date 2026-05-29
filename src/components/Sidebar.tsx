@@ -57,11 +57,11 @@ export function Sidebar({
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r border-slate-200 bg-white">
       <div className="flex h-16 items-center gap-2 border-b border-slate-200 px-5">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-sm font-bold text-white">
-          AM
+        <div className="flex h-8 w-8 items-center justify-center">
+          <img src="/thraive-logo.png" alt="Thraive" className="h-8 w-8 object-contain" />
         </div>
         <div>
-          <p className="text-sm font-semibold text-slate-900">联盟营销系统</p>
+          <p className="text-sm font-semibold text-slate-900">Thraive联盟营销系统</p>
           <p className="text-[11px] text-slate-400">Affiliate Marketing</p>
         </div>
       </div>

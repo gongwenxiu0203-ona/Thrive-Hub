@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { runCustomerStatusChecks, parseStringArray } from "@/lib/customer";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -26,7 +26,7 @@ import { requireSession } from "@/lib/session";
 import { customerScope, isStaff, parseViewScope } from "@/lib/dataScope";
 import { ScopeToggle } from "@/components/ScopeToggle";
 
-export const metadata = { title: "客户管理 · 联盟营销管理系统" };
+export const metadata = { title: "客户管理 · Thraive联盟营销系统" };
 
 type CustomerRow = Awaited<ReturnType<typeof loadCustomers>>[number];
 

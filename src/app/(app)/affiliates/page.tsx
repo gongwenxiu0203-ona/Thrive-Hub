@@ -1,10 +1,10 @@
-import { Suspense } from "react";
+﻿import { Suspense } from "react";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import AffiliatesClient from "./AffiliatesClient";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "联盟资源库 · 联盟营销管理系统" };
+export const metadata = { title: "联盟资源库 · Thraive联盟营销系统" };
 
 async function loadOptions() {
   const [affiliates, users, customers] = await Promise.all([

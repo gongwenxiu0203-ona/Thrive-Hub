@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/prisma";
+﻿import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -9,7 +9,7 @@ import { ReminderFormModal } from "./ReminderFormModal";
 import { ReminderItem } from "./ReminderItem";
 import { MarkAllReadButton } from "./MarkAllReadButton";
 
-export const metadata = { title: "提醒管理 · 联盟营销管理系统" };
+export const metadata = { title: "提醒管理 · Thraive联盟营销系统" };
 
 function csv(sp: Record<string, string | undefined>, key: string): string[] {
   return (sp[key] ?? "").split(",").map((s) => s.trim()).filter(Boolean);

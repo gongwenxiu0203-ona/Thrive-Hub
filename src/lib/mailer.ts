@@ -32,8 +32,8 @@ export async function sendMail(opts: MailOptions): Promise<void> {
   const secure = process.env.SMTP_SECURE === "true" || port === 465;
   const from =
     process.env.SMTP_FROM
-      ? `"联盟营销管理系统" <${process.env.SMTP_FROM}>`
-      : `"联盟营销管理系统" <${user}>`;
+      ? `"Thraive联盟营销系统" <${process.env.SMTP_FROM}>`
+      : `"Thraive联盟营销系统" <${user}>`;
 
   const transporter = nodemailer.createTransport({
     host,

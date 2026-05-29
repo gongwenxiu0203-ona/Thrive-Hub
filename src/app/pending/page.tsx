@@ -1,9 +1,9 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import { getSession } from "@/lib/session";
 import { logoutAction } from "@/actions/auth";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "账号审核中 · 联盟营销管理系统" };
+export const metadata = { title: "账号审核中 · Thraive联盟营销系统" };
 
 export default async function PendingPage() {
   const session = await getSession();

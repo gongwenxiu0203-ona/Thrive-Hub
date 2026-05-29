@@ -230,14 +230,14 @@ export async function forgotPasswordAction(
 
     await sendMail({
       to: email,
-      subject: "【联盟营销管理系统】密码重置申请",
+      subject: "【Thraive联盟营销系统】密码重置申请",
       text:
         `您好 ${user.name}，\n\n` +
         `我们收到了重置您账户密码的请求。\n` +
         `请点击以下链接完成密码重置（链接有效期 1 小时）：\n\n` +
         `${resetUrl}\n\n` +
         `如果您未提交此申请，请忽略本邮件，您的密码不会发生任何变化。\n\n` +
-        `—— 联盟营销管理系统`,
+        `—— Thraive联盟营销系统`,
       html: `
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -249,7 +249,7 @@ export async function forgotPasswordAction(
         <!-- header -->
         <tr><td style="background:#6366f1;padding:28px 32px;text-align:center">
           <div style="width:48px;height:48px;background:#ffffff22;border-radius:10px;display:inline-block;line-height:48px;font-size:20px;font-weight:700;color:#fff">AM</div>
-          <p style="margin:10px 0 0;font-size:15px;color:#e0e7ff;font-weight:500">联盟营销管理系统</p>
+          <p style="margin:10px 0 0;font-size:15px;color:#e0e7ff;font-weight:500">Thraive联盟营销系统</p>
         </td></tr>
         <!-- body -->
         <tr><td style="padding:32px">
@@ -272,7 +272,7 @@ export async function forgotPasswordAction(
         </td></tr>
         <!-- footer -->
         <tr><td style="background:#f8fafc;padding:16px 32px;text-align:center">
-          <p style="margin:0;font-size:12px;color:#94a3b8">© 2025 联盟营销管理系统 · 此邮件由系统自动发送，请勿回复</p>
+          <p style="margin:0;font-size:12px;color:#94a3b8">© 2025 Thraive联盟营销系统 · 此邮件由系统自动发送，请勿回复</p>
         </td></tr>
       </table>
     </td></tr>

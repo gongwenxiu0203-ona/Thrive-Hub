@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import { DollarSign, Percent, Package, Download } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
@@ -13,7 +13,7 @@ import { AsinMappingPanel } from "./AsinMappingPanel";
 import { formatCurrencyWith, formatCurrency, getCurrencyCode, formatNumber, formatDateTime, cn } from "@/lib/utils";
 import { requireSession } from "@/lib/session";
 
-export const metadata = { title: "推广数据BI · 联盟营销管理系统" };
+export const metadata = { title: "推广数据BI · Thraive联盟营销系统" };
 
 const ALL_TABS = [
   { key: "dashboard", label: "销售看板" },

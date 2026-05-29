@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/prisma";
+﻿import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { FilterBar, SearchFilter } from "@/components/ui/Filters";
@@ -15,7 +15,7 @@ import type { KanbanTask } from "./KanbanBoard";
 import { KanbanBoardWrapper } from "./KanbanBoardWrapper";
 import { ViewAsSelector } from "./ViewAsSelector";
 
-export const metadata = { title: "任务管理 · 联盟营销管理系统" };
+export const metadata = { title: "任务管理 · Thraive联盟营销系统" };
 
 const PRIORITY_ORDER: Record<string, number> = {
   URGENT: 0,

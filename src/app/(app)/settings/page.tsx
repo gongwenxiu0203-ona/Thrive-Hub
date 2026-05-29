@@ -1,9 +1,9 @@
-import { requireSession } from "@/lib/session";
+﻿import { requireSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { SettingsClient } from "./SettingsClient";
 import { ROLE_LABELS } from "@/lib/constants";
 
-export const metadata = { title: "账号设置 · 联盟营销管理系统" };
+export const metadata = { title: "账号设置 · Thraive联盟营销系统" };
 
 export default async function SettingsPage() {
   const session = await requireSession();

@@ -1,9 +1,9 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { RegisterForm } from "./RegisterForm";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "注册 · 联盟营销管理系统" };
+export const metadata = { title: "注册 · Thraive联盟营销系统" };
 
 export default async function RegisterPage({
   searchParams,

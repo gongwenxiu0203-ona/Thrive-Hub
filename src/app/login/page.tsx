@@ -1,9 +1,9 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import { LoginForm } from "./LoginForm";
 import { CheckCircle2 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "登录 · 联盟营销管理系统" };
+export const metadata = { title: "登录 · Thraive联盟营销系统" };
 
 export default async function LoginPage({
   searchParams,
@@ -21,7 +21,7 @@ export default async function LoginPage({
             AM
           </div>
           <h1 className="text-xl font-semibold text-slate-900">
-            联盟营销管理系统
+            Thraive联盟营销系统
           </h1>
           <p className="mt-1 text-sm text-slate-500">登录以进入工作台</p>
         </div>

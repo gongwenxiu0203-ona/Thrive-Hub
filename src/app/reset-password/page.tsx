@@ -1,10 +1,10 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { ResetForm } from "./ResetForm";
 import { ArrowLeft, AlertCircle } from "lucide-react";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "重置密码 · 联盟营销管理系统" };
+export const metadata = { title: "重置密码 · Thraive联盟营销系统" };
 
 export default async function ResetPasswordPage({
   searchParams,
