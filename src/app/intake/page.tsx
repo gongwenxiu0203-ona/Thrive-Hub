@@ -5,7 +5,14 @@ export const metadata = {
   robots: { index: false },
 };
 
-export default function IntakePage() {
+export default async function IntakePage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | undefined>>;
+}) {
+  const sp = await searchParams;
+  const channelId = sp.channel ?? "";
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-100 to-brand-50 py-10 px-4">
       <div className="mx-auto max-w-2xl">
@@ -21,7 +28,7 @@ export default function IntakePage() {
           </p>
         </div>
         <div className="card p-6 sm:p-8">
-          <IntakeForm />
+          <IntakeForm channelId={channelId} />
         </div>
         <p className="mt-6 text-center text-xs text-slate-400">
           您提交的信息将仅用于联盟营销服务对接

@@ -5,14 +5,15 @@ import { Share2, Copy, Check, ExternalLink } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 
 /** Shares the general (no-login) intake form link — no customer pre-fill. */
-export function IntakeLinkButton() {
+export function IntakeLinkButton({ channelUserId }: { channelUserId?: string }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const url =
-    typeof window !== "undefined"
-      ? `${window.location.origin}/intake`
-      : `/intake`;
+  const base =
+    typeof window !== "undefined" ? window.location.origin : "";
+  const url = channelUserId
+    ? `${base}/intake?channel=${channelUserId}`
+    : `${base}/intake`;
 
   function copy() {
     navigator.clipboard?.writeText(url).then(() => {

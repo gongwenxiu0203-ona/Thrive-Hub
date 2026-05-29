@@ -7,18 +7,30 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation";
  * - 我的：只看自己负责/创建的数据（默认）
  * - 全部：查看系统全部数据
  */
-export function ScopeToggle({ canToggle = true }: { canToggle?: boolean }) {
+export function ScopeToggle({
+  canToggle = true,
+  defaultView = "mine",
+}: {
+  canToggle?: boolean;
+  defaultView?: "mine" | "all";
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const sp = useSearchParams();
-  const current: "mine" | "all" = sp.get("scope") === "all" ? "all" : "mine";
+
+  // When defaultView="all": no param means "all"; ?scope=mine means "mine"
+  // When defaultView="mine": no param means "mine"; ?scope=all means "all"
+  const current: "mine" | "all" =
+    defaultView === "all"
+      ? sp.get("scope") === "mine" ? "mine" : "all"
+      : sp.get("scope") === "all" ? "all" : "mine";
 
   if (!canToggle) return null;
 
   function setScope(v: "mine" | "all") {
     const params = new URLSearchParams(sp.toString());
-    if (v === "all") params.set("scope", "all");
-    else params.delete("scope");
+    if (v === defaultView) params.delete("scope");
+    else params.set("scope", v);
     router.push(`${pathname}?${params.toString()}`);
   }
 

@@ -31,6 +31,17 @@ export async function POST(req: Request) {
     );
   }
 
+  // Resolve channel user — validate the ID actually exists
+  const channelIdRaw = get("channelId");
+  let channelUserId: string | null = null;
+  if (channelIdRaw) {
+    const channelUser = await prisma.user.findUnique({
+      where: { id: channelIdRaw, role: "CHANNEL" },
+      select: { id: true },
+    });
+    channelUserId = channelUser?.id ?? null;
+  }
+
   const mainSites = getArr("mainSites").filter((s) => MAIN_SITES.includes(s));
   const targetPlatforms = getArr("targetPlatforms").filter((p) =>
     PROMO_PLATFORMS.includes(p),
@@ -65,7 +76,14 @@ export async function POST(req: Request) {
       where: { id: customerId },
     });
     if (existing) {
-      await prisma.customer.update({ where: { id: customerId }, data });
+      await prisma.customer.update({
+        where: { id: customerId },
+        data: {
+          ...data,
+          // Only set channelUserId if not already assigned
+          ...(channelUserId && !existing.channelUserId ? { channelUserId } : {}),
+        },
+      });
       return NextResponse.json({ ok: true });
     }
   }
@@ -73,10 +91,21 @@ export async function POST(req: Request) {
   // Fallback: match by brand name, else create fresh.
   const byName = await prisma.customer.findFirst({ where: { brandName } });
   if (byName) {
-    await prisma.customer.update({ where: { id: byName.id }, data });
+    await prisma.customer.update({
+      where: { id: byName.id },
+      data: {
+        ...data,
+        ...(channelUserId && !byName.channelUserId ? { channelUserId } : {}),
+      },
+    });
   } else {
     await prisma.customer.create({
-      data: { ...data, source: "INTAKE", status: "UNASSIGNED" },
+      data: {
+        ...data,
+        source: "INTAKE",
+        status: "UNASSIGNED",
+        ...(channelUserId ? { channelUserId } : {}),
+      },
     });
   }
 

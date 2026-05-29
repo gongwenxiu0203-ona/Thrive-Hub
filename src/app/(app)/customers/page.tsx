@@ -124,7 +124,10 @@ export default async function CustomersPage({
 
   const isChannel = session.role === "CHANNEL";
   const sp = await searchParams;
-  const view = parseViewScope(sp);
+  // 内部员工默认"全部"，?scope=mine 可切回"我的"；其他角色保持原逻辑
+  const view: import("@/lib/dataScope").ViewScope = isStaff(session.role)
+    ? sp.scope === "mine" ? "mine" : "all"
+    : parseViewScope(sp);
   const scope = customerScope(
     {
       userId: session.userId,
@@ -194,15 +197,15 @@ export default async function CustomersPage({
         title="客户管理"
         description={
           isStaff(session.role)
-            ? view === "all"
-              ? "全部客户视图"
-              : "默认仅显示与你相关的客户，可切换到「全部」"
+            ? view === "mine"
+              ? "仅显示与你相关的客户"
+              : "全部客户视图（默认）"
             : "品牌客户管理"
         }
         actions={
           <>
-            {isStaff(session.role) && <ScopeToggle />}
-            <IntakeLinkButton />
+            {isStaff(session.role) && <ScopeToggle defaultView="all" />}
+            <IntakeLinkButton channelUserId={isChannel ? session.userId : undefined} />
             <CustomerImportModal />
             <QuickCreateModal />
             <CustomerFormModal users={userOptions} />
