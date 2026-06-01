@@ -1,4 +1,4 @@
-﻿import { Suspense } from "react";
+import { Suspense } from "react";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import AffiliatesClient from "./AffiliatesClient";
@@ -19,6 +19,7 @@ async function loadOptions() {
         brand: true,
         developmentStatus: true,
         cooperationMode: true,
+        region: true,
         personInChargeId: true,
         personInChargeName: true,
         personInCharge: { select: { name: true } },
@@ -46,99 +47,33 @@ async function loadOptions() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const affRows = affiliates as any[];
   const picNames = distinct([
-    ...affRows.map((a) => a.personInCharge?.name ?? null),
-    ...affRows.map((a) => a.personInChargeName ?? null),
+    ...affRows.map((a: any) => a.personInCharge?.name ?? null),
+    ...affRows.map((a: any) => a.personInChargeName ?? null),
   ]).sort();
 
   return {
-    sources: distinct(affRows.map((a) => a.source)),
-    categories: distinct(affRows.map((a) => a.category)),
-    types: distinct(affRows.map((a) => a.affiliateType)),
-    tags: flatJson(affRows.map((a) => a.tags)),
-    brands: distinct(affRows.map((a) => a.brand)),
-    statuses: distinct(affRows.map((a) => a.developmentStatus)),
-    modes: flatJson(affRows.map((a) => a.cooperationMode)),
-    names: distinct(affRows.map((a) => a.platformAffiliateName)).sort(),
+    sources: distinct(affRows.map((a: any) => a.source)),
+    categories: distinct(affRows.map((a: any) => a.category)),
+    types: distinct(affRows.map((a: any) => a.affiliateType)),
+    tags: flatJson(affRows.map((a: any) => a.tags)),
+    brands: distinct(affRows.map((a: any) => a.brand)),
+    statuses: distinct(affRows.map((a: any) => a.developmentStatus)),
+    modes: flatJson(affRows.map((a: any) => a.cooperationMode)),
+    regions: distinct(affRows.map((a: any) => a.region)).sort(),
+    names: distinct(affRows.map((a: any) => a.platformAffiliateName)).sort(),
     pics: picNames,
     users: users.map((u) => ({ id: u.id, name: u.name })),
     customers: customers.map((c) => ({ id: c.id, brandName: c.brandName })),
   };
 }
 
-async function loadDashboardData() {
-  const affiliates = await prisma.affiliate.findMany({
-    select: {
-      source: true,
-      category: true,
-      affiliateType: true,
-      tags: true,
-      developmentStatus: true,
-      insFollowers: true,
-      youtubeFollowers: true,
-      tiktokFollowers: true,
-      fbFollowers: true,
-      websiteTraffic: true,
-      createdAt: true,
-    },
-  });
-
-  const countBy = (fn: (a: (typeof affiliates)[0]) => string | null | undefined) => {
-    const map: Record<string, number> = {};
-    for (const a of affiliates) {
-      const v = fn(a) ?? "未填写";
-      map[v] = (map[v] ?? 0) + 1;
-    }
-    return Object.entries(map).map(([name, value]) => ({ name, value }));
-  };
-
-  const flatJsonCount = (field: keyof (typeof affiliates)[0]) => {
-    const map: Record<string, number> = {};
-    for (const a of affiliates) {
-      const s = a[field] as string | null;
-      if (!s) continue;
-      try {
-        const arr = JSON.parse(s);
-        if (Array.isArray(arr)) arr.forEach((v: string) => { if (v) map[v] = (map[v] ?? 0) + 1; });
-      } catch { /* ignore */ }
-    }
-    return Object.entries(map).sort((a, b) => b[1] - a[1]).map(([name, value]) => ({ name, value }));
-  };
-
-  const now = new Date();
-  const monthlyNew: { month: string; count: number }[] = [];
-  for (let i = 5; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const label = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-    const next = new Date(d.getFullYear(), d.getMonth() + 1, 1);
-    const count = affiliates.filter((a) => a.createdAt >= d && a.createdAt < next).length;
-    monthlyNew.push({ month: label, count });
-  }
-
-  return {
-    total: affiliates.length,
-    bySource: countBy((a) => a.source),
-    byCategory: countBy((a) => a.category),
-    byType: countBy((a) => a.affiliateType),
-    byStatus: countBy((a) => a.developmentStatus),
-    byTag: flatJsonCount("tags"),
-    totalFollowers: {
-      Instagram: affiliates.reduce((s, a) => s + (a.insFollowers ?? 0), 0),
-      YouTube: affiliates.reduce((s, a) => s + (a.youtubeFollowers ?? 0), 0),
-      TikTok: affiliates.reduce((s, a) => s + (a.tiktokFollowers ?? 0), 0),
-      Facebook: affiliates.reduce((s, a) => s + (a.fbFollowers ?? 0), 0),
-      Website: affiliates.reduce((s, a) => s + (a.websiteTraffic ?? 0), 0),
-    },
-    monthlyNew,
-  };
-}
-
 export default async function AffiliatePage() {
   const session = await requireSession();
-  const [options, dashData] = await Promise.all([loadOptions(), loadDashboardData()]);
+  const options = await loadOptions();
 
   return (
     <Suspense>
-      <AffiliatesClient options={options} dashData={dashData} currentUserId={session.userId} />
+      <AffiliatesClient options={options} currentUserId={session.userId} />
     </Suspense>
   );
 }

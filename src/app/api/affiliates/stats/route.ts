@@ -20,7 +20,9 @@ export async function GET(req: NextRequest) {
   const owners       = multi("owners");
   const topCreators  = multi("topCreators");
   const sampleShips  = multi("sampleShipping");
+  const regions      = multi("regions");
   const q            = sp.get("q")?.trim() ?? "";
+  const months       = Math.max(1, Math.min(24, parseInt(sp.get("months") ?? "6", 10)));
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const where: any = {};
@@ -36,6 +38,7 @@ export async function GET(req: NextRequest) {
   if (owners.length)      where.personInChargeId = { in: owners };
   if (topCreators.length) where.topCreator       = { in: topCreators };
   if (sampleShips.length) where.sampleShipping   = { in: sampleShips };
+  if (regions.length)     where.region           = { in: regions };
 
   if (tags.length) {
     where.AND = [
@@ -62,6 +65,7 @@ export async function GET(req: NextRequest) {
       cooperationMode: true,
       topCreator: true,
       sampleShipping: true,
+      region: true,
       insFollowers: true,
       youtubeFollowers: true,
       tiktokFollowers: true,
@@ -109,10 +113,10 @@ export async function GET(req: NextRequest) {
       .map(([name, value]) => ({ name, value }));
   };
 
-  // Monthly new (last 6 months)
+  // Monthly new (configurable months)
   const now = new Date();
-  const monthlyNew = Array.from({ length: 6 }, (_, i) => {
-    const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
+  const monthlyNew = Array.from({ length: months }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - (months - 1 - i), 1);
     const next = new Date(d.getFullYear(), d.getMonth() + 1, 1);
     const label = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     return { month: label, count: affiliates.filter((a) => a.createdAt >= d && a.createdAt < next).length };
@@ -128,7 +132,6 @@ export async function GET(req: NextRequest) {
       return s + pls.reduce((ps: number, p: { flatfee?: number | null }) => ps + (p.flatfee ?? 0), 0);
     }, 0);
 
-  // Owner distribution
   const byOwner = countBy((a) => a.personInCharge?.name ?? "未分配");
 
   return NextResponse.json({
@@ -142,6 +145,7 @@ export async function GET(req: NextRequest) {
     byMode:           flatJsonCount((a) => a.cooperationMode),
     byTopCreator:     countBy((a) => a.topCreator),
     bySampleShipping: countBy((a) => a.sampleShipping),
+    byRegion:         countBy((a) => a.region),
     byOwner,
     totalFollowers: {
       Instagram: affiliates.reduce((s, a) => s + (a.insFollowers ?? 0), 0),
@@ -151,14 +155,14 @@ export async function GET(req: NextRequest) {
       Website:   affiliates.reduce((s, a) => s + (a.websiteTraffic ?? 0), 0),
     },
     placementFlatfees: {
-      Website:   sumPlacementFlatfees((a) => a.websitePlacements),
-      Instagram: sumPlacementFlatfees((a) => a.instagramPlacements),
-      Facebook:  sumPlacementFlatfees((a) => a.facebookPlacements),
-      YouTube:   sumPlacementFlatfees((a) => a.youtubePlacements),
-      TikTok:    sumPlacementFlatfees((a) => a.tiktokPlacements),
+      Website:    sumPlacementFlatfees((a) => a.websitePlacements),
+      Instagram:  sumPlacementFlatfees((a) => a.instagramPlacements),
+      Facebook:   sumPlacementFlatfees((a) => a.facebookPlacements),
+      YouTube:    sumPlacementFlatfees((a) => a.youtubePlacements),
+      TikTok:     sumPlacementFlatfees((a) => a.tiktokPlacements),
       Storefront: affiliates.reduce((s, a) => s + (a.storefrontFlatfee ?? 0), 0),
-      LTK:       affiliates.reduce((s, a) => s + (a.ltkFlatfee ?? 0), 0),
-      Pinterest: affiliates.reduce((s, a) => s + (a.pinterestFlatfee ?? 0), 0),
+      LTK:        affiliates.reduce((s, a) => s + (a.ltkFlatfee ?? 0), 0),
+      Pinterest:  affiliates.reduce((s, a) => s + (a.pinterestFlatfee ?? 0), 0),
     },
     monthlyNew,
   });

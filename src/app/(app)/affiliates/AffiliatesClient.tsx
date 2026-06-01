@@ -26,6 +26,7 @@ interface Options {
   brands: string[];
   statuses: string[];
   modes: string[];
+  regions: string[];
   names: string[];
   pics: string[];
   users: { id: string; name: string }[];
@@ -34,7 +35,6 @@ interface Options {
 
 interface Props {
   options: Options;
-  dashData: unknown;
   currentUserId: string;
 }
 

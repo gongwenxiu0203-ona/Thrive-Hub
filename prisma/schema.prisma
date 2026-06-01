@@ -270,6 +270,7 @@ model Affiliate {
   updatedAt DateTime @updatedAt
 
   // 核心身份 (Excel B-G)
+  region                String? // 地区 Region: US|UK|DE|CA|JP|FR|AU etc.
   platformAffiliateName String  // 平台联盟商名称 Affiliate Name on Network
   internalAffiliateName String? // 内部联盟商名称 Internal Affiliate Name (相同=关联账号)
   source                String? // 联盟商来源: LTK|Iconically|Levanta|ACC|PartnerBoost|Amazon Tag search|Wayward

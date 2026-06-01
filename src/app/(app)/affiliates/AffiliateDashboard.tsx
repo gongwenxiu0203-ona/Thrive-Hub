@@ -37,15 +37,14 @@ interface StatsData {
   byTopCreator: Pair[];
   bySampleShipping: Pair[];
   byOwner: Pair[];
-  totalFollowers: Record<string, number>;
-  placementFlatfees: Record<string, number>;
+  byRegion: Pair[];
   monthlyNew: { month: string; count: number }[];
 }
 type Pair = { name: string; value: number };
 
 const FILTER_KEYS = [
   "sources","categories","types","tags","brands","statuses",
-  "modes","owners","topCreators","sampleShipping","q",
+  "modes","owners","topCreators","sampleShipping","regions","q",
 ] as const;
 type FilterKey = (typeof FILTER_KEYS)[number];
 
@@ -60,6 +59,7 @@ interface Props {
     brands: string[];
     statuses: string[];
     modes: string[];
+    regions: string[];
     users: { id: string; name: string }[];
   };
 }
@@ -70,6 +70,7 @@ export default function AffiliateDashboard({ options }: Props) {
   const pathname = usePathname();
   const [data, setData] = useState<StatsData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [trendMonths, setTrendMonths] = useState(6);
 
   const hasAnyFilter = FILTER_KEYS.some((k) => sp.get(k));
 
@@ -80,11 +81,12 @@ export default function AffiliateDashboard({ options }: Props) {
       const v = sp.get(k);
       if (v) p.set(k, v);
     }
+    p.set("months", String(trendMonths));
     fetch(`/api/affiliates/stats?${p.toString()}`)
       .then((r) => r.json())
       .then((d) => setData(d))
       .finally(() => setLoading(false));
-  }, [sp]);
+  }, [sp, trendMonths]);
 
   useEffect(() => { fetchStats(); }, [fetchStats]);
 
@@ -95,6 +97,8 @@ export default function AffiliateDashboard({ options }: Props) {
   }
 
   const userOpts = (options?.users ?? []).map((u) => ({ value: u.id, label: u.name }));
+  const nonZero = (arr: Pair[]) => arr.filter((d) => d.name !== "未填写" && d.value > 0);
+  const thisMonthCount = data?.monthlyNew[data.monthlyNew.length - 1]?.count ?? 0;
 
   return (
     <div className="space-y-4">
@@ -112,6 +116,12 @@ export default function AffiliateDashboard({ options }: Props) {
           )}
         </div>
         <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+          <FC label="地区 Region">
+            <MultiSelectFilter
+              paramKey="regions" placeholder="请选择"
+              options={toOpts(options?.regions ?? [])} width="w-full"
+            />
+          </FC>
           <FC label="联盟商来源">
             <MultiSelectFilter
               paramKey="sources" placeholder="请选择"
@@ -177,11 +187,9 @@ export default function AffiliateDashboard({ options }: Props) {
 
       {/* ── KPI row ────────────────────────────────────────────── */}
       {data && (
-        <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2">
           <KpiCard label="联盟商总数" value={data.total} />
-          <KpiCard label="来源种类" value={data.bySource.filter(s => s.name !== "未填写").length} />
-          <KpiCard label="类型种类" value={data.byType.filter(t => t.name !== "未填写").length} />
-          <KpiCard label="本月新增" value={data.monthlyNew[data.monthlyNew.length - 1]?.count ?? 0} />
+          <KpiCard label="本月新增" value={thisMonthCount} />
         </div>
       )}
 
@@ -193,119 +201,78 @@ export default function AffiliateDashboard({ options }: Props) {
 
       {data && !loading && (
         <div className="space-y-4">
-          {/* Row 1 */}
-          <div className="grid gap-4 lg:grid-cols-2">
-            <PanelCard
-              title="开发状态Status 分布"
-              exportRows={data.byStatus.map((d) => ({ 状态: d.name, 数量: d.value }))}
-            >
-              <PieView data={data.byStatus} />
-            </PanelCard>
-            <PanelCard
-              title="联盟商来源 分布"
-              exportRows={data.bySource.map((d) => ({ 来源: d.name, 数量: d.value }))}
-            >
-              <PieView data={data.bySource} />
-            </PanelCard>
-          </div>
-
-          {/* Brand row */}
-          {data.byBrand.filter(d => d.name !== "未填写").length > 0 && (
-            <PanelCard
-              title="品牌 Brand 分布"
-              exportRows={data.byBrand.map((d) => ({ 品牌: d.name, 数量: d.value }))}
-            >
-              <PieView data={data.byBrand.filter(d => d.name !== "未填写")} />
-            </PanelCard>
-          )}
-
-          {/* Row 2 */}
+          {/* Row 1: type pie + tag word cloud */}
           <div className="grid gap-4 lg:grid-cols-2">
             <PanelCard
               title="联盟商类型 Type 分布"
               exportRows={data.byType.map((d) => ({ 类型: d.name, 数量: d.value }))}
             >
-              <HBarView data={data.byType} height={280} />
+              <PieView data={nonZero(data.byType)} />
             </PanelCard>
             <PanelCard
-              title="一级类目 分布"
-              exportRows={data.byCategory.map((d) => ({ 类目: d.name, 数量: d.value }))}
+              title="联盟商标签 词云"
+              exportRows={data.byTag.map((d) => ({ 标签: d.name, 数量: d.value }))}
             >
-              <PieView data={data.byCategory} />
+              <TagCloud data={data.byTag.slice(0, 50)} />
             </PanelCard>
           </div>
 
-          {/* Row 3 */}
+          {/* Row 2: source donut + brand donut */}
           <div className="grid gap-4 lg:grid-cols-2">
             <PanelCard
-              title="合作模式 分布"
-              exportRows={data.byMode.map((d) => ({ 合作模式: d.name, 数量: d.value }))}
+              title="联盟商来源 分布"
+              exportRows={data.bySource.map((d) => ({ 来源: d.name, 数量: d.value }))}
             >
-              <PieView data={data.byMode} />
+              <DonutView data={nonZero(data.bySource)} />
             </PanelCard>
             <PanelCard
-              title="样品寄送 分布"
-              exportRows={data.bySampleShipping.map((d) => ({ 样品寄送: d.name, 数量: d.value }))}
+              title="品牌 Brand 分布"
+              exportRows={data.byBrand.map((d) => ({ 品牌: d.name, 数量: d.value }))}
             >
-              <PieView data={data.bySampleShipping} />
+              <DonutView data={nonZero(data.byBrand)} />
             </PanelCard>
           </div>
 
-          {/* Row 4 */}
+          {/* Row 3: owner bar + status donut */}
           <div className="grid gap-4 lg:grid-cols-2">
-            <PanelCard
-              title="Top Creator 分布"
-              exportRows={data.byTopCreator.map((d) => ({ "Top Creator": d.name, 数量: d.value }))}
-            >
-              <PieView data={data.byTopCreator} />
-            </PanelCard>
             <PanelCard
               title="负责人 分布"
               exportRows={data.byOwner.map((d) => ({ 负责人: d.name, 数量: d.value }))}
             >
-              <PieView data={data.byOwner} />
-            </PanelCard>
-          </div>
-
-          {/* Row 5: followers + flatfees */}
-          <div className="grid gap-4 lg:grid-cols-2">
-            <PanelCard
-              title="各平台流量/粉丝总量 (K)"
-              exportRows={Object.entries(data.totalFollowers).map(([平台, v]) => ({ 平台, "总量(K)": v }))}
-            >
               <HBarView
-                data={Object.entries(data.totalFollowers).map(([name, value]) => ({ name, value }))}
-                height={220}
+                data={data.byOwner.filter((d) => d.value > 0)}
+                height={Math.max(200, data.byOwner.length * 32)}
               />
             </PanelCard>
             <PanelCard
-              title="各平台 Flatfee 报价汇总 ($)"
-              exportRows={Object.entries(data.placementFlatfees).map(([平台, v]) => ({ 平台, "Flatfee($)": v }))}
+              title="开发状态 Status 分布"
+              exportRows={data.byStatus.map((d) => ({ 状态: d.name, 数量: d.value }))}
             >
-              <HBarView
-                data={Object.entries(data.placementFlatfees)
-                  .filter(([, v]) => v > 0)
-                  .map(([name, value]) => ({ name, value }))}
-                height={220}
-              />
+              <DonutView data={nonZero(data.byStatus)} />
             </PanelCard>
           </div>
 
-          {/* Row 6: tag distribution */}
-          {data.byTag.length > 0 && (
-            <PanelCard
-              title="联盟商标签 分布"
-              exportRows={data.byTag.map((d) => ({ 标签: d.name, 数量: d.value }))}
-            >
-              <HBarView data={data.byTag.slice(0, 20)} height={Math.max(240, data.byTag.slice(0, 20).length * 26)} />
-            </PanelCard>
-          )}
-
-          {/* Row 7: monthly trend */}
+          {/* Row 4: trend */}
           <PanelCard
-            title="近6个月新增联盟商"
+            title="联盟商新增数量"
             exportRows={data.monthlyNew.map((d) => ({ 月份: d.month, 新增数量: d.count }))}
           >
+            <div className="mb-2 flex items-center gap-2">
+              <span className="text-xs text-slate-500">时间范围：</span>
+              {[6, 12, 24].map((m) => (
+                <button
+                  key={m}
+                  onClick={() => setTrendMonths(m)}
+                  className={`rounded px-2 py-0.5 text-xs font-medium transition-colors ${
+                    trendMonths === m
+                      ? "bg-brand-600 text-white"
+                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  }`}
+                >
+                  近{m}个月
+                </button>
+              ))}
+            </div>
             <ResponsiveContainer width="100%" height={240}>
               <LineChart data={data.monthlyNew} margin={{ left: 0, right: 16 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
@@ -354,29 +321,57 @@ function PieView({ data }: { data: Pair[] }) {
     <div className="flex flex-wrap items-center gap-4">
       <ResponsiveContainer width={200} height={200} minWidth={160}>
         <PieChart>
-          <Pie data={data} dataKey="value" cx="50%" cy="50%" outerRadius={80} innerRadius={48}>
+          <Pie data={data} dataKey="value" cx="50%" cy="50%" outerRadius={80} innerRadius={0}>
             {data.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
           </Pie>
           <Tooltip
-            formatter={(v: number) => [
-              `${v} (${total > 0 ? Math.round((v / total) * 100) : 0}%)`,
-              "",
-            ]}
+            formatter={(v: number) => [`${v} (${total > 0 ? Math.round((v / total) * 100) : 0}%)`, ""]}
           />
         </PieChart>
       </ResponsiveContainer>
-      <div className="flex min-w-0 flex-1 flex-col gap-1.5 text-xs">
-        {data.map((d, i) => (
-          <div key={d.name} className="flex items-center gap-1.5 min-w-0">
-            <div
-              className="h-2.5 w-2.5 shrink-0 rounded-full"
-              style={{ backgroundColor: COLORS[i % COLORS.length] }}
-            />
-            <span className="truncate text-slate-600" title={d.name}>{d.name}</span>
-            <span className="ml-auto shrink-0 pl-2 font-medium text-slate-900">{d.value}</span>
-          </div>
-        ))}
-      </div>
+      <Legend data={data} total={total} />
+    </div>
+  );
+}
+
+function DonutView({ data }: { data: Pair[] }) {
+  const total = data.reduce((s, d) => s + d.value, 0);
+  if (data.length === 0 || total === 0) return <Empty />;
+  return (
+    <div className="flex flex-wrap items-center gap-4">
+      <ResponsiveContainer width={200} height={200} minWidth={160}>
+        <PieChart>
+          <Pie data={data} dataKey="value" cx="50%" cy="50%" outerRadius={80} innerRadius={50}>
+            {data.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+          </Pie>
+          <Tooltip
+            formatter={(v: number) => [`${v} (${total > 0 ? Math.round((v / total) * 100) : 0}%)`, ""]}
+          />
+        </PieChart>
+      </ResponsiveContainer>
+      <Legend data={data} total={total} />
+    </div>
+  );
+}
+
+function Legend({ data, total }: { data: Pair[]; total: number }) {
+  return (
+    <div className="flex min-w-0 flex-1 flex-col gap-1.5 text-xs">
+      {data.map((d, i) => (
+        <div key={d.name} className="flex items-center gap-1.5 min-w-0">
+          <div
+            className="h-2.5 w-2.5 shrink-0 rounded-full"
+            style={{ backgroundColor: COLORS[i % COLORS.length] }}
+          />
+          <span className="truncate text-slate-600" title={d.name}>{d.name}</span>
+          <span className="ml-auto shrink-0 pl-2 font-medium text-slate-900">
+            {d.value}
+            <span className="ml-1 text-slate-400">
+              ({total > 0 ? Math.round((d.value / total) * 100) : 0}%)
+            </span>
+          </span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -390,13 +385,36 @@ function HBarView({ data, height = 240 }: { data: Pair[]; height?: number }) {
         <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
         <YAxis
           dataKey="name" type="category"
-          tick={{ fontSize: 10 }} width={150}
-          tickFormatter={(v: string) => v.length > 18 ? v.slice(0, 18) + "…" : v}
+          tick={{ fontSize: 10 }} width={120}
+          tickFormatter={(v: string) => v.length > 15 ? v.slice(0, 15) + "…" : v}
         />
         <Tooltip />
         <Bar dataKey="value" name="数量" fill="#6366f1" radius={[0, 4, 4, 0]} />
       </BarChart>
     </ResponsiveContainer>
+  );
+}
+
+function TagCloud({ data }: { data: Pair[] }) {
+  if (data.length === 0) return <Empty />;
+  const max = Math.max(...data.map((d) => d.value));
+  const min = Math.min(...data.map((d) => d.value));
+  const range = max - min || 1;
+  const fontSize = (v: number) => Math.round(11 + ((v - min) / range) * 20);
+
+  return (
+    <div className="flex flex-wrap gap-x-3 gap-y-2 p-2 overflow-auto h-full">
+      {data.map((d, i) => (
+        <span
+          key={d.name}
+          style={{ fontSize: `${fontSize(d.value)}px`, color: COLORS[i % COLORS.length] }}
+          className="cursor-default font-medium leading-tight"
+          title={`${d.name}: ${d.value}`}
+        >
+          {d.name}
+        </span>
+      ))}
+    </div>
   );
 }
 

@@ -37,8 +37,41 @@ export interface AffiliateField {
   templateCol?: boolean; // Include in template download
 }
 
+export const REGION_MAP: Record<string, string> = {
+  "united states": "US", "united states of america": "US",
+  "united kingdom": "UK", "great britain": "UK",
+  "germany": "DE", "deutschland": "DE",
+  "canada": "CA",
+  "japan": "JP",
+  "france": "FR",
+  "australia": "AU",
+  "mexico": "MX",
+  "italy": "IT",
+  "spain": "ES",
+  "netherlands": "NL",
+  "sweden": "SE",
+  "poland": "PL",
+  "belgium": "BE",
+  "austria": "AT",
+  "singapore": "SG",
+  "india": "IN",
+};
+
+export function normalizeRegion(v: string): string {
+  const lower = v.toLowerCase().trim();
+  return REGION_MAP[lower] ?? v.toUpperCase().trim();
+}
+
 export const AFFILIATE_FIELDS: AffiliateField[] = [
   // ── Core Identity ────────────────────────────────────────────────────
+  {
+    key: "region",
+    label: "地区 Region",
+    type: "text",
+    group: "核心信息",
+    uploadable: true,
+    templateCol: true,
+  },
   {
     key: "platformAffiliateName",
     label: "平台联盟商名称 Affiliate Name on Network",

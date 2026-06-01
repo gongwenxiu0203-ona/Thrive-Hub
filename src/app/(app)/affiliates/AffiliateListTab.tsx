@@ -36,6 +36,7 @@ interface Props {
     brands: string[];
     statuses: string[];
     modes: string[];
+    regions: string[];
     names: string[];
     pics: string[];
     users: { id: string; name: string }[];
@@ -190,6 +191,9 @@ export default function AffiliateListTab({ options }: Props) {
           </FilterCell>
           <FilterCell label="合作模式">
             <MultiSelectFilter paramKey="modes" placeholder="请选择" options={toOpts(options.modes)} width="w-full" />
+          </FilterCell>
+          <FilterCell label="地区 Region">
+            <MultiSelectFilter paramKey="regions" placeholder="请选择" options={toOpts(options.regions ?? [])} width="w-full" />
           </FilterCell>
         </div>
       </div>

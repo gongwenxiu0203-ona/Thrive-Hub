@@ -23,6 +23,7 @@ export async function GET(req: NextRequest) {
   const statuses = multi("statuses");
   const modes = multi("modes");
   const owners = multi("owners");
+  const regions = multi("regions");
   const names = multi("names");        // 联盟商名称 (platformAffiliateName)
   const pics = multi("pics");          // 负责人 (matches User.name OR personInChargeName text)
   // Sales-linked filters (brand / affiliateType from SalesRecord)
@@ -46,6 +47,7 @@ export async function GET(req: NextRequest) {
   if (statuses.length) where.developmentStatus = { in: statuses };
   if (owners.length) where.personInChargeId = { in: owners };
   if (names.length) where.platformAffiliateName = { in: names };
+  if (regions.length) where.region = { in: regions };
 
   // pic filter spans User-linked name and uploaded text — wrap in AND so it
   // composes with any pre-existing where.OR (e.g., from the q search).
