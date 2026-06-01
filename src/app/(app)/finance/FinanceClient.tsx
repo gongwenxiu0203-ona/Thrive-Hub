@@ -17,6 +17,7 @@ import {
 } from "./NewChannelReconciliationModal";
 import { ChannelReconciliationDetailModal } from "./ChannelReconciliationDetailModal";
 import { ScopeToggle } from "@/components/ScopeToggle";
+import { AffiliateReconciliationTab, type AffiliateRec } from "./AffiliateReconciliationTab";
 
 type Settlement = {
   id: string;
@@ -120,6 +121,7 @@ type Props = {
   allUsers: User[];
   currentUserId: string;
   confirmedCustomerReconciliations: ConfirmedCustomerRec[];
+  affiliateReconciliations: AffiliateRec[];
   canToggleScope?: boolean;
   currentView?: "mine" | "all";
 };
@@ -304,6 +306,7 @@ export function FinanceClient({
   allUsers,
   currentUserId,
   confirmedCustomerReconciliations,
+  affiliateReconciliations,
   canToggleScope = false,
   currentView = "mine",
 }: Props) {
@@ -397,10 +400,7 @@ export function FinanceClient({
         />
       )}
       {tab === "affiliates" && (
-        <div className="card flex flex-col items-center justify-center py-16 text-center">
-          <div className="mb-3 text-4xl">🔜</div>
-          <p className="text-slate-500">联盟商对账及结算功能即将上线</p>
-        </div>
+        <AffiliateReconciliationTab records={affiliateReconciliations} />
       )}
     </div>
   );

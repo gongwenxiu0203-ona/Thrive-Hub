@@ -186,6 +186,9 @@ export default function CoopReviewModal({
           notes: fullNotes,
           customerStatus: customerStatus || null,
           reviewerIds,
+          // Structured data for auto-creating reconciliation records
+          platforms: platforms.filter(p => p.platform),
+          coopModes,
         }),
       });
       if (!res.ok) throw new Error(await res.text());

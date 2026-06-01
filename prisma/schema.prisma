@@ -51,6 +51,7 @@ model User {
   settlementsCreated       Settlement[]             @relation("SettlementCreator")
   channelReconciliationsCreated  ChannelReconciliation[] @relation("ChannelReconciliationCreator")
   channelReconciliationsAsChannel ChannelReconciliation[] @relation("ChannelUserReconciliations")
+  affiliateReconciliationsAsSubmitter AffiliateReconciliation[] @relation("AffiliateReconciliationSubmitter")
   // Permission overrides
   permissionOverrides            UserPermissionOverride[]
   invitedBy                      User?  @relation("UserInvitedBy", fields: [invitedById], references: [id])
@@ -137,6 +138,7 @@ model Customer {
   // Finance module relations
   reconciliations        CustomerReconciliation[]
   channelReconciliations ChannelReconciliation[] @relation("CustomerChannelReconciliations")
+  affiliateReconciliations AffiliateReconciliation[]
 }
 
 model Contract {
@@ -347,6 +349,7 @@ model Affiliate {
   personInCharge User?                 @relation("AffiliatePersonInCharge", fields: [personInChargeId], references: [id])
   batch          AffiliateBatch?       @relation(fields: [batchId], references: [id], onDelete: SetNull)
   coopReviews    AffiliateCoopReview[]
+  affiliateReconciliations AffiliateReconciliation[]
 }
 
 // 联盟商批量导入批次
@@ -686,4 +689,46 @@ model ChannelReconciliation {
   @@index([channelUserId])
   @@index([customerReconciliationId])
   @@index([periodStart])
+}
+
+// 联盟商对账记录 — 合作审核通过后自动创建
+model AffiliateReconciliation {
+  id                 String    @id @default(cuid())
+  affiliateId        String
+  affiliateName      String    // 平台联盟商名称
+  customerId         String?
+  customerName       String?   // 关联客户名称快照
+  cooperationMode    String    @default("[]") // JSON: 合作模式列表
+  platforms          String    @default("[]") // JSON: [{platform,link,placements:[{name,currency,flatfee}]}]
+  coopReviewId       String?   // 来源审核记录ID
+  submitterId        String?   // 提交审核人 userId
+
+  // 付款信息（由提交审核人填写）
+  promotionAsin      String?
+  paymentMethod      String?   // PayPal | 对公账号 | 银行转账
+  paymentAccountName String?
+  paymentAccount     String?
+  paymentNote        String?
+  paymentCurrency    String?
+  paymentAmount      Float?
+  paymentRequestAt   DateTime?
+
+  // 实际付款
+  paidAt             DateTime?
+  transactionNo      String?
+  proofUrl           String?
+
+  status             String    @default("pending") // pending | info_filled | paid
+  reminderSentAt     DateTime?
+
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  affiliate  Affiliate @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  submitter  User?     @relation("AffiliateReconciliationSubmitter", fields: [submitterId], references: [id], onDelete: SetNull)
+
+  @@index([affiliateId])
+  @@index([customerId])
+  @@index([submitterId])
 }

@@ -5,7 +5,6 @@ import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip,
   LineChart, Line, CartesianGrid, ResponsiveContainer, LabelList,
-  Customized,
 } from "recharts";
 import { X } from "lucide-react";
 import { PanelCard } from "@/components/ui/PanelCard";
@@ -56,87 +55,17 @@ interface Props {
   };
 }
 
-// ── Anti-collision pie/donut labels rendered via <Customized> ─────────────────
-function AntiCollisionLabels({ formattedGraphicalItems, total }: {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  formattedGraphicalItems?: any[];
-  total: number;
-}) {
-  const pieItem = formattedGraphicalItems?.[0];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const sectors: any[] = pieItem?.props?.sectors ?? [];
-  if (!sectors.length) return null;
-
-  const { cx, cy, outerRadius } = sectors[0];
-  const ELBOW_R  = outerRadius + 16;
-  const COL_R    = outerRadius + 66;
-  const LINE_H   = 22;
-
-  type Item = {
-    index: number; name: string; pct: number; midAngle: number;
-    natX: number; natY: number;
-  };
-
-  const items: Item[] = sectors.map((s: any, i: number) => {
-    const natX = cx + ELBOW_R * Math.cos(-s.midAngle * RADIAN);
-    const natY = cy + ELBOW_R * Math.sin(-s.midAngle * RADIAN);
-    return {
-      index: i,
-      name: s.payload?.name ?? s.name ?? "",
-      pct: (s.payload?.value ?? s.value) / total,
-      midAngle: s.midAngle,
-      natX, natY,
-    };
-  });
-
-  const right = items.filter((i) => i.natX >= cx).sort((a, b) => a.natY - b.natY);
-  const left  = items.filter((i) => i.natX  < cx).sort((a, b) => a.natY - b.natY);
-
-  function spread(group: Item[], colX: number, anchor: "start" | "end") {
-    if (!group.length) return [];
-    const avgY = group.reduce((s, i) => s + i.natY, 0) / group.length;
-    const topY = avgY - (group.length * LINE_H) / 2 + LINE_H / 2;
-    return group.map((item, i) => ({ ...item, finalX: colX, finalY: topY + i * LINE_H, anchor }));
-  }
-
-  const labeled = [
-    ...spread(right, cx + COL_R, "start"),
-    ...spread(left,  cx - COL_R, "end"),
-  ];
-
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function renderPieLabel({ cx, cy, midAngle, outerRadius, name, percent }: any) {
+  const radius = outerRadius + 32;
+  const x = cx + radius * Math.cos(-midAngle * RADIAN);
+  const y = cy + radius * Math.sin(-midAngle * RADIAN);
+  const pct = (percent * 100).toFixed(1);
   return (
-    <>
-      {labeled.map((item) => {
-        const sR  = outerRadius + 3;
-        const sx  = cx + sR * Math.cos(-item.midAngle * RADIAN);
-        const sy  = cy + sR * Math.sin(-item.midAngle * RADIAN);
-        const ex  = cx + ELBOW_R * Math.cos(-item.midAngle * RADIAN);
-        const ey  = cy + ELBOW_R * Math.sin(-item.midAngle * RADIAN);
-        const tx  = item.finalX + (item.anchor === "start" ? 4 : -4);
-        const col = COLORS[item.index % COLORS.length];
-
-        return (
-          <g key={item.index}>
-            {/* Kinked leader line: segment → elbow → label column */}
-            <path
-              d={`M${sx.toFixed(1)},${sy.toFixed(1)} L${ex.toFixed(1)},${ey.toFixed(1)} L${item.finalX.toFixed(1)},${item.finalY.toFixed(1)}`}
-              fill="none" stroke={col} strokeWidth={1} opacity={0.6}
-            />
-            <circle cx={ex} cy={ey} r={1.5} fill={col} />
-            {/* Name */}
-            <text x={tx} y={item.finalY - 5} fontSize={9} fill="#334155"
-              fontWeight={500} textAnchor={item.anchor}>
-              {item.name}
-            </text>
-            {/* Percentage */}
-            <text x={tx} y={item.finalY + 7} fontSize={8.5} fill={col}
-              fontWeight={700} textAnchor={item.anchor}>
-              {Math.round(item.pct * 100)}%
-            </text>
-          </g>
-        );
-      })}
-    </>
+    <text x={x} y={y} fill="#334155" fontSize={10} fontWeight={500}
+      textAnchor={x > cx ? "start" : "end"} dominantBaseline="central">
+      {`${name}: ${pct}%`}
+    </text>
   );
 }
 
@@ -344,14 +273,14 @@ function PieView({ data }: { data: Pair[] }) {
   return (
     <div className="h-full w-full" style={{ overflow: "visible" }}>
       <ResponsiveContainer width="100%" height="100%">
-        <PieChart margin={{ top: 40, right: 120, bottom: 40, left: 120 }}>
+        <PieChart margin={{ top: 20, right: 80, bottom: 20, left: 80 }}>
           <Pie data={data} dataKey="value" cx="50%" cy="50%"
-            outerRadius="52%" innerRadius={0}
-            label={false} labelLine={false}>
+            outerRadius="50%" innerRadius={0}
+            label={renderPieLabel}
+            labelLine={{ stroke: "#cbd5e1", strokeWidth: 1 }}>
             {data.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
           </Pie>
           <Tooltip formatter={(v: number) => [`${v} (${Math.round((v / total) * 100)}%)`, ""]} />
-          <Customized component={(props: any) => <AntiCollisionLabels {...props} total={total} />} />
         </PieChart>
       </ResponsiveContainer>
     </div>
@@ -364,14 +293,14 @@ function DonutView({ data }: { data: Pair[] }) {
   return (
     <div className="h-full w-full" style={{ overflow: "visible" }}>
       <ResponsiveContainer width="100%" height="100%">
-        <PieChart margin={{ top: 40, right: 120, bottom: 40, left: 120 }}>
+        <PieChart margin={{ top: 20, right: 80, bottom: 20, left: 80 }}>
           <Pie data={data} dataKey="value" cx="50%" cy="50%"
-            outerRadius="52%" innerRadius="30%"
-            label={false} labelLine={false}>
+            outerRadius="50%" innerRadius="28%"
+            label={renderPieLabel}
+            labelLine={{ stroke: "#cbd5e1", strokeWidth: 1 }}>
             {data.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
           </Pie>
           <Tooltip formatter={(v: number) => [`${v} (${Math.round((v / total) * 100)}%)`, ""]} />
-          <Customized component={(props: any) => <AntiCollisionLabels {...props} total={total} />} />
         </PieChart>
       </ResponsiveContainer>
     </div>

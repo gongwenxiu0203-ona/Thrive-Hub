@@ -33,7 +33,7 @@ export default async function FinancePage({
   const chRecScope = channelReconciliationScope(sess, view);
   const custScope = customerScope(sess, view);
 
-  const [reconciliations, trashedReconciliations, channelReconciliations, customers, channelUsers, allUsers] = await Promise.all([
+  const [reconciliations, trashedReconciliations, channelReconciliations, customers, channelUsers, allUsers, affiliateReconciliations] = await Promise.all([
     // 未删除的对账记录（带行级权限）
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prisma.customerReconciliation.findMany({
@@ -136,6 +136,14 @@ export default async function FinancePage({
       select: { id: true, name: true, email: true },
       orderBy: { name: "asc" },
     }),
+
+    // 联盟商对账记录
+    prisma.affiliateReconciliation.findMany({
+      include: {
+        submitter: { select: { id: true, name: true } },
+      },
+      orderBy: { createdAt: "desc" },
+    }),
   ]);
 
   // 为渠道商新建分账查询：已确认的客户对账记录（按客户分组，带行级权限）
@@ -184,6 +192,7 @@ export default async function FinancePage({
       allUsers={allUsers}
       currentUserId={session.userId}
       confirmedCustomerReconciliations={confirmedCustomerReconciliations}
+      affiliateReconciliations={affiliateReconciliations}
       canToggleScope={isStaff(session.role)}
       currentView={view}
     />
