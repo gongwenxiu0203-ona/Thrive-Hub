@@ -339,7 +339,7 @@ export async function saveReviewComment(contractId: string, comment: string) {
 
 /** 合同签署中 → 合同签署完成. Advances the linked customer to 合同签署完成. */
 export async function markCompleted(id: string) {
-  await requireSession();
+  const session = await requireSession();
   const contract = await prisma.contract.findUnique({ where: { id } });
   if (!contract) throw new Error("合同不存在");
   if (contract.status !== "SIGNING") {
@@ -351,7 +351,30 @@ export async function markCompleted(id: string) {
   });
   await bumpCustomerStatus(contract.customerId, "CONTRACT_SIGNED");
 
+  // 自动为有渠道商的客户创建渠道商分账管理记录
+  const customer = await prisma.customer.findUnique({
+    where: { id: contract.customerId },
+    select: { channelUserId: true },
+  });
+  if (customer?.channelUserId) {
+    const existing = await prisma.channelReconciliation.findFirst({
+      where: { contractId: id, autoCreated: true },
+    });
+    if (!existing) {
+      await prisma.channelReconciliation.create({
+        data: {
+          customerId: contract.customerId,
+          contractId: id,
+          channelUserId: customer.channelUserId,
+          autoCreated: true,
+          createdById: session.userId,
+        },
+      });
+    }
+  }
+
   revalidatePath("/contracts");
   revalidatePath(`/contracts/${id}`);
   revalidatePath(`/customers/${contract.customerId}`);
+  revalidatePath("/finance");
 }

@@ -45,6 +45,7 @@ export async function POST(req: Request) {
       contractId,
       periodStart,
       periodEnd,
+      reconcileType,
     } = body;
 
     if (!customerId || !contractId || !periodStart || !periodEnd) {
@@ -107,6 +108,7 @@ export async function POST(req: Request) {
         betType,
         betOrderCount,
         betSalesAmount,
+        reconcileType: reconcileType ?? "BOTH",
         createdById: session.userId,
         updatedAt: new Date(),
       },

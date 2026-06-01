@@ -22,6 +22,18 @@ export async function PATCH(
 
     const data: Record<string, unknown> = { updatedAt: new Date() };
 
+    // 新版分账管理配置字段
+    if ("totalPeriods" in body) data.totalPeriods = body.totalPeriods ? Number(body.totalPeriods) : null;
+    if ("periodType" in body) data.periodType = body.periodType || null;
+    if ("fixedFeeTotal" in body) data.fixedFeeTotal = body.fixedFeeTotal != null ? Number(body.fixedFeeTotal) : null;
+    if ("commissionTotal" in body) data.commissionTotal = body.commissionTotal != null ? Number(body.commissionTotal) : null;
+    if ("fixedFeeShareRate" in body && !("fixedFeeReceived" in body)) {
+      data.fixedFeeShareRate = Number(body.fixedFeeShareRate);
+    }
+    if ("commissionShareRate" in body && !("commissionReceived" in body)) {
+      data.commissionShareRate = Number(body.commissionShareRate);
+    }
+
     // 通用字段
     if ("note" in body) data.note = body.note;
     if ("periodNo" in body) data.periodNo = body.periodNo;

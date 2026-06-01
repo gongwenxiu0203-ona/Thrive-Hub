@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Briefcase, Wrench, CalendarClock, FileText, Users, ArrowRight, TrendingUp } from "lucide-react";
+import { Briefcase, Wrench, CalendarClock, FileText, Users, ArrowRight, TrendingUp, Wallet } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import {
   setBusinessOwner,
@@ -39,6 +39,17 @@ type ContractLite = {
   status: string;
 };
 
+type ChannelRecSummary = {
+  totalPeriods: number | null;
+  periodType: string | null;
+  fixedFeeTotal: number | null;
+  commissionTotal: number | null;
+  paidPeriodsFixed: number;
+  paidPeriodsCommission: number;
+  paidFixed: number;
+  paidCommission: number;
+};
+
 export function InternalManagement({
   customerId,
   customerName,
@@ -50,6 +61,7 @@ export function InternalManagement({
   contracts,
   businessTasks,
   backendTasks,
+  channelRec,
 }: {
   customerId: string;
   customerName: string;
@@ -61,6 +73,7 @@ export function InternalManagement({
   contracts: ContractLite[];
   businessTasks: TaskLite[];
   backendTasks: TaskLite[];
+  channelRec?: ChannelRecSummary | null;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -121,6 +134,44 @@ export function InternalManagement({
           ))}
         </select>
         <p className="mt-1.5 text-[11px] text-slate-400">渠道商关联后可在客户管理中查看此客户</p>
+
+        {/* 渠道商分账汇总 */}
+        {channelRec && (
+          <div className="mt-3 rounded-lg bg-teal-50 p-3">
+            <div className="mb-2 flex items-center gap-1">
+              <Wallet className="h-3.5 w-3.5 text-teal-600" />
+              <p className="text-[11px] font-semibold text-teal-700">分账汇总</p>
+              <Link href="/finance?tab=channels" className="ml-auto text-[10px] text-teal-500 hover:underline">
+                查看详情 →
+              </Link>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <SummaryItem label="固费分账总额" value={channelRec.fixedFeeTotal != null ? `¥${channelRec.fixedFeeTotal.toLocaleString()}` : "—"} />
+              <SummaryItem label="佣金分账总额" value={channelRec.commissionTotal != null ? `¥${channelRec.commissionTotal.toLocaleString()}` : "—"} />
+              <SummaryItem label="分账总期数" value={channelRec.totalPeriods != null ? `${channelRec.totalPeriods} 期（${channelRec.periodType === "quarterly" ? "季度" : "月度"}）` : "—"} />
+              <SummaryItem
+                label="固费剩余待分账"
+                value={channelRec.fixedFeeTotal != null
+                  ? `¥${(channelRec.fixedFeeTotal - channelRec.paidFixed).toLocaleString("zh-CN", { minimumFractionDigits: 2 })}`
+                  : "—"}
+                highlight={channelRec.fixedFeeTotal != null && channelRec.paidFixed < channelRec.fixedFeeTotal}
+              />
+              <SummaryItem
+                label="佣金剩余待分账"
+                value={channelRec.commissionTotal != null
+                  ? `¥${(channelRec.commissionTotal - channelRec.paidCommission).toLocaleString("zh-CN", { minimumFractionDigits: 2 })}`
+                  : "—"}
+                highlight={channelRec.commissionTotal != null && channelRec.paidCommission < channelRec.commissionTotal}
+              />
+              <SummaryItem
+                label="剩余分账期数"
+                value={channelRec.totalPeriods != null
+                  ? `${Math.max(0, channelRec.totalPeriods - Math.max(channelRec.paidPeriodsFixed, channelRec.paidPeriodsCommission))} 期`
+                  : "—"}
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── 3. 商务负责人 ── */}
@@ -218,6 +269,15 @@ export function InternalManagement({
 
         <TaskList tasks={backendTasks} emptyHint="分配后端负责人后，将自动创建「Demo 方案制定」任务" />
       </div>
+    </div>
+  );
+}
+
+function SummaryItem({ label, value, highlight = false }: { label: string; value: string; highlight?: boolean }) {
+  return (
+    <div>
+      <p className="text-[10px] text-slate-400">{label}</p>
+      <p className={`text-xs font-semibold ${highlight ? "text-amber-600" : "text-slate-700"}`}>{value}</p>
     </div>
   );
 }

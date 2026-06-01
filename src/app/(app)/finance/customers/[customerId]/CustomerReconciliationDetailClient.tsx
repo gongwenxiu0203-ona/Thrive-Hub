@@ -52,6 +52,7 @@ type Settlement = {
 type Rec = {
   id: string;
   status: string;
+  reconcileType?: string;
   periodStart: Date | string;
   periodEnd: Date | string;
   feeAmount: number;
@@ -530,10 +531,17 @@ function MonthlyRecordRow({
           <Badge className={RECONCILIATION_STATUS_COLORS[rec.status]}>
             {RECONCILIATION_STATUS_LABELS[rec.status] ?? rec.status}
           </Badge>
-          <span className="text-sm text-slate-500">
-            固费 {fixedSym}
-            {rec.feeAmount.toLocaleString()}
-          </span>
+          {rec.reconcileType && rec.reconcileType !== "BOTH" && (
+            <Badge className="bg-indigo-50 text-indigo-600">
+              {rec.reconcileType === "FEE_ONLY" ? "仅固费" : "仅佣金"}
+            </Badge>
+          )}
+          {rec.reconcileType !== "COMMISSION_ONLY" && (
+            <span className="text-sm text-slate-500">
+              固费 {fixedSym}
+              {rec.feeAmount.toLocaleString()}
+            </span>
+          )}
           <span className="text-sm text-slate-500">
             抽佣 {commSym}
             {rec.commissionAmount.toLocaleString("zh-CN", {
@@ -1462,6 +1470,7 @@ function NewMonthlyModal({
 }) {
   const [periodStart, setPeriodStart] = useState("");
   const [periodEnd, setPeriodEnd] = useState("");
+  const [reconcileType, setReconcileType] = useState("BOTH");
   const [loading, setLoading] = useState(false);
 
   async function submit(e: React.FormEvent) {
@@ -1477,6 +1486,7 @@ function NewMonthlyModal({
           contractId,
           periodStart,
           periodEnd,
+          reconcileType,
         }),
       });
       if (!res.ok) {
@@ -1500,6 +1510,18 @@ function NewMonthlyModal({
           </p>
         </div>
         <form onSubmit={submit} className="space-y-4 px-6 py-5">
+          <div>
+            <label className="label">对账类型 *</label>
+            <div className="flex gap-2">
+              {([["BOTH", "固费 + 佣金"], ["FEE_ONLY", "仅固费"], ["COMMISSION_ONLY", "仅佣金"]] as const).map(([v, l]) => (
+                <label key={v} className={`flex flex-1 cursor-pointer items-center justify-center rounded-lg border px-3 py-2 text-xs font-medium transition-colors
+                  ${reconcileType === v ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+                  <input type="radio" className="sr-only" value={v} checked={reconcileType === v} onChange={() => setReconcileType(v)} />
+                  {l}
+                </label>
+              ))}
+            </div>
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="label">对账开始日期 *</label>

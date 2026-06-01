@@ -557,6 +557,8 @@ model CustomerReconciliation {
   // EXCESS 模式手动填写的 GMV 基准值（用于「超额抽佣」计算）
   gmvBaseline Float?
 
+  reconcileType String @default("BOTH") // BOTH | FEE_ONLY | COMMISSION_ONLY
+
   // 终版确认数据（CONFIRMED 后锁定，不可修改）
   finalOrders           Int?
   finalSalesAmount      Float?
@@ -674,6 +676,13 @@ model ChannelReconciliation {
   actualDate    DateTime?
   note          String?
 
+  // 新版：合同级分账管理（autoCreated=true 时使用）
+  autoCreated     Boolean @default(false)
+  totalPeriods    Int?
+  periodType      String? // monthly | quarterly
+  fixedFeeTotal   Float?
+  commissionTotal Float?
+
   createdById String
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -684,11 +693,32 @@ model ChannelReconciliation {
   channelUser            User                    @relation("ChannelUserReconciliations", fields: [channelUserId], references: [id])
   settlement             Settlement?             @relation(fields: [settlementId], references: [id])
   createdBy              User                    @relation("ChannelReconciliationCreator", fields: [createdById], references: [id])
+  periods                ChannelReconciliationPeriod[]
 
   @@index([customerId])
   @@index([channelUserId])
   @@index([customerReconciliationId])
   @@index([periodStart])
+}
+
+model ChannelReconciliationPeriod {
+  id               String    @id @default(cuid())
+  reconciliationId String
+  periodIndex      Int
+  periodLabel      String?
+  fixedFeeAmount   Float?
+  commissionAmount Float?
+  fixedFeePaidAt   DateTime?
+  commissionPaidAt DateTime?
+  proofUrl         String?
+  notes            String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  reconciliation   ChannelReconciliation @relation(fields: [reconciliationId], references: [id], onDelete: Cascade)
+
+  @@index([reconciliationId])
+  @@unique([reconciliationId, periodIndex])
 }
 
 // 联盟商对账记录 — 合作审核通过后自动创建

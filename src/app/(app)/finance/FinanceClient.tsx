@@ -15,7 +15,7 @@ import {
   NewChannelReconciliationModal,
   type ConfirmedCustomerRec,
 } from "./NewChannelReconciliationModal";
-import { ChannelReconciliationDetailModal } from "./ChannelReconciliationDetailModal";
+import { ChannelReconciliationDetailModal, type ChannelReconciliationRecord, type CRPeriod } from "./ChannelReconciliationDetailModal";
 import { ScopeToggle } from "@/components/ScopeToggle";
 import { AffiliateReconciliationTab, type AffiliateRec } from "./AffiliateReconciliationTab";
 
@@ -58,43 +58,19 @@ type TrashedReconciliation = {
   createdBy: { id: string; name: string };
 };
 
-type ChannelReconciliation = {
-  id: string;
+type ChannelReconciliation = ChannelReconciliationRecord & {
   status: string;
   totalShareAmount: number;
   fixedFeeShareTotal: number;
   commissionShareTotal: number;
   estimatedDate: Date | string | null;
   actualDate: Date | string | null;
-  // v2 字段
-  periodNo: number;
-  periodStart: Date | string | null;
-  periodEnd: Date | string | null;
-  fixedFeeReceived: number | null;
-  fixedFeeShareRate: number;
-  fixedFeeShareAmount: number;
-  fixedFeeShareCurrency: string;
-  fixedFeeEstimatedDate: Date | string | null;
-  fixedFeeActualDate: Date | string | null;
-  fixedFeeProofUrl: string | null;
-  fixedFeePushedToChannel: boolean;
-  commissionReceived: number | null;
-  commissionShareRate: number;
-  commissionShareAmount: number;
-  commissionShareCurrency: string;
-  commissionEstimatedDate: Date | string | null;
-  commissionActualDate: Date | string | null;
-  commissionProofUrl: string | null;
-  commissionPushedToChannel: boolean;
-  customer: { id: string; brandName: string };
-  contract: { id: string; contractNo: string } | null;
   customerReconciliation: {
     id: string;
     periodStart: Date | string;
     periodEnd: Date | string;
     status: string;
   } | null;
-  channelUser: { id: string; name: string };
   createdBy: { id: string; name: string };
 };
 
@@ -815,27 +791,30 @@ function CustomerReconciliationTab({
 
 // ── ChannelReconciliationTab ──────────────────────────────────────────────────
 
-// 分账结算状态聚合（固费 + 抽佣 actualDate 是否填写）
-function channelShareStatusAgg(cr: ChannelReconciliation): {
-  label: string;
-  color: string;
-} {
+// 分账结算状态聚合
+function channelShareStatusAgg(cr: ChannelReconciliation): { label: string; color: string } {
+  if (cr.autoCreated) {
+    const total = cr.periods.length;
+    if (total === 0) return { label: "待配置", color: "bg-slate-100 text-slate-500" };
+    const hasFixed = cr.fixedFeeTotal != null && cr.fixedFeeTotal > 0;
+    const hasComm  = cr.commissionTotal != null && cr.commissionTotal > 0;
+    const paidFixed = cr.periods.filter((p: CRPeriod) => p.fixedFeePaidAt).length;
+    const paidComm  = cr.periods.filter((p: CRPeriod) => p.commissionPaidAt).length;
+    const allFixed = !hasFixed || paidFixed === total;
+    const allComm  = !hasComm  || paidComm  === total;
+    if (allFixed && allComm) return { label: "已完成", color: "bg-emerald-100 text-emerald-700" };
+    if (paidFixed > 0 || paidComm > 0) return { label: "进行中", color: "bg-amber-100 text-amber-700" };
+    return { label: "待分账", color: "bg-rose-100 text-rose-700" };
+  }
   const fxDone = !!cr.fixedFeeActualDate;
   const cmDone = !!cr.commissionActualDate;
-  // 只统计"有金额需要分账"的侧
   const fxHas = cr.fixedFeeReceived != null && cr.fixedFeeShareAmount > 0;
   const cmHas = cr.commissionReceived != null && cr.commissionShareAmount > 0;
-  if (!fxHas && !cmHas) {
-    return { label: "待结算", color: "bg-slate-100 text-slate-500" };
-  }
+  if (!fxHas && !cmHas) return { label: "待结算", color: "bg-slate-100 text-slate-500" };
   const fxOk = !fxHas || fxDone;
   const cmOk = !cmHas || cmDone;
-  if (fxOk && cmOk) {
-    return { label: "已分账", color: "bg-emerald-100 text-emerald-700" };
-  }
-  if (fxDone || cmDone) {
-    return { label: "部分分账", color: "bg-amber-100 text-amber-700" };
-  }
+  if (fxOk && cmOk) return { label: "已分账", color: "bg-emerald-100 text-emerald-700" };
+  if (fxDone || cmDone) return { label: "部分分账", color: "bg-amber-100 text-amber-700" };
   return { label: "待分账", color: "bg-rose-100 text-rose-700" };
 }
 
@@ -980,10 +959,10 @@ function ChannelReconciliationTab({
               <th className="px-4 py-3 text-left font-medium text-slate-600">客户</th>
               <th className="px-4 py-3 text-left font-medium text-slate-600">合同</th>
               <th className="px-4 py-3 text-left font-medium text-slate-600">渠道商</th>
-              <th className="px-4 py-3 text-left font-medium text-slate-600">分账期</th>
               <th className="px-4 py-3 text-left font-medium text-slate-600">固费分账</th>
-              <th className="px-4 py-3 text-left font-medium text-slate-600">抽佣分账</th>
-              <th className="px-4 py-3 text-left font-medium text-slate-600">分账结算状态</th>
+              <th className="px-4 py-3 text-left font-medium text-slate-600">佣金分账</th>
+              <th className="px-4 py-3 text-left font-medium text-slate-600">期数进度</th>
+              <th className="px-4 py-3 text-left font-medium text-slate-600">状态</th>
               <th className="px-4 py-3 text-left font-medium text-slate-600">操作</th>
             </tr>
           </thead>
@@ -1000,6 +979,8 @@ function ChannelReconciliationTab({
             ) : (
               filtered.map((cr) => {
                 const agg = channelShareStatusAgg(cr);
+                const paidFixed = cr.periods.filter((p: CRPeriod) => p.fixedFeePaidAt).length;
+                const paidComm  = cr.periods.filter((p: CRPeriod) => p.commissionPaidAt).length;
                 return (
                   <tr key={cr.id} className="hover:bg-slate-50">
                     <td className="px-4 py-3 font-medium text-slate-900">
@@ -1007,57 +988,46 @@ function ChannelReconciliationTab({
                     </td>
                     <td className="px-4 py-3 text-slate-600">
                       {cr.contract ? (
-                        <Link
-                          href={`/contracts/${cr.contract.id}`}
-                          className="text-brand-600 hover:underline"
-                        >
+                        <Link href={`/contracts/${cr.contract.id}`} className="text-brand-600 hover:underline">
                           {cr.contract.contractNo}
                         </Link>
+                      ) : "—"}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">{cr.channelUser.name}</td>
+                    <td className="px-4 py-3 text-xs text-slate-600">
+                      {cr.autoCreated ? (
+                        cr.fixedFeeTotal != null ? (
+                          <span>¥{cr.fixedFeeTotal.toLocaleString()}</span>
+                        ) : <span className="text-slate-400">待设置</span>
+                      ) : shareDisplay(cr.fixedFeeReceived, cr.fixedFeeShareAmount, cr.fixedFeeShareRate, cr.fixedFeeShareCurrency, cr.fixedFeeActualDate)}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-slate-600">
+                      {cr.autoCreated ? (
+                        cr.commissionTotal != null ? (
+                          <span>¥{cr.commissionTotal.toLocaleString()}</span>
+                        ) : <span className="text-slate-400">待设置</span>
+                      ) : shareDisplay(cr.commissionReceived, cr.commissionShareAmount, cr.commissionShareRate, cr.commissionShareCurrency, cr.commissionActualDate)}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-slate-500">
+                      {cr.autoCreated ? (
+                        cr.periods.length > 0 ? (
+                          <div>
+                            <div>{cr.periodType === "quarterly" ? "季度" : "月度"} · 共{cr.totalPeriods}期</div>
+                            {cr.fixedFeeTotal != null && <div className="text-slate-400">固费 {paidFixed}/{cr.totalPeriods}</div>}
+                            {cr.commissionTotal != null && <div className="text-slate-400">佣金 {paidComm}/{cr.totalPeriods}</div>}
+                          </div>
+                        ) : <span className="text-slate-400">未配置</span>
                       ) : (
-                        "—"
+                        <span>第{cr.periodNo}期{cr.periodStart && cr.periodEnd && <div className="text-slate-400">{formatDate(cr.periodStart)}~{formatDate(cr.periodEnd)}</div>}</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {cr.channelUser.name}
-                    </td>
-                    <td className="px-4 py-3 text-slate-500 text-xs">
-                      第 {cr.periodNo} 期
-                      {cr.periodStart && cr.periodEnd && (
-                        <div className="text-slate-400">
-                          {formatDate(cr.periodStart)} ~{" "}
-                          {formatDate(cr.periodEnd)}
-                        </div>
-                      )}
-                    </td>
+                    <td className="px-4 py-3"><Badge className={agg.color}>{agg.label}</Badge></td>
                     <td className="px-4 py-3">
-                      {shareDisplay(
-                        cr.fixedFeeReceived,
-                        cr.fixedFeeShareAmount,
-                        cr.fixedFeeShareRate,
-                        cr.fixedFeeShareCurrency,
-                        cr.fixedFeeActualDate,
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {shareDisplay(
-                        cr.commissionReceived,
-                        cr.commissionShareAmount,
-                        cr.commissionShareRate,
-                        cr.commissionShareCurrency,
-                        cr.commissionActualDate,
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <Badge className={agg.color}>{agg.label}</Badge>
-                    </td>
-                    <td className="px-4 py-3">
-                      <button
-                        type="button"
+                      <button type="button"
                         className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-brand-600 hover:bg-brand-50"
-                        onClick={() => setEditingId(cr.id)}
-                      >
+                        onClick={() => setEditingId(cr.id)}>
                         <Pencil className="h-3.5 w-3.5" />
-                        编辑
+                        {cr.autoCreated ? "管理" : "编辑"}
                       </button>
                     </td>
                   </tr>

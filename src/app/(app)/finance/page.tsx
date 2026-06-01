@@ -94,6 +94,7 @@ export default async function FinancePage({
         },
         channelUser: { select: { id: true, name: true } },
         createdBy: { select: { id: true, name: true } },
+        periods: { orderBy: { periodIndex: "asc" } },
       },
       orderBy: { createdAt: "desc" },
     }),

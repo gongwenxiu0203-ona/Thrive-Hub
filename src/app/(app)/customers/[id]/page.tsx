@@ -33,15 +33,21 @@ export default async function CustomerDetailPage({
   const session = await requireSession();
   const { id } = await params;
 
-  const customer = await prisma.customer.findUnique({
-    where: { id },
-    include: {
-      businessOwner: true,
-      backendOwner: true,
-      contracts: { orderBy: { createdAt: "desc" } },
-      tasks: { orderBy: { createdAt: "desc" } },
-    },
-  });
+  const [customer, channelRec] = await Promise.all([
+    prisma.customer.findUnique({
+      where: { id },
+      include: {
+        businessOwner: true,
+        backendOwner: true,
+        contracts: { orderBy: { createdAt: "desc" } },
+        tasks: { orderBy: { createdAt: "desc" } },
+      },
+    }),
+    prisma.channelReconciliation.findFirst({
+      where: { customerId: id, autoCreated: true },
+      include: { periods: { orderBy: { periodIndex: "asc" } } },
+    }),
+  ]);
   if (!customer) notFound();
 
   // 行级权限校验：品牌方只能看自己品牌，渠道商只能看自己的客户
@@ -213,6 +219,16 @@ export default async function CustomerDetailPage({
             }))}
             businessTasks={businessTasks}
             backendTasks={backendTasks}
+            channelRec={channelRec ? {
+              totalPeriods: channelRec.totalPeriods,
+              periodType: channelRec.periodType,
+              fixedFeeTotal: channelRec.fixedFeeTotal,
+              commissionTotal: channelRec.commissionTotal,
+              paidPeriodsFixed: channelRec.periods.filter((p: { fixedFeePaidAt: Date | null }) => p.fixedFeePaidAt).length,
+              paidPeriodsCommission: channelRec.periods.filter((p: { commissionPaidAt: Date | null }) => p.commissionPaidAt).length,
+              paidFixed: channelRec.periods.reduce((s: number, p: { fixedFeeAmount: number | null; fixedFeePaidAt: Date | null }) => s + (p.fixedFeePaidAt && p.fixedFeeAmount ? p.fixedFeeAmount : 0), 0),
+              paidCommission: channelRec.periods.reduce((s: number, p: { commissionAmount: number | null; commissionPaidAt: Date | null }) => s + (p.commissionPaidAt && p.commissionAmount ? p.commissionAmount : 0), 0),
+            } : null}
           />
           <div className="sticky top-4">
             <EvaluationModule
