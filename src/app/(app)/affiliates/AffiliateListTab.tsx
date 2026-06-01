@@ -5,7 +5,7 @@ import Link from "next/link";
 import { ExternalLink, Search, X, ChevronLeft, ChevronRight, ChevronDown, CheckSquare } from "lucide-react";
 import { AFFILIATE_DEV_STATUS_COLORS, AFFILIATE_SOURCE_OPTIONS, AFFILIATE_CATEGORY_OPTIONS,
   AFFILIATE_TYPE_OPTIONS, AFFILIATE_TAG_OPTIONS, AFFILIATE_DEV_STATUS_OPTIONS,
-  COOPERATION_MODE_OPTIONS } from "@/lib/constants";
+  COOPERATION_MODE_OPTIONS, REGION_OPTIONS } from "@/lib/constants";
 import { MultiSelectFilter } from "@/components/ui/MultiSelectFilter";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 
@@ -50,7 +50,7 @@ const PAGE_SIZE = 50;
 
 // Batch-editable fields config
 const BATCH_FIELDS = [
-  { value: "region",           label: "地区",          type: "text" },
+  { value: "region",           label: "地区",          type: "select", opts: REGION_OPTIONS },
   { value: "personInChargeId", label: "负责人",         type: "user" },
   { value: "source",           label: "联盟商来源",     type: "select", opts: AFFILIATE_SOURCE_OPTIONS },
   { value: "category",         label: "一级类目",       type: "select", opts: AFFILIATE_CATEGORY_OPTIONS },
@@ -337,7 +337,7 @@ export default function AffiliateListTab({ options }: Props) {
             <MultiSelectFilter paramKey="modes" placeholder="请选择" options={toOpts(options.modes)} width="w-full" />
           </FilterCell>
           <FilterCell label="地区 Region">
-            <MultiSelectFilter paramKey="regions" placeholder="请选择" options={toOpts(options.regions ?? [])} width="w-full" />
+            <MultiSelectFilter paramKey="regions" placeholder="请选择" options={toOpts([...REGION_OPTIONS])} width="w-full" />
           </FilterCell>
         </div>
         {/* Date range */}

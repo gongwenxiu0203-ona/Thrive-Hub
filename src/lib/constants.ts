@@ -472,3 +472,5 @@ export function labelOf(
   if (!key) return "—";
   return map[key] ?? key;
 }
+
+export const REGION_OPTIONS = ["US", "UK", "IT", "FR", "ES", "DE", "CA", "AU"] as const;
