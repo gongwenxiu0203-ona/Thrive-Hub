@@ -2,17 +2,19 @@
 
 import { useState } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
-import { BarChart3, List, Upload } from "lucide-react";
+import { BarChart3, List, Upload, ClipboardList } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import AffiliateDashboard from "./AffiliateDashboard";
 import AffiliateListTab from "./AffiliateListTab";
 import AffiliateUploadTab from "./AffiliateUploadTab";
 import AffiliateFormModal from "./AffiliateFormModal";
+import CoopReviewsTab from "./CoopReviewsTab";
 import { cn } from "@/lib/utils";
 
 const TABS = [
   { key: "dashboard", label: "概览面板", icon: BarChart3 },
   { key: "list", label: "资源列表", icon: List },
+  { key: "reviews", label: "审核记录", icon: ClipboardList },
   { key: "upload", label: "批量导入", icon: Upload },
 ] as const;
 
@@ -92,6 +94,7 @@ export default function AffiliatesClient({ options, currentUserId }: Props) {
 
       {tab === "dashboard" && <AffiliateDashboard options={options} />}
       {tab === "list" && <AffiliateListTab options={options} />}
+      {tab === "reviews" && <CoopReviewsTab users={options.users} customers={options.customers} />}
       {tab === "upload" && (
         <AffiliateUploadTab
           users={options.users}

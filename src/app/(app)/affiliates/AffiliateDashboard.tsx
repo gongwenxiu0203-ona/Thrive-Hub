@@ -5,6 +5,7 @@ import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip,
   LineChart, Line, CartesianGrid, ResponsiveContainer, LabelList,
+  Customized,
 } from "recharts";
 import { X } from "lucide-react";
 import { PanelCard } from "@/components/ui/PanelCard";
@@ -55,17 +56,69 @@ interface Props {
   };
 }
 
+// Straight-line labels: split left/right, distribute vertically, zero overlap
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function renderPieLabel({ cx, cy, midAngle, outerRadius, name, percent }: any) {
-  const radius = outerRadius + 32;
-  const x = cx + radius * Math.cos(-midAngle * RADIAN);
-  const y = cy + radius * Math.sin(-midAngle * RADIAN);
-  const pct = (percent * 100).toFixed(1);
+function StraightLabels({ formattedGraphicalItems, total }: { formattedGraphicalItems?: any[]; total: number }) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sectors: any[] = formattedGraphicalItems?.[0]?.props?.sectors ?? [];
+  if (!sectors.length) return null;
+
+  const { cx, cy, outerRadius } = sectors[0];
+  const LINE_H = 20;   // height per label block (name + pct)
+  const COL_R  = outerRadius + 58; // label column x distance from center
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const items = sectors.map((s: any, i: number) => {
+    const ang = -s.midAngle * RADIAN;
+    return {
+      index: i,
+      name: s.payload?.name ?? s.name ?? "",
+      pct: ((s.payload?.value ?? s.value) / total * 100).toFixed(1),
+      midAngle: s.midAngle,
+      natY: cy + (outerRadius + 30) * Math.sin(ang),
+      natX: cx + (outerRadius + 30) * Math.cos(ang),
+    };
+  });
+
+  const right = items.filter(i => i.natX >= cx).sort((a, b) => a.natY - b.natY);
+  const left  = items.filter(i => i.natX  < cx).sort((a, b) => a.natY - b.natY);
+
+  function place(group: typeof items, colX: number, anchor: "start" | "end") {
+    if (!group.length) return [];
+    const totalH = group.length * LINE_H;
+    const midY   = group.reduce((s, i) => s + i.natY, 0) / group.length;
+    let y = midY - totalH / 2 + LINE_H / 2;
+    return group.map(item => {
+      const fy = y; y += LINE_H;
+      return { ...item, finalX: colX, finalY: fy, anchor };
+    });
+  }
+
+  const labeled = [
+    ...place(right, cx + COL_R, "start"),
+    ...place(left,  cx - COL_R, "end"),
+  ];
+
   return (
-    <text x={x} y={y} fill="#334155" fontSize={10} fontWeight={500}
-      textAnchor={x > cx ? "start" : "end"} dominantBaseline="central">
-      {`${name}: ${pct}%`}
-    </text>
+    <>
+      {labeled.map(item => {
+        const ang = -item.midAngle * RADIAN;
+        const sx = cx + (outerRadius + 2) * Math.cos(ang);
+        const sy = cy + (outerRadius + 2) * Math.sin(ang);
+        const col = COLORS[item.index % COLORS.length];
+        const tx  = item.finalX + (item.anchor === "start" ? 3 : -3);
+        return (
+          <g key={item.index}>
+            <line x1={sx} y1={sy} x2={item.finalX} y2={item.finalY}
+              stroke={col} strokeWidth={0.8} opacity={0.5} />
+            <text x={tx} y={item.finalY - 5} fontSize={9} fill="#334155"
+              fontWeight={500} textAnchor={item.anchor}>{item.name}</text>
+            <text x={tx} y={item.finalY + 6} fontSize={8.5} fill={col}
+              fontWeight={700} textAnchor={item.anchor}>{item.pct}%</text>
+          </g>
+        );
+      })}
+    </>
   );
 }
 
@@ -273,14 +326,14 @@ function PieView({ data }: { data: Pair[] }) {
   return (
     <div className="h-full w-full" style={{ overflow: "visible" }}>
       <ResponsiveContainer width="100%" height="100%">
-        <PieChart margin={{ top: 20, right: 80, bottom: 20, left: 80 }}>
+        <PieChart margin={{ top: 30, right: 110, bottom: 30, left: 110 }}>
           <Pie data={data} dataKey="value" cx="50%" cy="50%"
-            outerRadius="50%" innerRadius={0}
-            label={renderPieLabel}
-            labelLine={{ stroke: "#cbd5e1", strokeWidth: 1 }}>
+            outerRadius="50%" innerRadius={0} label={false} labelLine={false}>
             {data.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
           </Pie>
           <Tooltip formatter={(v: number) => [`${v} (${Math.round((v / total) * 100)}%)`, ""]} />
+          {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+          <Customized component={(p: any) => <StraightLabels {...p} total={total} />} />
         </PieChart>
       </ResponsiveContainer>
     </div>
@@ -293,14 +346,14 @@ function DonutView({ data }: { data: Pair[] }) {
   return (
     <div className="h-full w-full" style={{ overflow: "visible" }}>
       <ResponsiveContainer width="100%" height="100%">
-        <PieChart margin={{ top: 20, right: 80, bottom: 20, left: 80 }}>
+        <PieChart margin={{ top: 30, right: 110, bottom: 30, left: 110 }}>
           <Pie data={data} dataKey="value" cx="50%" cy="50%"
-            outerRadius="50%" innerRadius="28%"
-            label={renderPieLabel}
-            labelLine={{ stroke: "#cbd5e1", strokeWidth: 1 }}>
+            outerRadius="50%" innerRadius="28%" label={false} labelLine={false}>
             {data.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
           </Pie>
           <Tooltip formatter={(v: number) => [`${v} (${Math.round((v / total) * 100)}%)`, ""]} />
+          {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+          <Customized component={(p: any) => <StraightLabels {...p} total={total} />} />
         </PieChart>
       </ResponsiveContainer>
     </div>

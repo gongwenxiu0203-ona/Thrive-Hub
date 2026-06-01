@@ -19,7 +19,6 @@ export default async function AppLayout({
   return (
     <div className="flex h-screen overflow-hidden">
       <Sidebar
-        unreadCount={unreadCount}
         role={session.role}
         userId={session.userId}
       />
@@ -28,6 +27,7 @@ export default async function AppLayout({
           name={session.name}
           role={session.role}
           email={session.email}
+          unreadCount={unreadCount}
         />
         {isGuest ? (
           <div className="relative flex-1 overflow-hidden">

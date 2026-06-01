@@ -8,7 +8,6 @@ import {
   Users,
   KanbanSquare,
   FileText,
-  Bell,
   BarChart3,
   Handshake,
   Link2,
@@ -34,17 +33,14 @@ const NAV: NavItem[] = [
   { href: "/tasks", label: "任务管理", icon: KanbanSquare },
   { href: "/contracts", label: "合同管理", icon: FileText },
   { href: "/finance", label: "财务对账", icon: Receipt },
-  { href: "/reminders", label: "提醒管理", icon: Bell },
   { href: "/bi", label: "推广数据BI", icon: BarChart3 },
   { href: "/affiliates", label: "联盟资源库", icon: Handshake },
 ];
 
 export function Sidebar({
-  unreadCount = 0,
   role = "",
   userId = "",
 }: {
-  unreadCount?: number;
   role?: string;
   userId?: string;
 }) {
@@ -84,11 +80,6 @@ export function Sidebar({
             >
               <Icon className="h-[18px] w-[18px]" />
               <span className="flex-1">{item.label}</span>
-              {item.href === "/reminders" && unreadCount > 0 && (
-                <span className="badge bg-rose-100 text-rose-700">
-                  {unreadCount}
-                </span>
-              )}
             </Link>
           );
         })}
