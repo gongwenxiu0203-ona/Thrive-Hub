@@ -172,8 +172,9 @@ export async function POST(req: Request) {
     const records: any[] = [];
     const skipped: number[] = [];
 
+    const customerBrandName = customer?.brandName ?? null;
     for (let i = 0; i < rows.length; i++) {
-      const result = convertRow(rows[i], mapping, platform, customerId);
+      const result = convertRow(rows[i], mapping, platform, customerId, customerBrandName);
       if (!result) {
         skipped.push(i + 2);
         continue;
@@ -255,11 +256,40 @@ export async function POST(req: Request) {
     // Clean up temp file after successful import.
     deleteTempFile(tempId);
 
+    // Auto-add unknown affiliates to the library (status: 待开发)
+    let newAffiliateCount = 0;
+    try {
+      const uniqueNames = [...new Set(records.map((r) => r.affiliateName as string).filter(Boolean))];
+      if (uniqueNames.length > 0) {
+        const existing = await prisma.affiliate.findMany({
+          where: { platformAffiliateName: { in: uniqueNames } },
+          select: { platformAffiliateName: true },
+        });
+        const existingSet = new Set(existing.map((a) => a.platformAffiliateName));
+        const toCreate = uniqueNames.filter((n) => !existingSet.has(n));
+        if (toCreate.length > 0) {
+          await prisma.affiliate.createMany({
+            data: toCreate.map((name) => ({
+              platformAffiliateName: name,
+              developmentStatus: "待开发 Not Yet Contacted",
+              tags: "[]",
+            })),
+            skipDuplicates: true,
+          });
+          newAffiliateCount = toCreate.length;
+        }
+      }
+    } catch (e) {
+      // Non-fatal: log but don't fail the import
+      console.error("[sales/upload] auto-add affiliate error:", e);
+    }
+
     return NextResponse.json({
       imported: records.length,
       skipped,
       errors: [],
       batchId,
+      newAffiliateCount,
     });
   } catch (err) {
     console.error("[sales/upload] unhandled error:", err);

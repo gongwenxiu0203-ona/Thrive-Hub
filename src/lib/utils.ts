@@ -54,7 +54,7 @@ export function formatCurrencyWith(n: number | null | undefined, currencyCode = 
   }).format(n);
 }
 
-function currencySymbol(code: string): string {
+export function currencySymbol(code: string): string {
   return ({ USD: "$", GBP: "£", EUR: "€", JPY: "¥", AUD: "A$" } as Record<string, string>)[code] ?? "$";
 }
 

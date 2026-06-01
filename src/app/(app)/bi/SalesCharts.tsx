@@ -183,7 +183,7 @@ export function SalesDashboard({
           }))}
           exportName="commission-rate-distribution"
         >
-          <PieChartView data={commissionRateDist} valueFormat="number" />
+          <PieChartView data={commissionRateDist} valueFormat="number" labelDecimals={2} />
         </PanelCard>
 
         <PanelCard
@@ -694,10 +694,12 @@ function PieChartView({
   data,
   valueFormat = "currency",
   currencyCode = "USD",
+  labelDecimals = 1,
 }: {
   data: Pair[];
   valueFormat?: "currency" | "number";
   currencyCode?: string;
+  labelDecimals?: number;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [dims, setDims] = useState({ width: 0, height: 0 });
@@ -788,7 +790,7 @@ function PieChartView({
                   fontSize={10}
                   fill="#374151"
                 >
-                  {`${l.name}: ${(l.percent * 100).toFixed(1)}%`}
+                  {`${l.name}: ${(l.percent * 100).toFixed(labelDecimals)}%`}
                 </text>
               </g>
             );

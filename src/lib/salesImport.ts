@@ -95,8 +95,14 @@ export function convertRow(
   mapping: Record<string, string>,
   platform: string,
   customerId: string | null,
+  customerBrandName?: string | null,
 ): { record: ConvertedRecord; error?: string } | null {
-  const p = getPlatform(platform);
+  // Resolve the actual platform: prefer file column value, fall back to selected
+  const mappedPlatform = mapping.affiliatePlatform
+    ? String(pick(row, mapping.affiliatePlatform) ?? "").trim()
+    : "";
+  const resolvedPlatform = mappedPlatform || platform;
+  const p = getPlatform(resolvedPlatform);
   const orderDate = toDate(pick(row, mapping.orderDate));
   if (!orderDate) {
     return null; // skip rows without a date
@@ -130,7 +136,7 @@ export function convertRow(
   }
 
   const record: ConvertedRecord = {
-    affiliatePlatform: platform,
+    affiliatePlatform: resolvedPlatform || platform,
     affiliateProgram:
       (pick(row, mapping.affiliateProgram) as string | undefined) ||
       p?.defaultProgram ||
@@ -139,6 +145,7 @@ export function convertRow(
     asin: (pick(row, mapping.asin) as string | undefined) || null,
     brand:
       ((pick(row, mapping.brand) as string | undefined) || "").toString() ||
+      customerBrandName ||
       "",
     affiliateName:
       ((pick(row, mapping.affiliateName) as string | undefined) || "")
@@ -189,17 +196,39 @@ export function convertRow(
   return { record };
 }
 
+// Required fields for upload mapping
+const REQUIRED_KEYS = new Set([
+  "store",
+  "asin",
+  "brand",
+  "affiliateName",
+  "orderDate",
+  "unitsSold",
+  "revenue",
+  "commission",
+  "commissionRate",
+  "region",
+  "affiliatePlatform",
+]);
+
+// Hint text shown in mapping table for special fallback fields
+export const FIELD_HINTS: Record<string, string> = {
+  brand: "不映射时默认使用关联客户品牌名",
+  affiliatePlatform: "不映射时使用上方所选联盟平台",
+  commissionRate: "不映射时自动计算（联盟商佣金 ÷ 销售金额）",
+};
+
 /** Get a stripped-down list of fields the user maps in the wizard. */
 export function getMappableFields() {
-  return SALES_FIELDS.filter(
-    (f) => f.source === "upload" && f.key !== "affiliatePlatform",
-  ).map((f) => ({
+  // Show affiliatePlatform first in the list, then other required fields, then optional
+  const ordered = [
+    ...SALES_FIELDS.filter((f) => f.key === "affiliatePlatform"),
+    ...SALES_FIELDS.filter((f) => f.source === "upload" && f.key !== "affiliatePlatform"),
+  ];
+  return ordered.map((f) => ({
     key: f.key,
     label: f.label,
-    required:
-      f.key === "orderDate" ||
-      f.key === "revenue" ||
-      f.key === "affiliateName",
+    required: REQUIRED_KEYS.has(f.key),
     type: f.type,
   }));
 }

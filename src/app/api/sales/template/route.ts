@@ -2,19 +2,42 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { buildSheet } from "@/lib/excel";
 import { getPlatform } from "@/lib/platformMappings";
-import { getMappableFields } from "@/lib/salesImport";
 
-// Download an upload template for a specific platform.
-// Query: ?platform=<name>
-// The template headers are the **platform's raw column headers** (when
-// the mapping spreadsheet specifies them) plus an empty cell for fields
-// without a known source column.
+// Download an upload template.
+// Query: ?platform=<name>  → platform-specific template with platform's raw headers
+//        (no platform)     → universal template with fixed Chinese headers
 export async function GET(req: Request) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
 
   const url = new URL(req.url);
   const platform = url.searchParams.get("platform") ?? "";
+
+  if (!platform) {
+    // Universal template — fixed headers matching the required fields
+    const universalHeaders: Record<string, string> = {
+      "联盟平台": "",
+      "店铺": "",
+      "ASIN": "",
+      "品牌": "",
+      "平台联盟商名称": "",
+      "订单日期": "",
+      "销售数量": "",
+      "销售金额": "",
+      "联盟商佣金": "",
+      "联盟商佣金比例": "",
+      "地区": "",
+    };
+    const buffer = buildSheet([universalHeaders], "通用上传模板");
+    return new NextResponse(new Uint8Array(buffer), {
+      headers: {
+        "Content-Type":
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition": `attachment; filename="sales-template-universal-${Date.now()}.xlsx"`,
+      },
+    });
+  }
+
   const p = getPlatform(platform);
   if (!p) {
     return NextResponse.json(
@@ -23,9 +46,9 @@ export async function GET(req: Request) {
     );
   }
 
-  // Build the header row: prefer the platform's raw column header; fall
-  // back to system field label so users see *which* system field they
-  // need to fill.
+  // Platform-specific template: prefer the platform's raw column header;
+  // fall back to system field label.
+  const { getMappableFields } = await import("@/lib/salesImport");
   const headers: Record<string, string> = {};
   for (const field of getMappableFields()) {
     const alias = p.fields[field.key]?.[0];

@@ -1,5 +1,5 @@
 ﻿import Link from "next/link";
-import { DollarSign, Percent, Package, Download } from "lucide-react";
+import { Package, Download } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -10,7 +10,7 @@ import { SalesDashboard } from "./SalesCharts";
 import { UploadPanel } from "./UploadPanel";
 import { CleanupPanel } from "./CleanupPanel";
 import { AsinMappingPanel } from "./AsinMappingPanel";
-import { formatCurrencyWith, formatCurrency, getCurrencyCode, formatNumber, formatDateTime, cn } from "@/lib/utils";
+import { formatCurrencyWith, formatCurrency, getCurrencyCode, currencySymbol, formatNumber, formatDateTime, cn } from "@/lib/utils";
 import { requireSession } from "@/lib/session";
 
 export const metadata = { title: "推广数据BI · Thraive联盟营销系统" };
@@ -86,6 +86,12 @@ function buildWhere(
       where.orderDate.lte = end;
     }
   }
+  // Commission rate range filter (user inputs as %, stored as decimal)
+  if (sp.rateMin || sp.rateMax) {
+    where.commissionRate = {};
+    if (sp.rateMin) where.commissionRate.gte = Number(sp.rateMin) / 100;
+    if (sp.rateMax) where.commissionRate.lte = Number(sp.rateMax) / 100;
+  }
   return where;
 }
 
@@ -132,6 +138,8 @@ function exportQueryString(
     "types",
     "from",
     "to",
+    "rateMin",
+    "rateMax",
   ]) {
     if (sp[k]) params.set(k, sp[k]!);
   }
@@ -627,6 +635,11 @@ async function DashboardTab({
 
   const currencyCode = getCurrencyCode(regions);
   const fmtCurrency = (n: number | null | undefined) => formatCurrencyWith(n, currencyCode);
+  const sym = currencySymbol(currencyCode);
+
+  // Filter zero-value entries from all chart distributions
+  const nonZero = (pairs: { name: string; value: number }[]) =>
+    pairs.filter((p) => p.value !== 0);
 
   return (
     <>
@@ -636,13 +649,13 @@ async function DashboardTab({
         <StatCard
           label="总销售额"
           value={fmtCurrency(totalRevenue)}
-          icon={<DollarSign className="h-5 w-5" />}
+          icon={<span className="text-base font-bold leading-none">{sym}</span>}
           accent="text-brand-600"
         />
         <StatCard
           label="联盟商佣金"
           value={fmtCurrency(totalCommission)}
-          icon={<Percent className="h-5 w-5" />}
+          icon={<span className="text-base font-bold leading-none">{sym}</span>}
           accent="text-emerald-600"
         />
         <StatCard
@@ -655,11 +668,11 @@ async function DashboardTab({
 
       {!isChannel && (
         <SalesDashboard
-          programDist={programDist}
-          platformDist={platformDist}
-          typeDist={typeDist}
-          commissionRateDist={commissionRateDist}
-          brandBars={brandBars}
+          programDist={nonZero(programDist)}
+          platformDist={nonZero(platformDist)}
+          typeDist={nonZero(typeDist)}
+          commissionRateDist={nonZero(commissionRateDist)}
+          brandBars={nonZero(brandBars)}
           newAffiliates={newAffiliates}
           topCreators={topCreators}
           topProducts={topProducts}

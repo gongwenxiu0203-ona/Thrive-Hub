@@ -11,7 +11,7 @@ import {
   Download,
 } from "lucide-react";
 import { deleteBatch } from "@/actions/sales";
-import { getMappableFields } from "@/lib/salesImport";
+import { getMappableFields, FIELD_HINTS } from "@/lib/salesImport";
 import { PLATFORM_NAMES } from "@/lib/platformMappings";
 import { formatDateTime, formatNumber } from "@/lib/utils";
 
@@ -114,7 +114,10 @@ export function UploadPanel({
       setError("请先选择关联客户后再导入数据。");
       return;
     }
-    const missing = MAPPABLE.filter((f) => f.required && !mapping[f.key]);
+    // Fields with auto-fallback don't require a manual mapping
+    const missing = MAPPABLE.filter(
+      (f) => f.required && !mapping[f.key] && !FIELD_HINTS[f.key],
+    );
     if (missing.length > 0) {
       setError(
         `以下必填字段尚未映射：${missing
@@ -159,7 +162,11 @@ export function UploadPanel({
         (data.skipped as unknown[])?.length > 0
           ? `，跳过 ${(data.skipped as unknown[]).length} 行（缺失必填值）`
           : "";
-      setDone(`成功导入 ${data.imported} 条销售记录${skippedNote}`);
+      const affNote =
+        (data.newAffiliateCount as number) > 0
+          ? `；已将 ${data.newAffiliateCount} 个新联盟商自动添加至资源库（状态：待开发）`
+          : "";
+      setDone(`成功导入 ${data.imported} 条销售记录${skippedNote}${affNote}`);
       setParsed(null);
       setMapping({});
       router.refresh();
@@ -180,6 +187,24 @@ export function UploadPanel({
 
   return (
     <div className="space-y-6">
+      {/* Upload rules notice */}
+      <section className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+        <p className="mb-2 text-sm font-semibold text-amber-800">📋 数据上传规则</p>
+        <ol className="list-decimal list-inside space-y-1 text-xs text-amber-700">
+          <li>源数据从平台下载后上传时，缺少的必填字段需在映射步骤中手动补足（如品牌、佣金比例等）。</li>
+          <li>上传前请删除无效数据行（如销售金额为 0、佣金为 0 的行），避免影响统计准确性。</li>
+        </ol>
+        <div className="mt-3 flex items-center gap-2">
+          <a
+            href="/api/sales/template"
+            className="inline-flex items-center gap-1 text-xs text-amber-800 underline hover:text-amber-900"
+          >
+            <Download className="h-3.5 w-3.5" /> 下载通用上传模板
+          </a>
+          <span className="text-xs text-amber-500">（不区分平台，包含所有必填列）</span>
+        </div>
+      </section>
+
       <section className="card p-6">
         <input
           ref={inputRef}
@@ -211,7 +236,7 @@ export function UploadPanel({
           </div>
           <div>
             <label className="label">
-              联盟平台 <span className="text-slate-400 text-xs font-normal">（可选）</span>
+              联盟平台 <span className="text-slate-400 text-xs font-normal">（映射表中可覆盖）</span>
             </label>
             <select
               className="input"
@@ -231,19 +256,22 @@ export function UploadPanel({
               ))}
             </select>
           </div>
-          <div className="flex items-end">
+          <div className="flex items-end gap-2">
             {platform ? (
               <a
                 href={`/api/sales/template?platform=${encodeURIComponent(platform)}`}
-                className="btn-secondary w-full justify-center"
+                className="btn-secondary flex-1 justify-center"
               >
                 <Download className="h-4 w-4" />
-                下载{platform}模板
+                {platform} 模板
               </a>
             ) : (
-              <button className="btn-secondary w-full" disabled>
-                <Download className="h-4 w-4" /> 先选择平台
-              </button>
+              <a
+                href="/api/sales/template"
+                className="btn-secondary flex-1 justify-center"
+              >
+                <Download className="h-4 w-4" /> 通用模板
+              </a>
             )}
           </div>
         </div>
@@ -315,6 +343,7 @@ export function UploadPanel({
                     const preview = col
                       ? String(parsed.sampleRows[0]?.[col] ?? "")
                       : "";
+                    const hint = FIELD_HINTS[field.key];
                     return (
                       <tr key={field.key}>
                         <td className="font-medium text-slate-700">
@@ -322,11 +351,16 @@ export function UploadPanel({
                           {field.required && (
                             <span className="ml-1 text-rose-500">*</span>
                           )}
+                          {hint && (
+                            <p className="mt-0.5 text-[10px] font-normal text-slate-400">
+                              {hint}
+                            </p>
+                          )}
                         </td>
                         <td>
                           <select
                             className={`input ${
-                              field.required && !col ? "border-rose-400" : ""
+                              field.required && !col && !hint ? "border-rose-400" : ""
                             }`}
                             value={col}
                             onChange={(e) =>
@@ -336,7 +370,7 @@ export function UploadPanel({
                               }))
                             }
                           >
-                            <option value="">— 不导入 —</option>
+                            <option value="">— {hint ? "自动处理" : "不导入"} —</option>
                             {parsed.columns.map((c) => (
                               <option key={c} value={c}>
                                 {c}
@@ -345,7 +379,7 @@ export function UploadPanel({
                           </select>
                         </td>
                         <td className="max-w-[12rem] truncate text-xs text-slate-400">
-                          {preview || "—"}
+                          {preview || (hint ? <span className="italic">{hint}</span> : "—")}
                         </td>
                       </tr>
                     );

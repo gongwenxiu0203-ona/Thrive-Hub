@@ -26,9 +26,9 @@ export const SALES_FIELDS: SalesField[] = [
   // 维度
   {
     key: "affiliatePlatform",
-    label: "联盟平台 Affiiate Network Platform",
+    label: "联盟平台 Affiliate Network Platform",
     type: "string",
-    source: "system",
+    source: "upload",
   },
   {
     key: "affiliateProgram",

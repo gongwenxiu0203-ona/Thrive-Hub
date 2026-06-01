@@ -4,6 +4,7 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { MultiSelectFilter } from "@/components/ui/MultiSelectFilter";
 import { DateRangeFilter } from "./DateRangeFilter";
 import { X } from "lucide-react";
+import { useState, useEffect } from "react";
 
 const FILTER_KEYS = [
   "platforms",
@@ -18,6 +19,8 @@ const FILTER_KEYS = [
   "labels",
   "from",
   "to",
+  "rateMin",
+  "rateMax",
 ] as const;
 
 export type FilterOptions = {
@@ -43,6 +46,24 @@ export function BIFilters({
   const router = useRouter();
   const pathname = usePathname();
   const sp = useSearchParams();
+
+  // Local state for rate range inputs (string to allow partial typing)
+  const [rateMin, setRateMin] = useState(sp.get("rateMin") ?? "");
+  const [rateMax, setRateMax] = useState(sp.get("rateMax") ?? "");
+
+  // Sync local state if URL params change externally (e.g. clearAll)
+  useEffect(() => {
+    setRateMin(sp.get("rateMin") ?? "");
+    setRateMax(sp.get("rateMax") ?? "");
+  }, [sp]);
+
+  function applyRateFilter() {
+    const next = new URLSearchParams(sp.toString());
+    if (rateMin) next.set("rateMin", rateMin); else next.delete("rateMin");
+    if (rateMax) next.set("rateMax", rateMax); else next.delete("rateMax");
+    next.delete("page");
+    router.push(`${pathname}?${next.toString()}`);
+  }
 
   function clearAll() {
     const next = new URLSearchParams(sp.toString());
@@ -167,6 +188,42 @@ export function BIFilters({
               options={toOpts(options.labels)}
               width="w-full"
             />
+          </FilterCell>
+        )}
+        {!isChannel && (
+          <FilterCell label="佣金比例范围（%）">
+            <div className="flex items-center gap-1">
+              <input
+                type="number"
+                min={0}
+                max={100}
+                step={0.01}
+                placeholder="下限"
+                className="input w-full text-sm"
+                value={rateMin}
+                onChange={(e) => setRateMin(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && applyRateFilter()}
+              />
+              <span className="shrink-0 text-slate-400">—</span>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                step={0.01}
+                placeholder="上限"
+                className="input w-full text-sm"
+                value={rateMax}
+                onChange={(e) => setRateMax(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && applyRateFilter()}
+              />
+              <button
+                type="button"
+                onClick={applyRateFilter}
+                className="btn-primary btn-sm shrink-0"
+              >
+                确定
+              </button>
+            </div>
           </FilterCell>
         )}
       </div>
