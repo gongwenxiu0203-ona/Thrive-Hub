@@ -379,14 +379,18 @@ async function DashboardTab({
   const typeDist = group((r) => resolveType(r.affiliateName, r.affiliateType) || "未分类");
   const brandBars = group((r) => r.brand).slice(0, 12);
 
-  // Commission rate distribution: bucket by percentage with 2-decimal precision.
-  // Round to nearest 0.01% (0.0001 of raw rate) so e.g. 0.01 → "1.00%",
-  // 0.001 → "0.10%", 0.015 → "1.50%". No coarse 5%-step bucketing.
+  // Commission rate distribution: for >= 1% round to integer, for < 1% keep 2 decimal places.
   const rateCounts = new Map<string, number>();
   for (const r of records) {
-    // Multiply by 10000, round, then divide by 100 → 2-decimal percentage value
-    const pctVal = Math.round(r.commissionRate * 10000) / 100;
-    const key = `${pctVal.toFixed(2)}%`; // e.g. 0.01 → "1.00%", 0.001 → "0.10%"
+    const rawPct = r.commissionRate * 100; // convert decimal rate to percentage
+    let key: string;
+    if (rawPct >= 1) {
+      key = `${Math.round(rawPct)}%`;      // integer for >= 1%
+    } else if (rawPct > 0) {
+      key = `${rawPct.toFixed(2)}%`;       // 2 decimal places for < 1%
+    } else {
+      key = "0%";
+    }
     rateCounts.set(key, (rateCounts.get(key) ?? 0) + 1);
   }
   const commissionRateDist = [...rateCounts.entries()]
