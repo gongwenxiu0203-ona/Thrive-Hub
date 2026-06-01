@@ -22,6 +22,8 @@ export async function GET(req: NextRequest) {
   const sampleShips  = multi("sampleShipping");
   const regions      = multi("regions");
   const q            = sp.get("q")?.trim() ?? "";
+  const dateFrom     = sp.get("dateFrom")?.trim();
+  const dateTo       = sp.get("dateTo")?.trim();
   const months       = Math.max(1, Math.min(24, parseInt(sp.get("months") ?? "6", 10)));
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -30,15 +32,26 @@ export async function GET(req: NextRequest) {
     { platformAffiliateName: { contains: q } },
     { internalAffiliateName: { contains: q } },
   ];
-  if (sources.length)     where.source           = { in: sources };
-  if (categories.length)  where.category         = { in: categories };
-  if (types.length)       where.affiliateType    = { in: types };
-  if (brands.length)      where.brand            = { in: brands };
+  if (sources.length)     where.source            = { in: sources };
+  if (categories.length)  where.category          = { in: categories };
+  if (types.length)       where.affiliateType     = { in: types };
+  if (brands.length)      where.brand             = { in: brands };
   if (statuses.length)    where.developmentStatus = { in: statuses };
-  if (owners.length)      where.personInChargeId = { in: owners };
-  if (topCreators.length) where.topCreator       = { in: topCreators };
-  if (sampleShips.length) where.sampleShipping   = { in: sampleShips };
-  if (regions.length)     where.region           = { in: regions };
+  if (owners.length)      where.personInChargeId  = { in: owners };
+  if (topCreators.length) where.topCreator        = { in: topCreators };
+  if (sampleShips.length) where.sampleShipping    = { in: sampleShips };
+  if (regions.length)     where.region            = { in: regions };
+
+  if (dateFrom || dateTo) {
+    const dateFilter: Record<string, Date> = {};
+    if (dateFrom) dateFilter.gte = new Date(dateFrom);
+    if (dateTo) {
+      const d = new Date(dateTo);
+      d.setHours(23, 59, 59, 999);
+      dateFilter.lte = d;
+    }
+    where.createdAt = dateFilter;
+  }
 
   if (tags.length) {
     where.AND = [
@@ -84,16 +97,13 @@ export async function GET(req: NextRequest) {
     },
   });
 
-  // Helpers
   const countBy = (fn: (a: (typeof affiliates)[0]) => string | null | undefined) => {
     const map: Record<string, number> = {};
     for (const a of affiliates) {
       const v = fn(a) ?? "未填写";
       map[v] = (map[v] ?? 0) + 1;
     }
-    return Object.entries(map)
-      .sort((a, b) => b[1] - a[1])
-      .map(([name, value]) => ({ name, value }));
+    return Object.entries(map).sort((a, b) => b[1] - a[1]).map(([name, value]) => ({ name, value }));
   };
 
   const flatJsonCount = (getter: (a: (typeof affiliates)[0]) => string | null | undefined) => {
@@ -103,26 +113,31 @@ export async function GET(req: NextRequest) {
       if (!s) continue;
       try {
         const arr = JSON.parse(s);
-        if (Array.isArray(arr)) {
-          arr.forEach((v: string) => { if (v) map[v] = (map[v] ?? 0) + 1; });
-        }
+        if (Array.isArray(arr)) arr.forEach((v: string) => { if (v) map[v] = (map[v] ?? 0) + 1; });
       } catch { /* ignore */ }
     }
-    return Object.entries(map)
-      .sort((a, b) => b[1] - a[1])
-      .map(([name, value]) => ({ name, value }));
+    return Object.entries(map).sort((a, b) => b[1] - a[1]).map(([name, value]) => ({ name, value }));
   };
 
-  // Monthly new (configurable months)
+  // Trend window: use dateFrom/dateTo if provided, else last N months
   const now = new Date();
-  const monthlyNew = Array.from({ length: months }, (_, i) => {
-    const d = new Date(now.getFullYear(), now.getMonth() - (months - 1 - i), 1);
-    const next = new Date(d.getFullYear(), d.getMonth() + 1, 1);
-    const label = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-    return { month: label, count: affiliates.filter((a) => a.createdAt >= d && a.createdAt < next).length };
-  });
+  const trendStart = dateFrom
+    ? (() => { const d = new Date(dateFrom); return new Date(d.getFullYear(), d.getMonth(), 1); })()
+    : new Date(now.getFullYear(), now.getMonth() - (months - 1), 1);
+  const trendEnd = dateTo
+    ? (() => { const d = new Date(dateTo); return new Date(d.getFullYear(), d.getMonth() + 1, 1); })()
+    : new Date(now.getFullYear(), now.getMonth() + 1, 1);
 
-  // Placements flatfee totals per platform
+  const monthlyNew: { month: string; count: number }[] = [];
+  let cur = new Date(trendStart);
+  while (cur < trendEnd && monthlyNew.length < 120) {
+    const next = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+    const label = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, "0")}`;
+    const count = affiliates.filter((a) => a.createdAt >= cur && a.createdAt < next).length;
+    monthlyNew.push({ month: label, count });
+    cur = next;
+  }
+
   const parsePlacements = (json: string) => {
     try { const a = JSON.parse(json); return Array.isArray(a) ? a : []; } catch { return []; }
   };
@@ -131,8 +146,6 @@ export async function GET(req: NextRequest) {
       const pls = parsePlacements(getter(a));
       return s + pls.reduce((ps: number, p: { flatfee?: number | null }) => ps + (p.flatfee ?? 0), 0);
     }, 0);
-
-  const byOwner = countBy((a) => a.personInCharge?.name ?? "未分配");
 
   return NextResponse.json({
     total: affiliates.length,
@@ -146,7 +159,7 @@ export async function GET(req: NextRequest) {
     byTopCreator:     countBy((a) => a.topCreator),
     bySampleShipping: countBy((a) => a.sampleShipping),
     byRegion:         countBy((a) => a.region),
-    byOwner,
+    byOwner:          countBy((a) => a.personInCharge?.name ?? "未分配"),
     totalFollowers: {
       Instagram: affiliates.reduce((s, a) => s + (a.insFollowers ?? 0), 0),
       YouTube:   affiliates.reduce((s, a) => s + (a.youtubeFollowers ?? 0), 0),

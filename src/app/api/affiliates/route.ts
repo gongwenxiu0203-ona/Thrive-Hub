@@ -24,6 +24,8 @@ export async function GET(req: NextRequest) {
   const modes = multi("modes");
   const owners = multi("owners");
   const regions = multi("regions");
+  const dateFrom = sp.get("dateFrom")?.trim();
+  const dateTo = sp.get("dateTo")?.trim();
   const names = multi("names");        // 联盟商名称 (platformAffiliateName)
   const pics = multi("pics");          // 负责人 (matches User.name OR personInChargeName text)
   // Sales-linked filters (brand / affiliateType from SalesRecord)
@@ -48,6 +50,16 @@ export async function GET(req: NextRequest) {
   if (owners.length) where.personInChargeId = { in: owners };
   if (names.length) where.platformAffiliateName = { in: names };
   if (regions.length) where.region = { in: regions };
+  if (dateFrom || dateTo) {
+    const dateFilter: Record<string, Date> = {};
+    if (dateFrom) dateFilter.gte = new Date(dateFrom);
+    if (dateTo) {
+      const d = new Date(dateTo);
+      d.setHours(23, 59, 59, 999);
+      dateFilter.lte = d;
+    }
+    where.createdAt = dateFilter;
+  }
 
   // pic filter spans User-linked name and uploaded text — wrap in AND so it
   // composes with any pre-existing where.OR (e.g., from the q search).

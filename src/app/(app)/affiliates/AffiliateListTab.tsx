@@ -75,8 +75,15 @@ export default function AffiliateListTab({ options }: Props) {
   const [q, setQ] = useState(sp.get("q") ?? "");
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [dateFromVal, setDateFromVal] = useState(sp.get("dateFrom") ?? "");
+  const [dateToVal, setDateToVal] = useState(sp.get("dateTo") ?? "");
   const page = parseInt(sp.get("page") ?? "1", 10);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(() => {
+    setDateFromVal(sp.get("dateFrom") ?? "");
+    setDateToVal(sp.get("dateTo") ?? "");
+  }, [sp]);
 
   const buildQuery = useCallback(() => {
     const p = new URLSearchParams(sp.toString());
@@ -195,6 +202,48 @@ export default function AffiliateListTab({ options }: Props) {
           <FilterCell label="地区 Region">
             <MultiSelectFilter paramKey="regions" placeholder="请选择" options={toOpts(options.regions ?? [])} width="w-full" />
           </FilterCell>
+        </div>
+        {/* Date range */}
+        <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2">
+          <span className="shrink-0 text-[11px] text-slate-500">新增起止时间</span>
+          <input
+            type="date"
+            value={dateFromVal}
+            onChange={(e) => setDateFromVal(e.target.value)}
+            className="rounded border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          />
+          <span className="text-xs text-slate-400">—</span>
+          <input
+            type="date"
+            value={dateToVal}
+            onChange={(e) => setDateToVal(e.target.value)}
+            className="rounded border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          />
+          <button
+            onClick={() => {
+              const p = new URLSearchParams(sp.toString());
+              if (dateFromVal) p.set("dateFrom", dateFromVal); else p.delete("dateFrom");
+              if (dateToVal) p.set("dateTo", dateToVal); else p.delete("dateTo");
+              p.delete("page");
+              router.push(`${pathname}?${p.toString()}`);
+            }}
+            className="rounded bg-brand-600 px-3 py-1 text-xs font-medium text-white hover:bg-brand-700"
+          >
+            确定
+          </button>
+          {(sp.get("dateFrom") || sp.get("dateTo")) && (
+            <button
+              onClick={() => {
+                setDateFromVal(""); setDateToVal("");
+                const p = new URLSearchParams(sp.toString());
+                p.delete("dateFrom"); p.delete("dateTo"); p.delete("page");
+                router.push(`${pathname}?${p.toString()}`);
+              }}
+              className="flex items-center gap-0.5 text-xs text-slate-400 hover:text-rose-500"
+            >
+              <X className="h-3 w-3" />清除日期
+            </button>
+          )}
         </div>
       </div>
 
