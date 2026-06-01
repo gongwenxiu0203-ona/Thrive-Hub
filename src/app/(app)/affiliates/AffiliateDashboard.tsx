@@ -21,10 +21,44 @@ const COLORS = [
 ];
 const RADIAN = Math.PI / 180;
 
-// Logo geometry constants (thraive-logo.png: 1765×2107 total; icon = top 72.9%)
+// ── Thraive logo geometry (thraive-logo.png: 1765×2107; icon = top 72.9%) ────
+// All coordinates normalised to icon dimensions (0-1)
 const LOGO_ICON_H_FRAC = 0.729;
-const LOGO_IMG_ASPECT  = 1765 / 2107;       // full image w/h
+const LOGO_IMG_ASPECT  = 1765 / 2107;
 const LOGO_ICON_ASPECT = 1765 / (2107 * LOGO_ICON_H_FRAC); // ≈1.149
+
+// Bezier left-edge of middle bar: bottom-left (0.164,1.0)→top-right (0.479,0.349)
+// control point (0.164, 0.349) → left boundary: x = 0.164 + 0.315·t²
+// where t is solved from quadratic: 0.651t² - 1.302t + (1-ny) = 0
+function midBarXLeft(ny: number): number {
+  const disc = 2.604 * ny - 0.909;
+  if (disc < 0) return 1;
+  const t = (1.302 - Math.sqrt(disc)) / 1.302;
+  return 0.164 + 0.315 * t * t;
+}
+
+function isInsideLogoIcon(
+  x: number, y: number,
+  iconX: number, iconY: number, iconW: number, iconH: number
+): boolean {
+  const nx = (x - iconX) / iconW;
+  const ny = (y - iconY) / iconH;
+  if (nx < 0 || nx > 1 || ny < 0 || ny > 1) return false;
+
+  // Dot circle (cx=0.082, cy=0.867, r=0.055)
+  const ddx = nx - 0.082, ddy = ny - 0.867;
+  if (ddx * ddx + ddy * ddy <= 0.055 * 0.055) return true;
+
+  // Middle bar ramp (right side x≤0.479, y range 0.349–1.0)
+  if (nx >= 0.01 && nx <= 0.479 && ny >= 0.349 && ny <= 1.0) {
+    if (nx >= midBarXLeft(ny)) return true;
+  }
+
+  // Right bar rectangle (x 0.601–0.765, y 0.033–1.0)
+  if (nx >= 0.601 && nx <= 0.765 && ny >= 0.033 && ny <= 1.0) return true;
+
+  return false;
+}
 
 interface StatsData {
   total: number;
@@ -62,41 +96,34 @@ interface Props {
   };
 }
 
-// ── Pie/donut label: name + % rendered inside the slice ──────────────────────
-function PieLabel({ cx, cy, midAngle, innerRadius, outerRadius, percent, name }: {
-  cx: number; cy: number; midAngle: number;
-  innerRadius: number; outerRadius: number; percent: number; name: string;
-}) {
-  if (percent < 0.05) return null;
-  const r = innerRadius + (outerRadius - innerRadius) * 0.58;
+// ── Outside label: name + % with leader line ─────────────────────────────────
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function OuterLabel({ cx, cy, midAngle, outerRadius, percent, name }: any) {
+  const r = outerRadius + 20;
   const x = cx + r * Math.cos(-midAngle * RADIAN);
   const y = cy + r * Math.sin(-midAngle * RADIAN);
-  const pctStr = `${Math.round(percent * 100)}%`;
-
-  if (percent < 0.12) {
-    return (
-      <text x={x} y={y} fill="white" textAnchor="middle" dominantBaseline="central"
-        fontSize={8} fontWeight={700}>{pctStr}</text>
-    );
-  }
-
-  const short = name.length > 9 ? name.slice(0, 8) + "…" : name;
-  const fs = percent > 0.20 ? 10 : 9;
+  const isRight = x >= cx;
   return (
-    <text textAnchor="middle" fill="white" fontWeight={700}>
-      <tspan x={x} y={y} dy="-0.55em" fontSize={fs}>{short}</tspan>
-      <tspan x={x} dy="1.3em" fontSize={fs - 1}>{pctStr}</tspan>
+    <text
+      fill="#334155"
+      textAnchor={isRight ? "start" : "end"}
+      dominantBaseline="central"
+      fontWeight={500}
+    >
+      <tspan x={x} y={y} dy="-0.52em" fontSize={9}>{name}</tspan>
+      <tspan x={x} dy="1.25em" fontSize={8.5} fill="#6366f1" fontWeight={700}>
+        {Math.round(percent * 100)}%
+      </tspan>
     </text>
   );
 }
 
-// ── Word cloud placement — three logo zones ───────────────────────────────────
+// ── Word-cloud placement inside logo shapes ───────────────────────────────────
 type PlacedWord = { text: string; x: number; y: number; size: number; idx: number };
 
 function placeWordsLogo(data: Pair[], W: number, H: number): PlacedWord[] {
   if (!W || !H) return [];
 
-  // Scale icon to fill 86% of panel
   let iconW = W * 0.86, iconH = iconW / LOGO_ICON_ASPECT;
   if (iconH > H * 0.86) { iconH = H * 0.86; iconW = iconH * LOGO_ICON_ASPECT; }
   const iconX = (W - iconW) / 2;
@@ -106,13 +133,13 @@ function placeWordsLogo(data: Pair[], W: number, H: number): PlacedWord[] {
   const max = sorted[0]?.value ?? 1;
   const min = sorted[sorted.length - 1]?.value ?? 0;
   const range = max - min || 1;
-  const getSize = (v: number) => Math.round(8 + ((v - min) / range) * 17);
+  const getSize = (v: number) => Math.round(8 + ((v - min) / range) * 16);
 
-  // Three zone centres (normalised within icon bounds)
+  // Zone spiral centres in absolute coords (middle bar / right bar / dot)
   const zones = [
-    { cx: iconX + 0.30 * iconW, cy: iconY + 0.68 * iconH, ry: 0.80 }, // middle bar
-    { cx: iconX + 0.68 * iconW, cy: iconY + 0.52 * iconH, ry: 0.65 }, // right bar
-    { cx: iconX + 0.093 * iconW, cy: iconY + 0.865 * iconH, ry: 0.60 }, // dot
+    { cx: iconX + 0.32 * iconW, cy: iconY + 0.68 * iconH },
+    { cx: iconX + 0.683 * iconW, cy: iconY + 0.52 * iconH },
+    { cx: iconX + 0.082 * iconW, cy: iconY + 0.867 * iconH },
   ];
 
   const placed: Array<PlacedWord & { w: number; h: number }> = [];
@@ -123,25 +150,31 @@ function placeWordsLogo(data: Pair[], W: number, H: number): PlacedWord[] {
     const ww = word.name.length * size * 0.60;
     const wh = size * 1.35;
 
-    // distribute: 60% → middle bar, 35% → right bar, 5% → dot
     const frac = idx / sorted.length;
-    const zoneOrder = frac < 0.60 ? [0, 1, 2] : frac < 0.95 ? [1, 0, 2] : [2, 0, 1];
+    const zoneOrder = frac < 0.58 ? [0, 1, 2] : frac < 0.93 ? [1, 0, 2] : [2, 0, 1];
 
     let found = false;
     for (const zi of zoneOrder) {
       if (found) break;
       const zone = zones[zi];
-      for (let t = 0; t < 700 && !found; t++) {
-        const angle = t * 0.48;
-        const radius = t * 1.15;
+      for (let t = 0; t < 2500 && !found; t++) {
+        const angle = t * 0.42;
+        const radius = t * 0.80;
         const x = zone.cx + radius * Math.cos(angle);
-        const y = zone.cy + radius * Math.sin(angle) * zone.ry;
-        if (x - ww / 2 < 2 || x + ww / 2 > W - 2) continue;
-        if (y - wh / 2 < 2 || y + wh / 2 > H - 2) continue;
+        const y = zone.cy + radius * Math.sin(angle);
+
+        // Centre and both horizontal edges must be inside logo
+        if (!isInsideLogoIcon(x, y, iconX, iconY, iconW, iconH)) continue;
+        if (!isInsideLogoIcon(x - ww / 2 + 3, y, iconX, iconY, iconW, iconH)) continue;
+        if (!isInsideLogoIcon(x + ww / 2 - 3, y, iconX, iconY, iconW, iconH)) continue;
+
         const overlaps = placed.some(
           (p) => Math.abs(x - p.x) < (ww + p.w) / 2 + 2 && Math.abs(y - p.y) < (wh + p.h) / 2 + 1
         );
-        if (!overlaps) { placed.push({ text: word.name, x, y, size, idx, w: ww, h: wh }); found = true; }
+        if (!overlaps) {
+          placed.push({ text: word.name, x, y, size, idx, w: ww, h: wh });
+          found = true;
+        }
       }
     }
   }
@@ -243,21 +276,15 @@ export default function AffiliateDashboard({ options }: Props) {
           <FC label="负责人 Person in Charge">
             <MultiSelectFilter paramKey="owners" placeholder="请选择" options={userOpts} width="w-full" />
           </FC>
-          {/* Date range — same height as other filter cells, spans 2 cols */}
+          {/* Date range — same height as other filter cells */}
           <div className="sm:col-span-2 xl:col-span-2">
             <p className="mb-1 text-[11px] text-slate-500">新增起止时间</p>
             <div className="flex items-center gap-1">
-              <input
-                type="date" value={dateFromVal}
-                onChange={(e) => setDateFromVal(e.target.value)}
-                className="h-[30px] flex-1 min-w-0 rounded border border-slate-200 px-2 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-brand-500"
-              />
+              <input type="date" value={dateFromVal} onChange={(e) => setDateFromVal(e.target.value)}
+                className="h-[30px] flex-1 min-w-0 rounded border border-slate-200 px-2 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-brand-500" />
               <span className="shrink-0 text-xs text-slate-400">—</span>
-              <input
-                type="date" value={dateToVal}
-                onChange={(e) => setDateToVal(e.target.value)}
-                className="h-[30px] flex-1 min-w-0 rounded border border-slate-200 px-2 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-brand-500"
-              />
+              <input type="date" value={dateToVal} onChange={(e) => setDateToVal(e.target.value)}
+                className="h-[30px] flex-1 min-w-0 rounded border border-slate-200 px-2 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-brand-500" />
               <button onClick={applyDate}
                 className="h-[30px] shrink-0 rounded bg-brand-600 px-2.5 text-xs font-medium text-white hover:bg-brand-700">
                 确定
@@ -291,7 +318,7 @@ export default function AffiliateDashboard({ options }: Props) {
 
       {data && !loading && (
         <div className="space-y-4">
-          {/* Row 1: type pie | tag cloud | source donut */}
+          {/* Row 1 */}
           <div className="grid gap-4 lg:grid-cols-3">
             <PanelCard title="联盟商类型 Type 分布" exportRows={data.byType.map((d) => ({ 类型: d.name, 数量: d.value }))}>
               <PieView data={nonZero(data.byType)} />
@@ -304,7 +331,7 @@ export default function AffiliateDashboard({ options }: Props) {
             </PanelCard>
           </div>
 
-          {/* Row 2: brand donut | owner vbar | status donut */}
+          {/* Row 2 */}
           <div className="grid gap-4 lg:grid-cols-3">
             <PanelCard title="品牌 Brand 分布" exportRows={data.byBrand.map((d) => ({ 品牌: d.name, 数量: d.value }))}>
               <DonutView data={nonZero(data.byBrand)} />
@@ -317,7 +344,7 @@ export default function AffiliateDashboard({ options }: Props) {
             </PanelCard>
           </div>
 
-          {/* Row 3: trend */}
+          {/* Row 3 */}
           <PanelCard title="联盟商新增数量" exportRows={data.monthlyNew.map((d) => ({ 月份: d.month, 新增数量: d.count }))}>
             <ResponsiveContainer width="100%" height={240}>
               <LineChart data={data.monthlyNew} margin={{ left: 0, right: 16 }}>
@@ -336,7 +363,6 @@ export default function AffiliateDashboard({ options }: Props) {
 }
 
 // ── Layout helpers ────────────────────────────────────────────────────────────
-
 function FC({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
@@ -356,22 +382,24 @@ function KpiCard({ label, value }: { label: string; value: string | number }) {
 }
 
 // ── Chart components ──────────────────────────────────────────────────────────
-
 function PieView({ data }: { data: Pair[] }) {
   const total = data.reduce((s, d) => s + d.value, 0);
   if (!data.length || !total) return <Empty />;
   return (
-    <ResponsiveContainer width="100%" height="100%">
-      <PieChart>
-        <Pie data={data} dataKey="value" cx="50%" cy="50%"
-          outerRadius="78%" innerRadius={0}
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          label={(props: any) => <PieLabel {...props} />} labelLine={false}>
-          {data.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-        </Pie>
-        <Tooltip formatter={(v: number) => [`${v} (${Math.round((v / total) * 100)}%)`, ""]} />
-      </PieChart>
-    </ResponsiveContainer>
+    // overflow:visible lets long labels bleed past the panel edge
+    <div className="h-full w-full" style={{ overflow: "visible" }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <PieChart margin={{ top: 30, right: 100, bottom: 30, left: 100 }}>
+          <Pie data={data} dataKey="value" cx="50%" cy="50%"
+            outerRadius="50%" innerRadius={0}
+            label={(props) => <OuterLabel {...props} />}
+            labelLine={{ stroke: "#cbd5e1", strokeWidth: 1 }}>
+            {data.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+          </Pie>
+          <Tooltip formatter={(v: number) => [`${v} (${Math.round((v / total) * 100)}%)`, ""]} />
+        </PieChart>
+      </ResponsiveContainer>
+    </div>
   );
 }
 
@@ -379,17 +407,19 @@ function DonutView({ data }: { data: Pair[] }) {
   const total = data.reduce((s, d) => s + d.value, 0);
   if (!data.length || !total) return <Empty />;
   return (
-    <ResponsiveContainer width="100%" height="100%">
-      <PieChart>
-        <Pie data={data} dataKey="value" cx="50%" cy="50%"
-          outerRadius="78%" innerRadius="42%"
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          label={(props: any) => <PieLabel {...props} />} labelLine={false}>
-          {data.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-        </Pie>
-        <Tooltip formatter={(v: number) => [`${v} (${Math.round((v / total) * 100)}%)`, ""]} />
-      </PieChart>
-    </ResponsiveContainer>
+    <div className="h-full w-full" style={{ overflow: "visible" }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <PieChart margin={{ top: 30, right: 100, bottom: 30, left: 100 }}>
+          <Pie data={data} dataKey="value" cx="50%" cy="50%"
+            outerRadius="50%" innerRadius="30%"
+            label={(props) => <OuterLabel {...props} />}
+            labelLine={{ stroke: "#cbd5e1", strokeWidth: 1 }}>
+            {data.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+          </Pie>
+          <Tooltip formatter={(v: number) => [`${v} (${Math.round((v / total) * 100)}%)`, ""]} />
+        </PieChart>
+      </ResponsiveContainer>
+    </div>
   );
 }
 
@@ -411,7 +441,7 @@ function VBarView({ data }: { data: Pair[] }) {
   );
 }
 
-// ── Tag cloud — words masked to Thraive logo icon shape ───────────────────────
+// ── Tag cloud: words geometrically FILLED into Thraive logo icon shapes ───────
 function TagCloud({ data }: { data: Pair[] }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [words, setWords] = useState<PlacedWord[]>([]);
@@ -432,49 +462,30 @@ function TagCloud({ data }: { data: Pair[] }) {
     setWords(placeWordsLogo(data, dims.w, dims.h));
   }, [data, dims]);
 
-  // Compute logo image position (icon portion centred in panel)
   const { w: W, h: H } = dims;
   let iconW = W * 0.86, iconH = iconW / LOGO_ICON_ASPECT;
   if (iconH > H * 0.86) { iconH = H * 0.86; iconW = iconH * LOGO_ICON_ASPECT; }
   const iconX = (W - iconW) / 2;
   const iconY = (H - iconH) / 2;
-  const fullImgH = iconW / LOGO_IMG_ASPECT; // full PNG height at this scale
+  const fullImgH = iconW / LOGO_IMG_ASPECT;
 
   return (
     <div ref={containerRef} className="h-full w-full">
       {dims.w > 0 && (
-        <svg width={W} height={H} style={{ overflow: "hidden" }}>
-          <defs>
-            {/* Invert logo so dark marks → white in mask (= visible area) */}
-            <filter id="twcInvert" colorInterpolationFilters="sRGB">
-              <feColorMatrix type="matrix"
-                values="-1 0 0 0 1  0 -1 0 0 1  0 0 -1 0 1  0 0 0 1 0" />
-            </filter>
-            <mask id="twcMask">
-              <image href="/thraive-logo.png"
-                x={iconX} y={iconY} width={iconW} height={fullImgH}
-                filter="url(#twcInvert)" />
-              {/* Block the "THRAIVE" text portion below the icon */}
-              <rect x={0} y={iconY + iconH} width={W} height={H} fill="black" />
-            </mask>
-          </defs>
-
-          {/* Faint logo silhouette as background */}
+        <svg width={W} height={H}>
+          {/* Faint logo silhouette so shapes are visible even where words don't fill */}
           <image href="/thraive-logo.png"
-            x={iconX} y={iconY} width={iconW} height={fullImgH} opacity={0.06} />
-
-          {/* Words clipped to logo icon shape */}
-          <g mask="url(#twcMask)">
-            {words.map((w) => (
-              <text key={w.text} x={w.x} y={w.y} fontSize={w.size}
-                fill={COLORS[w.idx % COLORS.length]}
-                textAnchor="middle" dominantBaseline="middle"
-                fontWeight={700} style={{ cursor: "default", userSelect: "none" }}>
-                <title>{w.text}</title>
-                {w.text}
-              </text>
-            ))}
-          </g>
+            x={iconX} y={iconY} width={iconW} height={fullImgH} opacity={0.08} />
+          {/* Words placed geometrically within logo shapes */}
+          {words.map((w) => (
+            <text key={w.text} x={w.x} y={w.y} fontSize={w.size}
+              fill={COLORS[w.idx % COLORS.length]}
+              textAnchor="middle" dominantBaseline="middle"
+              fontWeight={700} style={{ cursor: "default", userSelect: "none" }}>
+              <title>{w.text}: {data.find(d => d.name === w.text)?.value}</title>
+              {w.text}
+            </text>
+          ))}
         </svg>
       )}
     </div>
@@ -482,7 +493,5 @@ function TagCloud({ data }: { data: Pair[] }) {
 }
 
 function Empty() {
-  return (
-    <div className="flex h-32 items-center justify-center text-sm text-slate-400">暂无数据</div>
-  );
+  return <div className="flex h-32 items-center justify-center text-sm text-slate-400">暂无数据</div>;
 }
