@@ -21,6 +21,11 @@ const COLORS = [
 ];
 const RADIAN = Math.PI / 180;
 
+// Logo geometry constants (thraive-logo.png: 1765×2107 total; icon = top 72.9%)
+const LOGO_ICON_H_FRAC = 0.729;
+const LOGO_IMG_ASPECT  = 1765 / 2107;       // full image w/h
+const LOGO_ICON_ASPECT = 1765 / (2107 * LOGO_ICON_H_FRAC); // ≈1.149
+
 interface StatsData {
   total: number;
   bySource: Pair[];
@@ -57,61 +62,86 @@ interface Props {
   };
 }
 
-// ── Pie label rendered inside the slice ──────────────────────────────────────
-function PieLabel({ cx, cy, midAngle, innerRadius, outerRadius, percent }: {
+// ── Pie/donut label: name + % rendered inside the slice ──────────────────────
+function PieLabel({ cx, cy, midAngle, innerRadius, outerRadius, percent, name }: {
   cx: number; cy: number; midAngle: number;
-  innerRadius: number; outerRadius: number; percent: number;
+  innerRadius: number; outerRadius: number; percent: number; name: string;
 }) {
   if (percent < 0.05) return null;
-  const r = innerRadius + (outerRadius - innerRadius) * 0.55;
+  const r = innerRadius + (outerRadius - innerRadius) * 0.58;
   const x = cx + r * Math.cos(-midAngle * RADIAN);
   const y = cy + r * Math.sin(-midAngle * RADIAN);
+  const pctStr = `${Math.round(percent * 100)}%`;
+
+  if (percent < 0.12) {
+    return (
+      <text x={x} y={y} fill="white" textAnchor="middle" dominantBaseline="central"
+        fontSize={8} fontWeight={700}>{pctStr}</text>
+    );
+  }
+
+  const short = name.length > 9 ? name.slice(0, 8) + "…" : name;
+  const fs = percent > 0.20 ? 10 : 9;
   return (
-    <text x={x} y={y} fill="white" textAnchor="middle" dominantBaseline="central"
-      fontSize={percent > 0.15 ? 11 : 9} fontWeight={700}>
-      {`${Math.round(percent * 100)}%`}
+    <text textAnchor="middle" fill="white" fontWeight={700}>
+      <tspan x={x} y={y} dy="-0.55em" fontSize={fs}>{short}</tspan>
+      <tspan x={x} dy="1.3em" fontSize={fs - 1}>{pctStr}</tspan>
     </text>
   );
 }
 
-// ── Word cloud placement ──────────────────────────────────────────────────────
+// ── Word cloud placement — three logo zones ───────────────────────────────────
 type PlacedWord = { text: string; x: number; y: number; size: number; idx: number };
 
-function placeWords(data: Pair[], width: number, height: number): PlacedWord[] {
-  if (!width || !height) return [];
+function placeWordsLogo(data: Pair[], W: number, H: number): PlacedWord[] {
+  if (!W || !H) return [];
+
+  // Scale icon to fill 86% of panel
+  let iconW = W * 0.86, iconH = iconW / LOGO_ICON_ASPECT;
+  if (iconH > H * 0.86) { iconH = H * 0.86; iconW = iconH * LOGO_ICON_ASPECT; }
+  const iconX = (W - iconW) / 2;
+  const iconY = (H - iconH) / 2;
+
   const sorted = [...data].sort((a, b) => b.value - a.value);
   const max = sorted[0]?.value ?? 1;
   const min = sorted[sorted.length - 1]?.value ?? 0;
   const range = max - min || 1;
-  const getSize = (v: number) => Math.round(11 + ((v - min) / range) * 21);
-  const cx = width / 2, cy = height / 2;
-  const rx = width * 0.44, ry = height * 0.42;
+  const getSize = (v: number) => Math.round(8 + ((v - min) / range) * 17);
+
+  // Three zone centres (normalised within icon bounds)
+  const zones = [
+    { cx: iconX + 0.30 * iconW, cy: iconY + 0.68 * iconH, ry: 0.80 }, // middle bar
+    { cx: iconX + 0.68 * iconW, cy: iconY + 0.52 * iconH, ry: 0.65 }, // right bar
+    { cx: iconX + 0.093 * iconW, cy: iconY + 0.865 * iconH, ry: 0.60 }, // dot
+  ];
 
   const placed: Array<PlacedWord & { w: number; h: number }> = [];
 
   for (let idx = 0; idx < sorted.length; idx++) {
     const word = sorted[idx];
     const size = getSize(word.value);
-    const w = word.name.length * size * 0.58;
-    const h = size * 1.25;
+    const ww = word.name.length * size * 0.60;
+    const wh = size * 1.35;
+
+    // distribute: 60% → middle bar, 35% → right bar, 5% → dot
+    const frac = idx / sorted.length;
+    const zoneOrder = frac < 0.60 ? [0, 1, 2] : frac < 0.95 ? [1, 0, 2] : [2, 0, 1];
+
     let found = false;
-    for (let t = 0; t < 1200 && !found; t++) {
-      const angle = t * 0.42;
-      const radius = t * 1.4;
-      const x = cx + radius * Math.cos(angle);
-      const y = cy + radius * Math.sin(angle) * 0.72;
-      // must be inside the elliptical cloud
-      const nx = (x - cx) / rx, ny = (y - cy) / ry;
-      if (nx * nx + ny * ny > 0.9) continue;
-      if (x - w / 2 < 4 || x + w / 2 > width - 4) continue;
-      if (y - h / 2 < 4 || y + h / 2 > height - 4) continue;
-      const overlaps = placed.some(p =>
-        Math.abs(x - p.x) < (w + p.w) / 2 + 3 &&
-        Math.abs(y - p.y) < (h + p.h) / 2 + 2
-      );
-      if (!overlaps) {
-        placed.push({ text: word.name, x, y, size, idx, w, h });
-        found = true;
+    for (const zi of zoneOrder) {
+      if (found) break;
+      const zone = zones[zi];
+      for (let t = 0; t < 700 && !found; t++) {
+        const angle = t * 0.48;
+        const radius = t * 1.15;
+        const x = zone.cx + radius * Math.cos(angle);
+        const y = zone.cy + radius * Math.sin(angle) * zone.ry;
+        if (x - ww / 2 < 2 || x + ww / 2 > W - 2) continue;
+        if (y - wh / 2 < 2 || y + wh / 2 > H - 2) continue;
+        const overlaps = placed.some(
+          (p) => Math.abs(x - p.x) < (ww + p.w) / 2 + 2 && Math.abs(y - p.y) < (wh + p.h) / 2 + 1
+        );
+        if (!overlaps) { placed.push({ text: word.name, x, y, size, idx, w: ww, h: wh }); found = true; }
       }
     }
   }
@@ -213,25 +243,32 @@ export default function AffiliateDashboard({ options }: Props) {
           <FC label="负责人 Person in Charge">
             <MultiSelectFilter paramKey="owners" placeholder="请选择" options={userOpts} width="w-full" />
           </FC>
-          {/* Date range — spans 2 columns on wider screens */}
+          {/* Date range — same height as other filter cells, spans 2 cols */}
           <div className="sm:col-span-2 xl:col-span-2">
             <p className="mb-1 text-[11px] text-slate-500">新增起止时间</p>
-            <div className="flex flex-wrap items-center gap-1.5">
+            <div className="flex items-center gap-1">
               <input
                 type="date" value={dateFromVal}
                 onChange={(e) => setDateFromVal(e.target.value)}
-                className="flex-1 min-w-0 rounded border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                className="h-[30px] flex-1 min-w-0 rounded border border-slate-200 px-2 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-brand-500"
               />
-              <span className="text-xs text-slate-400">—</span>
+              <span className="shrink-0 text-xs text-slate-400">—</span>
               <input
                 type="date" value={dateToVal}
                 onChange={(e) => setDateToVal(e.target.value)}
-                className="flex-1 min-w-0 rounded border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                className="h-[30px] flex-1 min-w-0 rounded border border-slate-200 px-2 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-brand-500"
               />
-              <button onClick={applyDate} className="shrink-0 rounded bg-brand-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-brand-700">确定</button>
+              <button onClick={applyDate}
+                className="h-[30px] shrink-0 rounded bg-brand-600 px-2.5 text-xs font-medium text-white hover:bg-brand-700">
+                确定
+              </button>
               {dateActive && (
-                <button onClick={() => { setDateFromVal(""); setDateToVal(""); const n = new URLSearchParams(sp.toString()); n.delete("dateFrom"); n.delete("dateTo"); router.push(`${pathname}?${n.toString()}`); }}
-                  className="shrink-0 text-xs text-slate-400 hover:text-rose-500">
+                <button onClick={() => {
+                  setDateFromVal(""); setDateToVal("");
+                  const n = new URLSearchParams(sp.toString());
+                  n.delete("dateFrom"); n.delete("dateTo");
+                  router.push(`${pathname}?${n.toString()}`);
+                }} className="shrink-0 text-slate-400 hover:text-rose-500">
                   <X className="h-3.5 w-3.5" />
                 </button>
               )}
@@ -260,7 +297,7 @@ export default function AffiliateDashboard({ options }: Props) {
               <PieView data={nonZero(data.byType)} />
             </PanelCard>
             <PanelCard title="联盟商标签 词云" exportRows={data.byTag.map((d) => ({ 标签: d.name, 数量: d.value }))}>
-              <TagCloud data={data.byTag.slice(0, 55)} />
+              <TagCloud data={data.byTag.slice(0, 60)} />
             </PanelCard>
             <PanelCard title="联盟商来源 分布" exportRows={data.bySource.map((d) => ({ 来源: d.name, 数量: d.value }))}>
               <DonutView data={nonZero(data.bySource)} />
@@ -326,13 +363,10 @@ function PieView({ data }: { data: Pair[] }) {
   return (
     <ResponsiveContainer width="100%" height="100%">
       <PieChart>
-        <Pie
-          data={data} dataKey="value" cx="50%" cy="50%"
+        <Pie data={data} dataKey="value" cx="50%" cy="50%"
           outerRadius="78%" innerRadius={0}
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          label={(props: any) => <PieLabel {...props} />}
-          labelLine={false}
-        >
+          label={(props: any) => <PieLabel {...props} />} labelLine={false}>
           {data.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
         </Pie>
         <Tooltip formatter={(v: number) => [`${v} (${Math.round((v / total) * 100)}%)`, ""]} />
@@ -347,13 +381,10 @@ function DonutView({ data }: { data: Pair[] }) {
   return (
     <ResponsiveContainer width="100%" height="100%">
       <PieChart>
-        <Pie
-          data={data} dataKey="value" cx="50%" cy="50%"
+        <Pie data={data} dataKey="value" cx="50%" cy="50%"
           outerRadius="78%" innerRadius="42%"
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          label={(props: any) => <PieLabel {...props} />}
-          labelLine={false}
-        >
+          label={(props: any) => <PieLabel {...props} />} labelLine={false}>
           {data.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
         </Pie>
         <Tooltip formatter={(v: number) => [`${v} (${Math.round((v / total) * 100)}%)`, ""]} />
@@ -368,11 +399,8 @@ function VBarView({ data }: { data: Pair[] }) {
     <ResponsiveContainer width="100%" height="100%">
       <BarChart data={data} margin={{ left: 0, right: 8, top: 20, bottom: 52 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-        <XAxis
-          dataKey="name" tick={{ fontSize: 9 }} angle={-35}
-          textAnchor="end" interval={0}
-          tickFormatter={(v: string) => v.length > 8 ? v.slice(0, 8) + "…" : v}
-        />
+        <XAxis dataKey="name" tick={{ fontSize: 9 }} angle={-35} textAnchor="end" interval={0}
+          tickFormatter={(v: string) => v.length > 8 ? v.slice(0, 8) + "…" : v} />
         <YAxis tick={{ fontSize: 10 }} allowDecimals={false} width={28} />
         <Tooltip />
         <Bar dataKey="value" name="数量" fill="#6366f1" radius={[4, 4, 0, 0]}>
@@ -383,6 +411,7 @@ function VBarView({ data }: { data: Pair[] }) {
   );
 }
 
+// ── Tag cloud — words masked to Thraive logo icon shape ───────────────────────
 function TagCloud({ data }: { data: Pair[] }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [words, setWords] = useState<PlacedWord[]>([]);
@@ -390,40 +419,62 @@ function TagCloud({ data }: { data: Pair[] }) {
 
   useEffect(() => {
     if (!containerRef.current) return;
-    const { width, height } = containerRef.current.getBoundingClientRect();
-    if (width > 0 && height > 0) setDims({ w: width, h: height });
+    const obs = new ResizeObserver(([e]) => {
+      const { width, height } = e.contentRect;
+      if (width > 0 && height > 0) setDims({ w: width, h: height });
+    });
+    obs.observe(containerRef.current);
+    return () => obs.disconnect();
   }, []);
 
   useEffect(() => {
     if (!data.length || !dims.w) return;
-    setWords(placeWords(data, dims.w, dims.h));
+    setWords(placeWordsLogo(data, dims.w, dims.h));
   }, [data, dims]);
+
+  // Compute logo image position (icon portion centred in panel)
+  const { w: W, h: H } = dims;
+  let iconW = W * 0.86, iconH = iconW / LOGO_ICON_ASPECT;
+  if (iconH > H * 0.86) { iconH = H * 0.86; iconW = iconH * LOGO_ICON_ASPECT; }
+  const iconX = (W - iconW) / 2;
+  const iconY = (H - iconH) / 2;
+  const fullImgH = iconW / LOGO_IMG_ASPECT; // full PNG height at this scale
 
   return (
     <div ref={containerRef} className="h-full w-full">
       {dims.w > 0 && (
-        <svg width={dims.w} height={dims.h}>
-          {/* Cloud outline ellipse (subtle background) */}
-          <ellipse
-            cx={dims.w / 2} cy={dims.h / 2}
-            rx={dims.w * 0.44} ry={dims.h * 0.42}
-            fill="#f8fafc" stroke="#e2e8f0" strokeWidth={1}
-          />
-          {words.map((w) => (
-            <text
-              key={w.text}
-              x={w.x} y={w.y}
-              fontSize={w.size}
-              fill={COLORS[w.idx % COLORS.length]}
-              textAnchor="middle"
-              dominantBaseline="middle"
-              fontWeight={700}
-              style={{ cursor: "default", userSelect: "none" }}
-            >
-              <title>{w.text}</title>
-              {w.text}
-            </text>
-          ))}
+        <svg width={W} height={H} style={{ overflow: "hidden" }}>
+          <defs>
+            {/* Invert logo so dark marks → white in mask (= visible area) */}
+            <filter id="twcInvert" colorInterpolationFilters="sRGB">
+              <feColorMatrix type="matrix"
+                values="-1 0 0 0 1  0 -1 0 0 1  0 0 -1 0 1  0 0 0 1 0" />
+            </filter>
+            <mask id="twcMask">
+              <image href="/thraive-logo.png"
+                x={iconX} y={iconY} width={iconW} height={fullImgH}
+                filter="url(#twcInvert)" />
+              {/* Block the "THRAIVE" text portion below the icon */}
+              <rect x={0} y={iconY + iconH} width={W} height={H} fill="black" />
+            </mask>
+          </defs>
+
+          {/* Faint logo silhouette as background */}
+          <image href="/thraive-logo.png"
+            x={iconX} y={iconY} width={iconW} height={fullImgH} opacity={0.06} />
+
+          {/* Words clipped to logo icon shape */}
+          <g mask="url(#twcMask)">
+            {words.map((w) => (
+              <text key={w.text} x={w.x} y={w.y} fontSize={w.size}
+                fill={COLORS[w.idx % COLORS.length]}
+                textAnchor="middle" dominantBaseline="middle"
+                fontWeight={700} style={{ cursor: "default", userSelect: "none" }}>
+                <title>{w.text}</title>
+                {w.text}
+              </text>
+            ))}
+          </g>
         </svg>
       )}
     </div>
