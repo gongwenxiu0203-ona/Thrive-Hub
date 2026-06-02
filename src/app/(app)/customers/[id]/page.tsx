@@ -44,7 +44,8 @@ export default async function CustomerDetailPage({
       },
     }),
     prisma.channelReconciliation.findFirst({
-      where: { customerId: id, autoCreated: true },
+      where: { customerId: id },
+      orderBy: { createdAt: "desc" },
       include: { periods: { orderBy: { periodIndex: "asc" } } },
     }),
   ]);

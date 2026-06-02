@@ -60,7 +60,7 @@ export function ChannelReconciliationDetailModal({
   onSaved: () => void;
 }) {
   const [view, setView] = useState<"setup" | "periods">(
-    record.autoCreated ? (record.periods.length > 0 ? "periods" : "setup") : "setup"
+    record.periods.length > 0 ? "periods" : "setup"
   );
 
   return (
@@ -74,46 +74,39 @@ export function ChannelReconciliationDetailModal({
               </h2>
               <p className="mt-0.5 text-xs text-slate-500">
                 合同 {record.contract?.contractNo ?? "—"} · 渠道商 {record.channelUser.name}
-                {record.autoCreated && " · 自动创建"}
               </p>
             </div>
-            {record.autoCreated && (
-              <div className="flex gap-1 rounded-lg bg-slate-100 p-0.5">
-                <button
-                  onClick={() => setView("setup")}
-                  className={`flex items-center gap-1 rounded-md px-3 py-1 text-xs font-medium transition-colors ${
-                    view === "setup" ? "bg-white shadow text-slate-800" : "text-slate-500 hover:text-slate-700"
-                  }`}
-                >
-                  <Settings className="h-3 w-3" />分账设置
-                </button>
-                <button
-                  onClick={() => setView("periods")}
-                  className={`flex items-center gap-1 rounded-md px-3 py-1 text-xs font-medium transition-colors ${
-                    view === "periods" ? "bg-white shadow text-slate-800" : "text-slate-500 hover:text-slate-700"
-                  }`}
-                >
-                  <Calendar className="h-3 w-3" />期数管理
-                  {record.periods.length > 0 && (
-                    <span className="ml-1 rounded-full bg-brand-100 px-1.5 text-[10px] text-brand-700">
-                      {record.periods.length}
-                    </span>
-                  )}
-                </button>
-              </div>
-            )}
+            <div className="flex gap-1 rounded-lg bg-slate-100 p-0.5">
+              <button
+                onClick={() => setView("setup")}
+                className={`flex items-center gap-1 rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+                  view === "setup" ? "bg-white shadow text-slate-800" : "text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                <Settings className="h-3 w-3" />分账设置
+              </button>
+              <button
+                onClick={() => setView("periods")}
+                className={`flex items-center gap-1 rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+                  view === "periods" ? "bg-white shadow text-slate-800" : "text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                <Calendar className="h-3 w-3" />期数管理
+                {record.periods.length > 0 && (
+                  <span className="ml-1 rounded-full bg-brand-100 px-1.5 text-[10px] text-brand-700">
+                    {record.periods.length}
+                  </span>
+                )}
+              </button>
+            </div>
           </div>
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 py-5">
-          {record.autoCreated ? (
-            view === "setup" ? (
-              <SetupView record={record} onSaved={onSaved} />
-            ) : (
-              <PeriodsView record={record} onSaved={onSaved} />
-            )
+          {view === "setup" ? (
+            <SetupView record={record} onSaved={onSaved} />
           ) : (
-            <LegacyView record={record} onSaved={onSaved} />
+            <PeriodsView record={record} onSaved={onSaved} />
           )}
         </div>
 
