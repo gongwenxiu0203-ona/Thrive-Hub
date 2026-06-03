@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
-import { convertRow, getMappableFields } from "@/lib/salesImport";
+import { convertRow, getMappableFields, FIELD_HINTS } from "@/lib/salesImport";
 import { parseSheet } from "@/lib/excel";
 import { readFile, unlink } from "fs/promises";
 import path from "path";
@@ -105,9 +105,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "没有可导入的数据行" }, { status: 400 });
     }
 
-    // Required user-mapped fields.
+    // Required user-mapped fields (skip fields with auto-fallback, e.g. brand / affiliatePlatform / commissionRate).
     const required = getMappableFields().filter((f) => f.required);
-    const missing = required.filter((f) => !mapping[f.key]);
+    const missing = required.filter((f) => !mapping[f.key] && !FIELD_HINTS[f.key]);
     if (missing.length > 0) {
       deleteTempFile(tempId);
       return NextResponse.json(
