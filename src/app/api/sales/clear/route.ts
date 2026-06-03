@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
+import { isStaff } from "@/lib/permissions";
 
 // Clear sales records by filter. No row-count limit.
 // Body: { filter: { platforms?, programs?, brands?, regions?, stores?,
@@ -12,9 +13,9 @@ import { getSession } from "@/lib/session";
 export async function POST(req: Request) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
-  if (session.role !== "ADMIN") {
+  if (!isStaff(session.role)) {
     return NextResponse.json(
-      { error: "仅管理员可执行数据清理" },
+      { error: "仅内部员工可执行数据清理" },
       { status: 403 },
     );
   }
