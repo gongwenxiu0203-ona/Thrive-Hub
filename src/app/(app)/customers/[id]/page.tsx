@@ -24,6 +24,7 @@ import {
   labelOf,
 } from "@/lib/constants";
 import { formatDate } from "@/lib/utils";
+import { isStaff } from "@/lib/permissions";
 
 export default async function CustomerDetailPage({
   params,
@@ -146,7 +147,7 @@ export default async function CustomerDetailPage({
             <div className="flex items-center gap-2">
               <ShareIntakeButton customerId={customer.id} brandName={customer.brandName} size="md" />
               <CustomerFormModal users={userOptions} customer={editData} />
-              {session.role === "ADMIN" && <DeleteCustomerButton id={customer.id} />}
+              {isStaff(session.role) && <DeleteCustomerButton id={customer.id} />}
             </div>
           </div>
         </div>

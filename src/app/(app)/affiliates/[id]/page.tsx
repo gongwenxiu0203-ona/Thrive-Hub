@@ -4,6 +4,7 @@ import { ExternalLink } from "lucide-react";
 import { BackButton } from "@/components/BackButton";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
+import { isStaff } from "@/lib/permissions";
 import { AFFILIATE_DEV_STATUS_COLORS } from "@/lib/constants";
 import { parsePlacements } from "@/lib/affiliateFields";
 import AffiliateDetailClient from "./AffiliateDetailClient";
@@ -139,6 +140,7 @@ export default async function AffiliateDetailPage({
           affiliatePlatforms={affiliatePlatforms}
           salesData={salesRecords}
           currentUserId={session.userId}
+          canDelete={isStaff(session.role)}
         />
       </div>
 

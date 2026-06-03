@@ -2,6 +2,7 @@
 
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Check, RotateCcw } from "lucide-react";
 import { toggleRead } from "@/actions/reminders";
 import { Badge } from "@/components/ui/Badge";
@@ -12,6 +13,15 @@ import {
   labelOf,
 } from "@/lib/constants";
 import { formatDate, daysUntil, cn } from "@/lib/utils";
+
+const REMINDER_TYPE_HREF: Record<string, string> = {
+  DELIVERY:         "/finance",
+  MEETING:          "/tasks",
+  CONTRACT_EXPIRY:  "/contracts",
+  REVIEW:           "/tasks",
+  FOLLOWUP:         "/customers",
+  STATUS_CHECK:     "/customers",
+};
 
 type Option = { id: string; name: string };
 
@@ -31,6 +41,7 @@ export function ReminderItem({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const dleft = daysUntil(reminder.remindDate);
+  const navHref = REMINDER_TYPE_HREF[reminder.type] ?? "/tasks";
 
   function toggle() {
     startTransition(async () => {
@@ -50,14 +61,15 @@ export function ReminderItem({
     >
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <span
+          <Link
+            href={navHref}
             className={cn(
-              "text-sm font-medium",
+              "text-sm font-medium hover:underline hover:text-brand-600 transition-colors",
               reminder.isRead ? "text-slate-600" : "text-slate-900",
             )}
           >
             {reminder.title}
-          </span>
+          </Link>
           <Badge className={REMINDER_TYPE_COLORS[reminder.type]}>
             {labelOf(REMINDER_TYPE_LABELS, reminder.type)}
           </Badge>
