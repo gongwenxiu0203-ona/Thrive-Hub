@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { FileDown, Pencil } from "lucide-react";
 import { BackButton } from "@/components/BackButton";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
@@ -161,7 +162,27 @@ export default async function ContractDetailPage({
             </Badge>
           </div>
           <div className="flex items-center gap-2">
-            {contract.status === "IN_PROGRESS" && (
+            {/* V4 合同：编辑 + 下载 */}
+            {c.fillMethod && contract.status === "IN_PROGRESS" && (
+              <Link
+                href={`/contracts/new?contractId=${contract.id}`}
+                className="btn-secondary flex items-center gap-1.5 text-sm"
+              >
+                <Pencil className="h-4 w-4" /> 编辑合同信息
+              </Link>
+            )}
+            {c.fillMethod && (
+              <a
+                href={`/api/contracts/generate-doc/${contract.id}`}
+                target="_blank"
+                rel="noreferrer"
+                className="btn-outline flex items-center gap-1.5 text-sm"
+              >
+                <FileDown className="h-4 w-4" /> 下载合同 DOCX
+              </a>
+            )}
+            {/* 旧版合同：原有编辑弹窗 */}
+            {!c.fillMethod && contract.status === "IN_PROGRESS" && (
               <ContractFormModal
                 users={userOptions}
                 currentUserId={session.userId}
@@ -270,6 +291,100 @@ export default async function ContractDetailPage({
           />
         </dl>
       </section>
+
+      {/* V4 甲方信息卡片 */}
+      {c.fillMethod && (
+        <section className="card p-5">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="font-semibold text-slate-900">甲方信息</h2>
+            <span className="rounded-full bg-brand-50 px-2.5 py-0.5 text-xs text-brand-600">
+              {c.fillMethod === "AI_EXTRACT" ? "AI识别填写" : c.fillMethod === "EXTERNAL_LINK" ? "客户外部填写" : "手动填写"}
+            </span>
+          </div>
+          <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
+            <Field label="甲方签约主体" value={contract.partyA ?? "—"} />
+            <Field label="统一社会信用代码" value={c.partyACreditCode ?? "—"} />
+            <Field label="法定代表人" value={c.partyALegalRep ?? "—"} />
+            <Field label="甲方地址" value={c.partyAAddress ?? "—"} />
+            <Field label="甲方指定联系人" value={c.partyAContact ?? "—"} />
+            <Field label="联系电话" value={c.partyAPhone ?? "—"} />
+            <Field label="联系邮箱" value={c.partyAEmail ?? "—"} />
+            <Field label="税费" value={`${c.taxType ?? "不含税"}；${c.taxBearer ?? "甲方"}承担`} />
+            <Field label="固费金额" value={c.feeAmount ? `${c.feeCurrency} ${c.feeAmount} / 月` : "—"} />
+            <Field label="首期服务费" value={c.firstPeriodFee != null ? `${c.feeCurrency === "美金" ? "$" : "¥"}${c.firstPeriodFee}` : "—"} />
+            <Field label="固费支付周期" value={c.feeCycle ?? "—"} />
+            <Field label="GMV结算周期" value={c.gmvSettlementCycle ?? "—"} />
+          </dl>
+
+          {/* 推广商品清单 */}
+          {(() => {
+            let products: Array<{name:string;asin:string;price:string;trackLink:string}> = [];
+            try { products = JSON.parse(c.productList ?? "[]"); } catch {}
+            if (!products.length) return null;
+            return (
+              <div className="mt-4">
+                <p className="mb-2 text-sm font-medium text-slate-600">推广商品清单</p>
+                <div className="overflow-x-auto rounded-lg border border-slate-200">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-100 bg-slate-50 text-xs text-slate-500">
+                        <th className="px-3 py-2 text-left">商品名称</th>
+                        <th className="px-3 py-2 text-left">ASIN</th>
+                        <th className="px-3 py-2 text-left">零售价</th>
+                        <th className="px-3 py-2 text-left">追踪链接/优惠码</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {products.map((p, i) => (
+                        <tr key={i} className="border-b border-slate-50 last:border-0">
+                          <td className="px-3 py-2">{p.name || "—"}</td>
+                          <td className="px-3 py-2 font-mono text-xs">{p.asin || "—"}</td>
+                          <td className="px-3 py-2">{p.price || "—"}</td>
+                          <td className="px-3 py-2 max-w-[200px] truncate text-xs text-slate-500">{p.trackLink || "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* 合作渠道 */}
+          {(() => {
+            let channels: string[] = [];
+            try { channels = JSON.parse(c.coopChannels ?? "[]"); } catch {}
+            if (!channels.length) return null;
+            const labelMap: Record<string,string> = {
+              ACC: "Amazon Creator Connections（ACC）", Attribution: "Amazon Attribution",
+              Associates: "Amazon Affiliate Associates", AmazonLive: "Amazon Live",
+              Levanta: "Levanta", Impact: "Impact", Wayward: "Wayward",
+              ArcherAffiliates: "Archer Affiliates", PrivateSocial: "私域/社媒/流量渠道",
+            };
+            return (
+              <div className="mt-4">
+                <p className="mb-2 text-sm font-medium text-slate-600">确认合作渠道</p>
+                <div className="flex flex-wrap gap-2">
+                  {channels.map(k => (
+                    <span key={k} className="rounded-full bg-brand-50 px-3 py-1 text-xs text-brand-700">
+                      ☑ {labelMap[k] ?? k}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* 外部填写链接 */}
+          {c.externalFillToken && (
+            <div className="mt-4 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+              <p className="text-xs text-slate-500">
+                外部填写链接有效至：{c.externalFillExpiry ? new Date(c.externalFillExpiry).toLocaleDateString("zh-CN") : "—"}
+              </p>
+            </div>
+          )}
+        </section>
+      )}
 
       {/* 关键字段 + 原文对照 */}
       <ContractCompare

@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Briefcase, Wrench, CalendarClock, FileText, Users, ArrowRight, TrendingUp, Wallet } from "lucide-react";
+import { Briefcase, Wrench, CalendarClock, FileText, Users, ArrowRight, TrendingUp, Wallet, Plus } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import {
   setBusinessOwner,
@@ -198,12 +198,12 @@ export function InternalManagement({
         <div>
           <div className="mb-2 flex items-center justify-between">
             <p className="text-xs font-medium text-slate-500">关联合同</p>
-            <ContractFormModal
-              presetCustomerId={customerId}
-              presetCustomerName={customerName}
-              users={users}
-              trigger="link"
-            />
+            <Link
+              href={`/contracts/new?customerId=${customerId}`}
+              className="btn-primary btn-sm flex items-center gap-1"
+            >
+              <Plus className="h-3 w-3" /> 新增合同
+            </Link>
           </div>
           {contracts.length === 0 ? (
             <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-400">

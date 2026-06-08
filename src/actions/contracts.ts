@@ -378,3 +378,171 @@ export async function markCompleted(id: string) {
   revalidatePath(`/customers/${contract.customerId}`);
   revalidatePath("/finance");
 }
+
+// ─── V4 合同表单（新版甲方项目确认书）────────────────────────────────────────
+
+export interface ContractV4Payload {
+  customerId: string;
+  // 甲方信息
+  partyAName: string;
+  partyACreditCode?: string;
+  partyALegalRep?: string;
+  partyAAddress?: string;
+  partyAContact?: string;
+  partyAPhone?: string;
+  partyAEmail?: string;
+  // 合作信息
+  promoPlatform?: string;
+  targetSite?: string;        // comma-separated
+  startDate?: string;
+  endDate?: string;
+  taxType?: string;
+  taxBearer?: string;
+  // 费用
+  feeAmount?: string;
+  feeCurrency?: string;
+  firstPeriodFee?: number;
+  feeCycle?: string;
+  // GMV 佣金
+  commissionType?: string;
+  commissionRate?: string;
+  thresholdAmount?: string;
+  thresholdCurrency?: string;
+  tieredRules?: string;
+  excessBaseMonths?: string;
+  excessCommissionRate?: string;
+  gmvSettlementCycle?: string;
+  // 推广信息
+  productList?: string;     // JSON string
+  coopChannels?: string;    // JSON string
+  // 填写方式
+  fillMethod?: string;
+}
+
+export async function createContractV4(
+  payload: ContractV4Payload,
+): Promise<ContractSaveResult> {
+  const session = await requireSession();
+  const { customerId, partyAName } = payload;
+  if (!customerId) return { ok: false, error: "请选择关联客户" };
+  if (!partyAName) return { ok: false, error: "甲方公司名称为必填项" };
+
+  const year = new Date().getFullYear();
+  const existing = await prisma.contract.findMany({
+    where: { contractNo: { startsWith: `THRAIVE-${year}-` } },
+    select: { contractNo: true },
+  });
+  let max = 0;
+  for (const { contractNo } of existing) {
+    const seq = parseInt(contractNo.split("-").pop() ?? "0", 10);
+    if (!isNaN(seq) && seq > max) max = seq;
+  }
+  const contractNo = `THRAIVE-${year}-${String(max + 1).padStart(3, "0")}`;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const contract = await (prisma.contract.create as any)({
+    data: {
+      contractNo,
+      customerId,
+      type: "BRAND",
+      status: "IN_PROGRESS",
+      createdById: session.userId,
+      ownerId: session.userId,
+      fillMethod: payload.fillMethod ?? "MANUAL",
+      // 甲方信息
+      partyA: partyAName,
+      partyACreditCode: payload.partyACreditCode || null,
+      partyALegalRep: payload.partyALegalRep || null,
+      partyAAddress: payload.partyAAddress || null,
+      partyAContact: payload.partyAContact || null,
+      partyAPhone: payload.partyAPhone || null,
+      partyAEmail: payload.partyAEmail || null,
+      // 合作信息
+      promoPlatform: payload.promoPlatform || null,
+      targetSite: payload.targetSite || null,
+      startDate: payload.startDate ? new Date(payload.startDate) : null,
+      endDate: payload.endDate ? new Date(payload.endDate) : null,
+      taxType: payload.taxType || "不含税",
+      taxBearer: payload.taxBearer || "甲方",
+      // 费用
+      feeAmount: payload.feeAmount || null,
+      feeCurrency: payload.feeCurrency || "人民币",
+      firstPeriodFee: payload.firstPeriodFee ?? null,
+      feeCycle: payload.feeCycle || "季度预付",
+      // GMV 佣金
+      commissionType: payload.commissionType || "FIXED",
+      commissionRate: payload.commissionRate || null,
+      thresholdAmount: payload.thresholdAmount || null,
+      thresholdCurrency: payload.thresholdCurrency || "人民币",
+      tieredRules: payload.tieredRules || null,
+      excessBaseMonths: payload.excessBaseMonths || null,
+      excessCommissionRate: payload.excessCommissionRate || null,
+      gmvSettlementCycle: payload.gmvSettlementCycle || "月度",
+      // 推广信息
+      productList: payload.productList || null,
+      coopChannels: payload.coopChannels || null,
+    },
+  });
+
+  await bumpCustomerStatus(customerId, "CONTRACT_IN_PROGRESS");
+  revalidatePath("/contracts");
+  revalidatePath(`/customers/${customerId}`);
+  return { ok: true, contractId: contract.id };
+}
+
+export async function updateContractV4(
+  id: string,
+  payload: Partial<ContractV4Payload>,
+): Promise<ContractSaveResult> {
+  await requireSession();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (prisma.contract.update as any)({
+    where: { id },
+    data: {
+      partyA: payload.partyAName,
+      partyACreditCode: payload.partyACreditCode ?? undefined,
+      partyALegalRep: payload.partyALegalRep ?? undefined,
+      partyAAddress: payload.partyAAddress ?? undefined,
+      partyAContact: payload.partyAContact ?? undefined,
+      partyAPhone: payload.partyAPhone ?? undefined,
+      partyAEmail: payload.partyAEmail ?? undefined,
+      promoPlatform: payload.promoPlatform ?? undefined,
+      targetSite: payload.targetSite ?? undefined,
+      startDate: payload.startDate ? new Date(payload.startDate) : undefined,
+      endDate: payload.endDate ? new Date(payload.endDate) : undefined,
+      taxType: payload.taxType ?? undefined,
+      taxBearer: payload.taxBearer ?? undefined,
+      feeAmount: payload.feeAmount ?? undefined,
+      feeCurrency: payload.feeCurrency ?? undefined,
+      firstPeriodFee: payload.firstPeriodFee ?? undefined,
+      feeCycle: payload.feeCycle ?? undefined,
+      commissionType: payload.commissionType ?? undefined,
+      commissionRate: payload.commissionRate ?? undefined,
+      thresholdAmount: payload.thresholdAmount ?? undefined,
+      thresholdCurrency: payload.thresholdCurrency ?? undefined,
+      tieredRules: payload.tieredRules ?? undefined,
+      excessBaseMonths: payload.excessBaseMonths ?? undefined,
+      excessCommissionRate: payload.excessCommissionRate ?? undefined,
+      gmvSettlementCycle: payload.gmvSettlementCycle ?? undefined,
+      productList: payload.productList ?? undefined,
+      coopChannels: payload.coopChannels ?? undefined,
+    },
+  });
+  revalidatePath("/contracts");
+  revalidatePath(`/contracts/${id}`);
+  return { ok: true, contractId: id };
+}
+
+/** 生成外部填写 token，有效期 7 天 */
+export async function generateFillToken(contractId: string): Promise<{ token: string }> {
+  await requireSession();
+  const token = crypto.randomUUID();
+  const expiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (prisma.contract.update as any)({
+    where: { id: contractId },
+    data: { externalFillToken: token, externalFillExpiry: expiry, fillMethod: "EXTERNAL_LINK" },
+  });
+  revalidatePath(`/contracts/${contractId}`);
+  return { token };
+}

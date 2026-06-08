@@ -12,6 +12,8 @@ const PUBLIC_PREFIXES = [
   "/intake",
   "/api/intake",
   "/api/auth",
+  "/contract-fill",        // 外部合同填写链接（无需登录）
+  "/api/contract-fill",    // 外部填写提交 API
 ];
 
 export async function middleware(req: NextRequest) {
