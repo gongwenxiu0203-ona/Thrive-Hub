@@ -1,5 +1,5 @@
 ﻿import Link from "next/link";
-import { Download } from "lucide-react";
+import { Download, FilePlus, Upload } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -109,10 +109,16 @@ export default async function ContractsPage({
               <Download className="h-4 w-4" />
               下载合同模板
             </a>
+            {/* 新建合同（V4 模板） */}
+            <Link href="/contracts/new" className="btn-primary flex items-center gap-1.5 text-sm">
+              <FilePlus className="h-4 w-4" /> 新建合同
+            </Link>
+            {/* 上传已有合同（原有智能提取流程） */}
             <ContractFormModal
               customers={customerOptions}
               users={userOptions}
               currentUserId={session.userId}
+              trigger="upload"
             />
           </div>
         }

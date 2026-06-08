@@ -10,6 +10,7 @@ import { createContractV4, updateContractV4, type ContractV4Payload } from "@/ac
 import { cn } from "@/lib/utils";
 
 type Customer = { id: string; brandName: string };
+type UserOption = { id: string; name: string };
 
 // 合作渠道选项
 const COOP_CHANNELS = [
@@ -41,13 +42,15 @@ function emptyProduct(): ProductRow {
 
 interface Props {
   customers: Customer[];
+  users: UserOption[];
   presetCustomerId?: string;
   presetCustomerName?: string;
+  currentUserId?: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   existingContract?: any;
 }
 
-export function ContractV4Form({ customers, presetCustomerId, presetCustomerName, existingContract }: Props) {
+export function ContractV4Form({ customers, users, presetCustomerId, presetCustomerName, currentUserId, existingContract }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const isEdit = !!existingContract;
@@ -63,6 +66,10 @@ export function ContractV4Form({ customers, presetCustomerId, presetCustomerName
 
   // ── 表单字段 ──────────────────────────────────────────────────────────────────
   const [customerId, setCustomerId] = useState(presetCustomerId ?? existingContract?.customerId ?? "");
+  const [ownerId, setOwnerId] = useState(existingContract?.ownerId ?? currentUserId ?? "");
+  // 默认审核人：找名字包含 "Shallow" 的用户
+  const defaultReviewer = users.find(u => u.name.toLowerCase().includes("shallow"))?.id ?? "";
+  const [reviewerId, setReviewerId] = useState(existingContract?.reviewerId ?? defaultReviewer);
   const [partyAName,       setPartyAName]       = useState(existingContract?.partyA ?? "");
   const [partyACreditCode, setPartyACreditCode] = useState(existingContract?.partyACreditCode ?? "");
   const [partyALegalRep,   setPartyALegalRep]   = useState(existingContract?.partyALegalRep ?? "");
@@ -200,6 +207,8 @@ export function ContractV4Form({ customers, presetCustomerId, presetCustomerName
   function buildPayload(): ContractV4Payload {
     return {
       customerId,
+      ownerId: ownerId || undefined,
+      reviewerId: reviewerId || undefined,
       partyAName,
       partyACreditCode,
       partyALegalRep,
@@ -339,22 +348,58 @@ export function ContractV4Form({ customers, presetCustomerId, presetCustomerName
       <form onSubmit={onSubmit} className="space-y-5">
         {/* 关联客户 */}
         {!presetCustomerId && (
-          <div className="card p-5">
-            <label className="label">关联客户 <span className="text-rose-500">*</span></label>
-            <select className="input" value={customerId} onChange={e => setCustomerId(e.target.value)} required>
-              <option value="">请选择关联客户</option>
-              {customers.map(c => (
-                <option key={c.id} value={c.id}>{c.brandName}</option>
-              ))}
-            </select>
+          <div className="card p-5 space-y-4">
+            <div>
+              <label className="label">关联客户 <span className="text-rose-500">*</span></label>
+              <select className="input" value={customerId} onChange={e => setCustomerId(e.target.value)} required>
+                <option value="">请选择关联客户</option>
+                {customers.map(c => (
+                  <option key={c.id} value={c.id}>{c.brandName}</option>
+                ))}
+              </select>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="label">合同负责人（提交审核人）</label>
+                <select className="input" value={ownerId} onChange={e => setOwnerId(e.target.value)}>
+                  <option value="">未指定（默认当前用户）</option>
+                  {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="label">审核人</label>
+                <select className="input" value={reviewerId} onChange={e => setReviewerId(e.target.value)}>
+                  <option value="">未指定（默认 Shallow）</option>
+                  {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
+              </div>
+            </div>
           </div>
         )}
         {presetCustomerId && (
-          <div className="card p-5">
-            <p className="label">关联客户</p>
-            <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
-              {presetCustomerName}
-            </p>
+          <div className="card p-5 space-y-4">
+            <div>
+              <p className="label">关联客户</p>
+              <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
+                {presetCustomerName}
+              </p>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="label">合同负责人（提交审核人）</label>
+                <select className="input" value={ownerId} onChange={e => setOwnerId(e.target.value)}>
+                  <option value="">未指定</option>
+                  {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="label">审核人</label>
+                <select className="input" value={reviewerId} onChange={e => setReviewerId(e.target.value)}>
+                  <option value="">未指定</option>
+                  {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
+              </div>
+            </div>
           </div>
         )}
 

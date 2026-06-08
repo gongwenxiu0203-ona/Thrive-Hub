@@ -88,7 +88,7 @@ export function ContractFormModal({
   presetCustomerName?: string;
   contract?: ContractEditData;
   currentUserId?: string;
-  trigger?: "button" | "link" | "edit";
+  trigger?: "button" | "link" | "edit" | "upload";
 }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -253,6 +253,10 @@ export function ContractFormModal({
     ) : trigger === "edit" ? (
       <button className="btn-secondary btn-sm" onClick={() => setOpen(true)}>
         <Pencil className="h-3.5 w-3.5" /> 编辑
+      </button>
+    ) : trigger === "upload" ? (
+      <button className="btn-secondary flex items-center gap-1.5 text-sm" onClick={() => setOpen(true)}>
+        <FileText className="h-4 w-4" /> 上传已有合同
       </button>
     ) : (
       <button className="btn-primary btn-sm" onClick={() => setOpen(true)}>

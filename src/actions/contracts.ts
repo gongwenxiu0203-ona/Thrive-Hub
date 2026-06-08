@@ -383,6 +383,8 @@ export async function markCompleted(id: string) {
 
 export interface ContractV4Payload {
   customerId: string;
+  ownerId?: string;
+  reviewerId?: string;
   // 甲方信息
   partyAName: string;
   partyACreditCode?: string;
@@ -447,7 +449,8 @@ export async function createContractV4(
       type: "BRAND",
       status: "IN_PROGRESS",
       createdById: session.userId,
-      ownerId: session.userId,
+      ownerId: payload.ownerId || session.userId,
+      reviewerId: payload.reviewerId || (await defaultReviewerId()),
       fillMethod: payload.fillMethod ?? "MANUAL",
       // 甲方信息
       partyA: partyAName,

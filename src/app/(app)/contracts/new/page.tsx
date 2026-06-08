@@ -44,10 +44,10 @@ export default async function NewContractPage({
     }
   }
 
-  const customers = await prisma.customer.findMany({
-    select: { id: true, brandName: true },
-    orderBy: { brandName: "asc" },
-  });
+  const [customers, users] = await Promise.all([
+    prisma.customer.findMany({ select: { id: true, brandName: true }, orderBy: { brandName: "asc" } }),
+    prisma.user.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } }),
+  ]);
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -64,8 +64,10 @@ export default async function NewContractPage({
 
       <ContractV4Form
         customers={customers}
+        users={users}
         presetCustomerId={customer?.id}
         presetCustomerName={customer?.brandName}
+        currentUserId={session.userId}
         existingContract={existingContract}
       />
     </div>
