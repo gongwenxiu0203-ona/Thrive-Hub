@@ -184,6 +184,30 @@ model Contract {
   excessCommissionRate  String? // EXCESS 机制：增长服务佣金比例（带 %）
   gmvSettlementCycle    String? // 联盟归因 GMV 结算周期
 
+  // ── 合同表单填写字段（v4 甲方项目确认书）────────────────────────────────────
+  // 甲方补充信息
+  partyACreditCode   String?   // 统一社会信用代码（或其他对应信息）
+  partyALegalRep     String?   // 甲方法定代表人
+  partyAAddress      String?   // 甲方地址（第十四条通知与送达）
+  partyAContact      String?   // 甲方指定联系人
+  partyAPhone        String?   // 甲方联系电话
+  partyAEmail        String?   // 甲方联系邮箱
+
+  // 合同费用补充
+  taxType        String  @default("不含税") // 税费类型
+  taxBearer      String  @default("甲方")  // 税费承担方
+  firstPeriodFee Float?                    // 首期服务费金额
+  productList    String?                   // 推广商品清单 JSON [{name,asin,price,trackLink}]
+  coopChannels   String?                   // 合作渠道 JSON string[]
+
+  // 填写方式与外部链接
+  fillMethod         String?   // MANUAL | AI_EXTRACT | EXTERNAL_LINK
+  externalFillToken  String?   @unique // 外部填写链接 Token（唯一）
+  externalFillExpiry DateTime?          // Token 过期时间（默认 7 天）
+
+  // 生成的合同文档
+  generatedDocUrl String? // 生成的 DOCX/PDF 文件路径
+
   startDate DateTime? // 合作期限-开始
   endDate   DateTime? // 合作期限-结束
 
