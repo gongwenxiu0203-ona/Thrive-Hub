@@ -63,6 +63,7 @@ export function ContractV4Form({ customers, users, presetCustomerId, presetCusto
   const [fillToken, setFillToken] = useState(existingContract?.externalFillToken ?? "");
   const [tokenCopied, setTokenCopied] = useState(false);
   const [generatingToken, setGeneratingToken] = useState(false);
+  const [createdContractId, setCreatedContractId] = useState<string | undefined>(existingContract?.id);
 
   // ── 表单字段 ──────────────────────────────────────────────────────────────────
   const [customerId, setCustomerId] = useState(presetCustomerId ?? existingContract?.customerId ?? "");
@@ -101,7 +102,7 @@ export function ContractV4Form({ customers, users, presetCustomerId, presetCusto
   const [taxBearer,      setTaxBearer]      = useState(existingContract?.taxBearer ?? "甲方");
 
   // 费用
-  const [feeCurrency,    setFeeCurrency]    = useState(existingContract?.feeCurrency ?? "人民币");
+  const [feeCurrency,    setFeeCurrency]    = useState(existingContract?.feeCurrency ?? "美金");
   const [contractType,   setContractType]   = useState(existingContract?.type ?? "BRAND");
   const [feeAmount,      setFeeAmount]      = useState(existingContract?.feeAmount ?? "");
   const [feeCycle,       setFeeCycle]       = useState(existingContract?.feeCycle ?? "季度预付");
@@ -195,21 +196,65 @@ export function ContractV4Form({ customers, users, presetCustomerId, presetCusto
     }
   }, [aiText]);
 
-  // ── 生成外部填写链接 ───────────────────────────────────────────────────────
+  // ── 校验「合作信息」内部字段（链接模式 + 各模式共用）──────────────────────────
+  function validateCoopFields(): string | null {
+    if (!customerId) return "请选择关联客户";
+    if (platforms.length === 0 && !otherPlatform.trim()) return "请至少选择一个销售平台";
+    if (targetSites.length === 0) return "请至少选择一个目标站点";
+    if (!startDate) return "请填写合作开始日期";
+    if (!endDate) return "请填写合作结束日期";
+    if (!feeAmount.trim()) return "请填写月度服务费金额";
+    if (commissionType === "FIXED" && !commissionRate.trim()) return "请填写 GMV 抽佣比例";
+    if (commissionType === "THRESHOLD" && (!thresholdAmount.trim() || !commissionRate.trim())) return "请填写 GMV 门槛金额及抽佣比例";
+    if (commissionType === "EXCESS" && (!excessBaseMonths.trim() || !excessRate.trim())) return "请填写超额佣金的基准月数及比例";
+    if (channels.length === 0) return "请至少确认一个合作渠道";
+    if (products.filter(p => p.name || p.asin).length === 0) return "请至少填写一个推广商品";
+    return null;
+  }
+
+  // ── 校验甲方信息（手动/AI 模式才需要；链接模式由客户填写）────────────────────
+  function validatePartyAFields(): string | null {
+    if (!partyAName.trim()) return "请填写甲方签约主体公司名称";
+    if (!partyACreditCode.trim()) return "请填写统一社会信用代码";
+    if (!partyALegalRep.trim()) return "请填写法定代表人";
+    if (!partyAAddress.trim()) return "请填写甲方地址";
+    if (!partyAContact.trim()) return "请填写甲方指定联系人";
+    if (!partyAPhone.trim()) return "请填写联系电话";
+    if (!partyAEmail.trim()) return "请填写电子邮箱";
+    return null;
+  }
+
+  // ── 生成外部填写链接：创建合同草稿 + 生成 token ─────────────────────────────
   const generateToken = async () => {
-    if (!existingContract?.id) {
-      setError("请先保存合同后再生成外部填写链接");
-      return;
-    }
+    setError(null);
+    // 链接模式：先校验内部「合作信息」字段（甲方信息由客户填写）
+    const coopErr = validateCoopFields();
+    if (coopErr) { setError(coopErr); return; }
+
     setGeneratingToken(true);
     try {
+      let contractId = existingContract?.id;
+      // 新建合同：先创建草稿（fillMethod=EXTERNAL_LINK，甲方信息留空待客户填写）
+      if (!contractId) {
+        const payload = { ...buildPayload(), fillMethod: "EXTERNAL_LINK" };
+        const result = await createContractV4(payload);
+        if (!result.ok || !result.contractId) {
+          setError(result.error ?? "创建合同草稿失败");
+          return;
+        }
+        contractId = result.contractId;
+        setCreatedContractId(contractId);
+      }
       const res = await fetch("/api/contracts/fill-token", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contractId: existingContract.id }),
+        body: JSON.stringify({ contractId }),
       });
       const data = await res.json();
       if (data.token) setFillToken(data.token);
+      else setError(data.error ?? "生成链接失败");
+    } catch {
+      setError("生成链接失败，请重试");
     } finally {
       setGeneratingToken(false);
     }
@@ -266,14 +311,19 @@ export function ContractV4Form({ customers, users, presetCustomerId, presetCusto
   // ── 提交 ───────────────────────────────────────────────────────────────────
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!customerId) { setError("请选择关联客户"); return; }
-    if (!partyAName) { setError("甲方公司名称为必填项"); return; }
+    // 所有字段必填：先校验合作信息，再校验甲方信息
+    const coopErr = validateCoopFields();
+    if (coopErr) { setError(coopErr); return; }
+    const partyAErr = validatePartyAFields();
+    if (partyAErr) { setError(partyAErr); return; }
     setError(null);
 
     startTransition(async () => {
       const payload = buildPayload();
-      const result = isEdit
-        ? await updateContractV4(existingContract.id, payload)
+      // 链接模式生成草稿后保存 → 走更新；否则新建/编辑
+      const targetId = existingContract?.id ?? createdContractId;
+      const result = targetId
+        ? await updateContractV4(targetId, payload)
         : await createContractV4(payload);
 
       if (!result.ok) { setError(result.error ?? "保存失败"); return; }
@@ -341,7 +391,8 @@ export function ContractV4Form({ customers, users, presetCustomerId, presetCusto
       {mode === "link" && (
         <div className="card p-5 space-y-4">
           <p className="text-sm text-slate-600">
-            生成专属链接发送给客户，客户填写甲方信息后自动同步到合同记录中
+            填写下方「合作信息」后点击「生成填写链接」，即可创建合同草稿并生成专属链接。
+            发送给客户填写甲方信息后，回到本系统完成合同保存。
           </p>
           {fillToken ? (
             <div className="space-y-2">
@@ -352,17 +403,19 @@ export function ContractV4Form({ customers, users, presetCustomerId, presetCusto
                   {tokenCopied ? "已复制" : "复制"}
                 </button>
               </div>
-              <p className="text-xs text-slate-400">有效期 7 天，客户填写后自动同步</p>
+              <p className="text-xs text-emerald-600">
+                ✅ 合同草稿已创建，链接有效期 7 天。客户填写后甲方信息自动同步，可在合同详情页查看与下载。
+              </p>
             </div>
           ) : (
             <button
               type="button"
               onClick={generateToken}
-              disabled={generatingToken || !isEdit}
+              disabled={generatingToken}
               className="btn-primary"
             >
               <Link2 className="h-4 w-4" />
-              {generatingToken ? "生成中…" : isEdit ? "生成外部填写链接" : "请先保存合同后再生成链接"}
+              {generatingToken ? "生成中…" : "生成填写链接"}
             </button>
           )}
         </div>
@@ -443,7 +496,15 @@ export function ContractV4Form({ customers, users, presetCustomerId, presetCusto
           </div>
         )}
 
-        {/* ── ① 甲方信息 ── */}
+        {/* ── ① 甲方信息（链接模式下由客户填写，隐藏）── */}
+        {mode === "link" ? (
+          <div className="rounded-2xl border border-blue-100 bg-blue-50 px-5 py-4">
+            <p className="text-sm font-semibold text-slate-700">① 甲方信息</p>
+            <p className="mt-1 text-xs text-slate-500">
+              链接模式下，甲方信息由客户通过填写链接提交，无需在此填写。
+            </p>
+          </div>
+        ) : (
         <FormSection title="① 甲方信息" color="blue">
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="sm:col-span-2">
@@ -486,6 +547,7 @@ export function ContractV4Form({ customers, users, presetCustomerId, presetCusto
             </div>
           </div>
         </FormSection>
+        )}
 
         {/* ── ② 合作信息 ── */}
         <FormSection title="② 合作信息" color="amber">
@@ -754,9 +816,21 @@ export function ContractV4Form({ customers, users, presetCustomerId, presetCusto
                 <FileDown className="h-4 w-4" /> 下载合同 DOCX
               </a>
             )}
-            <button type="submit" disabled={pending} className="btn-primary">
-              {pending ? "保存中…" : isEdit ? "保存修改" : "创建合同"}
-            </button>
+            {/* 链接模式：合同在「生成填写链接」时已创建，此处不再显示提交按钮 */}
+            {mode !== "link" && (
+              <button type="submit" disabled={pending} className="btn-primary">
+                {pending ? "保存中…" : (isEdit || createdContractId) ? "保存修改" : "创建合同"}
+              </button>
+            )}
+            {mode === "link" && fillToken && (
+              <button
+                type="button"
+                onClick={() => router.push(`/contracts/${createdContractId}`)}
+                className="btn-primary"
+              >
+                完成，查看合同
+              </button>
+            )}
           </div>
         </div>
       </form>

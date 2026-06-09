@@ -377,10 +377,9 @@ export async function generateContractDocx(data: ContractV4Data): Promise<Buffer
   // 项目确认书（SOW）
   // ════════════════════════════════════════════════════════════════════════════
 
-  // Issue 7：SOW 第2行 乙方（服务方）：填入乙方公司名称
-  // 主合同已经替换了第1次，这里处理第2次（SOW中）
-  xml = replaceNth(xml, "乙方（服务方）：____________________</w:t>",
-    `乙方（服务方）：${PARTY_B.name}</w:t>`, 1);
+  // Issue 7：SOW 乙方（服务方）：填入乙方公司名称
+  // SOW 版本无下划线（"乙方（服务方）：</w:t>"），与主合同的带下划线版本不冲突
+  xml = xml.replace("乙方（服务方）：</w:t>", `乙方（服务方）：${PARTY_B.name}</w:t>`);
 
   // SOW 甲方（第2次出现）
   xml = replaceNth(xml, "甲方（客户）：", `甲方（客户）：${fmt(data.partyAName)}`, 2);

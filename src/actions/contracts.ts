@@ -428,7 +428,9 @@ export async function createContractV4(
   const session = await requireSession();
   const { customerId, partyAName } = payload;
   if (!customerId) return { ok: false, error: "请选择关联客户" };
-  if (!partyAName) return { ok: false, error: "甲方公司名称为必填项" };
+  // 链接模式草稿：甲方信息由客户填写，允许暂时为空
+  const isExternalDraft = payload.fillMethod === "EXTERNAL_LINK";
+  if (!partyAName && !isExternalDraft) return { ok: false, error: "甲方公司名称为必填项" };
 
   const year = new Date().getFullYear();
   const existing = await prisma.contract.findMany({

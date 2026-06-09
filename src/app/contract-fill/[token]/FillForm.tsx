@@ -29,7 +29,19 @@ export function FillForm({ token, info }: { token: string; info: ContractInfo })
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!fields.partyAName) { setError("甲方公司名称为必填项"); return; }
+    // 所有甲方字段必填
+    const checks: [string, string][] = [
+      [fields.partyAName, "甲方签约主体公司名称"],
+      [fields.partyACreditCode, "统一社会信用代码"],
+      [fields.partyALegalRep, "法定代表人"],
+      [fields.partyAAddress, "甲方地址"],
+      [fields.partyAContact, "甲方指定联系人"],
+      [fields.partyAPhone, "联系电话"],
+      [fields.partyAEmail, "电子邮箱"],
+    ];
+    for (const [val, label] of checks) {
+      if (!val.trim()) { setError(`请填写${label}`); return; }
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -74,18 +86,18 @@ export function FillForm({ token, info }: { token: string; info: ContractInfo })
           placeholder="请填写公司全称" />
       </Field>
 
-      <Field label="统一社会信用代码（或其他对应信息）">
-        <input className="input" value={fields.partyACreditCode} onChange={set("partyACreditCode")}
+      <Field label="统一社会信用代码（或其他对应信息）" required>
+        <input className="input" required value={fields.partyACreditCode} onChange={set("partyACreditCode")}
           placeholder="18位统一社会信用代码" />
       </Field>
 
-      <Field label="法定代表人">
-        <input className="input" value={fields.partyALegalRep} onChange={set("partyALegalRep")}
+      <Field label="法定代表人" required>
+        <input className="input" required value={fields.partyALegalRep} onChange={set("partyALegalRep")}
           placeholder="法定代表人姓名" />
       </Field>
 
-      <Field label="甲方地址">
-        <input className="input" value={fields.partyAAddress} onChange={set("partyAAddress")}
+      <Field label="甲方地址" required>
+        <input className="input" required value={fields.partyAAddress} onChange={set("partyAAddress")}
           placeholder="公司注册/办公地址" />
       </Field>
 
@@ -94,18 +106,18 @@ export function FillForm({ token, info }: { token: string; info: ContractInfo })
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="甲方指定联系人">
-          <input className="input" value={fields.partyAContact} onChange={set("partyAContact")}
+        <Field label="甲方指定联系人" required>
+          <input className="input" required value={fields.partyAContact} onChange={set("partyAContact")}
             placeholder="联系人姓名" />
         </Field>
-        <Field label="联系电话">
-          <input className="input" type="tel" value={fields.partyAPhone} onChange={set("partyAPhone")}
+        <Field label="联系电话" required>
+          <input className="input" required type="tel" value={fields.partyAPhone} onChange={set("partyAPhone")}
             placeholder="手机或座机号码" />
         </Field>
       </div>
 
-      <Field label="电子邮箱">
-        <input className="input" type="email" value={fields.partyAEmail} onChange={set("partyAEmail")}
+      <Field label="电子邮箱" required>
+        <input className="input" required type="email" value={fields.partyAEmail} onChange={set("partyAEmail")}
           placeholder="business@company.com" />
       </Field>
 
