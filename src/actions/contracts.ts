@@ -385,6 +385,7 @@ export interface ContractV4Payload {
   customerId: string;
   ownerId?: string;
   reviewerId?: string;
+  type?: string;  // BRAND | CHANNEL | REBATE
   // 甲方信息
   partyAName: string;
   partyACreditCode?: string;
@@ -447,6 +448,7 @@ export async function createContractV4(
       contractNo,
       customerId,
       type: "BRAND",
+      type: payload.type || "BRAND",
       status: "IN_PROGRESS",
       createdById: session.userId,
       ownerId: payload.ownerId || session.userId,

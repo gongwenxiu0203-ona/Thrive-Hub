@@ -4,7 +4,7 @@ import { useState, useTransition, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
   Pencil, Sparkles, Link2, Plus, Trash2, Copy, Check,
-  ChevronDown, ChevronUp, FileDown,
+  ChevronDown, ChevronUp, FileDown, Upload,
 } from "lucide-react";
 import { createContractV4, updateContractV4, type ContractV4Payload } from "@/actions/contracts";
 import { cn } from "@/lib/utils";
@@ -90,9 +90,16 @@ export function ContractV4Form({ customers, users, presetCustomerId, presetCusto
 
   // 费用
   const [feeCurrency,    setFeeCurrency]    = useState(existingContract?.feeCurrency ?? "人民币");
+  const [contractType,   setContractType]   = useState(existingContract?.type ?? "BRAND");
   const [feeAmount,      setFeeAmount]      = useState(existingContract?.feeAmount ?? "");
-  const [firstPeriodFee, setFirstPeriodFee] = useState(existingContract?.firstPeriodFee?.toString() ?? "");
   const [feeCycle,       setFeeCycle]       = useState(existingContract?.feeCycle ?? "季度预付");
+
+  // 首期服务费：自动计算，不需要手动输入
+  const computedFirstPeriodFee = (() => {
+    const amt = parseFloat((feeAmount ?? "").replace(/,/g, ""));
+    if (isNaN(amt) || amt <= 0) return null;
+    return feeCycle === "月付" ? amt : amt * 3;
+  })();
 
   // GMV 佣金
   const [commissionType, setCommissionType] = useState(existingContract?.commissionType ?? "FIXED");
@@ -157,7 +164,6 @@ export function ContractV4Form({ customers, users, presetCustomerId, presetCusto
       if (d.taxBearer) setTaxBearer(d.taxBearer);
       if (d.feeAmount) setFeeAmount(d.feeAmount);
       if (d.feeCurrency) setFeeCurrency(d.feeCurrency);
-      if (d.firstPeriodFee) setFirstPeriodFee(String(d.firstPeriodFee));
       if (d.feeCycle) setFeeCycle(d.feeCycle);
       if (d.commissionType) setCommissionType(d.commissionType);
       if (d.commissionRate) setCommissionRate(d.commissionRate);
@@ -209,6 +215,7 @@ export function ContractV4Form({ customers, users, presetCustomerId, presetCusto
       customerId,
       ownerId: ownerId || undefined,
       reviewerId: reviewerId || undefined,
+      type: contractType,
       partyAName,
       partyACreditCode,
       partyALegalRep,
@@ -224,7 +231,7 @@ export function ContractV4Form({ customers, users, presetCustomerId, presetCusto
       taxBearer,
       feeCurrency,
       feeAmount,
-      firstPeriodFee: firstPeriodFee ? parseFloat(firstPeriodFee) : undefined,
+      firstPeriodFee: computedFirstPeriodFee ?? undefined,
       feeCycle,
       commissionType,
       commissionRate,
@@ -358,7 +365,15 @@ export function ContractV4Form({ customers, users, presetCustomerId, presetCusto
                 ))}
               </select>
             </div>
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div>
+                <label className="label">合同类型</label>
+                <select className="input" value={contractType} onChange={e => setContractType(e.target.value)}>
+                  <option value="BRAND">品牌方合同</option>
+                  <option value="CHANNEL">渠道商合同</option>
+                  <option value="REBATE">返佣合同</option>
+                </select>
+              </div>
               <div>
                 <label className="label">合同负责人（提交审核人）</label>
                 <select className="input" value={ownerId} onChange={e => setOwnerId(e.target.value)}>
@@ -384,7 +399,15 @@ export function ContractV4Form({ customers, users, presetCustomerId, presetCusto
                 {presetCustomerName}
               </p>
             </div>
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div>
+                <label className="label">合同类型</label>
+                <select className="input" value={contractType} onChange={e => setContractType(e.target.value)}>
+                  <option value="BRAND">品牌方合同</option>
+                  <option value="CHANNEL">渠道商合同</option>
+                  <option value="REBATE">返佣合同</option>
+                </select>
+              </div>
               <div>
                 <label className="label">合同负责人（提交审核人）</label>
                 <select className="input" value={ownerId} onChange={e => setOwnerId(e.target.value)}>
@@ -525,9 +548,15 @@ export function ContractV4Form({ customers, users, presetCustomerId, presetCusto
                     onChange={e => setFeeAmount(e.target.value)} placeholder="如：5000" />
                 </div>
                 <div>
-                  <label className="label text-xs">首期服务费</label>
-                  <input className="input" type="number" value={firstPeriodFee}
-                    onChange={e => setFirstPeriodFee(e.target.value)} placeholder="首期金额" />
+                  <label className="label text-xs">首期服务费（自动计算）</label>
+                  <div className="input bg-slate-50 text-slate-700 cursor-not-allowed">
+                    {computedFirstPeriodFee != null
+                      ? `${feeCurrency === "美金" ? "$" : "¥"}${computedFirstPeriodFee.toLocaleString()}`
+                      : <span className="text-slate-400 text-xs">月度服务费填写后自动计算</span>}
+                  </div>
+                  <p className="mt-0.5 text-[10px] text-slate-400">
+                    月付 = 月度服务费×1；季度预付 = 月度服务费×3
+                  </p>
                 </div>
               </div>
               <div>
@@ -623,57 +652,13 @@ export function ContractV4Form({ customers, users, presetCustomerId, presetCusto
         {/* ── ③ 推广信息 ── */}
         <FormSection title="③ 推广信息" color="green">
           {/* 推广商品清单 */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-semibold text-slate-600">推广商品清单</p>
-              <button type="button" onClick={addProduct} className="btn-ghost btn-sm">
-                <Plus className="h-3.5 w-3.5" /> 添加商品
-              </button>
-            </div>
-            <div className="overflow-x-auto rounded-lg border border-slate-200">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-slate-100 bg-slate-50">
-                    <th className="px-3 py-2 text-left text-xs font-medium text-slate-500">商品名称</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-slate-500">ASIN</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-slate-500">零售价（参考）</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-slate-500">专属优惠码/追踪链接</th>
-                    <th className="w-8 px-2 py-2"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {products.map((p, i) => (
-                    <tr key={i} className="border-b border-slate-50">
-                      <td className="px-2 py-1.5">
-                        <input className="input py-1 text-xs" value={p.name}
-                          onChange={e => updateProduct(i, "name", e.target.value)} placeholder="商品名称" />
-                      </td>
-                      <td className="px-2 py-1.5">
-                        <input className="input py-1 text-xs" value={p.asin}
-                          onChange={e => updateProduct(i, "asin", e.target.value)} placeholder="B0XXXXX" />
-                      </td>
-                      <td className="px-2 py-1.5">
-                        <input className="input py-1 text-xs" value={p.price}
-                          onChange={e => updateProduct(i, "price", e.target.value)} placeholder="$XX.XX" />
-                      </td>
-                      <td className="px-2 py-1.5">
-                        <input className="input py-1 text-xs" value={p.trackLink}
-                          onChange={e => updateProduct(i, "trackLink", e.target.value)} placeholder="优惠码或链接" />
-                      </td>
-                      <td className="px-2 py-1.5">
-                        {products.length > 1 && (
-                          <button type="button" onClick={() => removeProduct(i)}
-                            className="text-slate-300 hover:text-rose-500">
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          <ProductListSection
+            products={products}
+            onAdd={addProduct}
+            onRemove={removeProduct}
+            onUpdate={updateProduct}
+            onImport={setProducts}
+          />
 
           {/* 合作渠道 */}
           <div className="space-y-2 mt-4">
@@ -762,6 +747,144 @@ function FormSection({
         {open ? <ChevronUp className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
       </button>
       {open && <div className="px-5 pb-5 space-y-4">{children}</div>}
+    </div>
+  );
+}
+
+// ── 推广商品清单组件（支持下载模板 + CSV/Excel 上传） ──────────────────────────
+
+function ProductListSection({
+  products, onAdd, onRemove, onUpdate, onImport,
+}: {
+  products: ProductRow[];
+  onAdd: () => void;
+  onRemove: (i: number) => void;
+  onUpdate: (i: number, k: keyof ProductRow, v: string) => void;
+  onImport: (rows: ProductRow[]) => void;
+}) {
+  const [importing, setImporting] = useState(false);
+  const [importNote, setImportNote] = useState<string | null>(null);
+
+  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    setImportNote(null);
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const text = ev.target?.result as string;
+        // Parse CSV (handle BOM, CRLF, LF)
+        const clean = text.replace(/^﻿/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+        const lines = clean.split("\n").filter(l => l.trim());
+        if (lines.length < 2) { setImportNote("文件为空或仅有表头"); return; }
+        // Skip header row
+        const rows: ProductRow[] = lines.slice(1).map(line => {
+          // Simple CSV parse (handle quoted fields)
+          const cols = line.split(",").map(c => c.replace(/^"|"$/g, "").trim());
+          return {
+            name: cols[0] ?? "",
+            asin: cols[1] ?? "",
+            price: cols[2] ?? "",
+            trackLink: cols[3] ?? "",
+          };
+        }).filter(r => r.name || r.asin);
+
+        if (!rows.length) { setImportNote("未识别到有效商品行（需填写商品名称或ASIN）"); return; }
+        onImport(rows);
+        setImportNote(`✅ 已导入 ${rows.length} 个商品`);
+      } catch {
+        setImportNote("解析失败，请使用下载的模板文件");
+      } finally {
+        setImporting(false);
+        if (e.target) e.target.value = "";
+      }
+    };
+    reader.readAsText(file, "utf-8");
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-semibold text-slate-600">推广商品清单</p>
+        <div className="flex items-center gap-2">
+          {/* 下载模板 */}
+          <a
+            href="/api/contracts/product-template"
+            download="product-list-template.csv"
+            className="btn-ghost btn-sm"
+          >
+            <FileDown className="h-3.5 w-3.5" /> 下载表头模板
+          </a>
+          {/* 上传 CSV */}
+          <label className="btn-ghost btn-sm cursor-pointer">
+            <Upload className="h-3.5 w-3.5" />
+            {importing ? "导入中…" : "上传 CSV"}
+            <input
+              type="file"
+              accept=".csv,.txt"
+              className="hidden"
+              onChange={handleFile}
+              disabled={importing}
+            />
+          </label>
+          {/* 手动添加一行 */}
+          <button type="button" onClick={onAdd} className="btn-ghost btn-sm">
+            <Plus className="h-3.5 w-3.5" /> 添加商品
+          </button>
+        </div>
+      </div>
+
+      {importNote && (
+        <p className={`text-xs ${importNote.startsWith("✅") ? "text-emerald-600" : "text-rose-500"}`}>
+          {importNote}
+        </p>
+      )}
+
+      <div className="overflow-x-auto rounded-lg border border-slate-200">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-100 bg-slate-50">
+              <th className="px-3 py-2 text-left text-xs font-medium text-slate-500">商品名称</th>
+              <th className="px-3 py-2 text-left text-xs font-medium text-slate-500">ASIN</th>
+              <th className="px-3 py-2 text-left text-xs font-medium text-slate-500">零售价（参考）</th>
+              <th className="px-3 py-2 text-left text-xs font-medium text-slate-500">专属优惠码/追踪链接</th>
+              <th className="w-8 px-2 py-2"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {products.map((p, i) => (
+              <tr key={i} className="border-b border-slate-50">
+                <td className="px-2 py-1.5">
+                  <input className="input py-1 text-xs" value={p.name}
+                    onChange={e => onUpdate(i, "name", e.target.value)} placeholder="商品名称" />
+                </td>
+                <td className="px-2 py-1.5">
+                  <input className="input py-1 text-xs" value={p.asin}
+                    onChange={e => onUpdate(i, "asin", e.target.value)} placeholder="B0XXXXX" />
+                </td>
+                <td className="px-2 py-1.5">
+                  <input className="input py-1 text-xs" value={p.price}
+                    onChange={e => onUpdate(i, "price", e.target.value)} placeholder="$XX.XX" />
+                </td>
+                <td className="px-2 py-1.5">
+                  <input className="input py-1 text-xs" value={p.trackLink}
+                    onChange={e => onUpdate(i, "trackLink", e.target.value)} placeholder="优惠码或链接" />
+                </td>
+                <td className="px-2 py-1.5">
+                  {products.length > 1 && (
+                    <button type="button" onClick={() => onRemove(i)}
+                      className="text-slate-300 hover:text-rose-500">
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
