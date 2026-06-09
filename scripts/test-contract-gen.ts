@@ -12,7 +12,7 @@ async function main() {
     partyAContact: "李四",
     partyAPhone: "13800138000",
     partyAEmail: "zhangsan@test.com",
-    promoPlatform: "亚马逊（Amazon）",
+    promoPlatform: "亚马逊（Amazon）,独立站,TikTok Shop",
     targetSite: "美国站,英国站,日本",
     startDate: new Date("2026-06-09"),
     endDate: new Date("2027-06-08"),

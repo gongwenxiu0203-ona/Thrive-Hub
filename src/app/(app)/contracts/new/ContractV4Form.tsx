@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useTransition, useCallback } from "react";
+import { useState, useTransition, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
   Pencil, Sparkles, Link2, Plus, Trash2, Copy, Check,
-  ChevronDown, ChevronUp, FileDown, Upload,
+  ChevronDown, ChevronUp, FileDown, Upload, PenLine,
 } from "lucide-react";
 import { createContractV4, updateContractV4, type ContractV4Payload } from "@/actions/contracts";
 import { cn } from "@/lib/utils";
@@ -78,8 +78,20 @@ export function ContractV4Form({ customers, users, presetCustomerId, presetCusto
   const [partyAPhone,      setPartyAPhone]      = useState(existingContract?.partyAPhone ?? "");
   const [partyAEmail,      setPartyAEmail]      = useState(existingContract?.partyAEmail ?? "");
 
-  // 合作信息
-  const [promoPlatform,  setPromoPlatform]  = useState(existingContract?.promoPlatform ?? "亚马逊（Amazon）");
+  // 合作信息 — 销售平台（多选，第一条 + 推广平台 共用）
+  const STD_PLATFORMS = ["亚马逊（Amazon）", "独立站", "沃尔玛（Walmart）"];
+  const initialPlatforms = (existingContract?.promoPlatform ?? "亚马逊（Amazon）")
+    .split(",").map((s: string) => s.trim()).filter(Boolean);
+  const [platforms, setPlatforms] = useState<string[]>(
+    initialPlatforms.filter((p: string) => STD_PLATFORMS.includes(p))
+  );
+  const [otherPlatform, setOtherPlatform] = useState<string>(
+    initialPlatforms.find((p: string) => !STD_PLATFORMS.includes(p)) ?? ""
+  );
+  const togglePlatform = (p: string) =>
+    setPlatforms(arr => arr.includes(p) ? arr.filter(x => x !== p) : [...arr, p]);
+  // 合并为逗号分隔字符串供 payload / DOCX 使用
+  const promoPlatform = [...platforms, otherPlatform.trim()].filter(Boolean).join(",");
   const [targetSites,    setTargetSites]    = useState<string[]>(
     existingContract?.targetSite ? existingContract.targetSite.split(",").map((s: string) => s.trim()).filter(Boolean) : []
   );
@@ -156,7 +168,12 @@ export function ContractV4Form({ customers, users, presetCustomerId, presetCusto
       if (d.partyAContact) setPartyAContact(d.partyAContact);
       if (d.partyAPhone) setPartyAPhone(d.partyAPhone);
       if (d.partyAEmail) setPartyAEmail(d.partyAEmail);
-      if (d.promoPlatform) setPromoPlatform(d.promoPlatform);
+      if (d.promoPlatform) {
+        const parts = String(d.promoPlatform).split(",").map(s => s.trim()).filter(Boolean);
+        setPlatforms(parts.filter(p => STD_PLATFORMS.includes(p)));
+        const other = parts.find(p => !STD_PLATFORMS.includes(p));
+        if (other) setOtherPlatform(other);
+      }
       if (d.targetSite) setTargetSites(d.targetSite.split(",").map((s: string) => s.trim()).filter(Boolean));
       if (d.startDate) setStartDate(d.startDate);
       if (d.endDate) setEndDate(d.endDate);
@@ -473,14 +490,33 @@ export function ContractV4Form({ customers, users, presetCustomerId, presetCusto
         {/* ── ② 合作信息 ── */}
         <FormSection title="② 合作信息" color="amber">
           <div className="space-y-4">
-            {/* 推广平台 */}
+            {/* 销售平台（多选，对应合同第一条勾选 + 推广平台）*/}
             <div>
-              <label className="label">推广平台</label>
-              <select className="input" value={promoPlatform} onChange={e => setPromoPlatform(e.target.value)}>
-                <option>亚马逊（Amazon）</option>
-                <option>独立站</option>
-                <option>沃尔玛（Walmart）</option>
-              </select>
+              <label className="label">销售平台 / 推广平台（可多选）</label>
+              <div className="flex flex-wrap items-center gap-2">
+                {STD_PLATFORMS.map(p => (
+                  <label key={p}
+                    className={cn(
+                      "flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm transition-colors",
+                      platforms.includes(p)
+                        ? "border-brand-500 bg-brand-50 text-brand-700"
+                        : "border-slate-200 text-slate-600 hover:border-slate-300"
+                    )}>
+                    <input type="checkbox" className="hidden"
+                      checked={platforms.includes(p)} onChange={() => togglePlatform(p)} />
+                    {p}
+                  </label>
+                ))}
+                <input
+                  className="input h-[34px] w-44 text-sm"
+                  value={otherPlatform}
+                  onChange={e => setOtherPlatform(e.target.value)}
+                  placeholder="其他平台（手动填写）"
+                />
+              </div>
+              <p className="mt-1 text-[11px] text-slate-400">
+                所选平台将自动勾选合同第一条「销售平台」及项目确认书推广平台
+              </p>
             </div>
 
             {/* 目标站点 */}
@@ -699,6 +735,9 @@ export function ContractV4Form({ customers, users, presetCustomerId, presetCusto
           </div>
         )}
 
+        {/* ── 乙方签字图片（主合同 + 项目确认书通用）── */}
+        <SignatureUpload />
+
         {/* 提交按钮 */}
         <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-4">
           <button type="button" onClick={() => router.back()} className="btn-secondary">
@@ -747,6 +786,79 @@ function FormSection({
         {open ? <ChevronUp className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
       </button>
       {open && <div className="px-5 pb-5 space-y-4">{children}</div>}
+    </div>
+  );
+}
+
+// ── 乙方签字图片上传（全局，主合同+项目确认书两处签字通用） ──────────────────
+
+function SignatureUpload() {
+  const [exists, setExists] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const [previewKey, setPreviewKey] = useState(0);
+
+  useEffect(() => {
+    fetch("/api/contracts/signature")
+      .then(r => r.json())
+      .then(d => setExists(!!d.exists))
+      .catch(() => {});
+  }, []);
+
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    setNote(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/contracts/signature", { method: "POST", body: fd });
+      const data = await res.json();
+      if (!res.ok) { setNote(data.error ?? "上传失败"); return; }
+      setExists(true);
+      setPreviewKey(k => k + 1);
+      setNote("✅ 签名已上传，将自动应用到所有合同的乙方签字处");
+    } catch {
+      setNote("上传失败，请重试");
+    } finally {
+      setUploading(false);
+      if (e.target) e.target.value = "";
+    }
+  }
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5">
+      <div className="mb-3 flex items-center gap-2">
+        <PenLine className="h-4 w-4 text-brand-600" />
+        <p className="text-sm font-semibold text-slate-700">乙方签字图片</p>
+        <span className="text-xs text-slate-400">（主合同 + 项目确认书两处签字通用，盖章处留空）</span>
+      </div>
+      <div className="flex items-center gap-4">
+        {exists ? (
+          <img
+            key={previewKey}
+            src={`/signature-party-b.png?v=${previewKey}`}
+            alt="乙方签名"
+            className="h-16 rounded border border-slate-200 bg-slate-50 object-contain px-2"
+          />
+        ) : (
+          <div className="flex h-16 w-40 items-center justify-center rounded border border-dashed border-slate-300 text-xs text-slate-400">
+            未上传签名
+          </div>
+        )}
+        <label className="btn-secondary cursor-pointer text-sm">
+          <Upload className="h-4 w-4" />
+          {uploading ? "上传中…" : exists ? "更换签名" : "上传签名图片"}
+          <input type="file" accept="image/png,image/jpeg" className="hidden" onChange={handleFile} disabled={uploading} />
+        </label>
+      </div>
+      {note && (
+        <p className={`mt-2 text-xs ${note.startsWith("✅") ? "text-emerald-600" : "text-rose-500"}`}>{note}</p>
+      )}
+      <p className="mt-2 text-[11px] text-slate-400">
+        建议上传背景透明的 PNG 签名图片，下载合同时自动嵌入乙方两处签字位置。
+      </p>
     </div>
   );
 }

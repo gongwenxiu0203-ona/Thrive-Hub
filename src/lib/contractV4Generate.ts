@@ -224,9 +224,11 @@ export async function generateContractDocx(data: ContractV4Data): Promise<Buffer
   const isMonthlyGMV = (data.gmvSettlementCycle ?? "月度") !== "季度";
 
   // 签名图片路径（优先合同专属，否则用全局默认）
+  // 乙方签名：优先合同专属，否则用全局上传的签名文件
+  const globalSig = path.join(process.cwd(), "public", "signature-party-b.png");
   const sigPath = data.partyBSignatureUrl
     ? path.join(process.cwd(), "public", data.partyBSignatureUrl.replace(/^\//, ""))
-    : path.join(process.cwd(), "public", "signature-hum.png");
+    : globalSig;
   const hasSignature = await embedSignature(zip, sigPath);
   const sigDrawingXml = hasSignature ? buildSignatureDrawingXml() : "";
 
@@ -248,19 +250,32 @@ export async function generateContractDocx(data: ContractV4Data): Promise<Buffer
   xml = replaceNth(xml, "法定代表人：________________________", `法定代表人：${PARTY_B.legalRep}`, 1);
 
   // ════════════════════════════════════════════════════════════════════════════
-  // 第一条：销售平台勾选
+  // 第一条：销售平台勾选（多选，含「其他」自定义平台）
   // ════════════════════════════════════════════════════════════════════════════
-  const promoLower = (data.promoPlatform ?? "").toLowerCase();
+  const platformParts = (data.promoPlatform ?? "").split(",").map(s => s.trim()).filter(Boolean);
+  const hasAmazon = platformParts.some(p => /amazon|亚马逊/i.test(p));
+  const hasIndie  = platformParts.some(p => p.includes("独立站"));
+  const hasWalmart = platformParts.some(p => /walmart|沃尔玛/i.test(p));
+  // 其他 = 不匹配三个标准平台的自定义文本
+  const otherPlatform = platformParts.find(p =>
+    !/amazon|亚马逊/i.test(p) && !p.includes("独立站") && !/walmart|沃尔玛/i.test(p)
+  );
   {
     const paras = splitParas(xml);
+    let firstClauseDone = false;
+    let otherDone = false;
     const out = paras.map(p => {
-      if (paraContains(p, "亚马逊平台（") && paraHasCheckbox(p)) {
-        return checkBoxesByIndex(p, [
-          promoLower.includes("amazon") || promoLower.includes("亚马逊"),
-          promoLower.includes("独立站"),
-          promoLower.includes("walmart") || promoLower.includes("沃尔玛"),
-          false,
-        ]);
+      // #22：三个标准平台复选框
+      if (!firstClauseDone && paraContains(p, "亚马逊平台（") && paraHasCheckbox(p)) {
+        firstClauseDone = true;
+        return checkBoxesByIndex(p, [hasAmazon, hasIndie, hasWalmart]);
+      }
+      // #23：其他平台（勾选 + 填入自定义文本）
+      if (firstClauseDone && !otherDone && otherPlatform && paraContains(p, "其他：") && paraHasCheckbox(p)) {
+        otherDone = true;
+        let seg = checkNthBox(p, 1);
+        seg = fillUnderlined(seg, escXml(otherPlatform), 1);
+        return seg;
       }
       return p;
     });
