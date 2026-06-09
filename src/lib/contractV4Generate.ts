@@ -156,6 +156,58 @@ function replaceBankField(para: string, label: string, value: string): string {
   );
 }
 
+// ── 推广商品清单表格填充 ──────────────────────────────────────────────────────
+
+interface ProductRow { name?: string; asin?: string; price?: string; trackLink?: string }
+
+/** 在单元格的空段落内插入文本 run（值为空则保持单元格原样）*/
+function fillCell(cellXml: string, value: string): string {
+  if (!value) return cellXml;
+  const run = `<w:r><w:rPr><w:rFonts w:hint="eastAsia" w:asciiTheme="minorEastAsia" w:hAnsiTheme="minorEastAsia" w:cstheme="minorEastAsia"/><w:sz w:val="24"/></w:rPr><w:t xml:space="preserve">${escXml(value)}</w:t></w:r>`;
+  // 单元格内只有一个空段落，把 run 插到第一个 </w:p> 前
+  return cellXml.replace("</w:p>", `${run}</w:p>`);
+}
+
+/** 用 4 个值填充一行的 4 个单元格 */
+function fillRow(rowXml: string, values: [string, string, string, string]): string {
+  const cells = [...rowXml.matchAll(/<w:tc>[\s\S]*?<\/w:tc>/g)].map(m => m[0]);
+  if (cells.length < 4) return rowXml;
+  const filled = cells.map((c, i) => fillCell(c, values[i] ?? ""));
+  return `<w:tr>${filled.join("")}</w:tr>`;
+}
+
+/** 把推广商品清单写入 1.4 表格（商品名称可空；任一字段有值即写入一行）*/
+function fillProductTable(xml: string, products: ProductRow[]): string {
+  const anchor = xml.indexOf("商品名称");
+  if (anchor < 0) return xml;
+  const tblStart = xml.lastIndexOf("<w:tbl>", anchor);
+  const tblEndRaw = xml.indexOf("</w:tbl>", anchor);
+  if (tblStart < 0 || tblEndRaw < 0) return xml;
+  const tblEnd = tblEndRaw + "</w:tbl>".length;
+  const tbl = xml.substring(tblStart, tblEnd);
+
+  const rows = [...tbl.matchAll(/<w:tr>[\s\S]*?<\/w:tr>/g)].map(m => m[0]);
+  if (rows.length < 2) return xml;
+  const header = rows[0];
+  const emptyRow = rows[1]; // 空行模板
+  const prefix = tbl.substring(0, tbl.indexOf("<w:tr>")); // <w:tblPr>+<w:tblGrid>
+
+  const valid = products.filter(p => p.name || p.asin || p.price || p.trackLink);
+  // 至少保留 4 行表单样式；商品多于 4 个则克隆空行
+  const totalRows = Math.max(4, valid.length);
+  const dataRows: string[] = [];
+  for (let i = 0; i < totalRows; i++) {
+    const p = valid[i];
+    if (p) {
+      dataRows.push(fillRow(emptyRow, [p.name ?? "", p.asin ?? "", p.price ?? "", p.trackLink ?? ""]));
+    } else {
+      dataRows.push(emptyRow);
+    }
+  }
+  const newTbl = `${prefix}${header}${dataRows.join("")}</w:tbl>`;
+  return xml.substring(0, tblStart) + newTbl + xml.substring(tblEnd);
+}
+
 /** 简单文本替换（第 n 次出现） */
 function replaceNth(xml: string, find: string, replace: string, n: number): string {
   let count = 0;
@@ -530,6 +582,13 @@ export async function generateContractDocx(data: ContractV4Data): Promise<Buffer
       return p;
     });
     xml = joinParas(out);
+  }
+
+  // ── 1.4 推广商品清单表格（商品名称可空，有任一字段即写入）────────────────────
+  {
+    let products: ProductRow[] = [];
+    try { products = JSON.parse(data.productList ?? "[]"); } catch { products = []; }
+    xml = fillProductTable(xml, products);
   }
 
   // ── SOW 签字页（Issue 10：盖章空白，签字处嵌入签名图）───────────────────────

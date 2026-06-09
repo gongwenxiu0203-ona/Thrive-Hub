@@ -208,7 +208,7 @@ export function ContractV4Form({ customers, users, presetCustomerId, presetCusto
     if (commissionType === "THRESHOLD" && (!thresholdAmount.trim() || !commissionRate.trim())) return "请填写 GMV 门槛金额及抽佣比例";
     if (commissionType === "EXCESS" && (!excessBaseMonths.trim() || !excessRate.trim())) return "请填写超额佣金的基准月数及比例";
     if (channels.length === 0) return "请至少确认一个合作渠道";
-    if (products.filter(p => p.name || p.asin).length === 0) return "请至少填写一个推广商品";
+    // 推广商品清单可为空（非必填）；填写或上传后会自动同步到合同文件
     return null;
   }
 
@@ -302,7 +302,7 @@ export function ContractV4Form({ customers, users, presetCustomerId, presetCusto
       excessBaseMonths,
       excessCommissionRate: excessRate,
       gmvSettlementCycle: gmvCycle,
-      productList: JSON.stringify(products.filter(p => p.name || p.asin)),
+      productList: JSON.stringify(products.filter(p => p.name || p.asin || p.price || p.trackLink)),
       coopChannels: JSON.stringify(channels),
       fillMethod: mode === "ai" ? "AI_EXTRACT" : "MANUAL",
     };

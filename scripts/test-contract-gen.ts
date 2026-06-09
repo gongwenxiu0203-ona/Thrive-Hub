@@ -26,7 +26,11 @@ async function main() {
     commissionRate: "8%",
     gmvSettlementCycle: "月度",
     coopChannels: JSON.stringify(["ACC", "Levanta", "PrivateSocial"]),
-    productList: JSON.stringify([]),
+    productList: JSON.stringify([
+      { name: "智能手表", asin: "B0ABC12345", price: "$59.99", trackLink: "PROMO10 / https://amzn.to/abc" },
+      { name: "", asin: "B0XYZ67890", price: "$29.99", trackLink: "https://amzn.to/xyz" },
+      { name: "无线耳机", asin: "", price: "", trackLink: "SAVE20" },
+    ]),
   });
 
   fs.writeFileSync("C:/Temp/test-contract-output.docx", buf);
