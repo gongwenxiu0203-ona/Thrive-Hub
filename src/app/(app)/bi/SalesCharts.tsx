@@ -81,6 +81,7 @@ export function SalesDashboard({
   brandTrend,
   acosTrend,
   currencyCode = "USD",
+  promoContentRows = [],
 }: {
   programDist: Pair[];
   platformDist: Pair[];
@@ -123,6 +124,14 @@ export function SalesDashboard({
   brandTrend: SeriesPoint[];
   acosTrend: SeriesPoint[];
   currencyCode?: string;
+  promoContentRows?: {
+    affiliateName: string;
+    affiliateType: string;
+    brand: string;
+    linkTag: string;
+    publishedAt: string;
+    promoLink: string;
+  }[];
 }) {
   const formatCurrency = (n: number | null | undefined) => formatCurrencyWith(n, currencyCode);
   const [trendTab, setTrendTab] = useState<"daily" | "weekly" | "monthly">(
@@ -407,6 +416,66 @@ export function SalesDashboard({
                     {(p.rate * 100).toFixed(2)}%
                   </td>
                   <td className="text-right">{p.cpa.toFixed(2)}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </PanelCard>
+
+      {/* 推广内容（反向拉取联盟商资源库的往期推广内容）*/}
+      <PanelCard
+        title="推广内容"
+        subtitle="从联盟商资源库反向拉取的往期推广内容（按发布时间降序 · 全部）"
+        exportRows={promoContentRows.map((r) => ({
+          平台联盟商名称: r.affiliateName,
+          联盟商类型: r.affiliateType,
+          品牌: r.brand,
+          链接标签: r.linkTag,
+          发布时间: r.publishedAt,
+          推广链接: r.promoLink,
+        }))}
+        exportName="promo-contents"
+        height="h-[360px] overflow-auto"
+      >
+        <table className="data w-full text-xs">
+          <thead className="sticky top-0 bg-white">
+            <tr>
+              <th>平台联盟商名称</th>
+              <th>联盟商类型</th>
+              <th>品牌</th>
+              <th>链接标签</th>
+              <th>发布时间</th>
+              <th>推广链接</th>
+            </tr>
+          </thead>
+          <tbody>
+            {promoContentRows.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="py-6 text-center text-slate-400">
+                  暂无推广内容（在联盟商详情页「往期推广内容」中填写后自动汇总）
+                </td>
+              </tr>
+            ) : (
+              promoContentRows.map((r, i) => (
+                <tr key={i}>
+                  <td>{r.affiliateName || "—"}</td>
+                  <td>{r.affiliateType || "—"}</td>
+                  <td>{r.brand || "—"}</td>
+                  <td>{r.linkTag || "—"}</td>
+                  <td>{r.publishedAt || "—"}</td>
+                  <td className="max-w-[260px] truncate">
+                    {r.promoLink ? (
+                      <a
+                        href={/^https?:\/\//.test(r.promoLink) ? r.promoLink : `https://${r.promoLink}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-brand-600 hover:underline"
+                      >
+                        {r.promoLink}
+                      </a>
+                    ) : "—"}
+                  </td>
                 </tr>
               ))
             )}

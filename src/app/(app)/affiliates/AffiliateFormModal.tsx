@@ -27,6 +27,12 @@ interface BrandEntry {
   contactEmail: string;
 }
 
+interface PromoContent {
+  brand: string;
+  publishedAt: string;   // yyyy-mm-dd 或自由文本
+  promoLink: string;
+}
+
 interface Props {
   users: { id: string; name: string }[];
   customers: { id: string; brandName: string }[];
@@ -82,6 +88,12 @@ export default function AffiliateFormModal({ users, customers, currentUserId, af
     })
   );
 
+  // 往期推广内容（品牌 / 发布时间 / 推广链接，可多条）
+  const [promoContents, setPromoContents] = useState<PromoContent[]>(() => {
+    const arr = parseArr(affiliate?.promoContents) as unknown as PromoContent[];
+    return Array.isArray(arr) ? arr : [];
+  });
+
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -100,6 +112,10 @@ export default function AffiliateFormModal({ users, customers, currentUserId, af
     body.youtubePlacements = JSON.stringify(youtubePlacements);
     body.tiktokPlacements = JSON.stringify(tiktokPlacements);
     body.brandEntries = JSON.stringify(brandEntries);
+    // 往期推广内容：过滤掉完全空白的行
+    body.promoContents = JSON.stringify(
+      promoContents.filter(pc => pc.brand || pc.publishedAt || pc.promoLink)
+    );
     // Mirror primary personInChargeId from first brand entry for filtering/relation
     body.personInChargeId = brandEntries[0]?.personInChargeId || null;
 
@@ -140,6 +156,17 @@ export default function AffiliateFormModal({ users, customers, currentUserId, af
       ? { ...e, customerId: customerId || null, brandName: c?.brandName ?? e.brandName }
       : e
     ));
+  }
+
+  // 往期推广内容 helpers
+  function addPromoContent() {
+    setPromoContents(prev => [...prev, { brand: "", publishedAt: "", promoLink: "" }]);
+  }
+  function removePromoContent(i: number) {
+    setPromoContents(prev => prev.filter((_, idx) => idx !== i));
+  }
+  function updatePromoContent(i: number, key: keyof PromoContent, val: string) {
+    setPromoContents(prev => prev.map((e, idx) => idx === i ? { ...e, [key]: val } : e));
   }
 
   return (
@@ -299,6 +326,55 @@ export default function AffiliateFormModal({ users, customers, currentUserId, af
                   />
                 ))}
               </div>
+            </div>
+          </Section>
+
+          {/* 往期推广内容 */}
+          <Section title="往期推广内容">
+            <div>
+              <div className="mb-2 flex items-center justify-between">
+                <label className="text-xs font-medium text-slate-600">品牌 / 发布时间 / 推广链接（可多条）</label>
+                <button type="button" onClick={addPromoContent} className="flex items-center gap-1 text-xs text-brand-600 hover:text-brand-700">
+                  <Plus className="h-3.5 w-3.5" />新增推广内容
+                </button>
+              </div>
+              {promoContents.length === 0 ? (
+                <p className="rounded-lg bg-slate-50 px-3 py-3 text-xs text-slate-400">
+                  暂无往期推广内容，点击「新增推广内容」添加
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {promoContents.map((pc, i) => (
+                    <div key={i} className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-100 bg-slate-50/60 p-2">
+                      <input
+                        className="input h-[34px] flex-1 min-w-[120px] text-sm"
+                        placeholder="品牌"
+                        value={pc.brand}
+                        onChange={e => updatePromoContent(i, "brand", e.target.value)}
+                      />
+                      <input
+                        type="date"
+                        className="input h-[34px] w-[150px] text-sm"
+                        value={pc.publishedAt}
+                        onChange={e => updatePromoContent(i, "publishedAt", e.target.value)}
+                      />
+                      <input
+                        className="input h-[34px] flex-[2] min-w-[180px] text-sm"
+                        placeholder="推广链接 https://..."
+                        value={pc.promoLink}
+                        onChange={e => updatePromoContent(i, "promoLink", e.target.value)}
+                      />
+                      <button type="button" onClick={() => removePromoContent(i)}
+                        className="shrink-0 text-slate-300 hover:text-rose-500">
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <p className="mt-1.5 text-[11px] text-slate-400">
+                发布时间留空时，BI 推广内容看板将尝试从推广链接自动识别时间
+              </p>
             </div>
           </Section>
 

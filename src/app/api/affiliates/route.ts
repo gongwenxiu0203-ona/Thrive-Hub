@@ -185,6 +185,7 @@ export async function POST(req: NextRequest) {
       cooperationMode: serialise(body.cooperationMode),
       sampleShipping: body.sampleShipping ?? null,
       brandEntries: serialise(body.brandEntries),
+      promoContents: serialise(body.promoContents),
       personInChargeId: body.personInChargeId ?? null,
     },
   });

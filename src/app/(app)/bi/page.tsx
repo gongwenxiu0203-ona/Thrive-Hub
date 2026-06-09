@@ -323,13 +323,60 @@ async function DashboardTab({
   isBrand?: boolean;
   regions?: string[];
 }) {
-  const [records, affLibrary] = await Promise.all([
+  const [records, affLibrary, affPromo] = await Promise.all([
     prisma.salesRecord.findMany({ where, orderBy: { orderDate: "asc" } }),
     prisma.affiliate.findMany({
       select: { platformAffiliateName: true, affiliateType: true },
     }),
+    // 反向拉取联盟商资源库中的往期推广内容
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (prisma.affiliate.findMany as any)({
+      select: {
+        platformAffiliateName: true,
+        internalAffiliateName: true,
+        affiliateType: true,
+        promoContents: true,
+      },
+    }),
   ]);
   const resolveType = buildAffTypeResolver(affLibrary);
+
+  // ── 推广内容（反向拉取联盟商资源库的往期推广内容）────────────────────────────
+  // 尝试从链接中识别发布时间（/2024/05/13/ 或 2024-05-13 等模式）
+  const extractDateFromUrl = (url: string): string => {
+    const m1 = url.match(/(20\d{2})[/\-](\d{1,2})[/\-](\d{1,2})/);
+    if (m1) return `${m1[1]}-${m1[2].padStart(2, "0")}-${m1[3].padStart(2, "0")}`;
+    const m2 = url.match(/(20\d{2})(\d{2})(\d{2})/);
+    if (m2) return `${m2[1]}-${m2[2]}-${m2[3]}`;
+    return "";
+  };
+  const promoContentRows: {
+    affiliateName: string;
+    affiliateType: string;
+    brand: string;
+    linkTag: string;
+    publishedAt: string;
+    promoLink: string;
+  }[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  for (const a of affPromo as any[]) {
+    let list: { brand?: string; publishedAt?: string; promoLink?: string }[] = [];
+    try { list = JSON.parse(a.promoContents ?? "[]"); } catch { list = []; }
+    for (const pc of list) {
+      const link = (pc.promoLink ?? "").trim();
+      if (!pc.brand && !pc.publishedAt && !link) continue;
+      promoContentRows.push({
+        affiliateName: a.platformAffiliateName ?? "",
+        affiliateType: a.affiliateType ?? "",
+        brand: pc.brand ?? "",
+        linkTag: a.internalAffiliateName ?? "",
+        publishedAt: (pc.publishedAt ?? "").trim() || (link ? extractDateFromUrl(link) : ""),
+        promoLink: link,
+      });
+    }
+  }
+  // 按发布时间降序（空时间排最后）
+  promoContentRows.sort((a, b) => (b.publishedAt || "").localeCompare(a.publishedAt || ""));
 
   if (records.length === 0) {
     const emptyChannelOpts: FilterOptions = isChannel
@@ -685,6 +732,7 @@ async function DashboardTab({
           brandTrend={brandTrend}
           acosTrend={acosTrend}
           currencyCode={currencyCode}
+          promoContentRows={promoContentRows}
         />
       )}
     </>

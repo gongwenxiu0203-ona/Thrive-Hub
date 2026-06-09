@@ -81,6 +81,11 @@ export default async function AffiliateDetailPage({
   let customerCoops: { customerId: string; customerName: string; status: string }[] = [];
   try { customerCoops = JSON.parse(affiliate.customerCooperations); } catch { /* ignore */ }
 
+  // Parse 往期推广内容
+  let promoContents: { brand: string; publishedAt: string; promoLink: string }[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  try { promoContents = JSON.parse((affiliate as any).promoContents ?? "[]"); } catch { /* ignore */ }
+
   // Extract platforms with ANY recorded data for CoopReviewModal dropdown
   // (link auto-fills if present, but we show a platform as long as it has any data)
   const affiliatePlatforms: { name: string; link: string | null }[] = [
@@ -194,6 +199,42 @@ export default async function AffiliateDetailPage({
               <div className="mt-3">
                 <p className="text-xs text-slate-500">开发情况描述</p>
                 <p className="mt-0.5 whitespace-pre-wrap text-sm text-slate-700">{affiliate.developmentDesc}</p>
+              </div>
+            )}
+          </InfoCard>
+
+          {/* 往期推广内容 */}
+          <InfoCard title="往期推广内容">
+            {promoContents.length === 0 ? (
+              <p className="text-xs text-slate-400">暂无往期推广内容记录</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-100 text-xs text-slate-500">
+                      <th className="px-2 py-1.5 text-left font-medium">品牌</th>
+                      <th className="px-2 py-1.5 text-left font-medium">发布时间</th>
+                      <th className="px-2 py-1.5 text-left font-medium">推广链接</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {promoContents.map((pc, i) => (
+                      <tr key={i} className="border-b border-slate-50 last:border-0">
+                        <td className="px-2 py-1.5 text-slate-700">{pc.brand || "—"}</td>
+                        <td className="px-2 py-1.5 text-slate-600">{pc.publishedAt || "—"}</td>
+                        <td className="px-2 py-1.5">
+                          {pc.promoLink ? (
+                            <a href={safeHref(pc.promoLink)} target="_blank" rel="noreferrer"
+                              className="inline-flex items-center gap-1 text-brand-600 hover:underline max-w-[220px] truncate">
+                              <span className="truncate">{pc.promoLink}</span>
+                              <ExternalLink className="h-3 w-3 shrink-0" />
+                            </a>
+                          ) : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </InfoCard>
