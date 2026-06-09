@@ -408,15 +408,22 @@ export function ContractV4Form({ customers, users, presetCustomerId, presetCusto
               </p>
             </div>
           ) : (
-            <button
-              type="button"
-              onClick={generateToken}
-              disabled={generatingToken}
-              className="btn-primary"
-            >
-              <Link2 className="h-4 w-4" />
-              {generatingToken ? "生成中…" : "生成填写链接"}
-            </button>
+            <>
+              {error && (
+                <div className="rounded-lg bg-rose-50 border border-rose-200 px-4 py-2.5 text-sm text-rose-600">
+                  {error}
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={generateToken}
+                disabled={generatingToken}
+                className="btn-primary"
+              >
+                <Link2 className="h-4 w-4" />
+                {generatingToken ? "生成中…" : "生成填写链接"}
+              </button>
+            </>
           )}
         </div>
       )}

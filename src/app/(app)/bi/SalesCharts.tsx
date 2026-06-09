@@ -436,6 +436,7 @@ export function SalesDashboard({
           推广链接: r.promoLink,
         }))}
         exportName="promo-contents"
+        alwaysShowExport
         height="h-[360px] overflow-auto"
       >
         <table className="data w-full text-xs">

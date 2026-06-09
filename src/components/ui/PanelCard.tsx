@@ -14,6 +14,7 @@ export function PanelCard({
   children,
   height = "h-[320px]",
   className = "",
+  alwaysShowExport = false,
 }: {
   title: string;
   subtitle?: string;
@@ -22,8 +23,10 @@ export function PanelCard({
   children: React.ReactNode;
   height?: string;
   className?: string;
+  alwaysShowExport?: boolean;
 }) {
   const [zoomed, setZoomed] = useState(false);
+  const canExport = !!exportRows && (alwaysShowExport || exportRows.length > 0);
 
   useEffect(() => {
     if (!zoomed) return;
@@ -67,7 +70,7 @@ export function PanelCard({
             )}
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            {exportRows && exportRows.length > 0 && (
+            {canExport && (
               <button
                 type="button"
                 onClick={handleExport}
@@ -109,7 +112,7 @@ export function PanelCard({
                 )}
               </div>
               <div className="flex gap-1">
-                {exportRows && exportRows.length > 0 && (
+                {canExport && (
                   <button
                     type="button"
                     onClick={handleExport}
