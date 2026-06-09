@@ -430,7 +430,6 @@ async function DashboardTab({
   }
   const topCreators = [...creatorMap.values()]
     .sort((a, b) => b.revenue - a.revenue)
-    .slice(0, 50)
     .map((c) => ({
       platform: c.platform,
       program: c.program,
@@ -476,7 +475,6 @@ async function DashboardTab({
   }
   const topProducts = [...productMap.values()]
     .sort((a, b) => b.revenue - a.revenue)
-    .slice(0, 50)
     .map((p) => ({
       ...p,
       revenue: Math.round(p.revenue * 100) / 100,

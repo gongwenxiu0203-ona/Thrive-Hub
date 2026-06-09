@@ -288,7 +288,7 @@ export function SalesDashboard({
       {/* Creator + Product tables */}
       <PanelCard
         title="All Creator by GMV"
-        subtitle="按联盟商汇总的销售明细 (Top 50)"
+        subtitle="按联盟商汇总的销售明细（按销售额降序 · 全部）"
         exportRows={topCreators.map((c) => ({
           联盟平台: c.platform,
           联盟类型: c.program,
@@ -349,7 +349,7 @@ export function SalesDashboard({
 
       <PanelCard
         title="Products by GMV and Commission"
-        subtitle="按产品 ASIN 汇总 (Top 50)"
+        subtitle="按产品 ASIN 汇总（按销售额降序 · 全部）"
         exportRows={topProducts.map((p) => ({
           联盟平台: p.platform,
           联盟类型: p.program,

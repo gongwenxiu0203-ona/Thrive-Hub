@@ -113,6 +113,19 @@ export function MultiSelectFilter({
     );
   }
 
+  // 排除：在当前筛选结果中反选——已选的取消、未选的选中。
+  // 配合搜索可快速实现「选中全部，排除某几项」。
+  function invertFiltered() {
+    setDraft((d) => {
+      const next = new Set(d);
+      for (const o of filtered) {
+        if (next.has(o.value)) next.delete(o.value);
+        else next.add(o.value);
+      }
+      return Array.from(next);
+    });
+  }
+
   const label =
     selected.length === 0
       ? placeholder
@@ -183,6 +196,14 @@ export function MultiSelectFilter({
                 title="选中当前筛选结果"
               >
                 全选
+              </button>
+              <button
+                type="button"
+                onClick={invertFiltered}
+                className="text-amber-600 hover:underline"
+                title="反选当前筛选结果（已选取消、未选选中）"
+              >
+                排除
               </button>
               <button
                 type="button"
