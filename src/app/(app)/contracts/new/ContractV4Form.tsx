@@ -227,9 +227,9 @@ export function ContractV4Form({ customers, users, presetCustomerId, presetCusto
   // ── 生成外部填写链接：创建合同草稿 + 生成 token ─────────────────────────────
   const generateToken = async () => {
     setError(null);
-    // 链接模式：先校验内部「合作信息」字段（甲方信息由客户填写）
-    const coopErr = validateCoopFields();
-    if (coopErr) { setError(coopErr); return; }
+    // 链接模式：仅需选择关联客户即可生成链接。
+    // 甲方信息由客户通过链接填写（客户端必填）；合作信息可在客户填写后回系统补充。
+    if (!customerId) { setError("请先选择关联客户"); return; }
 
     setGeneratingToken(true);
     try {
@@ -391,8 +391,8 @@ export function ContractV4Form({ customers, users, presetCustomerId, presetCusto
       {mode === "link" && (
         <div className="card p-5 space-y-4">
           <p className="text-sm text-slate-600">
-            填写下方「合作信息」后点击「生成填写链接」，即可创建合同草稿并生成专属链接。
-            发送给客户填写甲方信息后，回到本系统完成合同保存。
+            选择上方「关联客户」后即可点击「生成填写链接」，创建合同草稿并生成专属链接。
+            发送给客户填写甲方信息（客户端全部必填）；合作信息可在客户填写完成后回本系统补充并保存合同。
           </p>
           {fillToken ? (
             <div className="space-y-2">
