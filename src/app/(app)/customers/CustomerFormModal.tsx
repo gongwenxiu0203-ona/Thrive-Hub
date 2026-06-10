@@ -9,7 +9,8 @@ import {
   type CustomerSectionDefaults,
 } from "@/components/CustomerSectionFields";
 import { createCustomer, updateCustomer } from "@/actions/customers";
-import { RATING_LABELS, AMAZON_CATEGORIES } from "@/lib/constants";
+import { RATING_LABELS, AMAZON_CATEGORIES, CUSTOMER_STATUS_LABELS } from "@/lib/constants";
+import { toInputDate } from "@/lib/utils";
 
 type UserOption = { id: string; name: string };
 
@@ -154,10 +155,33 @@ export function CustomerFormModal({
                   ))}
                 </select>
               </div>
+              {/* 新增客户时可直接设置合作状态 + Demo方案截止日期 */}
+              {!isEdit && (
+                <>
+                  <div>
+                    <label className="label text-xs">客户合作状态</label>
+                    <select name="status" className="input" defaultValue="">
+                      <option value="">自动（按是否分配负责人）</option>
+                      {Object.entries(CUSTOMER_STATUS_LABELS).map(([k, v]) => (
+                        <option key={k} value={k}>{v}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="label text-xs">Demo方案截止日期</label>
+                    <input
+                      type="date"
+                      name="demoDueDate"
+                      className="input"
+                      min={toInputDate(new Date())}
+                    />
+                  </div>
+                </>
+              )}
             </div>
             {!isEdit && (
               <p className="mt-2 text-xs text-slate-400">
-                选择商务负责人将自动创建「客户会议预约」任务；选择后端负责人将自动创建「Demo方案制定」任务。
+                选择商务负责人将自动创建「客户会议预约」任务；选择后端负责人将自动创建「Demo方案制定」任务（使用上方截止日期，创建后无需在详情页二次选择）。
               </p>
             )}
           </section>

@@ -96,6 +96,8 @@ export async function createCustomer(fd: FormData): Promise<SaveResult> {
 
   const businessOwnerId = str(fd, "businessOwnerId") || null;
   const backendOwnerId = str(fd, "backendOwnerId") || null;
+  const manualStatus = str(fd, "status") || null;       // 手动选择的合作状态
+  const demoDueDate = str(fd, "demoDueDate") || null;    // Demo方案截止日期
 
   const customer = await prisma.customer.create({
     data: {
@@ -103,9 +105,12 @@ export async function createCustomer(fd: FormData): Promise<SaveResult> {
       businessOwnerId,
       backendOwnerId,
       source: "INTERNAL",
-      status: businessOwnerId || backendOwnerId
-        ? "DEMO_IN_PROGRESS"
-        : "UNASSIGNED",
+      // 优先使用手动选择的合作状态；否则按是否分配负责人自动判定
+      status: manualStatus
+        ? manualStatus
+        : businessOwnerId || backendOwnerId
+          ? "DEMO_IN_PROGRESS"
+          : "UNASSIGNED",
     },
   });
 
@@ -113,7 +118,8 @@ export async function createCustomer(fd: FormData): Promise<SaveResult> {
     await createMeetingTask(customer.id, customer.brandName, businessOwnerId);
   }
   if (backendOwnerId) {
-    await createDemoTask(customer.id, customer.brandName, backendOwnerId, null);
+    // 使用创建时填写的截止日期，避免在详情页二次选择
+    await createDemoTask(customer.id, customer.brandName, backendOwnerId, demoDueDate);
   }
 
   revalidatePath("/customers");

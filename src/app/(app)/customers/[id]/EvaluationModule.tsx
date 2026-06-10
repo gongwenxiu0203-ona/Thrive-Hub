@@ -7,11 +7,18 @@ import { saveEvaluation } from "@/actions/customers";
 import { RATING_COLORS, RATING_LABELS } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 
+// 汇率（兑人民币）。如需调整请更新此处。
+const FX_TO_CNY: Record<string, number> = { USD: 7.2, CNY: 1, EUR: 7.8, GBP: 9.2 };
+const CUR_SYMBOL: Record<string, string> = { USD: "$", CNY: "¥", EUR: "€", GBP: "£" };
+const CUR_OPTIONS = ["USD", "CNY", "EUR", "GBP"] as const;
+
 export interface EvaluationData {
   revenueScore: 0 | 10 | 20;
   revenueMonthlyFee: number;
+  revenueMonthlyFeeCur?: string;  // 基础月费货币（默认 USD）
   revenueCommRate: number;
   revenueGmv: number;
+  revenueGmvCur?: string;         // 联盟月GMV货币（默认 USD）
 
   bsrScore: 0 | 10 | 20;
   bsrRank: number | null;
@@ -28,15 +35,22 @@ export interface EvaluationData {
 }
 
 const EMPTY: EvaluationData = {
-  revenueScore: 0, revenueMonthlyFee: 0, revenueCommRate: 0, revenueGmv: 0,
+  revenueScore: 0, revenueMonthlyFee: 0, revenueMonthlyFeeCur: "USD", revenueCommRate: 0, revenueGmv: 0, revenueGmvCur: "USD",
   bsrScore: 0, bsrRank: null,
   mediaBuyScore: 0, mediaBuyOption: "",
   commissionScore: 0, commissionAvg: 0, commissionOffer: 0,
   categoryScore: 0, categoryMatches: 0,
 };
 
-function calcRevenueScore(monthlyFee: number, commRate: number, gmv: number): 0 | 10 | 20 {
-  const income = monthlyFee + (commRate / 100) * gmv * 6.9;
+/** 月收入换算成人民币 */
+function revenueToCny(monthlyFee: number, feeCur: string, commRate: number, gmv: number, gmvCur: string): number {
+  const feeRate = FX_TO_CNY[feeCur] ?? FX_TO_CNY.USD;
+  const gmvRate = FX_TO_CNY[gmvCur] ?? FX_TO_CNY.USD;
+  return monthlyFee * feeRate + (commRate / 100) * gmv * gmvRate;
+}
+
+function calcRevenueScore(monthlyFee: number, feeCur: string, commRate: number, gmv: number, gmvCur: string): 0 | 10 | 20 {
+  const income = revenueToCny(monthlyFee, feeCur, commRate, gmv, gmvCur);
   if (income >= 20000) return 20;
   if (income >= 5000) return 10;
   return 0;
@@ -129,7 +143,7 @@ export function EvaluationModule({
   function set<K extends keyof EvaluationData>(key: K, value: EvaluationData[K]) {
     setData(prev => {
       const next = { ...prev, [key]: value };
-      next.revenueScore = calcRevenueScore(next.revenueMonthlyFee, next.revenueCommRate, next.revenueGmv);
+      next.revenueScore = calcRevenueScore(next.revenueMonthlyFee, next.revenueMonthlyFeeCur ?? "USD", next.revenueCommRate, next.revenueGmv, next.revenueGmvCur ?? "USD");
       next.bsrScore = calcBsrScore(next.bsrRank);
       next.commissionScore = calcCommissionScore(next.commissionAvg, next.commissionOffer);
       next.categoryScore = calcCategoryScore(next.categoryMatches);
@@ -263,13 +277,20 @@ export function EvaluationModule({
             {/* 1 收入评估 */}
             <DimensionCard index="1" title="收入评估" score={data.revenueScore} maxScore={20}>
               <p className="mb-2 text-xs text-slate-500">
-                月收入 = 基础月费(RMB) + 抽佣比例 × 月GMV($) × 汇率6.9
+                月收入 = 基础月费 + 抽佣比例 × 联盟月GMV，按汇率统一换算为人民币评估
               </p>
               <div className="grid gap-2 grid-cols-3">
                 <div>
-                  <label className="label text-xs">基础月费(RMB)</label>
-                  <input type="number" min={0} className="input text-sm" value={data.revenueMonthlyFee || ""}
-                    onChange={e => set("revenueMonthlyFee", Number(e.target.value))} placeholder="0" />
+                  <label className="label text-xs">基础月费</label>
+                  <div className="flex gap-1">
+                    <select className="input text-sm w-[68px] shrink-0 px-1"
+                      value={data.revenueMonthlyFeeCur ?? "USD"}
+                      onChange={e => set("revenueMonthlyFeeCur", e.target.value)}>
+                      {CUR_OPTIONS.map(c => <option key={c} value={c}>{CUR_SYMBOL[c]}{c}</option>)}
+                    </select>
+                    <input type="number" min={0} className="input text-sm" value={data.revenueMonthlyFee || ""}
+                      onChange={e => set("revenueMonthlyFee", Number(e.target.value))} placeholder="0" />
+                  </div>
                 </div>
                 <div>
                   <label className="label text-xs">抽佣比例(%)</label>
@@ -277,15 +298,23 @@ export function EvaluationModule({
                     onChange={e => set("revenueCommRate", Number(e.target.value))} placeholder="0" />
                 </div>
                 <div>
-                  <label className="label text-xs">联盟月GMV($)</label>
-                  <input type="number" min={0} className="input text-sm" value={data.revenueGmv || ""}
-                    onChange={e => set("revenueGmv", Number(e.target.value))} placeholder="0" />
+                  <label className="label text-xs">联盟月GMV</label>
+                  <div className="flex gap-1">
+                    <select className="input text-sm w-[68px] shrink-0 px-1"
+                      value={data.revenueGmvCur ?? "USD"}
+                      onChange={e => set("revenueGmvCur", e.target.value)}>
+                      {CUR_OPTIONS.map(c => <option key={c} value={c}>{CUR_SYMBOL[c]}{c}</option>)}
+                    </select>
+                    <input type="number" min={0} className="input text-sm" value={data.revenueGmv || ""}
+                      onChange={e => set("revenueGmv", Number(e.target.value))} placeholder="0" />
+                  </div>
                 </div>
               </div>
               {(data.revenueMonthlyFee > 0 || data.revenueCommRate > 0 || data.revenueGmv > 0) && (
                 <p className="mt-2 rounded-lg bg-slate-50 px-3 py-1.5 text-xs text-slate-600">
-                  预计月收入：约 <strong>¥{Math.round(data.revenueMonthlyFee + (data.revenueCommRate / 100) * data.revenueGmv * 6.9).toLocaleString()}</strong>
+                  预计月收入：约 <strong>¥{Math.round(revenueToCny(data.revenueMonthlyFee, data.revenueMonthlyFeeCur ?? "USD", data.revenueCommRate, data.revenueGmv, data.revenueGmvCur ?? "USD")).toLocaleString()}</strong>
                   {" · "}得分：<strong className="text-brand-600">{data.revenueScore}</strong>
+                  <span className="ml-1 text-[10px] text-slate-400">（汇率 USD7.2/EUR7.8/GBP9.2）</span>
                 </p>
               )}
             </DimensionCard>

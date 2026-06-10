@@ -86,6 +86,7 @@ export function TaskDetailModal({
   // External links state
   const [links, setLinks] = useState<{ label: string; url: string }[]>(task.externalLinks ?? []);
   const [linksSaving, setLinksSaving] = useState(false);
+  const [linksSaved, setLinksSaved] = useState(false);
 
   function addLink() {
     setLinks((prev) => [...prev, { label: "", url: "" }]);
@@ -98,8 +99,13 @@ export function TaskDetailModal({
   }
   async function saveLinks() {
     setLinksSaving(true);
-    try { await updateTaskLinks(task.id, links.filter(l => l.url.trim())); }
-    finally { setLinksSaving(false); }
+    setLinksSaved(false);
+    try {
+      await updateTaskLinks(task.id, links.filter(l => l.url.trim()));
+      router.refresh();
+      setLinksSaved(true);
+      setTimeout(() => setLinksSaved(false), 2500);
+    } finally { setLinksSaving(false); }
   }
 
   // meeting form
@@ -110,12 +116,13 @@ export function TaskDetailModal({
   const [mLocation, setMLocation] = useState(task.meetingLocation ?? "");
   const [mAttendees, setMAttendees] = useState<string[]>(task.attendees);
 
-  function run(fn: () => Promise<unknown>) {
+  function run(fn: () => Promise<unknown>, closeOnSuccess = false) {
     setError(null);
     startTransition(async () => {
       try {
         await fn();
         router.refresh();
+        if (closeOnSuccess) onClose();
       } catch (e) {
         setError(e instanceof Error ? e.message : "操作失败");
       }
@@ -365,14 +372,21 @@ export function TaskDetailModal({
             </div>
           )}
           {links.length > 0 && (
-            <button
-              type="button"
-              className="btn-secondary btn-sm mt-2 text-xs"
-              onClick={saveLinks}
-              disabled={linksSaving}
-            >
-              <Save className="h-3.5 w-3.5" /> {linksSaving ? "保存中…" : "保存链接"}
-            </button>
+            <div className="mt-2 flex items-center gap-2">
+              <button
+                type="button"
+                className="btn-secondary btn-sm text-xs"
+                onClick={saveLinks}
+                disabled={linksSaving}
+              >
+                <Save className="h-3.5 w-3.5" /> {linksSaving ? "保存中…" : "保存链接"}
+              </button>
+              {linksSaved && (
+                <span className="flex items-center gap-1 text-xs text-emerald-600">
+                  <CheckCircle2 className="h-3.5 w-3.5" /> 已保存
+                </span>
+              )}
+            </div>
           )}
         </div>
 
@@ -489,30 +503,32 @@ export function TaskDetailModal({
           </div>
         )}
 
-        {/* 底部：负责人操作按钮（交换按钮放到下面） */}
-        <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-4">
-          <button
-            className="btn-secondary"
-            disabled={pending}
-            onClick={() => run(() => setTaskStatus(task.id, "CANCELLED"))}
-          >
-            <XCircle className="h-4 w-4" /> 取消
-          </button>
-          <button
-            className="btn-secondary"
-            disabled={pending}
-            onClick={() => setShowReturn(true)}
-          >
-            <Undo2 className="h-4 w-4" /> 退回
-          </button>
-          <button
-            className="btn bg-emerald-600 text-white hover:bg-emerald-700"
-            disabled={pending}
-            onClick={() => run(() => setTaskStatus(task.id, "DONE"))}
-          >
-            <CheckCircle2 className="h-4 w-4" /> 任务完成
-          </button>
-        </div>
+        {/* 底部：负责人操作按钮 — 仅在可操作状态显示（已完成/已取消则隐藏）*/}
+        {(task.status === "TODO" || task.status === "IN_PROGRESS" || task.status === "RETURNED") && (
+          <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-4">
+            <button
+              className="btn-secondary"
+              disabled={pending}
+              onClick={() => run(() => setTaskStatus(task.id, "CANCELLED"), true)}
+            >
+              <XCircle className="h-4 w-4" /> 取消
+            </button>
+            <button
+              className="btn-secondary"
+              disabled={pending}
+              onClick={() => setShowReturn(true)}
+            >
+              <Undo2 className="h-4 w-4" /> 退回
+            </button>
+            <button
+              className="btn bg-emerald-600 text-white hover:bg-emerald-700"
+              disabled={pending}
+              onClick={() => run(() => setTaskStatus(task.id, "DONE"), true)}
+            >
+              <CheckCircle2 className="h-4 w-4" /> 任务完成
+            </button>
+          </div>
+        )}
       </div>
     </Modal>
   );
