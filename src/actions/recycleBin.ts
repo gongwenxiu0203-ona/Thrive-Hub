@@ -15,6 +15,7 @@ function model(type: RecycleType): any {
     case "reminder": return prisma.reminder;
     case "salesBatch": return prisma.salesBatch;
     case "project": return prisma.project;
+    case "workLog": return prisma.workLog;
   }
 }
 

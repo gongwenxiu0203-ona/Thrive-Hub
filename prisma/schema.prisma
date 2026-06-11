@@ -582,6 +582,7 @@ model WorkLog {
   workTypes  String   @default("[]") // JSON string[]: 项目管理 | BD
   content    String   // 具体工作进度
   logDate    DateTime @default(now()) // 日志时间（自动生成）
+  deletedAt  DateTime? // 软删除（回收站 7 天保留）
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 

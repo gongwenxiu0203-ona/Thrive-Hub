@@ -77,7 +77,7 @@ export async function importWorkLogEntries(projectId: string): Promise<{ ok: boo
   // 找关联了本项目的工作日志
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const logs = await (prisma.workLog.findMany as any)({
-    where: { projectIds: { contains: projectId } },
+    where: { projectIds: { contains: projectId }, deletedAt: null },
     include: { author: { select: { name: true } } },
     orderBy: { logDate: "asc" },
   });
