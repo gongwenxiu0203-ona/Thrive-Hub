@@ -127,7 +127,30 @@ export async function GET(req: NextRequest) {
     }),
   ]);
 
-  return NextResponse.json({ data, total, page, pageSize });
+  // 过往销售：按平台联盟商名称聚合本页联盟商的销售记录（销售额 + 单量）
+  const pageNames = data.map((a) => a.platformAffiliateName).filter(Boolean);
+  const salesByName = new Map<string, { revenue: number; units: number }>();
+  if (pageNames.length) {
+    const grouped = await prisma.salesRecord.groupBy({
+      by: ["affiliateName"],
+      where: { affiliateName: { in: pageNames } },
+      _sum: { revenue: true, unitsSold: true },
+    });
+    for (const g of grouped) {
+      salesByName.set(g.affiliateName, {
+        revenue: g._sum.revenue ?? 0,
+        units: g._sum.unitsSold ?? 0,
+      });
+    }
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const enriched = data.map((a: any) => ({
+    ...a,
+    salesRevenue: salesByName.get(a.platformAffiliateName)?.revenue ?? 0,
+    salesUnits: salesByName.get(a.platformAffiliateName)?.units ?? 0,
+  }));
+
+  return NextResponse.json({ data: enriched, total, page, pageSize });
 }
 
 export async function POST(req: NextRequest) {

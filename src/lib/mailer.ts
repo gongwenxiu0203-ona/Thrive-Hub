@@ -10,6 +10,8 @@ export interface MailOptions {
   subject: string;
   html: string;
   text?: string;
+  replyTo?: string;
+  cc?: string;
 }
 
 export async function sendMail(opts: MailOptions): Promise<void> {
@@ -50,5 +52,7 @@ export async function sendMail(opts: MailOptions): Promise<void> {
     subject: opts.subject,
     html: opts.html,
     text: opts.text,
+    replyTo: opts.replyTo,
+    cc: opts.cc,
   });
 }

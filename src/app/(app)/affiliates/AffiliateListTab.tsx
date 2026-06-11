@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
-import { ExternalLink, Search, X, ChevronLeft, ChevronRight, ChevronDown, CheckSquare } from "lucide-react";
+import { ExternalLink, Search, X, ChevronLeft, ChevronRight, ChevronDown, CheckSquare, Mail, Download } from "lucide-react";
+import { AffiliateEmailModal } from "./AffiliateEmailModal";
 import { AFFILIATE_DEV_STATUS_COLORS, AFFILIATE_SOURCE_OPTIONS, AFFILIATE_CATEGORY_OPTIONS,
   AFFILIATE_TYPE_OPTIONS, AFFILIATE_TAG_OPTIONS, AFFILIATE_DEV_STATUS_OPTIONS,
   COOPERATION_MODE_OPTIONS, REGION_OPTIONS } from "@/lib/constants";
@@ -26,6 +27,9 @@ interface AffiliateRow {
   tiktokLink: string | null;
   youtubeLink: string | null;
   websiteLink: string | null;
+  contactEmail: string | null;
+  salesRevenue: number;
+  salesUnits: number;
   personInCharge: { id: string; name: string } | null;
 }
 
@@ -132,6 +136,34 @@ export default function AffiliateListTab({ options }: Props) {
   const [batchValue, setBatchValue] = useState("");
   const [batchValues, setBatchValues] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  // 邮件发送目标
+  const [emailTarget, setEmailTarget] = useState<{ id: string; name: string; email: string } | null>(null);
+
+  // 导出选中的联盟商（CSV）
+  function exportSelected() {
+    const rows = data.filter((a) => selectedIds.has(a.id));
+    if (rows.length === 0) return;
+    const headers = ["平台联盟商名称", "内部名称", "来源", "类目", "联盟商类型", "开发状态", "负责人", "过往销售额", "过往销量", "联系邮箱"];
+    const csvLines = [headers.join(",")];
+    for (const a of rows) {
+      const cells = [
+        a.platformAffiliateName, a.internalAffiliateName ?? "", a.source ?? "", a.category ?? "",
+        a.affiliateType ?? "", a.developmentStatus ?? "", a.personInCharge?.name ?? "",
+        String(a.salesRevenue ?? 0), String(a.salesUnits ?? 0), a.contactEmail ?? "",
+      ].map((c) => `"${String(c).replace(/"/g, '""')}"`);
+      csvLines.push(cells.join(","));
+    }
+    const bom = "﻿";
+    const blob = new Blob([bom + csvLines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `联盟商导出-${rows.length}个-${Date.now()}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
 
   const page = parseInt(sp.get("page") ?? "1", 10);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
@@ -193,6 +225,7 @@ export default function AffiliateListTab({ options }: Props) {
     else if (sortKey === "insFollowers") { av = a.insFollowers ?? -1; bv = b.insFollowers ?? -1; }
     else if (sortKey === "tiktokFollowers") { av = a.tiktokFollowers ?? -1; bv = b.tiktokFollowers ?? -1; }
     else if (sortKey === "youtubeFollowers") { av = a.youtubeFollowers ?? -1; bv = b.youtubeFollowers ?? -1; }
+    else if (sortKey === "salesRevenue") { av = a.salesRevenue ?? -1; bv = b.salesRevenue ?? -1; }
     if (av === null || av === bv) return 0;
     if (typeof av === "number") return sortDir === "asc" ? (av as number) - (bv as number) : (bv as number) - (av as number);
     return sortDir === "asc" ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
@@ -389,14 +422,16 @@ export default function AffiliateListTab({ options }: Props) {
               <th className="px-4 py-2.5 text-left font-medium">社媒粉丝(K)</th>
               <SortableHeader label="开发状态" sortKey="developmentStatus" current={sortKey} dir={sortDir} onSort={handleSort} />
               <SortableHeader label="负责人" sortKey="personInCharge" current={sortKey} dir={sortDir} onSort={handleSort} />
+              <SortableHeader label="过往销售" sortKey="salesRevenue" current={sortKey} dir={sortDir} onSort={handleSort} />
+              <th className="px-4 py-2.5 text-left font-medium">联系邮箱</th>
               <th className="px-4 py-2.5 text-left font-medium">链接</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={11} className="py-10 text-center text-slate-400">加载中…</td></tr>
+              <tr><td colSpan={13} className="py-10 text-center text-slate-400">加载中…</td></tr>
             ) : sorted.length === 0 ? (
-              <tr><td colSpan={11} className="py-10 text-center text-slate-400">暂无数据</td></tr>
+              <tr><td colSpan={13} className="py-10 text-center text-slate-400">暂无数据</td></tr>
             ) : sorted.map((a) => {
               const tags = parseTags(a.tags);
               const statusColor = AFFILIATE_DEV_STATUS_COLORS[a.developmentStatus ?? ""] ?? "bg-slate-100 text-slate-600";
@@ -440,6 +475,23 @@ export default function AffiliateListTab({ options }: Props) {
                     ) : "—"}
                   </td>
                   <td className="px-4 py-2.5 text-slate-500">{a.personInCharge?.name ?? "—"}</td>
+                  <td className="px-4 py-2.5 text-xs text-slate-600">
+                    {a.salesRevenue > 0
+                      ? <span title={`${a.salesUnits} 单`}>${a.salesRevenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                      : "—"}
+                  </td>
+                  <td className="px-4 py-2.5">
+                    {a.contactEmail ? (
+                      <button
+                        onClick={() => setEmailTarget({ id: a.id, name: a.platformAffiliateName, email: a.contactEmail! })}
+                        className="inline-flex items-center gap-1 text-xs text-brand-600 hover:underline max-w-[160px] truncate"
+                        title={`给 ${a.contactEmail} 发邮件`}
+                      >
+                        <Mail className="h-3 w-3 shrink-0" />
+                        <span className="truncate">{a.contactEmail}</span>
+                      </button>
+                    ) : <span className="text-xs text-slate-300">—</span>}
+                  </td>
                   <td className="px-4 py-2.5">
                     <div className="flex gap-1.5">
                       {a.instagramLink && <SocialLink href={a.instagramLink} label="INS" />}
@@ -472,6 +524,11 @@ export default function AffiliateListTab({ options }: Props) {
       {selectedIds.size > 0 && (
         <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 flex items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-4 py-2.5 shadow-2xl">
           <span className="text-sm font-semibold text-brand-700">已选 {selectedIds.size} 个</span>
+          {/* 导出选中 */}
+          <button onClick={exportSelected}
+            className="flex h-[30px] items-center gap-1 rounded border border-slate-200 px-2.5 text-xs font-medium text-slate-600 hover:border-brand-400 hover:text-brand-600 shrink-0">
+            <Download className="h-3.5 w-3.5" />导出选中
+          </button>
           <div className="h-4 w-px bg-slate-200" />
           <span className="text-xs text-slate-500 shrink-0">批量修改：</span>
 
@@ -499,6 +556,15 @@ export default function AffiliateListTab({ options }: Props) {
             <X className="h-4 w-4" />
           </button>
         </div>
+      )}
+
+      {/* 邮件发送弹窗 */}
+      {emailTarget && (
+        <AffiliateEmailModal
+          affiliateName={emailTarget.name}
+          toEmail={emailTarget.email}
+          onClose={() => setEmailTarget(null)}
+        />
       )}
     </div>
   );
