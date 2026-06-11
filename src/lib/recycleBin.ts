@@ -13,7 +13,7 @@ export function daysRemaining(deletedAt: Date | string | null | undefined): numb
   return Math.ceil(ms / (24 * 60 * 60 * 1000));
 }
 
-export type RecycleType = "customer" | "contract" | "affiliate" | "task" | "reminder" | "salesBatch";
+export type RecycleType = "customer" | "contract" | "affiliate" | "task" | "reminder" | "salesBatch" | "project";
 
 export const RECYCLE_TYPE_LABELS: Record<RecycleType, string> = {
   customer: "客户",
@@ -22,6 +22,7 @@ export const RECYCLE_TYPE_LABELS: Record<RecycleType, string> = {
   task: "任务",
   reminder: "提醒",
   salesBatch: "推广数据批次",
+  project: "项目",
 };
 
 /**
@@ -61,6 +62,10 @@ export async function purgeExpired(): Promise<void> {
     // 推广批次：删除批次会级联其销售记录
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await (prisma.salesBatch.deleteMany as any)({ where });
+
+    // 项目：删除项目会级联其时间流条目
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (prisma.project.deleteMany as any)({ where });
   } catch (e) {
     console.error("[recycleBin] purgeExpired error:", e);
   }

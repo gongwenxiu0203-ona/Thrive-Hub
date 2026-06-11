@@ -36,13 +36,14 @@ export default async function RecycleBinPage() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const q = (m: any, args: any) => m.findMany({ ...args, where: sel, orderBy: { deletedAt: "desc" } });
 
-  const [customers, contracts, affiliates, tasks, reminders, batches] = await Promise.all([
+  const [customers, contracts, affiliates, tasks, reminders, batches, projects] = await Promise.all([
     q(prisma.customer, { select: { id: true, brandName: true, category: true, deletedAt: true } }),
     q(prisma.contract, { select: { id: true, contractNo: true, partyA: true, deletedAt: true } }),
     q(prisma.affiliate, { select: { id: true, platformAffiliateName: true, source: true, deletedAt: true } }),
     q(prisma.task, { select: { id: true, title: true, category: true, deletedAt: true } }),
     q(prisma.reminder, { select: { id: true, title: true, type: true, deletedAt: true } }),
     q(prisma.salesBatch, { select: { id: true, fileName: true, recordCount: true, deletedAt: true } }),
+    q(prisma.project, { select: { id: true, name: true, type: true, deletedAt: true } }),
   ]);
 
   const items: Item[] = [
@@ -58,10 +59,12 @@ export default async function RecycleBinPage() {
     ...reminders.map((r: any) => ({ type: "reminder" as const, id: r.id, title: r.title, subtitle: r.type ?? "", deletedAt: r.deletedAt, daysLeft: daysRemaining(r.deletedAt) })),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ...batches.map((b: any) => ({ type: "salesBatch" as const, id: b.id, title: b.fileName, subtitle: `${b.recordCount} 条记录`, deletedAt: b.deletedAt, daysLeft: daysRemaining(b.deletedAt) })),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ...projects.map((p: any) => ({ type: "project" as const, id: p.id, title: p.name, subtitle: p.type === "INTEGRATED" ? "整合合作" : "单次合作", deletedAt: p.deletedAt, daysLeft: daysRemaining(p.deletedAt) })),
   ];
 
   // 按类型分组
-  const groups = (["customer", "contract", "affiliate", "task", "reminder", "salesBatch"] as RecycleType[])
+  const groups = (["customer", "contract", "affiliate", "task", "reminder", "salesBatch", "project"] as RecycleType[])
     .map((type) => ({ type, items: items.filter((i) => i.type === type) }))
     .filter((g) => g.items.length > 0);
 

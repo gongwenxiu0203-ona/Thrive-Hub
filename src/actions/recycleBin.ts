@@ -14,6 +14,7 @@ function model(type: RecycleType): any {
     case "task": return prisma.task;
     case "reminder": return prisma.reminder;
     case "salesBatch": return prisma.salesBatch;
+    case "project": return prisma.project;
   }
 }
 

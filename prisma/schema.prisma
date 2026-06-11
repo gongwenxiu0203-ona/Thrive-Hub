@@ -52,6 +52,10 @@ model User {
   channelReconciliationsCreated  ChannelReconciliation[] @relation("ChannelReconciliationCreator")
   channelReconciliationsAsChannel ChannelReconciliation[] @relation("ChannelUserReconciliations")
   affiliateReconciliationsAsSubmitter AffiliateReconciliation[] @relation("AffiliateReconciliationSubmitter")
+  // 项目管理 + 工作日志
+  projectsCreated Project[]      @relation("ProjectCreator")
+  projectEntries  ProjectEntry[] @relation("ProjectEntryAuthor")
+  workLogs        WorkLog[]      @relation("WorkLogAuthor")
   // Permission overrides
   permissionOverrides            UserPermissionOverride[]
   invitedBy                      User?  @relation("UserInvitedBy", fields: [invitedById], references: [id])
@@ -142,6 +146,7 @@ model Customer {
   reconciliations        CustomerReconciliation[]
   channelReconciliations ChannelReconciliation[] @relation("CustomerChannelReconciliations")
   affiliateReconciliations AffiliateReconciliation[]
+  projects               Project[]
 }
 
 model Contract {
@@ -229,6 +234,7 @@ model Contract {
   fieldReviews ContractFieldReview[]
   reconciliations CustomerReconciliation[]
   channelReconciliations ChannelReconciliation[] @relation("ContractChannelReconciliations")
+  projects Project[]
 }
 
 model ContractFieldReview {
@@ -513,6 +519,76 @@ model AsinMapping {
 
   @@unique([brand, store, region, asin])
   @@index([asin])
+}
+
+// ─── 项目管理 ────────────────────────────────────────────────────────────────
+
+// 项目（整合合作 / 单次合作）
+model Project {
+  id     String @id @default(cuid())
+  type   String @default("INTEGRATED") // INTEGRATED 整合合作 | ONE_OFF 单次合作
+  name   String
+  status String @default("ACTIVE") // ACTIVE 进行中 | PAUSED 暂停 | DONE 已完成 | CANCELLED 已终止
+
+  customerId String? // 关联客户（自动带出商务/后端负责人）
+  contractId String? // 关联合同（整合合作 = 签署完成的合同）
+
+  // 单次合作流程字段（P3 使用，预留）
+  demand         String? // 需求描述
+  price          String? // 确认价格
+  coopResult     String? // 合作结论：COOPERATE 合作 | DECLINED 不合作
+  settlementData String? // JSON 结算数据 [{person, parentAsin, serviceFee}]
+
+  // 软删除（回收站 7 天保留）
+  deletedAt DateTime?
+
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  customer  Customer?      @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  contract  Contract?      @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  createdBy User           @relation("ProjectCreator", fields: [createdById], references: [id])
+  entries   ProjectEntry[]
+
+  @@index([customerId])
+  @@index([type])
+  @@index([status])
+}
+
+// 项目时间流条目（日常工作瀑布流 / 数据维度记录 / 流程节点）
+model ProjectEntry {
+  id            String  @id @default(cuid())
+  projectId     String
+  kind          String  @default("DAILY") // DAILY 日常工作 | DATA 数据维度 | NODE 流程节点（单次合作）
+  content       String
+  authorId      String?
+  fromWorkLogId String? // 从工作日志拉取时记录来源
+  createdAt     DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  author  User?   @relation("ProjectEntryAuthor", fields: [authorId], references: [id])
+
+  @@index([projectId])
+  @@index([createdAt])
+}
+
+// 工作日志（周报/月报，P2 使用）
+model WorkLog {
+  id         String   @id @default(cuid())
+  authorId   String
+  period     String   @default("WEEKLY") // WEEKLY 周报 | MONTHLY 月报
+  projectIds String   @default("[]") // JSON string[]: 关联项目 id
+  workTypes  String   @default("[]") // JSON string[]: 项目管理 | BD
+  content    String   // 具体工作进度
+  logDate    DateTime @default(now()) // 日志时间（自动生成）
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  author User @relation("WorkLogAuthor", fields: [authorId], references: [id])
+
+  @@index([authorId])
+  @@index([logDate])
 }
 
 model PasswordResetToken {

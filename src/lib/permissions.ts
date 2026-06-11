@@ -13,8 +13,8 @@ export function canDeleteCustomer(role: string): boolean {
 
 // Page routes a role is NOT allowed to view. Middleware redirects to landing.
 export const ROLE_BLOCKED_ROUTES: Record<string, string[]> = {
-  BRAND: ["/dashboard", "/customers", "/contracts", "/affiliates", "/tasks", "/finance"],
-  CHANNEL: ["/dashboard", "/contracts", "/affiliates", "/tasks", "/finance"],
+  BRAND: ["/dashboard", "/customers", "/contracts", "/affiliates", "/tasks", "/finance", "/projects"],
+  CHANNEL: ["/dashboard", "/contracts", "/affiliates", "/tasks", "/finance", "/projects"],
 };
 
 // Where to send a role on login or when they hit a blocked page.

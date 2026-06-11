@@ -17,6 +17,7 @@ import {
   Copy,
   Check,
   Trash2,
+  FolderKanban,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -32,6 +33,7 @@ const NAV: NavItem[] = [
   { href: "/dashboard", label: "工作台", icon: LayoutDashboard },
   { href: "/customers", label: "客户管理", icon: Users },
   { href: "/tasks", label: "任务管理", icon: KanbanSquare },
+  { href: "/projects", label: "项目管理", icon: FolderKanban },
   { href: "/contracts", label: "合同管理", icon: FileText },
   { href: "/finance", label: "财务对账", icon: Receipt },
   { href: "/bi", label: "推广数据BI", icon: BarChart3 },
