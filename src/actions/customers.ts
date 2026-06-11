@@ -150,7 +150,12 @@ export async function updateCustomer(
 export async function deleteCustomer(id: string) {
   const session = await requireSession();
   if (!canDeleteCustomer(session.role)) throw new Error("无权删除客户");
-  await prisma.customer.delete({ where: { id } });
+  // 渠道分账（ChannelReconciliation）外键无级联，会阻塞客户删除，需先删除。
+  // 其余关联（合同/客户对账等）已配置级联或置空。
+  await prisma.$transaction(async (tx) => {
+    await tx.channelReconciliation.deleteMany({ where: { customerId: id } });
+    await tx.customer.delete({ where: { id } });
+  });
   revalidatePath("/customers");
   redirect("/customers");
 }
