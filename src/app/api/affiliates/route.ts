@@ -32,9 +32,9 @@ export async function GET(req: NextRequest) {
   const salesBrands = multi("salesBrands");
   const salesTypes = multi("salesTypes");
 
-  // Build base where
+  // Build base where（排除回收站中的软删除联盟商）
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const where: any = {};
+  const where: any = { deletedAt: null };
 
   if (q) {
     where.OR = [

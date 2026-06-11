@@ -31,17 +31,19 @@ export default async function RemindersPage({
   // Build base where clause
   const isCreatedScope = scopeFilter.includes("created") && !scopeFilter.includes("received");
   const baseWhere = isCreatedScope
-    ? { createdById: session.userId }
-    : { targetId: session.userId };
+    ? { createdById: session.userId, deletedAt: null }
+    : { targetId: session.userId, deletedAt: null };
 
   const [allReminders, users, unreadCount] = await Promise.all([
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prisma.reminder.findMany({
-      where: baseWhere,
+      where: baseWhere as any,
       orderBy: [{ isRead: "asc" }, { remindDate: "asc" }],
       include: { target: true, createdBy: true },
     }),
     prisma.user.findMany({ orderBy: { name: "asc" } }),
-    prisma.reminder.count({ where: { targetId: session.userId, isRead: false } }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    prisma.reminder.count({ where: { targetId: session.userId, isRead: false, deletedAt: null } as any }),
   ]);
 
   const reminders = allReminders.filter((r) => {

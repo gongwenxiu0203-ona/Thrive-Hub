@@ -15,6 +15,8 @@ export async function deleteBatch(batchId: string) {
       throw new Error("仅上传者或内部员工可删除该批次");
     }
   }
-  await prisma.salesBatch.delete({ where: { id: batchId } });
+  // 软删除：进回收站（恢复后销售记录仍在；到期物理清理会级联删除记录）
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (prisma.salesBatch.update as any)({ where: { id: batchId }, data: { deletedAt: new Date() } });
   revalidatePath("/bi");
 }

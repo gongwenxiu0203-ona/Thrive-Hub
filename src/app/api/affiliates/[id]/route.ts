@@ -96,6 +96,8 @@ export async function DELETE(
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
-  await prisma.affiliate.delete({ where: { id } });
+  // 软删除：进回收站，7 天内可恢复
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (prisma.affiliate.update as any)({ where: { id }, data: { deletedAt: new Date() } });
   return NextResponse.json({ ok: true });
 }

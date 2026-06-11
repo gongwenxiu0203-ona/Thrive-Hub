@@ -52,7 +52,8 @@ const DAY = 24 * 60 * 60 * 1000;
 export async function runCustomerStatusChecks(): Promise<void> {
   const now = Date.now();
   const candidates = await prisma.customer.findMany({
-    where: { status: { in: ["DEMO_DONE", "INTERNAL_DISCUSSION", "PENDING"] } },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    where: { status: { in: ["DEMO_DONE", "INTERNAL_DISCUSSION", "PENDING"] }, deletedAt: null } as any,
     select: {
       id: true,
       status: true,

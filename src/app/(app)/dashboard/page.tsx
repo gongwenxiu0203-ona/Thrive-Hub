@@ -44,9 +44,10 @@ export default async function DashboardPage({
     brandName: session.brandName,
   };
   const view = parseViewScope(sp);
-  const custWhere = customerScope(sessForScope, view);
-  const contractWhere = contractScope(sessForScope, view);
-  const taskWhere = taskScope(sessForScope, view);
+  // 排除回收站中的软删除记录
+  const custWhere = { ...customerScope(sessForScope, view), deletedAt: null };
+  const contractWhere = { ...contractScope(sessForScope, view), deletedAt: null };
+  const taskWhere = { ...taskScope(sessForScope, view), deletedAt: null };
 
   const [
     customerCount,
@@ -69,8 +70,9 @@ export default async function DashboardPage({
     }),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prisma.contract.count({ where: contractWhere as any }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prisma.reminder.count({
-      where: { targetId: session.userId, isRead: false },
+      where: { targetId: session.userId, isRead: false, deletedAt: null } as any,
     }),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prisma.customer.findMany({

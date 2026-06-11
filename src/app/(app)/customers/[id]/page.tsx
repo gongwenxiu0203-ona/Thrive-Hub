@@ -40,8 +40,10 @@ export default async function CustomerDetailPage({
       include: {
         businessOwner: true,
         backendOwner: true,
-        contracts: { orderBy: { createdAt: "desc" } },
-        tasks: { orderBy: { createdAt: "desc" } },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        contracts: { where: { deletedAt: null } as any, orderBy: { createdAt: "desc" } },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        tasks: { where: { deletedAt: null } as any, orderBy: { createdAt: "desc" } },
       },
     }),
     prisma.channelReconciliation.findFirst({
@@ -50,7 +52,8 @@ export default async function CustomerDetailPage({
       include: { periods: { orderBy: { periodIndex: "asc" } } },
     }),
   ]);
-  if (!customer) notFound();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if (!customer || (customer as any).deletedAt) notFound();
 
   // 行级权限校验：品牌方只能看自己品牌，渠道商只能看自己的客户
   if (session.role === "BRAND" && session.brandName) {

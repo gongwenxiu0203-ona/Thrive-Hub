@@ -149,7 +149,9 @@ export async function updateContract(
 export async function deleteContract(id: string) {
   const session = await requireSession();
   if (session.role !== "ADMIN") throw new Error("仅管理员可删除合同");
-  await prisma.contract.delete({ where: { id } });
+  // 软删除：进回收站，7 天内可恢复
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (prisma.contract.update as any)({ where: { id }, data: { deletedAt: new Date() } });
   revalidatePath("/contracts");
   redirect("/contracts");
 }

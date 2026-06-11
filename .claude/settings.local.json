@@ -91,7 +91,19 @@
       "Bash(Select-Object -ExpandProperty FullName)",
       "Bash(xargs grep -l \"status.*COMPLETED\")",
       "Bash(extract-text \"C:\\\\Users\\\\17863\\\\Desktop\\\\0527 - 增加后补账户信息条款-平台联盟营销服务合同+项目确认书（亚马逊）-清洁版本.docx\")",
-      "Bash(python scripts/office/unpack.py \"C:\\\\Users\\\\17863\\\\Desktop\\\\0527 - 增加后补账户信息条款-平台联盟营销服务合同+项目确认书（亚马逊）-清洁版本.docx\" /tmp/contract_unpacked/)"
+      "Bash(python scripts/office/unpack.py \"C:\\\\Users\\\\17863\\\\Desktop\\\\0527 - 增加后补账户信息条款-平台联盟营销服务合同+项目确认书（亚马逊）-清洁版本.docx\" /tmp/contract_unpacked/)",
+      "Bash(node_modules/.bin/tsx scripts/test-contract-gen.ts)",
+      "Bash(node_modules/.bin/tsx scripts/inspect-checks.ts)",
+      "Bash(node_modules/.bin/tsx -e ' *)",
+      "Bash(node_modules/.bin/tsc --noEmit -p tsconfig.json)",
+      "Bash(taskkill //F //IM node.exe)",
+      "Bash(mkdir -p \"prisma/migrations/20260610000000_customer_acos_note\")",
+      "Bash(printf -- '-- 客户亚马逊站内推广 ACOS 备注字段\\\\nALTER TABLE \"Customer\" ADD COLUMN \"amazonAcosNote\" TEXT;\\\\n')",
+      "Bash(ssh -T git@github.com)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(GIT_SSH_COMMAND=\"ssh -v\" git push origin master)",
+      "Bash(GIT_SSH_COMMAND=\"ssh -o HostName=ssh.github.com -o Port=443\" git push origin master)",
+      "Bash(GIT_SSH_COMMAND=\"ssh -o HostName=ssh.github.com -o Port=443\" git ls-remote origin master)"
     ]
   }
 }

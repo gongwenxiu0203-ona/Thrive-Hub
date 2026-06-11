@@ -27,7 +27,8 @@ export default async function AffiliateDetailPage({
       coopReviews: { orderBy: { createdAt: "desc" } },
     },
   });
-  if (!affiliate) notFound();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if (!affiliate || (affiliate as any).deletedAt) notFound();
 
   // Linked accounts (same internalAffiliateName)
   const linkedAccounts = affiliate.internalAffiliateName

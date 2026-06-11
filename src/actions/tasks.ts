@@ -76,7 +76,9 @@ export async function updateTaskContent(
 
 export async function deleteTask(id: string) {
   await requireSession();
-  await prisma.task.delete({ where: { id } });
+  // 软删除：进回收站
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (prisma.task.update as any)({ where: { id }, data: { deletedAt: new Date() } });
   revalidatePath("/tasks");
 }
 

@@ -50,7 +50,9 @@ export async function updateReminder(id: string, fd: FormData) {
 
 export async function deleteReminder(id: string) {
   await requireSession();
-  await prisma.reminder.delete({ where: { id } });
+  // 软删除：进回收站
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (prisma.reminder.update as any)({ where: { id }, data: { deletedAt: new Date() } });
   revalidatePath("/reminders");
 }
 

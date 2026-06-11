@@ -39,7 +39,8 @@ export default async function ContractDetailPage({
       fieldReviews: true,
     },
   });
-  if (!contract) notFound();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if (!contract || (contract as any).deletedAt) notFound();
 
   // 行级权限校验
   if (session.role === "BRAND" && session.brandName) {

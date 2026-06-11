@@ -52,13 +52,13 @@ export default async function ContractsPage({
   const [allContracts, customers, users] = await Promise.all([
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prisma.contract.findMany({
-      where: contractScope(sess, view) as any,
+      where: { ...contractScope(sess, view), deletedAt: null } as any,
       orderBy: { createdAt: "desc" },
       include: { customer: true, owner: true, reviewer: true },
     }),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prisma.customer.findMany({
-      where: customerScope(sess, view) as any,
+      where: { ...customerScope(sess, view), deletedAt: null } as any,
       orderBy: { brandName: "asc" },
     }),
     prisma.user.findMany({ orderBy: { name: "asc" } }),

@@ -65,13 +65,13 @@ export default async function TasksPage({
   const [allTasks, customers, users] = await Promise.all([
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prisma.task.findMany({
-      where: taskScope(sess, view) as any,
+      where: { ...taskScope(sess, view), deletedAt: null } as any,
       orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
       include: { customer: true, owner: true, publisher: true },
     }),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prisma.customer.findMany({
-      where: customerScope(sess, view) as any,
+      where: { ...customerScope(sess, view), deletedAt: null } as any,
       orderBy: { brandName: "asc" },
     }),
     prisma.user.findMany({ orderBy: { name: "asc" } }),

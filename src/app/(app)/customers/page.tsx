@@ -138,7 +138,7 @@ export default async function CustomersPage({
   );
 
   const [customers, users] = await Promise.all([
-    loadCustomers(scope),
+    loadCustomers({ ...scope, deletedAt: null }),
     prisma.user.findMany({ orderBy: { name: "asc" } }),
   ]);
 

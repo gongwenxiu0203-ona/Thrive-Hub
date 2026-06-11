@@ -165,7 +165,8 @@ export default async function BIPage({
   const tab = TABS.some((t) => t.key === sp.tab) ? sp.tab! : "dashboard";
 
   // Build base where clause — restrict by role
-  const baseWhere: Prisma.SalesRecordWhereInput = {};
+  // 同时排除已软删除（回收站）批次的销售记录
+  const baseWhere: Prisma.SalesRecordWhereInput = { batch: { deletedAt: null } };
   if (role === "BRAND" && brandName) {
     baseWhere.brand = brandName;
   }
@@ -871,7 +872,9 @@ function buildPageUrl(
 
 async function UploadTab() {
   const [batches, customers] = await Promise.all([
-    prisma.salesBatch.findMany({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (prisma.salesBatch.findMany as any)({
+      where: { deletedAt: null },
       orderBy: { createdAt: "desc" },
       include: {
         uploader: { select: { name: true } },
@@ -880,6 +883,7 @@ async function UploadTab() {
       take: 30,
     }),
     prisma.customer.findMany({
+      where: { deletedAt: null },
       orderBy: { brandName: "asc" },
       select: { id: true, brandName: true },
     }),

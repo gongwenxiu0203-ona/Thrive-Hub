@@ -128,6 +128,7 @@ model Customer {
   contactPhone String?
 
   source    String   @default("INTERNAL") // INTERNAL | INTAKE
+  deletedAt DateTime? // 回收站软删除标记（7天内可恢复，到期物理清理）
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -217,6 +218,7 @@ model Contract {
   lockedFields  String  @default("[]") // JSON: field keys locked after prior approval round
 
   createdById String
+  deletedAt   DateTime? // 回收站软删除标记
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -268,6 +270,7 @@ model Task {
 
   sortOrder Int       @default(0)
   dueDate   DateTime?
+  deletedAt DateTime? // 回收站软删除标记
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
@@ -285,6 +288,7 @@ model Reminder {
   isRead      Boolean  @default(false)
   targetId    String
   createdById String
+  deletedAt   DateTime? // 回收站软删除标记
   createdAt   DateTime @default(now())
 
   target    User @relation("ReminderTarget", fields: [targetId], references: [id])
@@ -294,6 +298,7 @@ model Reminder {
 // 联盟资源库 — 字段与「资源库字段.xlsx」第一行完全对应
 model Affiliate {
   id        String   @id @default(cuid())
+  deletedAt DateTime? // 回收站软删除标记
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -419,6 +424,7 @@ model SalesBatch {
   affiliatePlatform String? // 上传时选择的联盟平台
   recordCount       Int      @default(0)
   uploaderId        String
+  deletedAt         DateTime? // 回收站软删除标记
   createdAt         DateTime @default(now())
 
   customer Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
