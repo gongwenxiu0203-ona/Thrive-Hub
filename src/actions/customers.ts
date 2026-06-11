@@ -105,6 +105,8 @@ export async function createCustomer(fd: FormData): Promise<SaveResult> {
       ...data,
       businessOwnerId,
       backendOwnerId,
+      // 无论是否分配后端负责人，只要选了日期就保存到客户记录
+      demoDueDate: demoDueDate ? new Date(demoDueDate) : null,
       source: "INTERNAL",
       // 优先使用手动选择的合作状态；否则按是否分配负责人自动判定
       status: manualStatus
@@ -226,9 +228,18 @@ export async function setBackendOwner(
   const newOwnerId = userId || null;
   const isNewAssignment = !!newOwnerId && customer.backendOwnerId !== newOwnerId;
 
+  // 截止日期优先用传入值，否则用客户记录里已保存的 demoDueDate（创建时填的）
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const storedDue = (customer as any).demoDueDate as Date | null | undefined;
+  const effectiveDue = dueDate || (storedDue ? new Date(storedDue).toISOString().slice(0, 10) : null);
+
+  // 如果本次传入了新日期，同步更新客户记录里的 demoDueDate
   await prisma.customer.update({
     where: { id: customerId },
-    data: { backendOwnerId: newOwnerId },
+    data: {
+      backendOwnerId: newOwnerId,
+      ...(dueDate ? { demoDueDate: new Date(dueDate) } : {}),
+    },
   });
 
   if (isNewAssignment) {
@@ -238,14 +249,18 @@ export async function setBackendOwner(
     if (existingDemo) {
       await prisma.task.update({
         where: { id: existingDemo.id },
-        data: { ownerId: newOwnerId, publisherId: newOwnerId },
+        data: {
+          ownerId: newOwnerId,
+          publisherId: newOwnerId,
+          ...(effectiveDue ? { dueDate: new Date(effectiveDue) } : {}),
+        },
       });
     } else {
       await createDemoTask(
         customerId,
         customer.brandName,
         newOwnerId,
-        dueDate || null,
+        effectiveDue,
       );
       if (customer.status === "UNASSIGNED") {
         await prisma.customer.update({

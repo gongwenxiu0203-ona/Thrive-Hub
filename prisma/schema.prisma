@@ -118,6 +118,7 @@ model Customer {
   evaluationData  String?  // JSON: { revenueScore, bsrScore, mediaBuyScore, commissionScore, categoryScore, ... }
   businessOwnerId String?
   backendOwnerId  String?
+  demoDueDate     DateTime? // Demo 方案截止日期（独立存储，不依赖是否分配后端负责人）
   channelUserId   String? // 渠道商 userId（关联渠道商用户）
   createdById     String? // 创建者 userId
 

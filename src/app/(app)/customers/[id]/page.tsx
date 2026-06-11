@@ -212,6 +212,7 @@ export default async function CustomerDetailPage({
             status={customer.status}
             businessOwnerId={customer.businessOwnerId}
             backendOwnerId={customer.backendOwnerId}
+            demoDueDate={customerAny.demoDueDate ? new Date(customerAny.demoDueDate).toISOString().slice(0, 10) : null}
             channelUserId={customerAny.channelUserId ?? null}
             users={userOptions}
             contracts={customer.contracts.map((ct) => ({

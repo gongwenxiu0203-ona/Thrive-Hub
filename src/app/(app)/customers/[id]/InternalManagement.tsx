@@ -56,6 +56,7 @@ export function InternalManagement({
   status,
   businessOwnerId,
   backendOwnerId,
+  demoDueDate,
   channelUserId,
   users,
   contracts,
@@ -68,6 +69,7 @@ export function InternalManagement({
   status: string;
   businessOwnerId: string | null;
   backendOwnerId: string | null;
+  demoDueDate?: string | null;
   channelUserId: string | null;
   users: Option[];
   contracts: ContractLite[];
@@ -77,7 +79,8 @@ export function InternalManagement({
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [demoDue, setDemoDue] = useState("");
+  // 默认显示创建时已保存的 Demo 截止日期（即使后端负责人空着）
+  const [demoDue, setDemoDue] = useState(demoDueDate ?? "");
 
   function run(fn: () => Promise<unknown>) {
     startTransition(async () => {
