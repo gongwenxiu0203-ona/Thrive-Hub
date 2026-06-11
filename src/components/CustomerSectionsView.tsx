@@ -7,6 +7,7 @@ type ViewData = {
   targetPlatforms: string[];
   platformGmv: Record<string, string>;
   amazonAcos: string | null;
+  amazonAcosNote: string | null;
   socialMediaInfo: string | null;
   affiliateHistory: string | null;
   affiliatePlatforms: string | null;
@@ -134,6 +135,7 @@ export function CustomerSectionsView({ data }: { data: ViewData }) {
         accent="border-amber-200 bg-amber-50/60"
       >
         <Row label="站内广告ACOS" value={data.amazonAcos} />
+        <Row label="ACOS备注" value={data.amazonAcosNote} />
         <Row label="社媒推广情况" value={data.socialMediaInfo} />
         <Row label="联盟营销情况" value={data.affiliateHistory} />
         <Row label="使用的平台" value={data.affiliatePlatforms} />

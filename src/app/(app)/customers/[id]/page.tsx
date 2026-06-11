@@ -82,6 +82,7 @@ export default async function CustomerDetailPage({
     targetPlatforms: parseStringArray(customer.targetPlatforms),
     platformGmv: parseRecord(customer.platformGmv),
     amazonAcos: customer.amazonAcos,
+    amazonAcosNote: customer.amazonAcosNote,
     socialMediaInfo: customer.socialMediaInfo,
     affiliateHistory: customer.affiliateHistory,
     affiliatePlatforms: customer.affiliatePlatforms,

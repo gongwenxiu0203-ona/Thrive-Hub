@@ -52,6 +52,7 @@ function collectCustomerData(fd: FormData) {
     targetPlatforms: JSON.stringify(targetPlatforms),
     platformGmv: JSON.stringify(platformGmv),
     amazonAcos: str(fd, "amazonAcos") || null,
+    amazonAcosNote: str(fd, "amazonAcosNote") || null,
     socialMediaInfo: str(fd, "socialMediaInfo") || null,
     affiliateHistory: str(fd, "affiliateHistory") || null,
     affiliatePlatforms: str(fd, "affiliatePlatforms") || null,

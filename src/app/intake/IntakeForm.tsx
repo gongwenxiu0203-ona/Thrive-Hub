@@ -41,6 +41,7 @@ function buildPayload(form: HTMLFormElement, customerId?: string, channelId?: st
     targetPlatforms,
     platformGmv,
     amazonAcos: str("amazonAcos"),
+    amazonAcosNote: str("amazonAcosNote"),
     socialMediaInfo: str("socialMediaInfo"),
     affiliateHistory: str("affiliateHistory"),
     affiliatePlatforms: str("affiliatePlatforms"),

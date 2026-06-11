@@ -58,6 +58,7 @@ export async function POST(req: Request) {
     targetPlatforms: JSON.stringify(targetPlatforms),
     platformGmv: JSON.stringify(getObj("platformGmv")),
     amazonAcos: get("amazonAcos") || null,
+    amazonAcosNote: get("amazonAcosNote") || null,
     socialMediaInfo: get("socialMediaInfo") || null,
     affiliateHistory: get("affiliateHistory") || null,
     affiliatePlatforms: get("affiliatePlatforms") || null,

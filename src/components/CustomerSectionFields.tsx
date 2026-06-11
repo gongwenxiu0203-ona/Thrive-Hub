@@ -12,6 +12,7 @@ export type CustomerSectionDefaults = {
   targetPlatforms?: string[];
   platformGmv?: Record<string, string>;
   amazonAcos?: string | null;
+  amazonAcosNote?: string | null;
   socialMediaInfo?: string | null;
   affiliateHistory?: string | null;
   affiliatePlatforms?: string | null;
@@ -218,6 +219,16 @@ export function CustomerSectionFields({
               className="input"
               placeholder="如：25%"
               defaultValue={defaults?.amazonAcos ?? ""}
+            />
+          </div>
+          <div>
+            <label className="label">亚马逊站内推广 ACOS 备注</label>
+            <textarea
+              name="amazonAcosNote"
+              className="input"
+              rows={2}
+              placeholder="补充说明 ACOS 相关情况（可选）"
+              defaultValue={defaults?.amazonAcosNote ?? ""}
             />
           </div>
           <div>

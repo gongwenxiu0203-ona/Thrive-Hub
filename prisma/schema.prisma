@@ -99,6 +99,7 @@ model Customer {
 
   // ③ 历史推广
   amazonAcos         String? // 亚马逊站内广告 ACOS
+  amazonAcosNote     String? // 亚马逊站内推广 ACOS 备注
   socialMediaInfo    String? // 社媒推广情况
   affiliateHistory   String? // 是否做过联盟营销及相关情况
   affiliatePlatforms String? // 具体用的平台（ACC / Levanta / PartnerBoost 等）
