@@ -28,6 +28,7 @@ interface AffiliateRow {
   youtubeLink: string | null;
   websiteLink: string | null;
   contactEmail: string | null;
+  contactInfo: string | null;
   salesRevenue: number;
   salesUnits: number;
   personInCharge: { id: string; name: string } | null;
@@ -143,13 +144,13 @@ export default function AffiliateListTab({ options }: Props) {
   function exportSelected() {
     const rows = data.filter((a) => selectedIds.has(a.id));
     if (rows.length === 0) return;
-    const headers = ["平台联盟商名称", "内部名称", "来源", "类目", "联盟商类型", "开发状态", "负责人", "过往销售额", "过往销量", "联系邮箱"];
+    const headers = ["平台联盟商名称", "内部名称", "来源", "类目", "联盟商类型", "开发状态", "负责人", "过往销售额", "过往销量", "联系方式"];
     const csvLines = [headers.join(",")];
     for (const a of rows) {
       const cells = [
         a.platformAffiliateName, a.internalAffiliateName ?? "", a.source ?? "", a.category ?? "",
         a.affiliateType ?? "", a.developmentStatus ?? "", a.personInCharge?.name ?? "",
-        String(a.salesRevenue ?? 0), String(a.salesUnits ?? 0), a.contactEmail ?? "",
+        String(a.salesRevenue ?? 0), String(a.salesUnits ?? 0), a.contactInfo ?? "",
       ].map((c) => `"${String(c).replace(/"/g, '""')}"`);
       csvLines.push(cells.join(","));
     }
@@ -423,7 +424,7 @@ export default function AffiliateListTab({ options }: Props) {
               <SortableHeader label="开发状态" sortKey="developmentStatus" current={sortKey} dir={sortDir} onSort={handleSort} />
               <SortableHeader label="负责人" sortKey="personInCharge" current={sortKey} dir={sortDir} onSort={handleSort} />
               <SortableHeader label="过往销售" sortKey="salesRevenue" current={sortKey} dir={sortDir} onSort={handleSort} />
-              <th className="px-4 py-2.5 text-left font-medium">联系邮箱</th>
+              <th className="px-4 py-2.5 text-left font-medium">联系方式</th>
               <th className="px-4 py-2.5 text-left font-medium">链接</th>
             </tr>
           </thead>
@@ -481,14 +482,14 @@ export default function AffiliateListTab({ options }: Props) {
                       : "—"}
                   </td>
                   <td className="px-4 py-2.5">
-                    {a.contactEmail ? (
+                    {a.contactInfo ? (
                       <button
-                        onClick={() => setEmailTarget({ id: a.id, name: a.platformAffiliateName, email: a.contactEmail! })}
-                        className="inline-flex items-center gap-1 text-xs text-brand-600 hover:underline max-w-[160px] truncate"
-                        title={`给 ${a.contactEmail} 发邮件`}
+                        onClick={() => setEmailTarget({ id: a.id, name: a.platformAffiliateName, email: a.contactInfo! })}
+                        className="inline-flex items-center gap-1 text-xs text-brand-600 hover:underline max-w-[180px] truncate"
+                        title={`给 ${a.contactInfo} 发邮件`}
                       >
                         <Mail className="h-3 w-3 shrink-0" />
-                        <span className="truncate">{a.contactEmail}</span>
+                        <span className="truncate">{a.contactInfo}</span>
                       </button>
                     ) : <span className="text-xs text-slate-300">—</span>}
                   </td>

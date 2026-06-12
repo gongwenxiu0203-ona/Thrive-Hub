@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "联盟资源库 · Thraive联盟营销系统" };
 
 async function loadOptions() {
-  const [affiliates, users, customers] = await Promise.all([
+  const [affiliates, users, customers, salesBrands] = await Promise.all([
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (prisma.affiliate.findMany as any)({
       select: {
@@ -17,6 +17,7 @@ async function loadOptions() {
         affiliateType: true,
         tags: true,
         brand: true,
+        brandEntries: true,
         developmentStatus: true,
         cooperationMode: true,
         region: true,
@@ -27,6 +28,8 @@ async function loadOptions() {
     }),
     prisma.user.findMany({ select: { id: true, name: true } }),
     prisma.customer.findMany({ select: { id: true, brandName: true }, orderBy: { brandName: "asc" } }),
+    // 往期合作数据里的品牌（销售记录 distinct brand）
+    prisma.salesRecord.findMany({ select: { brand: true }, distinct: ["brand"] }),
   ]);
 
   const distinct = <T>(arr: (T | null | undefined)[]) =>
@@ -56,7 +59,16 @@ async function loadOptions() {
     categories: distinct(affRows.map((a: any) => a.category)),
     types: distinct(affRows.map((a: any) => a.affiliateType)),
     tags: flatJson(affRows.map((a: any) => a.tags)),
-    brands: distinct(affRows.map((a: any) => a.brand)),
+    // 品牌：联盟商自身 brand + 多品牌记录(brandEntries) + 往期合作数据(销售记录) 的品牌并集
+    brands: distinct([
+      ...affRows.map((a: any) => a.brand),
+      ...affRows.flatMap((a: any) => {
+        try { return (JSON.parse(a.brandEntries ?? "[]") as { brandName?: string }[]).map((e) => e.brandName ?? null); }
+        catch { return []; }
+      }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...(salesBrands as any[]).map((s) => s.brand),
+    ]).sort(),
     statuses: distinct(affRows.map((a: any) => a.developmentStatus)),
     modes: flatJson(affRows.map((a: any) => a.cooperationMode)),
     regions: distinct(affRows.map((a: any) => a.region)).sort(),
