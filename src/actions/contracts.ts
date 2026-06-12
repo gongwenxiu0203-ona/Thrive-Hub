@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { bumpCustomerStatus } from "@/lib/customer";
 import { CONTRACT_REVIEW_FIELDS } from "@/lib/constants";
+import { syncContractProgressToProjects } from "@/actions/projects";
 
 function str(fd: FormData, key: string): string {
   return String(fd.get(key) ?? "").trim();
@@ -197,6 +198,7 @@ export async function submitForReview(id: string) {
     where: { id },
     data: { status: "REVIEWING" },
   });
+  await syncContractProgressToProjects(id, "审核中");
 
   if (contract.reviewerId) {
     await prisma.reminder.create({
@@ -298,6 +300,7 @@ export async function finalizeReview(contractId: string) {
       lockedFields: JSON.stringify(newLockedFields),
     },
   });
+  await syncContractProgressToProjects(contractId, hasRejected ? "审核驳回·推进中" : "签署中");
 
   // Mark the review task as DONE
   await prisma.task.updateMany({
@@ -351,6 +354,7 @@ export async function markCompleted(id: string) {
     where: { id },
     data: { status: "COMPLETED" },
   });
+  await syncContractProgressToProjects(id, "签署完成");
   await bumpCustomerStatus(contract.customerId, "CONTRACT_SIGNED");
 
   // 自动为有渠道商的客户创建渠道商分账管理记录

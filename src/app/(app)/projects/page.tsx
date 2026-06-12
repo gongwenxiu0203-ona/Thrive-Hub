@@ -31,29 +31,39 @@ export default async function ProjectsPage() {
       },
       orderBy: { createdAt: "desc" },
     }),
-    // 可创建项目的合同：签署完成 + 尚未建项目
+    // 可关联的合同：签署完成的合同（一个客户可多项目，不再限制一合同一项目）
     prisma.contract.findMany({
       where: { status: "COMPLETED" },
       select: {
         id: true,
         contractNo: true,
+        customerId: true,
         customer: { select: { brandName: true } },
       },
       orderBy: { createdAt: "desc" },
     }),
   ]);
 
-  // 单次合作可关联的客户
-  const customers = await prisma.customer.findMany({
-    select: { id: true, brandName: true },
-    orderBy: { brandName: "asc" },
-  });
+  // 关联客户（含商务负责人，自动带出）+ 项目负责人候选用户
+  const [customers, users] = await Promise.all([
+    prisma.customer.findMany({
+      select: { id: true, brandName: true, businessOwner: { select: { name: true } } },
+      orderBy: { brandName: "asc" },
+    }),
+    prisma.user.findMany({
+      where: { status: "APPROVED", role: { in: ["ADMIN", "USER", "LYNQ_STAFF"] } },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    }),
+  ]);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const usedContractIds = new Set((projects as any[]).map((p) => p.contractId).filter(Boolean));
-  const availableContracts = completedContracts
-    .filter((c) => !usedContractIds.has(c.id))
-    .map((c) => ({ id: c.id, contractNo: c.contractNo, brandName: c.customer.brandName }));
+  // 所有签署完成的合同都可关联（一客户多项目，不再排除已用）
+  const availableContracts = completedContracts.map((c) => ({
+    id: c.id,
+    contractNo: c.contractNo,
+    brandName: c.customer.brandName,
+    customerId: c.customerId,
+  }));
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rows = (projects as any[]).map((p) => ({
@@ -71,5 +81,19 @@ export default async function ProjectsPage() {
     createdAt: p.createdAt.toISOString(),
   }));
 
-  return <ProjectsClient projects={rows} availableContracts={availableContracts} customers={customers} />;
+  const customerOptions = customers.map((c) => ({
+    id: c.id,
+    brandName: c.brandName,
+    businessOwnerName: c.businessOwner?.name ?? undefined,
+  }));
+
+  return (
+    <ProjectsClient
+      projects={rows}
+      availableContracts={availableContracts}
+      customers={customerOptions}
+      users={users}
+      currentUserId={session.userId}
+    />
+  );
 }

@@ -8,53 +8,92 @@ import { isStaff } from "@/lib/permissions";
 export type ProjectSaveResult = { ok: boolean; error?: string; projectId?: string };
 
 /**
- * 整合合作：基于「签署完成」的合同创建项目。
- * 自动带出客户（含商务/后端负责人）。
+ * 整合合作：选关联客户（可多项目）+ 关联合同（可选）创建项目。
+ * 商务负责人自动取客户负责人；项目负责人默认创建人（可手动改）。
  */
-export async function createIntegratedProject(
-  contractId: string,
-  name?: string,
-): Promise<ProjectSaveResult> {
+export async function createIntegratedProject(payload: {
+  customerId: string;
+  contractId?: string;
+  ownerId?: string;
+  name?: string;
+}): Promise<ProjectSaveResult> {
   const session = await requireSession();
   if (!isStaff(session.role)) return { ok: false, error: "无权创建项目" };
-  if (!contractId) return { ok: false, error: "请选择签署完成的合同" };
+  if (!payload.customerId) return { ok: false, error: "请选择关联客户" };
 
-  const contract = await prisma.contract.findUnique({
-    where: { id: contractId },
-    include: { customer: true },
-  });
-  if (!contract) return { ok: false, error: "合同不存在" };
-  if (contract.status !== "COMPLETED") {
-    return { ok: false, error: "仅「签署完成」的合同可创建整合合作项目" };
+  const customer = await prisma.customer.findUnique({ where: { id: payload.customerId } });
+  if (!customer) return { ok: false, error: "客户不存在" };
+
+  // 关联合同（可选）：若选了，校验属于该客户
+  let contractNo = "";
+  let contractStatus = "";
+  if (payload.contractId) {
+    const contract = await prisma.contract.findUnique({ where: { id: payload.contractId } });
+    if (!contract) return { ok: false, error: "合同不存在" };
+    if (contract.customerId !== payload.customerId) {
+      return { ok: false, error: "所选合同不属于该客户" };
+    }
+    contractNo = contract.contractNo;
+    contractStatus = contract.status;
   }
-
-  // 同一合同避免重复建项目
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const dup = await (prisma.project.findFirst as any)({
-    where: { contractId, deletedAt: null },
-  });
-  if (dup) return { ok: false, error: "该合同已创建过项目" };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const project = await (prisma.project.create as any)({
     data: {
       type: "INTEGRATED",
-      name: name?.trim() || `${contract.customer.brandName} 整合合作`,
-      customerId: contract.customerId,
-      contractId,
+      name: payload.name?.trim() || `${customer.brandName} 整合合作`,
+      customerId: payload.customerId,
+      contractId: payload.contractId || null,
+      ownerId: payload.ownerId || session.userId, // 默认创建人
       createdById: session.userId,
     },
   });
+
+  // 关联了合同：把当前合同进度作为一条「合同进度」节点写入时间流
+  if (payload.contractId) {
+    const { CONTRACT_STATUS_LABELS } = await import("@/lib/constants");
+    const label = CONTRACT_STATUS_LABELS[contractStatus] ?? contractStatus;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (prisma.projectEntry.create as any)({
+      data: {
+        projectId: project.id,
+        kind: "CONTRACT",
+        content: `关联合同 ${contractNo}，当前状态：${label}`,
+        authorId: session.userId,
+      },
+    });
+  }
 
   revalidatePath("/projects");
   return { ok: true, projectId: project.id };
 }
 
-/** 添加项目时间流条目（日常工作 / 数据维度）*/
+/** 合同状态变动时，同步一条「合同进度」节点到关联的整合合作项目时间流 */
+export async function syncContractProgressToProjects(contractId: string, statusLabel: string, note?: string) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const projects = await (prisma.project.findMany as any)({
+    where: { contractId, deletedAt: null },
+    select: { id: true },
+  });
+  for (const p of projects as { id: string }[]) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (prisma.projectEntry.create as any)({
+      data: {
+        projectId: p.id,
+        kind: "CONTRACT",
+        content: note ? `合同进度：${statusLabel}（${note}）` : `合同进度：${statusLabel}`,
+        authorId: null,
+      },
+    });
+    revalidatePath(`/projects/${p.id}`);
+  }
+}
+
+/** 添加项目时间流条目（日常工作 / 数据维度 / BD 进度）*/
 export async function addProjectEntry(
   projectId: string,
   content: string,
-  kind: "DAILY" | "DATA" = "DAILY",
+  kind: "DAILY" | "DATA" | "BD" = "DAILY",
 ): Promise<ProjectSaveResult> {
   const session = await requireSession();
   if (!isStaff(session.role)) return { ok: false, error: "无权操作" };
@@ -220,14 +259,19 @@ export async function confirmProjectPrice(projectId: string, price: string): Pro
   return { ok: true, projectId };
 }
 
-/** 提交合作信息（ASIN 库存 + 是否设置 code + 起止时间）*/
+/** 提交合作信息（最低折后价 + ASIN 库存表 + 是否设置 code + 起止时间）*/
 export async function submitProjectInfo(
   projectId: string,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  data: { asins: any[]; hasCode: boolean; code?: string; startDate?: string; endDate?: string },
+  data: {
+    lowestPrice?: string;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    asins: any[];
+    hasCode: boolean; code?: string; startDate?: string; endDate?: string;
+  },
 ): Promise<ProjectSaveResult> {
   const session = await requireSession();
   if (!isStaff(session.role)) return { ok: false, error: "无权操作" };
+  if (!data.lowestPrice?.trim()) return { ok: false, error: "请填写最低折后价" };
   if (data.hasCode && !data.code?.trim()) return { ok: false, error: "已选择设置 code，请填写 code 码" };
   if (data.hasCode && (!data.startDate || !data.endDate)) return { ok: false, error: "请填写 code 起止时间" };
 
@@ -236,9 +280,47 @@ export async function submitProjectInfo(
     where: { id: projectId },
     data: { submissionData: JSON.stringify(data), stage: "INFO_SUBMITTED" },
   });
-  const asinCount = (data.asins ?? []).filter((a) => a.asin || a.name).length;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const asinCount = (data.asins ?? []).filter((a: any) => a.parentAsin || a.childAsin).length;
   const codeNote = data.hasCode ? `，code：${data.code}（${data.startDate} ~ ${data.endDate}）` : "，未设置 code";
-  await addNode(projectId, session.userId, `提交合作信息：${asinCount} 个 ASIN 库存${codeNote}`);
+  await addNode(projectId, session.userId, `提交合作信息：最低折后价 ${data.lowestPrice}，${asinCount} 行 ASIN 库存${codeNote}`);
+  revalidatePath(`/projects/${projectId}`);
+  return { ok: true, projectId };
+}
+
+/** 上传合作信息表格（识别表头作为推广基本信息展示字段）*/
+export async function uploadCoopInfoTable(
+  projectId: string,
+  data: { headers: string[]; rows: string[][] },
+): Promise<ProjectSaveResult> {
+  const session = await requireSession();
+  if (!isStaff(session.role)) return { ok: false, error: "无权操作" };
+  if (!data.headers.length) return { ok: false, error: "未识别到表格表头" };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (prisma.project.update as any)({
+    where: { id: projectId },
+    data: { coopInfo: JSON.stringify(data) },
+  });
+  await addNode(projectId, session.userId, `上传合作信息表：${data.headers.length} 个字段，${data.rows.length} 行数据`);
+  revalidatePath(`/projects/${projectId}`);
+  return { ok: true, projectId };
+}
+
+/** 生成邮件发联盟商（暂不真发，仅在时间流记录「已发送邮件」并推进阶段）*/
+export async function sendAffiliateEmailStep(
+  projectId: string,
+  data: { affiliateName: string; senderEmail?: string; receiverEmail?: string },
+): Promise<ProjectSaveResult> {
+  const session = await requireSession();
+  if (!isStaff(session.role)) return { ok: false, error: "无权操作" };
+  if (!data.affiliateName) return { ok: false, error: "请选择联盟商" };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (prisma.project.update as any)({
+    where: { id: projectId },
+    data: { stage: "EMAIL_SENT" },
+  });
+  const recv = data.receiverEmail ? ` → ${data.receiverEmail}` : "";
+  await addNode(projectId, session.userId, `已发送邮件给联盟商「${data.affiliateName}」${recv}（按模板生成）`);
   revalidatePath(`/projects/${projectId}`);
   return { ok: true, projectId };
 }

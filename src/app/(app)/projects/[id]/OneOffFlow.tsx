@@ -8,18 +8,19 @@ import {
 } from "lucide-react";
 import {
   submitProjectTo, confirmProjectPrice, submitProjectInfo,
-  addProjectNote, decideProjectCoop, settleProject,
+  addProjectNote, decideProjectCoop, settleProject, sendAffiliateEmailStep,
+  uploadCoopInfoTable,
 } from "@/actions/projects";
 import { cn } from "@/lib/utils";
 
 type UserOption = { id: string; name: string };
-type Asin = { name: string; asin: string; stock: string };
+type Asin = { parentAsin: string; childAsin: string; color: string; size: string; stock: string };
 type SettleRow = { person: string; parentAsin: string; serviceFee: string };
 
-const STAGE_ORDER = ["REQUIREMENT", "SUBMITTED", "PRICE_CONFIRMED", "INFO_SUBMITTED", "DECIDED", "SETTLED"];
+const STAGE_ORDER = ["REQUIREMENT", "SUBMITTED", "PRICE_CONFIRMED", "INFO_SUBMITTED", "EMAIL_SENT", "DECIDED", "SETTLED"];
 const STAGE_LABELS: Record<string, string> = {
   REQUIREMENT: "需求创建", SUBMITTED: "提交", PRICE_CONFIRMED: "确认价格",
-  INFO_SUBMITTED: "提交信息", DECIDED: "确认合作", SETTLED: "结算",
+  INFO_SUBMITTED: "提交信息", EMAIL_SENT: "发送邮件", DECIDED: "确认合作", SETTLED: "结算",
 };
 
 export function OneOffFlow({
@@ -83,7 +84,11 @@ export function OneOffFlow({
 
       {/* 各阶段操作卡片 */}
       {stage === "REQUIREMENT" && (
-        <SubmitToCard users={users} pending={pending} onSubmit={(uid) => run(() => submitProjectTo(projectId, uid))} />
+        <>
+          <CoopInfoUploadCard pending={pending}
+            onUpload={(d) => run(() => uploadCoopInfoTable(projectId, d))} />
+          <SubmitToCard users={users} pending={pending} onSubmit={(uid) => run(() => submitProjectTo(projectId, uid))} />
+        </>
       )}
 
       {stage === "SUBMITTED" && (
@@ -98,6 +103,11 @@ export function OneOffFlow({
       )}
 
       {stage === "INFO_SUBMITTED" && (
+        <EmailStepCard pending={pending}
+          onSend={(d) => run(() => sendAffiliateEmailStep(projectId, d))} />
+      )}
+
+      {stage === "EMAIL_SENT" && (
         <ActionCard title="沟通与确认合作" icon={<MessageSquare className="h-4 w-4" />}
           hint="可记录沟通进度（时间流显示），确认最终是否合作">
           <CommunicateAndDecide
@@ -148,6 +158,69 @@ function ActionCard({ title, icon, hint, children }: {
   );
 }
 
+// 上传合作信息表格（识别表头作为推广基本信息展示字段）
+function CoopInfoUploadCard({ pending, onUpload }: {
+  pending: boolean; onUpload: (d: { headers: string[]; rows: string[][] }) => void;
+}) {
+  const [headers, setHeaders] = useState<string[]>([]);
+  const [rows, setRows] = useState<string[][]>([]);
+  const [note, setNote] = useState<string | null>(null);
+
+  function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const text = (ev.target?.result as string).replace(/^﻿/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+        const lines = text.split("\n").filter((l) => l.trim());
+        if (!lines.length) { setNote("文件为空"); return; }
+        const hdr = lines[0].split(",").map((x) => x.replace(/^"|"$/g, "").trim()).filter(Boolean);
+        const rws = lines.slice(1).map((l) => l.split(",").map((x) => x.replace(/^"|"$/g, "").trim()));
+        setHeaders(hdr); setRows(rws);
+        setNote(`✅ 识别到 ${hdr.length} 个字段、${rws.length} 行数据`);
+      } catch { setNote("解析失败，请上传 CSV 表格"); }
+      finally { if (e.target) e.target.value = ""; }
+    };
+    reader.readAsText(file, "utf-8");
+  }
+
+  return (
+    <ActionCard title="上传合作信息（推广基本信息）" icon={<Upload className="h-4 w-4" />}
+      hint="上传 CSV 表格，系统自动识别表头字段作为推广基本信息展示">
+      <div className="flex items-center gap-2">
+        <label className="btn-secondary btn-sm cursor-pointer">
+          <Upload className="h-3.5 w-3.5" /> 上传表格 CSV
+          <input type="file" accept=".csv,.txt" className="hidden" onChange={handleUpload} />
+        </label>
+        {headers.length > 0 && (
+          <button className="btn-primary btn-sm" disabled={pending} onClick={() => onUpload({ headers, rows })}>
+            <Check className="h-3.5 w-3.5" /> 保存合作信息
+          </button>
+        )}
+      </div>
+      {note && <p className={`mt-2 text-xs ${note.startsWith("✅") ? "text-emerald-600" : "text-rose-500"}`}>{note}</p>}
+      {headers.length > 0 && (
+        <div className="mt-2 overflow-x-auto rounded-lg border border-slate-100">
+          <table className="w-full text-sm">
+            <thead><tr className="border-b border-slate-100 bg-slate-50 text-xs text-slate-500">
+              {headers.map((h, i) => <th key={i} className="px-2 py-1.5 text-left">{h}</th>)}
+            </tr></thead>
+            <tbody>
+              {rows.slice(0, 5).map((r, i) => (
+                <tr key={i} className="border-b border-slate-50 last:border-0">
+                  {headers.map((_, j) => <td key={j} className="px-2 py-1.5 text-xs text-slate-600">{r[j] ?? ""}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {rows.length > 5 && <p className="px-2 py-1 text-[11px] text-slate-400">…共 {rows.length} 行，保存后全部展示</p>}
+        </div>
+      )}
+    </ActionCard>
+  );
+}
+
 function SubmitToCard({ users, pending, onSubmit }: {
   users: UserOption[]; pending: boolean; onSubmit: (uid: string) => void;
 }) {
@@ -181,11 +254,14 @@ function PriceForm({ pending, onConfirm }: { pending: boolean; onConfirm: (p: st
   );
 }
 
+function emptyAsin(): Asin { return { parentAsin: "", childAsin: "", color: "", size: "", stock: "" }; }
+
 function InfoSubmitCard({ pending, onSubmit }: {
   pending: boolean;
-  onSubmit: (data: { asins: Asin[]; hasCode: boolean; code?: string; startDate?: string; endDate?: string }) => void;
+  onSubmit: (data: { lowestPrice: string; asins: Asin[]; hasCode: boolean; code?: string; startDate?: string; endDate?: string }) => void;
 }) {
-  const [asins, setAsins] = useState<Asin[]>([{ name: "", asin: "", stock: "" }]);
+  const [lowestPrice, setLowestPrice] = useState("");
+  const [asins, setAsins] = useState<Asin[]>([emptyAsin()]);
   const [hasCode, setHasCode] = useState(false);
   const [code, setCode] = useState("");
   const [startDate, setStartDate] = useState("");
@@ -205,9 +281,9 @@ function InfoSubmitCard({ pending, onSubmit }: {
         const lines = text.split("\n").filter((l) => l.trim());
         const rows: Asin[] = lines.slice(1).map((l) => {
           const c = l.split(",").map((x) => x.replace(/^"|"$/g, "").trim());
-          return { name: c[0] ?? "", asin: c[1] ?? "", stock: c[2] ?? "" };
-        }).filter((r) => r.name || r.asin);
-        if (rows.length) { setAsins(rows); setNote(`✅ 已导入 ${rows.length} 个 ASIN`); }
+          return { parentAsin: c[0] ?? "", childAsin: c[1] ?? "", color: c[2] ?? "", size: c[3] ?? "", stock: c[4] ?? "" };
+        }).filter((r) => r.parentAsin || r.childAsin);
+        if (rows.length) { setAsins(rows); setNote(`✅ 已导入 ${rows.length} 行 ASIN 库存`); }
         else setNote("未识别到有效数据");
       } catch { setNote("解析失败，请用下载的模板"); }
       finally { if (e.target) e.target.value = ""; }
@@ -217,11 +293,18 @@ function InfoSubmitCard({ pending, onSubmit }: {
 
   return (
     <ActionCard title="提交合作信息" icon={<Upload className="h-4 w-4" />}
-      hint="提交 ASIN 库存（可下载模板批量上传），并设置是否使用 code">
-      {/* ASIN 库存 */}
+      hint="填写最低折后价 + ASIN 库存表（可下载模板批量上传），并设置是否使用 code">
+      {/* 最低折后价 */}
+      <div className="mb-3">
+        <label className="label text-xs">最低折后价 *</label>
+        <input className="input" value={lowestPrice} onChange={(e) => setLowestPrice(e.target.value)}
+          placeholder="如：$19.99 或 ¥99" />
+      </div>
+
+      {/* ASIN 库存表 */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <span className="text-xs font-semibold text-slate-600">ASIN 库存清单</span>
+          <span className="text-xs font-semibold text-slate-600">ASIN 库存表</span>
           <div className="flex gap-2">
             <a href="/api/projects/asin-template" download className="btn-ghost btn-sm">
               <FileDown className="h-3.5 w-3.5" /> 下载模板
@@ -230,7 +313,7 @@ function InfoSubmitCard({ pending, onSubmit }: {
               <Upload className="h-3.5 w-3.5" /> 上传 CSV
               <input type="file" accept=".csv,.txt" className="hidden" onChange={handleUpload} />
             </label>
-            <button className="btn-ghost btn-sm" onClick={() => setAsins((a) => [...a, { name: "", asin: "", stock: "" }])}>
+            <button className="btn-ghost btn-sm" onClick={() => setAsins((a) => [...a, emptyAsin()])}>
               <Plus className="h-3.5 w-3.5" /> 添加
             </button>
           </div>
@@ -239,14 +322,17 @@ function InfoSubmitCard({ pending, onSubmit }: {
         <div className="overflow-x-auto rounded-lg border border-slate-200">
           <table className="w-full text-sm">
             <thead><tr className="border-b border-slate-100 bg-slate-50 text-xs text-slate-500">
-              <th className="px-2 py-1.5 text-left">商品名称</th><th className="px-2 py-1.5 text-left">ASIN</th>
+              <th className="px-2 py-1.5 text-left">父ASIN</th><th className="px-2 py-1.5 text-left">可售子ASIN</th>
+              <th className="px-2 py-1.5 text-left">颜色</th><th className="px-2 py-1.5 text-left">尺码</th>
               <th className="px-2 py-1.5 text-left">库存数量</th><th className="w-8"></th>
             </tr></thead>
             <tbody>
               {asins.map((a, i) => (
                 <tr key={i} className="border-b border-slate-50">
-                  <td className="px-2 py-1"><input className="input py-1 text-xs" value={a.name} onChange={(e) => update(i, "name", e.target.value)} /></td>
-                  <td className="px-2 py-1"><input className="input py-1 text-xs" value={a.asin} onChange={(e) => update(i, "asin", e.target.value)} placeholder="B0XXXX" /></td>
+                  <td className="px-2 py-1"><input className="input py-1 text-xs" value={a.parentAsin} onChange={(e) => update(i, "parentAsin", e.target.value)} placeholder="B0XXXX" /></td>
+                  <td className="px-2 py-1"><input className="input py-1 text-xs" value={a.childAsin} onChange={(e) => update(i, "childAsin", e.target.value)} placeholder="B0YYYY" /></td>
+                  <td className="px-2 py-1"><input className="input py-1 text-xs" value={a.color} onChange={(e) => update(i, "color", e.target.value)} /></td>
+                  <td className="px-2 py-1"><input className="input py-1 text-xs" value={a.size} onChange={(e) => update(i, "size", e.target.value)} /></td>
                   <td className="px-2 py-1"><input className="input py-1 text-xs" value={a.stock} onChange={(e) => update(i, "stock", e.target.value)} /></td>
                   <td className="px-2 py-1">{asins.length > 1 && (
                     <button onClick={() => setAsins((x) => x.filter((_, idx) => idx !== i))} className="text-slate-300 hover:text-rose-500"><Trash2 className="h-3.5 w-3.5" /></button>
@@ -284,9 +370,76 @@ function InfoSubmitCard({ pending, onSubmit }: {
 
       <div className="mt-4 flex justify-end">
         <button className="btn-primary" disabled={pending}
-          onClick={() => onSubmit({ asins, hasCode, code, startDate, endDate })}>
+          onClick={() => onSubmit({ lowestPrice, asins, hasCode, code, startDate, endDate })}>
           <Check className="h-4 w-4" /> 提交信息
         </button>
+      </div>
+    </ActionCard>
+  );
+}
+
+// 生成邮件发联盟商（暂不真发，记录已发送邮件）
+function EmailStepCard({ pending, onSend }: {
+  pending: boolean;
+  onSend: (d: { affiliateName: string; senderEmail?: string; receiverEmail?: string }) => void;
+}) {
+  const [affiliateName, setAffiliateName] = useState("");
+  const [results, setResults] = useState<{ id: string; name: string; email: string }[]>([]);
+  const [picked, setPicked] = useState<{ name: string; email: string } | null>(null);
+  const [senderEmail, setSenderEmail] = useState("");
+  const [receiverEmail, setReceiverEmail] = useState("");
+
+  async function search(v: string) {
+    setAffiliateName(v);
+    setPicked(null);
+    if (!v.trim()) { setResults([]); return; }
+    const res = await fetch(`/api/affiliates?q=${encodeURIComponent(v)}&pageSize=8`);
+    const data = await res.json();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    setResults((data.data ?? []).map((a: any) => ({ id: a.id, name: a.platformAffiliateName, email: a.contactInfo ?? "" })));
+  }
+
+  return (
+    <ActionCard title="生成邮件发联盟商" icon={<Send className="h-4 w-4" />}
+      hint="选择联盟商并填写收发邮箱，一键「发送」（暂不真实发信，仅在时间流记录已发送邮件）">
+      <div className="space-y-3">
+        <div className="relative">
+          <label className="label text-xs">选择联盟商（资源库）*</label>
+          <input className="input" value={affiliateName} onChange={(e) => search(e.target.value)}
+            placeholder="搜索联盟商名称…" />
+          {!picked && results.length > 0 && (
+            <div className="absolute z-30 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-xl">
+              {results.map((r) => (
+                <button key={r.id} type="button"
+                  onClick={() => { setPicked({ name: r.name, email: r.email }); setAffiliateName(r.name); setReceiverEmail(r.email); setResults([]); }}
+                  className="flex w-full items-center justify-between px-3 py-1.5 text-left text-sm hover:bg-slate-50">
+                  <span className="truncate text-slate-700">{r.name}</span>
+                  {r.email && <span className="text-[10px] text-slate-400">{r.email}</span>}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label className="label text-xs">发送邮箱</label>
+            <input className="input" value={senderEmail} onChange={(e) => setSenderEmail(e.target.value)} placeholder="发件邮箱（可选）" />
+          </div>
+          <div>
+            <label className="label text-xs">接收邮箱</label>
+            <input className="input" value={receiverEmail} onChange={(e) => setReceiverEmail(e.target.value)} placeholder="联盟商联系邮箱" />
+          </div>
+        </div>
+        <div className="flex items-center justify-between">
+          <button type="button" className="text-xs text-slate-400 hover:text-slate-600"
+            onClick={() => onSend({ affiliateName: affiliateName || "（未指定）", senderEmail, receiverEmail })}>
+            跳过/直接标记已发送
+          </button>
+          <button className="btn-primary" disabled={pending || !affiliateName.trim()}
+            onClick={() => onSend({ affiliateName, senderEmail, receiverEmail })}>
+            <Send className="h-4 w-4" /> 一键发送
+          </button>
+        </div>
       </div>
     </ActionCard>
   );
@@ -368,23 +521,31 @@ function SettleCard({ pending, biParentAsins, onSettle }: {
 }
 
 function SubmissionView({ submissionData, price }: { submissionData: string; price: string | null }) {
-  let d: { asins?: Asin[]; hasCode?: boolean; code?: string; startDate?: string; endDate?: string } = {};
+  let d: { lowestPrice?: string; asins?: Asin[]; hasCode?: boolean; code?: string; startDate?: string; endDate?: string } = {};
   try { d = JSON.parse(submissionData); } catch {}
   const asins = d.asins ?? [];
   return (
     <div className="card p-5">
       <h3 className="mb-3 text-sm font-semibold text-slate-800">已提交合作信息</h3>
-      {price && <p className="mb-2 text-xs text-slate-500">确认价格：<b className="text-slate-700">{price}</b></p>}
+      <div className="mb-2 flex flex-wrap gap-x-6 gap-y-1 text-xs text-slate-500">
+        {price && <span>确认价格：<b className="text-slate-700">{price}</b></span>}
+        {d.lowestPrice && <span>最低折后价：<b className="text-slate-700">{d.lowestPrice}</b></span>}
+      </div>
       {asins.length > 0 && (
         <div className="overflow-x-auto rounded-lg border border-slate-100">
           <table className="w-full text-sm">
             <thead><tr className="border-b border-slate-100 bg-slate-50 text-xs text-slate-500">
-              <th className="px-3 py-1.5 text-left">商品名称</th><th className="px-3 py-1.5 text-left">ASIN</th><th className="px-3 py-1.5 text-left">库存</th>
+              <th className="px-3 py-1.5 text-left">父ASIN</th><th className="px-3 py-1.5 text-left">可售子ASIN</th>
+              <th className="px-3 py-1.5 text-left">颜色</th><th className="px-3 py-1.5 text-left">尺码</th><th className="px-3 py-1.5 text-left">库存</th>
             </tr></thead>
             <tbody>
               {asins.map((a, i) => (
                 <tr key={i} className="border-b border-slate-50 last:border-0">
-                  <td className="px-3 py-1.5">{a.name || "—"}</td><td className="px-3 py-1.5 font-mono text-xs">{a.asin || "—"}</td><td className="px-3 py-1.5">{a.stock || "—"}</td>
+                  <td className="px-3 py-1.5 font-mono text-xs">{a.parentAsin || "—"}</td>
+                  <td className="px-3 py-1.5 font-mono text-xs">{a.childAsin || "—"}</td>
+                  <td className="px-3 py-1.5">{a.color || "—"}</td>
+                  <td className="px-3 py-1.5">{a.size || "—"}</td>
+                  <td className="px-3 py-1.5">{a.stock || "—"}</td>
                 </tr>
               ))}
             </tbody>

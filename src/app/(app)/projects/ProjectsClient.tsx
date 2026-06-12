@@ -15,6 +15,7 @@ export const ONEOFF_STAGE_LABELS: Record<string, string> = {
   SUBMITTED: "已提交",
   PRICE_CONFIRMED: "已确认价格",
   INFO_SUBMITTED: "已提交信息",
+  EMAIL_SENT: "已发邮件",
   DECIDED: "已确认合作",
   SETTLED: "已结算",
 };
@@ -23,6 +24,7 @@ export const ONEOFF_STAGE_COLORS: Record<string, string> = {
   SUBMITTED: "bg-sky-100 text-sky-700",
   PRICE_CONFIRMED: "bg-amber-100 text-amber-700",
   INFO_SUBMITTED: "bg-indigo-100 text-indigo-700",
+  EMAIL_SENT: "bg-cyan-100 text-cyan-700",
   DECIDED: "bg-violet-100 text-violet-700",
   SETTLED: "bg-emerald-100 text-emerald-700",
 };
@@ -56,17 +58,22 @@ type ProjectRow = {
   createdAt: string;
 };
 
-type ContractOption = { id: string; contractNo: string; brandName: string };
-type CustomerOption = { id: string; brandName: string };
+type ContractOption = { id: string; contractNo: string; brandName: string; customerId: string };
+type CustomerOption = { id: string; brandName: string; businessOwnerName?: string };
+type UserOption = { id: string; name: string };
 
 export default function ProjectsClient({
   projects,
   availableContracts,
   customers = [],
+  users = [],
+  currentUserId = "",
 }: {
   projects: ProjectRow[];
   availableContracts: ContractOption[];
   customers?: CustomerOption[];
+  users?: UserOption[];
+  currentUserId?: string;
 }) {
   const [tab, setTab] = useState<"INTEGRATED" | "ONE_OFF">("INTEGRATED");
   const [showCreate, setShowCreate] = useState(false);
@@ -187,6 +194,9 @@ export default function ProjectsClient({
       {showCreate && (
         <CreateProjectModal
           contracts={availableContracts}
+          customers={customers}
+          users={users}
+          currentUserId={currentUserId}
           onClose={() => setShowCreate(false)}
         />
       )}
@@ -274,28 +284,43 @@ function CreateOneOffModal({
   );
 }
 
-// ── 新建整合合作项目弹窗：选择签署完成的合同 ─────────────────────────────────
+// ── 新建整合合作项目弹窗：选客户 → 选合同 → 负责人 ───────────────────────────
 
 function CreateProjectModal({
   contracts,
+  customers,
+  users,
+  currentUserId,
   onClose,
 }: {
   contracts: ContractOption[];
+  customers: CustomerOption[];
+  users: UserOption[];
+  currentUserId: string;
   onClose: () => void;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [customerId, setCustomerId] = useState("");
   const [contractId, setContractId] = useState("");
+  const [ownerId, setOwnerId] = useState(currentUserId);
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  const selected = contracts.find((c) => c.id === contractId);
+  const customer = customers.find((c) => c.id === customerId);
+  // 该客户名下的合同
+  const customerContracts = contracts.filter((c) => c.customerId === customerId);
 
   function onSubmit() {
-    if (!contractId) { setError("请选择签署完成的合同"); return; }
+    if (!customerId) { setError("请选择关联客户"); return; }
     setError(null);
     startTransition(async () => {
-      const result = await createIntegratedProject(contractId, name);
+      const result = await createIntegratedProject({
+        customerId,
+        contractId: contractId || undefined,
+        ownerId: ownerId || undefined,
+        name,
+      });
       if (!result.ok) { setError(result.error ?? "创建失败"); return; }
       onClose();
       router.push(`/projects/${result.projectId}`);
@@ -303,7 +328,7 @@ function CreateProjectModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 pt-10">
       <div className="w-full max-w-lg rounded-2xl bg-white shadow-xl">
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
           <h2 className="text-sm font-semibold text-slate-900">新建整合合作项目</h2>
@@ -311,40 +336,58 @@ function CreateProjectModal({
         </div>
         <div className="space-y-4 px-5 py-5">
           <div>
-            <label className="label">选择签署完成的合同 *</label>
-            {contracts.length === 0 ? (
+            <label className="label">关联客户 *</label>
+            <select className="input" value={customerId}
+              onChange={(e) => { setCustomerId(e.target.value); setContractId(""); }}>
+              <option value="">请选择客户</option>
+              {customers.map((c) => <option key={c.id} value={c.id}>{c.brandName}</option>)}
+            </select>
+            <p className="mt-1 text-[11px] text-slate-400">一个客户可关联创建多个项目</p>
+          </div>
+          <div>
+            <label className="label">关联合同（可选）</label>
+            {!customerId ? (
+              <p className="rounded-lg bg-slate-50 px-3 py-2.5 text-xs text-slate-400">请先选择客户</p>
+            ) : customerContracts.length === 0 ? (
               <p className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2.5 text-xs text-amber-700">
-                暂无可用合同：仅「签署完成」且尚未创建过项目的合同可选
+                该客户暂无可关联的合同
               </p>
             ) : (
               <select className="input" value={contractId} onChange={(e) => setContractId(e.target.value)}>
-                <option value="">请选择合同</option>
-                {contracts.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.contractNo} · {c.brandName}
-                  </option>
+                <option value="">不关联合同</option>
+                {customerContracts.map((c) => (
+                  <option key={c.id} value={c.id}>{c.contractNo}</option>
                 ))}
               </select>
             )}
-            <p className="mt-1 text-[11px] text-slate-400">
-              创建后自动带出客户、商务负责人、后端负责人，并关联推广 BI 数据
-            </p>
+            <p className="mt-1 text-[11px] text-slate-400">关联后合同状态变动会自动同步到项目时间流</p>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="label">商务负责人</label>
+              <div className="input bg-slate-50 text-slate-600">{customer?.businessOwnerName ?? "（取客户负责人）"}</div>
+              <p className="mt-1 text-[11px] text-slate-400">自动取该客户的商务负责人</p>
+            </div>
+            <div>
+              <label className="label">项目负责人</label>
+              <select className="input" value={ownerId} onChange={(e) => setOwnerId(e.target.value)}>
+                <option value="">未指定</option>
+                {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </select>
+              <p className="mt-1 text-[11px] text-slate-400">默认创建人，可手动修改</p>
+            </div>
           </div>
           <div>
             <label className="label">项目名称（可选）</label>
-            <input
-              className="input"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={selected ? `默认：${selected.brandName} 整合合作` : "默认使用客户品牌名"}
-            />
+            <input className="input" value={name} onChange={(e) => setName(e.target.value)}
+              placeholder={customer ? `默认：${customer.brandName} 整合合作` : "默认使用客户品牌名"} />
           </div>
           {error && (
             <div className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-sm text-rose-600">{error}</div>
           )}
           <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
             <button onClick={onClose} className="btn-secondary text-sm">取消</button>
-            <button onClick={onSubmit} disabled={pending || contracts.length === 0} className="btn-primary text-sm">
+            <button onClick={onSubmit} disabled={pending || !customerId} className="btn-primary text-sm">
               {pending ? "创建中…" : "创建项目"}
             </button>
           </div>

@@ -35,6 +35,7 @@ export default async function ProjectDetailPage({
       },
       contract: { select: { id: true, contractNo: true } },
       createdBy: { select: { name: true } },
+      owner: { select: { name: true } },
       entries: {
         orderBy: { createdAt: "desc" },
         include: { author: { select: { name: true } } },
@@ -107,6 +108,7 @@ export default async function ProjectDetailPage({
             <div>
               <p className="text-xs text-white/70">
                 {project.type === "INTEGRATED" ? "整合合作项目" : "单次合作项目"}
+                <span className="ml-2">项目负责人：{project.owner?.name ?? project.createdBy?.name ?? "—"}</span>
               </p>
               <h1 className="mt-0.5 text-2xl font-bold text-white">{project.name}</h1>
             </div>
@@ -142,16 +144,49 @@ export default async function ProjectDetailPage({
       {/* ── 单次合作：需求 + 流程 ── */}
       {isOneOff && (
         <>
-          {project.demand && (
+          {(project.demand || project.coopInfo) && (
             <div className="card p-4">
-              <p className="text-[11px] font-medium text-slate-400">需求描述</p>
-              <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{project.demand}</p>
-              {project.coopInfo && (
+              {project.demand && (
                 <>
-                  <p className="mt-3 text-[11px] font-medium text-slate-400">合作信息</p>
-                  <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{project.coopInfo}</p>
+                  <p className="text-[11px] font-medium text-slate-400">需求描述</p>
+                  <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{project.demand}</p>
                 </>
               )}
+              {project.coopInfo && (() => {
+                // coopInfo 可能是 JSON 表格（推广基本信息）或纯文本
+                let table: { headers?: string[]; rows?: string[][] } | null = null;
+                try {
+                  const parsed = JSON.parse(project.coopInfo);
+                  if (parsed && Array.isArray(parsed.headers)) table = parsed;
+                } catch { /* 纯文本 */ }
+                if (table && table.headers && table.headers.length) {
+                  return (
+                    <div className="mt-3">
+                      <p className="text-[11px] font-medium text-slate-400">推广基本信息</p>
+                      <div className="mt-1 overflow-x-auto rounded-lg border border-slate-100">
+                        <table className="w-full text-sm">
+                          <thead><tr className="border-b border-slate-100 bg-slate-50 text-xs text-slate-500">
+                            {table.headers.map((h, i) => <th key={i} className="px-2 py-1.5 text-left">{h}</th>)}
+                          </tr></thead>
+                          <tbody>
+                            {(table.rows ?? []).map((r, i) => (
+                              <tr key={i} className="border-b border-slate-50 last:border-0">
+                                {table!.headers!.map((_, j) => <td key={j} className="px-2 py-1.5 text-xs text-slate-600">{r[j] ?? ""}</td>)}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                }
+                return (
+                  <div className="mt-3">
+                    <p className="text-[11px] font-medium text-slate-400">合作信息</p>
+                    <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{project.coopInfo}</p>
+                  </div>
+                );
+              })()}
             </div>
           )}
           <OneOffFlow

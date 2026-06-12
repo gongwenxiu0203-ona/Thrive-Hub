@@ -7,8 +7,8 @@ export async function GET() {
   if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
 
   const bom = "﻿";
-  const header = "商品名称,ASIN,库存数量\n";
-  const sample = ",,\n,,\n,,\n";
+  const header = "父ASIN,可售子ASIN,颜色,尺码,库存数量\n";
+  const sample = ",,,,\n,,,,\n,,,,\n";
   const csv = bom + header + sample;
 
   return new NextResponse(csv, {

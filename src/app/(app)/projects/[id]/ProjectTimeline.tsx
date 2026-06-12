@@ -2,13 +2,13 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Send, Download, BarChart3, NotebookPen, BookOpen } from "lucide-react";
+import { Send, Download, BarChart3, NotebookPen, BookOpen, Users } from "lucide-react";
 import { addProjectEntry, importWorkLogEntries } from "@/actions/projects";
 import { formatDateTime, cn } from "@/lib/utils";
 
 type Entry = {
   id: string;
-  kind: string;       // DAILY | DATA | NODE
+  kind: string;       // DAILY | DATA | BD | NODE | CONTRACT
   content: string;
   authorName: string;
   fromWorkLog: boolean;
@@ -16,17 +16,19 @@ type Entry = {
 };
 
 const KIND_META: Record<string, { label: string; dot: string; badge: string }> = {
-  DAILY: { label: "日常工作", dot: "bg-brand-500", badge: "bg-brand-50 text-brand-700" },
-  DATA:  { label: "数据维度", dot: "bg-amber-500", badge: "bg-amber-50 text-amber-700" },
-  NODE:  { label: "流程节点", dot: "bg-slate-500", badge: "bg-slate-100 text-slate-600" },
+  DAILY:    { label: "日常工作", dot: "bg-brand-500", badge: "bg-brand-50 text-brand-700" },
+  DATA:     { label: "数据维度", dot: "bg-amber-500", badge: "bg-amber-50 text-amber-700" },
+  BD:       { label: "BD 进度", dot: "bg-teal-500", badge: "bg-teal-50 text-teal-700" },
+  CONTRACT: { label: "合同进度", dot: "bg-indigo-500", badge: "bg-indigo-50 text-indigo-700" },
+  NODE:     { label: "流程节点", dot: "bg-slate-500", badge: "bg-slate-100 text-slate-600" },
 };
 
 export function ProjectTimeline({ projectId, entries }: { projectId: string; entries: Entry[] }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [content, setContent] = useState("");
-  const [kind, setKind] = useState<"DAILY" | "DATA">("DAILY");
-  const [filter, setFilter] = useState<"ALL" | "DAILY" | "DATA">("ALL");
+  const [kind, setKind] = useState<"DAILY" | "DATA" | "BD">("DAILY");
+  const [filter, setFilter] = useState<"ALL" | "DAILY" | "DATA" | "BD" | "CONTRACT">("ALL");
   const [note, setNote] = useState<string | null>(null);
 
   const shown = filter === "ALL" ? entries : entries.filter((e) => e.kind === filter);
@@ -70,7 +72,7 @@ export function ProjectTimeline({ projectId, entries }: { projectId: string; ent
             />
             <div className="mt-2 flex flex-wrap items-center gap-2">
               {/* 类型选择 */}
-              {(["DAILY", "DATA"] as const).map((k) => (
+              {(["DAILY", "DATA", "BD"] as const).map((k) => (
                 <label
                   key={k}
                   className={cn(
@@ -81,7 +83,7 @@ export function ProjectTimeline({ projectId, entries }: { projectId: string; ent
                   )}
                 >
                   <input type="radio" className="hidden" checked={kind === k} onChange={() => setKind(k)} />
-                  {k === "DAILY" ? <NotebookPen className="h-3 w-3" /> : <BarChart3 className="h-3 w-3" />}
+                  {k === "DAILY" ? <NotebookPen className="h-3 w-3" /> : k === "DATA" ? <BarChart3 className="h-3 w-3" /> : <Users className="h-3 w-3" />}
                   {KIND_META[k].label}
                 </label>
               ))}
@@ -111,6 +113,8 @@ export function ProjectTimeline({ projectId, entries }: { projectId: string; ent
           { key: "ALL", label: `全部（${entries.length}）` },
           { key: "DAILY", label: `日常工作（${entries.filter((e) => e.kind === "DAILY").length}）` },
           { key: "DATA", label: `数据维度（${entries.filter((e) => e.kind === "DATA").length}）` },
+          { key: "BD", label: `BD 进度（${entries.filter((e) => e.kind === "BD").length}）` },
+          { key: "CONTRACT", label: `合同进度（${entries.filter((e) => e.kind === "CONTRACT").length}）` },
         ] as const).map((f) => (
           <button
             key={f.key}
