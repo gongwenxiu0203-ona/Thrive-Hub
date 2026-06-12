@@ -7,20 +7,41 @@ import { isStaff } from "@/lib/permissions";
 
 export type WorkLogSaveResult = { ok: boolean; error?: string; workLogId?: string };
 
+export interface BdProgressItem {
+  affiliateId: string;
+  affiliateName: string;
+  progress: string;
+}
+
 export interface WorkLogPayload {
   period: "WEEKLY" | "MONTHLY";
   projectIds: string[];   // 关联项目
   workTypes: string[];    // 项目管理 | BD
-  content: string;        // 具体工作进度
+  content: string;        // 项目管理工作进度
+  bdProgress?: BdProgressItem[]; // BD 工作进度（按联盟商）
+}
+
+/** 校验工作内容与对应进度是否填写 */
+function validateWorkContent(payload: WorkLogPayload): string | null {
+  if (!payload.workTypes.length) return "请选择工作内容（项目管理 / BD）";
+  if (payload.workTypes.includes("项目管理") && !payload.content.trim()) {
+    return "已选「项目管理」，请填写项目管理工作进度";
+  }
+  if (payload.workTypes.includes("BD")) {
+    const valid = (payload.bdProgress ?? []).filter((b) => b.affiliateName && b.progress.trim());
+    if (valid.length === 0) return "已选「BD」，请至少选择一个联盟商并填写进度";
+  }
+  return null;
 }
 
 /** 创建工作日志（日志时间自动生成）*/
 export async function createWorkLog(payload: WorkLogPayload): Promise<WorkLogSaveResult> {
   const session = await requireSession();
   if (!isStaff(session.role)) return { ok: false, error: "无权操作" };
-  if (!payload.content.trim()) return { ok: false, error: "请填写具体工作进度" };
-  if (!payload.workTypes.length) return { ok: false, error: "请选择工作内容（项目管理 / BD）" };
+  const err = validateWorkContent(payload);
+  if (err) return { ok: false, error: err };
 
+  const bd = (payload.bdProgress ?? []).filter((b) => b.affiliateName && b.progress.trim());
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const log = await (prisma.workLog.create as any)({
     data: {
@@ -29,6 +50,7 @@ export async function createWorkLog(payload: WorkLogPayload): Promise<WorkLogSav
       projectIds: JSON.stringify(payload.projectIds),
       workTypes: JSON.stringify(payload.workTypes),
       content: payload.content.trim(),
+      bdProgress: payload.workTypes.includes("BD") ? JSON.stringify(bd) : null,
     },
   });
   revalidatePath("/worklogs");
@@ -44,8 +66,10 @@ export async function updateWorkLog(id: string, payload: WorkLogPayload): Promis
   if (log.authorId !== session.userId && session.role !== "ADMIN") {
     return { ok: false, error: "仅作者或管理员可编辑" };
   }
-  if (!payload.content.trim()) return { ok: false, error: "请填写具体工作进度" };
+  const err = validateWorkContent(payload);
+  if (err) return { ok: false, error: err };
 
+  const bd = (payload.bdProgress ?? []).filter((b) => b.affiliateName && b.progress.trim());
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (prisma.workLog.update as any)({
     where: { id },
@@ -54,6 +78,7 @@ export async function updateWorkLog(id: string, payload: WorkLogPayload): Promis
       projectIds: JSON.stringify(payload.projectIds),
       workTypes: JSON.stringify(payload.workTypes),
       content: payload.content.trim(),
+      bdProgress: payload.workTypes.includes("BD") ? JSON.stringify(bd) : null,
     },
   });
   revalidatePath("/worklogs");

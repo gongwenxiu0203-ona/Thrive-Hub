@@ -33,8 +33,10 @@ export default async function WorkLogsPage() {
   const rows = (logs as any[]).map((l) => {
     let pids: string[] = [];
     let types: string[] = [];
+    let bd: { affiliateId: string; affiliateName: string; progress: string }[] = [];
     try { pids = JSON.parse(l.projectIds); } catch {}
     try { types = JSON.parse(l.workTypes); } catch {}
+    try { bd = JSON.parse(l.bdProgress ?? "[]"); } catch {}
     return {
       id: l.id,
       authorId: l.author?.id ?? "",
@@ -44,6 +46,7 @@ export default async function WorkLogsPage() {
       projectNames: pids.map((id) => projectMap.get(id) ?? "已删除项目"),
       workTypes: types,
       content: l.content,
+      bdProgress: bd,
       logDate: l.logDate.toISOString(),
     };
   });

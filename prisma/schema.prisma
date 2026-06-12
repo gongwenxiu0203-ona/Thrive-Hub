@@ -584,7 +584,8 @@ model WorkLog {
   period     String   @default("WEEKLY") // WEEKLY 周报 | MONTHLY 月报
   projectIds String   @default("[]") // JSON string[]: 关联项目 id
   workTypes  String   @default("[]") // JSON string[]: 项目管理 | BD
-  content    String   // 具体工作进度
+  content    String   // 项目管理工作进度（选了「项目管理」时填写）
+  bdProgress String?  // BD 工作进度 JSON [{affiliateId,affiliateName,progress}]（选了「BD」时填写）
   logDate    DateTime @default(now()) // 日志时间（自动生成）
   deletedAt  DateTime? // 软删除（回收站 7 天保留）
   createdAt  DateTime @default(now())

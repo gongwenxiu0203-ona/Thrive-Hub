@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  Plus, X, BookOpen, Pencil, Trash2, Download, Sparkles, Undo2,
+  Plus, X, BookOpen, Pencil, Trash2, Download, Sparkles, Undo2, Search,
 } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import {
@@ -15,6 +15,8 @@ import { formatDateTime, cn } from "@/lib/utils";
 
 const WORK_TYPE_OPTIONS = ["项目管理", "BD"] as const;
 
+type BdItem = { affiliateId: string; affiliateName: string; progress: string };
+
 type LogRow = {
   id: string;
   authorId: string;
@@ -24,6 +26,7 @@ type LogRow = {
   projectNames: string[];
   workTypes: string[];
   content: string;
+  bdProgress: BdItem[];
   logDate: string;
 };
 
@@ -133,7 +136,31 @@ export default function WorkLogsClient({
                       ))}
                     </div>
                   )}
-                  <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">{l.content}</p>
+                  {l.workTypes.includes("项目管理") && l.content && (
+                    <div className="mt-2">
+                      {l.workTypes.includes("BD") && <p className="mb-0.5 text-[11px] font-medium text-slate-400">项目管理进度</p>}
+                      <p className="whitespace-pre-wrap text-sm text-slate-700">{l.content}</p>
+                    </div>
+                  )}
+                  {/* 兼容旧数据：未标记项目管理但有 content */}
+                  {!l.workTypes.includes("项目管理") && l.content && (
+                    <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">{l.content}</p>
+                  )}
+                  {l.bdProgress.length > 0 && (
+                    <div className="mt-2.5">
+                      <p className="mb-1 text-[11px] font-medium text-slate-400">BD 进度（按联盟商）</p>
+                      <div className="space-y-1.5">
+                        {l.bdProgress.map((b, i) => (
+                          <div key={i} className="rounded-lg border border-slate-100 bg-slate-50/60 px-2.5 py-1.5">
+                            <Link href={`/affiliates/${b.affiliateId}`} className="text-xs font-medium text-brand-700 hover:underline">
+                              {b.affiliateName}
+                            </Link>
+                            <p className="mt-0.5 whitespace-pre-wrap text-sm text-slate-700">{b.progress}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -171,15 +198,31 @@ function WorkLogFormModal({
   const [projectIds, setProjectIds] = useState<string[]>(log?.projectIds ?? []);
   const [workTypes, setWorkTypes] = useState<string[]>(log?.workTypes ?? []);
   const [content, setContent] = useState(log?.content ?? "");
+  const [bdItems, setBdItems] = useState<BdItem[]>(log?.bdProgress ?? []);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState<"" | "pull" | "ai">("");
   const [undoContent, setUndoContent] = useState<string | null>(null);
 
+  const hasPM = workTypes.includes("项目管理");
+  const hasBD = workTypes.includes("BD");
+
   const toggleProject = (id: string) =>
     setProjectIds((arr) => (arr.includes(id) ? arr.filter((x) => x !== id) : [...arr, id]));
   const toggleType = (t: string) =>
     setWorkTypes((arr) => (arr.includes(t) ? arr.filter((x) => x !== t) : [...arr, t]));
+
+  // BD 联盟商进度操作
+  const addBdAffiliate = (a: { id: string; name: string }) => {
+    setBdItems((arr) =>
+      arr.some((x) => x.affiliateId === a.id)
+        ? arr
+        : [...arr, { affiliateId: a.id, affiliateName: a.name, progress: "" }],
+    );
+  };
+  const removeBd = (id: string) => setBdItems((arr) => arr.filter((x) => x.affiliateId !== id));
+  const updateBdProgress = (id: string, progress: string) =>
+    setBdItems((arr) => arr.map((x) => (x.affiliateId === id ? { ...x, progress } : x)));
 
   // 从项目拉取本周期工作进度
   async function pullFromProjects() {
@@ -235,7 +278,7 @@ function WorkLogFormModal({
 
   function onSubmit() {
     setError(null);
-    const payload: WorkLogPayload = { period, projectIds, workTypes, content };
+    const payload: WorkLogPayload = { period, projectIds, workTypes, content, bdProgress: bdItems };
     startTransition(async () => {
       const result = isEdit ? await updateWorkLog(log!.id, payload) : await createWorkLog(payload);
       if (!result.ok) { setError(result.error ?? "保存失败"); return; }
@@ -327,38 +370,82 @@ function WorkLogFormModal({
             </div>
           </div>
 
-          {/* 具体工作进度 */}
-          <div>
-            <div className="mb-1 flex items-center justify-between">
-              <label className="label mb-0">具体工作进度 *</label>
-              <div className="flex gap-1.5">
-                <button type="button" onClick={pullFromProjects} disabled={busy !== ""}
-                  className="btn-secondary btn-sm" title="按所选周期从关联项目时间流拉取进度">
-                  <Download className="h-3.5 w-3.5" />
-                  {busy === "pull" ? "拉取中…" : "从项目拉取"}
-                </button>
-                {undoContent !== null && (
-                  <button type="button" onClick={undoAI} className="btn-secondary btn-sm">
-                    <Undo2 className="h-3.5 w-3.5" /> 撤销
+          {!hasPM && !hasBD && (
+            <p className="rounded-lg bg-slate-50 px-3 py-2.5 text-xs text-slate-400">
+              请先选择上方「工作内容」，再填写对应的工作进度
+            </p>
+          )}
+
+          {/* 项目管理工作进度（选了「项目管理」时显示）*/}
+          {hasPM && (
+            <div>
+              <div className="mb-1 flex items-center justify-between">
+                <label className="label mb-0">项目管理工作进度 *</label>
+                <div className="flex gap-1.5">
+                  <button type="button" onClick={pullFromProjects} disabled={busy !== ""}
+                    className="btn-secondary btn-sm" title="按所选周期从关联项目时间流拉取进度">
+                    <Download className="h-3.5 w-3.5" />
+                    {busy === "pull" ? "拉取中…" : "从项目拉取"}
                   </button>
-                )}
-                <button type="button" onClick={aiSummarize} disabled={busy !== ""}
-                  className="btn-primary btn-sm">
-                  <Sparkles className="h-3.5 w-3.5" />
-                  {busy === "ai" ? "AI 处理中…" : "AI 总结优化"}
-                </button>
+                  {undoContent !== null && (
+                    <button type="button" onClick={undoAI} className="btn-secondary btn-sm">
+                      <Undo2 className="h-3.5 w-3.5" /> 撤销
+                    </button>
+                  )}
+                  <button type="button" onClick={aiSummarize} disabled={busy !== ""}
+                    className="btn-primary btn-sm">
+                    <Sparkles className="h-3.5 w-3.5" />
+                    {busy === "ai" ? "AI 处理中…" : "AI 总结优化"}
+                  </button>
+                </div>
               </div>
+              <textarea
+                className="input min-h-[150px] text-sm"
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                placeholder={`记录${period === "MONTHLY" ? "本月" : "本周"}项目管理工作进度…\n可勾选关联项目后点「从项目拉取」自动填充，再用「AI 总结优化」润色`}
+              />
+              {note && (
+                <p className={`mt-1.5 text-xs ${note.startsWith("✅") ? "text-emerald-600" : "text-slate-500"}`}>{note}</p>
+              )}
             </div>
-            <textarea
-              className="input min-h-[180px] text-sm"
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              placeholder={`记录${period === "MONTHLY" ? "本月" : "本周"}工作进度…\n也可以勾选关联项目后点「从项目拉取」自动填充，再用「AI 总结优化」润色`}
-            />
-            {note && (
-              <p className={`mt-1.5 text-xs ${note.startsWith("✅") ? "text-emerald-600" : "text-slate-500"}`}>{note}</p>
-            )}
-          </div>
+          )}
+
+          {/* BD 工作进度（选了「BD」时显示，按联盟商）*/}
+          {hasBD && (
+            <div>
+              <label className="label">BD 工作进度（按联盟商）*</label>
+              <AffiliatePicker
+                selectedIds={bdItems.map((b) => b.affiliateId)}
+                onAdd={addBdAffiliate}
+              />
+              {bdItems.length === 0 ? (
+                <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2.5 text-xs text-slate-400">
+                  搜索并选择联盟商后，逐个填写对应的 BD 进度
+                </p>
+              ) : (
+                <div className="mt-2 space-y-2">
+                  {bdItems.map((b) => (
+                    <div key={b.affiliateId} className="rounded-lg border border-slate-200 p-2.5">
+                      <div className="mb-1.5 flex items-center justify-between">
+                        <span className="text-xs font-semibold text-slate-700">{b.affiliateName}</span>
+                        <button type="button" onClick={() => removeBd(b.affiliateId)}
+                          className="text-slate-300 hover:text-rose-500">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                      <textarea
+                        className="input min-h-[60px] text-sm"
+                        value={b.progress}
+                        onChange={(e) => updateBdProgress(b.affiliateId, e.target.value)}
+                        placeholder={`记录与「${b.affiliateName}」的 BD 进度…`}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {error && (
             <div className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-sm text-rose-600">{error}</div>
@@ -372,6 +459,92 @@ function WorkLogFormModal({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── 联盟商搜索选择器（从联盟资源库搜索，点击加入 BD 进度）──────────────────────
+
+function AffiliatePicker({
+  selectedIds,
+  onAdd,
+}: {
+  selectedIds: string[];
+  onAdd: (a: { id: string; name: string }) => void;
+}) {
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
+  const [results, setResults] = useState<{ id: string; name: string }[]>([]);
+  const [loading, setLoading] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  function search(val: string) {
+    setQ(val);
+    setOpen(true);
+    clearTimeout(debounceRef.current);
+    if (!val.trim()) { setResults([]); return; }
+    debounceRef.current = setTimeout(async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(`/api/affiliates?q=${encodeURIComponent(val)}&pageSize=15`);
+        const data = await res.json();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        setResults((data.data ?? []).map((a: any) => ({ id: a.id, name: a.platformAffiliateName })));
+      } finally {
+        setLoading(false);
+      }
+    }, 350);
+  }
+
+  return (
+    <div ref={ref} className="relative">
+      <div className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-2">
+        <Search className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+        <input
+          className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400"
+          placeholder="搜索联盟商名称添加…"
+          value={q}
+          onChange={(e) => search(e.target.value)}
+          onFocus={() => q && setOpen(true)}
+        />
+      </div>
+      {open && q.trim() && (
+        <div className="absolute z-30 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-xl">
+          {loading ? (
+            <p className="px-3 py-3 text-center text-xs text-slate-400">搜索中…</p>
+          ) : results.length === 0 ? (
+            <p className="px-3 py-3 text-center text-xs text-slate-400">无匹配联盟商</p>
+          ) : (
+            results.map((r) => {
+              const added = selectedIds.includes(r.id);
+              return (
+                <button
+                  key={r.id}
+                  type="button"
+                  disabled={added}
+                  onClick={() => { onAdd(r); setQ(""); setResults([]); setOpen(false); }}
+                  className={cn(
+                    "flex w-full items-center justify-between px-3 py-1.5 text-left text-sm hover:bg-slate-50",
+                    added && "cursor-not-allowed opacity-50",
+                  )}
+                >
+                  <span className="truncate text-slate-700">{r.name}</span>
+                  {added ? <span className="text-[10px] text-slate-400">已添加</span> : <Plus className="h-3.5 w-3.5 text-brand-500" />}
+                </button>
+              );
+            })
+          )}
+        </div>
+      )}
     </div>
   );
 }
