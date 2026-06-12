@@ -8,6 +8,7 @@ import { BackButton } from "@/components/BackButton";
 import { formatCurrency, formatNumber } from "@/lib/utils";
 import { ProjectHeaderActions } from "./ProjectHeaderActions";
 import { ProjectTimeline } from "./ProjectTimeline";
+import { OneOffFlow } from "./OneOffFlow";
 
 export const dynamic = "force-dynamic";
 
@@ -42,7 +43,32 @@ export default async function ProjectDetailPage({
   });
   if (!project || project.deletedAt) notFound();
 
+  const isOneOff = project.type === "ONE_OFF";
   const brandName: string = project.customer?.brandName ?? "";
+
+  // 单次合作所需：站内用户（提交对象）+ BI 父ASIN（结算选择）+ 提交对象名
+  let users: { id: string; name: string }[] = [];
+  let biParentAsins: string[] = [];
+  let submittedToName: string | null = null;
+  if (isOneOff) {
+    users = await prisma.user.findMany({
+      where: { status: "APPROVED", role: { in: ["ADMIN", "USER", "LYNQ_STAFF"] } },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    });
+    if (project.submittedToId) {
+      submittedToName = users.find((u) => u.id === project.submittedToId)?.name ?? null;
+    }
+    if (brandName) {
+      const asinRows = await prisma.salesRecord.findMany({
+        where: { brand: brandName, parentAsin: { not: null } },
+        select: { parentAsin: true },
+        distinct: ["parentAsin"],
+        take: 200,
+      });
+      biParentAsins = asinRows.map((r) => r.parentAsin!).filter(Boolean);
+    }
+  }
 
   // ── 数据维度：从推广 BI 拉取该客户品牌的销售数据 ──────────────────────────────
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
@@ -101,8 +127,10 @@ export default async function ProjectDetailPage({
           <HeaderStat icon={<Wrench className="h-4 w-4 shrink-0 text-slate-400" />} label="后端负责人">
             <p className="truncate text-sm font-medium text-slate-800">{project.customer?.backendOwner?.name ?? "未分配"}</p>
           </HeaderStat>
-          <HeaderStat icon={<FileText className="h-4 w-4 shrink-0 text-slate-400" />} label="关联合同">
-            {project.contract ? (
+          <HeaderStat icon={<FileText className="h-4 w-4 shrink-0 text-slate-400" />} label={isOneOff ? "创建人" : "关联合同"}>
+            {isOneOff ? (
+              <p className="truncate text-sm font-medium text-slate-800">{project.createdBy?.name ?? "—"}</p>
+            ) : project.contract ? (
               <Link href={`/contracts/${project.contract.id}`} className="truncate text-sm font-medium text-brand-700 hover:underline">
                 {project.contract.contractNo}
               </Link>
@@ -110,6 +138,47 @@ export default async function ProjectDetailPage({
           </HeaderStat>
         </div>
       </div>
+
+      {/* ── 单次合作：需求 + 流程 ── */}
+      {isOneOff && (
+        <>
+          {project.demand && (
+            <div className="card p-4">
+              <p className="text-[11px] font-medium text-slate-400">需求描述</p>
+              <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{project.demand}</p>
+              {project.coopInfo && (
+                <>
+                  <p className="mt-3 text-[11px] font-medium text-slate-400">合作信息</p>
+                  <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{project.coopInfo}</p>
+                </>
+              )}
+            </div>
+          )}
+          <OneOffFlow
+            projectId={project.id}
+            stage={project.stage ?? "REQUIREMENT"}
+            price={project.price ?? null}
+            coopResult={project.coopResult ?? null}
+            submissionData={project.submissionData ?? null}
+            settlementData={project.settlementData ?? null}
+            submittedToName={submittedToName}
+            users={users}
+            biParentAsins={biParentAsins}
+          />
+          <div>
+            <div className="mb-3 flex items-center gap-3">
+              <div className="flex h-6 w-6 items-center justify-center rounded-md bg-slate-700 text-xs font-bold text-white">流</div>
+              <h2 className="text-sm font-bold text-slate-700">流程时间流</h2>
+              <span className="h-px flex-1 bg-slate-200" />
+            </div>
+            <ProjectTimeline projectId={project.id} entries={entries} />
+          </div>
+        </>
+      )}
+
+      {!isOneOff && (
+      <>
+      {/* INTEGRATED 内容 */}
 
       {/* ── ① 数据维度：推广 BI 数据 ── */}
       <div>
@@ -154,6 +223,8 @@ export default async function ProjectDetailPage({
         </div>
         <ProjectTimeline projectId={project.id} entries={entries} />
       </div>
+      </>
+      )}
     </div>
   );
 }

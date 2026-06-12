@@ -43,6 +43,12 @@ export default async function ProjectsPage() {
     }),
   ]);
 
+  // 单次合作可关联的客户
+  const customers = await prisma.customer.findMany({
+    select: { id: true, brandName: true },
+    orderBy: { brandName: "asc" },
+  });
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const usedContractIds = new Set((projects as any[]).map((p) => p.contractId).filter(Boolean));
   const availableContracts = completedContracts
@@ -55,6 +61,7 @@ export default async function ProjectsPage() {
     type: p.type,
     name: p.name,
     status: p.status,
+    stage: p.stage ?? null,
     customerName: p.customer?.brandName ?? "—",
     businessOwner: p.customer?.businessOwner?.name ?? "—",
     backendOwner: p.customer?.backendOwner?.name ?? "—",
@@ -64,5 +71,5 @@ export default async function ProjectsPage() {
     createdAt: p.createdAt.toISOString(),
   }));
 
-  return <ProjectsClient projects={rows} availableContracts={availableContracts} />;
+  return <ProjectsClient projects={rows} availableContracts={availableContracts} customers={customers} />;
 }

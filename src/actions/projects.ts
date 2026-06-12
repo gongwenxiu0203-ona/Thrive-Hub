@@ -126,6 +126,166 @@ export async function updateProjectStatus(projectId: string, status: string) {
   revalidatePath(`/projects/${projectId}`);
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// 单次合作流程（P3）
+// 阶段：REQUIREMENT 需求创建 → SUBMITTED 已提交 → PRICE_CONFIRMED 确认价格
+//      → INFO_SUBMITTED 已提交合作信息 → DECIDED 确认是否合作 → SETTLED 已结算
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** 给项目时间流追加一条流程节点（NODE），记录提交人 */
+async function addNode(projectId: string, authorId: string, content: string) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (prisma.projectEntry.create as any)({
+    data: { projectId, kind: "NODE", content, authorId },
+  });
+}
+
+/** 创建单次合作项目（需求创建 + 上传合作信息）*/
+export async function createOneOffProject(payload: {
+  name: string;
+  customerId?: string;
+  demand: string;
+  coopInfo?: string;
+}): Promise<ProjectSaveResult> {
+  const session = await requireSession();
+  if (!isStaff(session.role)) return { ok: false, error: "无权创建项目" };
+  if (!payload.name.trim()) return { ok: false, error: "请填写项目名称" };
+  if (!payload.demand.trim()) return { ok: false, error: "请填写需求描述" };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const project = await (prisma.project.create as any)({
+    data: {
+      type: "ONE_OFF",
+      name: payload.name.trim(),
+      customerId: payload.customerId || null,
+      demand: payload.demand.trim(),
+      coopInfo: payload.coopInfo?.trim() || null,
+      stage: "REQUIREMENT",
+      createdById: session.userId,
+    },
+  });
+  await addNode(project.id, session.userId, `创建需求：${payload.demand.trim().slice(0, 100)}`);
+  revalidatePath("/projects");
+  return { ok: true, projectId: project.id };
+}
+
+/** 提交给站内用户（站内提醒通知；邮件暂不实现）*/
+export async function submitProjectTo(projectId: string, toUserId: string): Promise<ProjectSaveResult> {
+  const session = await requireSession();
+  if (!isStaff(session.role)) return { ok: false, error: "无权操作" };
+  if (!toUserId) return { ok: false, error: "请选择提交对象" };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const project = await (prisma.project.findUnique as any)({ where: { id: projectId } });
+  if (!project) return { ok: false, error: "项目不存在" };
+
+  const [toUser, fromUser] = await Promise.all([
+    prisma.user.findUnique({ where: { id: toUserId }, select: { name: true } }),
+    prisma.user.findUnique({ where: { id: session.userId }, select: { name: true } }),
+  ]);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (prisma.project.update as any)({
+    where: { id: projectId },
+    data: { submittedToId: toUserId, stage: "SUBMITTED" },
+  });
+  // 站内提醒通知
+  await prisma.reminder.create({
+    data: {
+      title: `单次合作项目待处理：${project.name}`,
+      content: `${fromUser?.name ?? "同事"} 提交了单次合作项目「${project.name}」给你处理，请确认价格。`,
+      remindDate: new Date(),
+      type: "FOLLOWUP",
+      targetId: toUserId,
+      createdById: session.userId,
+    },
+  });
+  await addNode(projectId, session.userId, `提交给 ${toUser?.name ?? "成员"} 处理（已站内通知）`);
+  revalidatePath(`/projects/${projectId}`);
+  return { ok: true, projectId };
+}
+
+/** 确认价格 */
+export async function confirmProjectPrice(projectId: string, price: string): Promise<ProjectSaveResult> {
+  const session = await requireSession();
+  if (!isStaff(session.role)) return { ok: false, error: "无权操作" };
+  if (!price.trim()) return { ok: false, error: "请填写确认价格" };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (prisma.project.update as any)({
+    where: { id: projectId },
+    data: { price: price.trim(), stage: "PRICE_CONFIRMED" },
+  });
+  await addNode(projectId, session.userId, `确认价格：${price.trim()}`);
+  revalidatePath(`/projects/${projectId}`);
+  return { ok: true, projectId };
+}
+
+/** 提交合作信息（ASIN 库存 + 是否设置 code + 起止时间）*/
+export async function submitProjectInfo(
+  projectId: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  data: { asins: any[]; hasCode: boolean; code?: string; startDate?: string; endDate?: string },
+): Promise<ProjectSaveResult> {
+  const session = await requireSession();
+  if (!isStaff(session.role)) return { ok: false, error: "无权操作" };
+  if (data.hasCode && !data.code?.trim()) return { ok: false, error: "已选择设置 code，请填写 code 码" };
+  if (data.hasCode && (!data.startDate || !data.endDate)) return { ok: false, error: "请填写 code 起止时间" };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (prisma.project.update as any)({
+    where: { id: projectId },
+    data: { submissionData: JSON.stringify(data), stage: "INFO_SUBMITTED" },
+  });
+  const asinCount = (data.asins ?? []).filter((a) => a.asin || a.name).length;
+  const codeNote = data.hasCode ? `，code：${data.code}（${data.startDate} ~ ${data.endDate}）` : "，未设置 code";
+  await addNode(projectId, session.userId, `提交合作信息：${asinCount} 个 ASIN 库存${codeNote}`);
+  revalidatePath(`/projects/${projectId}`);
+  return { ok: true, projectId };
+}
+
+/** 沟通备注（时间流追加一条沟通记录）*/
+export async function addProjectNote(projectId: string, note: string): Promise<ProjectSaveResult> {
+  const session = await requireSession();
+  if (!isStaff(session.role)) return { ok: false, error: "无权操作" };
+  if (!note.trim()) return { ok: false, error: "请填写沟通内容" };
+  await addNode(projectId, session.userId, `沟通：${note.trim()}`);
+  revalidatePath(`/projects/${projectId}`);
+  return { ok: true, projectId };
+}
+
+/** 确认是否合作 */
+export async function decideProjectCoop(projectId: string, result: "COOPERATE" | "DECLINED"): Promise<ProjectSaveResult> {
+  const session = await requireSession();
+  if (!isStaff(session.role)) return { ok: false, error: "无权操作" };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (prisma.project.update as any)({
+    where: { id: projectId },
+    data: { coopResult: result, stage: "DECIDED", status: result === "DECLINED" ? "CANCELLED" : "ACTIVE" },
+  });
+  await addNode(projectId, session.userId, result === "COOPERATE" ? "确认合作 ✓" : "确认不合作 ✗");
+  revalidatePath(`/projects/${projectId}`);
+  return { ok: true, projectId };
+}
+
+/** 保存结算数据（人员 / 父ASIN / 服务费金额）+ 标记已结算 */
+export async function settleProject(
+  projectId: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  rows: { person: string; parentAsin: string; serviceFee: string }[],
+): Promise<ProjectSaveResult> {
+  const session = await requireSession();
+  if (!isStaff(session.role)) return { ok: false, error: "无权操作" };
+  const valid = rows.filter((r) => r.person || r.parentAsin || r.serviceFee);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (prisma.project.update as any)({
+    where: { id: projectId },
+    data: { settlementData: JSON.stringify(valid), stage: "SETTLED", status: "DONE" },
+  });
+  await addNode(projectId, session.userId, `完成结算：${valid.length} 条结算记录`);
+  revalidatePath(`/projects/${projectId}`);
+  return { ok: true, projectId };
+}
+
 /** 软删除项目（进回收站，7 天可恢复）*/
 export async function softDeleteProject(projectId: string) {
   const session = await requireSession();

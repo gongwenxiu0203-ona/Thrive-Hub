@@ -533,9 +533,13 @@ model Project {
   customerId String? // 关联客户（自动带出商务/后端负责人）
   contractId String? // 关联合同（整合合作 = 签署完成的合同）
 
-  // 单次合作流程字段（P3 使用，预留）
+  // 单次合作流程字段
+  stage          String? // 流程阶段：REQUIREMENT|SUBMITTED|PRICE_CONFIRMED|INFO_SUBMITTED|DECIDED|SETTLED
   demand         String? // 需求描述
+  coopInfo       String? // 合作信息（上传/填写）
+  submittedToId  String? // 提交给哪个站内用户（审核/协作）
   price          String? // 确认价格
+  submissionData String? // JSON 提交信息 { asins:[{name,asin,stock}], hasCode, code, startDate, endDate }
   coopResult     String? // 合作结论：COOPERATE 合作 | DECLINED 不合作
   settlementData String? // JSON 结算数据 [{person, parentAsin, serviceFee}]
 
