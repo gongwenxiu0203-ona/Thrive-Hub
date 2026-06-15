@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Plus, X, BookOpen, Pencil, Trash2, Download, Sparkles, Undo2, Search,
+  Upload, Check, ChevronDown, Clipboard,
 } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import {
@@ -31,15 +32,18 @@ type LogRow = {
 };
 
 type ProjectOption = { id: string; name: string };
+type AffiliateOption = { id: string; name: string };
 
 export default function WorkLogsClient({
   logs,
   projects,
+  affiliates = [],
   currentUserId,
   isAdmin,
 }: {
   logs: LogRow[];
   projects: ProjectOption[];
+  affiliates?: AffiliateOption[];
   currentUserId: string;
   isAdmin: boolean;
 }) {
@@ -171,6 +175,7 @@ export default function WorkLogsClient({
       {(showCreate || editing) && (
         <WorkLogFormModal
           projects={projects}
+          affiliates={affiliates}
           log={editing}
           onClose={() => { setShowCreate(false); setEditing(null); }}
         />
@@ -183,10 +188,12 @@ export default function WorkLogsClient({
 
 function WorkLogFormModal({
   projects,
+  affiliates,
   log,
   onClose,
 }: {
   projects: ProjectOption[];
+  affiliates: AffiliateOption[];
   log: LogRow | null;
   onClose: () => void;
 }) {
@@ -219,6 +226,18 @@ function WorkLogFormModal({
         ? arr
         : [...arr, { affiliateId: a.id, affiliateName: a.name, progress: "" }],
     );
+  };
+  // 批量替换（全选/排除/粘贴/上传 都走这里）：传入要保留的联盟商集合
+  const setBdAffiliates = (list: { id: string; name: string }[]) => {
+    setBdItems((prev) => {
+      // 保留已填的 progress
+      const prevMap = new Map(prev.map((b) => [b.affiliateId, b.progress]));
+      return list.map((a) => ({
+        affiliateId: a.id,
+        affiliateName: a.name,
+        progress: prevMap.get(a.id) ?? "",
+      }));
+    });
   };
   const removeBd = (id: string) => setBdItems((arr) => arr.filter((x) => x.affiliateId !== id));
   const updateBdProgress = (id: string, progress: string) =>
@@ -415,13 +434,14 @@ function WorkLogFormModal({
           {hasBD && (
             <div>
               <label className="label">BD 工作进度（按联盟商）*</label>
-              <AffiliatePicker
+              <AffiliateMultiPicker
+                allAffiliates={affiliates}
                 selectedIds={bdItems.map((b) => b.affiliateId)}
-                onAdd={addBdAffiliate}
+                onChange={setBdAffiliates}
               />
               {bdItems.length === 0 ? (
                 <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2.5 text-xs text-slate-400">
-                  搜索并选择联盟商后，逐个填写对应的 BD 进度
+                  点击上方选择器选择联盟商（支持搜索/全选/排除/粘贴名称/上传文件），逐个填写 BD 进度
                 </p>
               ) : (
                 <div className="mt-2 space-y-2">
@@ -463,21 +483,31 @@ function WorkLogFormModal({
   );
 }
 
-// ── 联盟商搜索选择器（从联盟资源库搜索，点击加入 BD 进度）──────────────────────
+// ── 联盟商多选选择器（下拉所有联盟商 + 多选/搜索/全选/排除/粘贴/文件上传）─────────
 
-function AffiliatePicker({
+function AffiliateMultiPicker({
+  allAffiliates,
   selectedIds,
-  onAdd,
+  onChange,
 }: {
+  allAffiliates: AffiliateOption[];
   selectedIds: string[];
-  onAdd: (a: { id: string; name: string }) => void;
+  onChange: (list: AffiliateOption[]) => void;
 }) {
-  const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
-  const [results, setResults] = useState<{ id: string; name: string }[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [q, setQ] = useState("");
+  const [note, setNote] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+
+  // 全集 by id 和 by name（lower）—便于粘贴/上传匹配
+  const byId = new Map(allAffiliates.map((a) => [a.id, a]));
+  const byName = new Map(allAffiliates.map((a) => [a.name.trim().toLowerCase(), a]));
+
+  // 当前选中集
+  const selectedSet = new Set(selectedIds);
+  const filtered = q.trim()
+    ? allAffiliates.filter((a) => a.name.toLowerCase().includes(q.trim().toLowerCase()))
+    : allAffiliates;
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -487,63 +517,198 @@ function AffiliatePicker({
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  function search(val: string) {
-    setQ(val);
-    setOpen(true);
-    clearTimeout(debounceRef.current);
-    if (!val.trim()) { setResults([]); return; }
-    debounceRef.current = setTimeout(async () => {
-      setLoading(true);
-      try {
-        const res = await fetch(`/api/affiliates?q=${encodeURIComponent(val)}&pageSize=15`);
-        const data = await res.json();
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        setResults((data.data ?? []).map((a: any) => ({ id: a.id, name: a.platformAffiliateName })));
-      } finally {
-        setLoading(false);
-      }
-    }, 350);
+  // 工具：把一组 id 应用为最终选中集（去重 + 保留顺序）
+  function applyIds(ids: string[]) {
+    const seen = new Set<string>();
+    const list: AffiliateOption[] = [];
+    for (const id of ids) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const a = byId.get(id);
+      if (a) list.push(a);
+    }
+    onChange(list);
   }
 
+  function toggle(id: string) {
+    if (selectedSet.has(id)) {
+      applyIds(selectedIds.filter((x) => x !== id));
+    } else {
+      applyIds([...selectedIds, id]);
+    }
+  }
+
+  function selectAllFiltered() {
+    const next = new Set(selectedIds);
+    filtered.forEach((a) => next.add(a.id));
+    applyIds([...next]);
+    setNote(`已全选当前筛选范围 ${filtered.length} 个`);
+  }
+
+  // 排除（反选）当前筛选范围
+  function invertFiltered() {
+    const next = new Set(selectedIds);
+    for (const a of filtered) {
+      if (next.has(a.id)) next.delete(a.id);
+      else next.add(a.id);
+    }
+    applyIds([...next]);
+    setNote("已反选当前筛选范围");
+  }
+
+  function clearAll() {
+    applyIds([]);
+    setNote("已清空选择");
+  }
+
+  // 粘贴：换行/逗号/Tab 分隔多个联盟商名称
+  function handlePaste(e: React.ClipboardEvent<HTMLInputElement>) {
+    const text = e.clipboardData.getData("text");
+    if (!/[\n,;\t]/.test(text)) return; // 单值走搜索
+    e.preventDefault();
+    const names = text.split(/[\n,;\t]+/).map((s) => s.trim()).filter(Boolean);
+    bulkAddByNames(names);
+  }
+
+  function bulkAddByNames(names: string[]) {
+    const matched: string[] = [];
+    const missing: string[] = [];
+    for (const n of names) {
+      const a = byName.get(n.toLowerCase());
+      if (a) matched.push(a.id);
+      else missing.push(n);
+    }
+    if (!matched.length) {
+      setNote(`未匹配到联盟商：${missing.slice(0, 3).join("、")}${missing.length > 3 ? "…" : ""}`);
+      return;
+    }
+    const merged = [...selectedIds];
+    for (const id of matched) if (!selectedIds.includes(id)) merged.push(id);
+    applyIds(merged);
+    setNote(
+      `✅ 已匹配 ${matched.length} 个${missing.length ? `；${missing.length} 个未匹配：${missing.slice(0, 3).join("、")}${missing.length > 3 ? "…" : ""}` : ""}`,
+    );
+  }
+
+  // 文件上传：读取首列作为名称（CSV / TXT 都可）
+  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const text = (ev.target?.result as string).replace(/^﻿/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+        const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+        if (!lines.length) { setNote("文件为空"); return; }
+        // 第一列：去掉表头（如包含"联盟商"或"name"则跳过）
+        const first = lines[0].split(/[,;\t]/)[0].trim();
+        const start = /联盟商|name|affiliate/i.test(first) ? 1 : 0;
+        const names = lines.slice(start).map((l) => l.split(/[,;\t]/)[0].replace(/^"|"$/g, "").trim()).filter(Boolean);
+        bulkAddByNames(names);
+      } catch { setNote("文件解析失败，请使用 CSV/TXT，每行一个联盟商名称"); }
+      finally { if (e.target) e.target.value = ""; }
+    };
+    reader.readAsText(file, "utf-8");
+  }
+
+  const buttonLabel =
+    selectedIds.length === 0
+      ? "选择联盟商（多选）"
+      : `已选 ${selectedIds.length} 个联盟商`;
+
   return (
-    <div ref={ref} className="relative">
-      <div className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-2">
-        <Search className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-        <input
-          className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400"
-          placeholder="搜索联盟商名称添加…"
-          value={q}
-          onChange={(e) => search(e.target.value)}
-          onFocus={() => q && setOpen(true)}
-        />
-      </div>
-      {open && q.trim() && (
-        <div className="absolute z-30 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-xl">
-          {loading ? (
-            <p className="px-3 py-3 text-center text-xs text-slate-400">搜索中…</p>
-          ) : results.length === 0 ? (
-            <p className="px-3 py-3 text-center text-xs text-slate-400">无匹配联盟商</p>
-          ) : (
-            results.map((r) => {
-              const added = selectedIds.includes(r.id);
-              return (
-                <button
-                  key={r.id}
-                  type="button"
-                  disabled={added}
-                  onClick={() => { onAdd(r); setQ(""); setResults([]); setOpen(false); }}
-                  className={cn(
-                    "flex w-full items-center justify-between px-3 py-1.5 text-left text-sm hover:bg-slate-50",
-                    added && "cursor-not-allowed opacity-50",
-                  )}
-                >
-                  <span className="truncate text-slate-700">{r.name}</span>
-                  {added ? <span className="text-[10px] text-slate-400">已添加</span> : <Plus className="h-3.5 w-3.5 text-brand-500" />}
-                </button>
-              );
-            })
+    <div className="space-y-2">
+      <div ref={ref} className="relative">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className={cn(
+            "flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm transition",
+            selectedIds.length
+              ? "border-brand-300 bg-brand-50 text-brand-700"
+              : "border-slate-300 bg-white text-slate-600",
           )}
-        </div>
+        >
+          <span className="truncate">{buttonLabel}</span>
+          <ChevronDown className="h-4 w-4 shrink-0" />
+        </button>
+
+        {open && (
+          <div className="absolute left-0 z-30 mt-1 w-full rounded-lg border border-slate-200 bg-white shadow-xl">
+            {/* 搜索 + 粘贴 */}
+            <div className="flex items-center gap-1 border-b border-slate-100 p-2">
+              <Search className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+              <input
+                autoFocus
+                className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400"
+                placeholder="查找 / 粘贴多个联盟商名称（换行/逗号分隔）…"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                onPaste={handlePaste}
+              />
+              {q && (
+                <button type="button" onClick={() => setQ("")}
+                  className="rounded p-0.5 text-slate-400 hover:bg-slate-100">
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+
+            {/* 工具栏 */}
+            <div className="flex items-center justify-between border-b border-slate-100 px-2 py-1.5 text-xs text-slate-500">
+              <span>已选 <b className="text-slate-800">{selectedIds.length}</b> / {allAffiliates.length}（当前筛选 {filtered.length}）</span>
+              <div className="flex gap-2.5">
+                <button type="button" onClick={selectAllFiltered}
+                  className="text-brand-600 hover:underline" title="选中当前筛选结果">全选</button>
+                <button type="button" onClick={invertFiltered}
+                  className="text-amber-600 hover:underline" title="反选当前筛选结果">排除</button>
+                <button type="button" onClick={clearAll}
+                  className="text-slate-500 hover:underline">清空</button>
+              </div>
+            </div>
+
+            {/* 列表 */}
+            <div className="max-h-64 overflow-y-auto py-1">
+              {filtered.length === 0 ? (
+                <p className="px-3 py-4 text-center text-xs text-slate-400">无匹配联盟商</p>
+              ) : (
+                filtered.map((a) => {
+                  const active = selectedSet.has(a.id);
+                  return (
+                    <button
+                      key={a.id}
+                      type="button"
+                      onClick={() => toggle(a.id)}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-slate-50"
+                    >
+                      <span className={cn(
+                        "flex h-4 w-4 shrink-0 items-center justify-center rounded border",
+                        active ? "border-brand-500 bg-brand-500 text-white" : "border-slate-300",
+                      )}>
+                        {active && <Check className="h-3 w-3" />}
+                      </span>
+                      <span className="truncate text-slate-700">{a.name}</span>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+
+            {/* 底部：上传文件 + 提示 */}
+            <div className="flex items-center justify-between border-t border-slate-100 p-2">
+              <label className="flex cursor-pointer items-center gap-1 text-[11px] text-slate-500 hover:text-brand-600">
+                <Upload className="h-3 w-3" /> 上传文件批量添加
+                <input type="file" accept=".csv,.txt" className="hidden" onChange={handleFile} />
+              </label>
+              <p className="flex items-center gap-1 text-[11px] text-slate-400">
+                <Clipboard className="h-3 w-3" /> 支持粘贴多名称（换行/逗号/Tab分隔）
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+      {note && (
+        <p className={`text-xs ${note.startsWith("✅") || note.startsWith("已") ? "text-emerald-600" : "text-rose-500"}`}>{note}</p>
       )}
     </div>
   );

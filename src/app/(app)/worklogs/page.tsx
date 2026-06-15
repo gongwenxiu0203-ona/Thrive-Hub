@@ -11,7 +11,7 @@ export default async function WorkLogsPage() {
   const session = await requireSession();
   if (!isStaff(session.role)) redirect("/dashboard");
 
-  const [logs, projects] = await Promise.all([
+  const [logs, projects, affiliates] = await Promise.all([
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (prisma.workLog.findMany as any)({
       where: { deletedAt: null },
@@ -23,6 +23,10 @@ export default async function WorkLogsPage() {
       where: { deletedAt: null },
       select: { id: true, name: true, type: true },
       orderBy: { createdAt: "desc" },
+    }),
+    prisma.affiliate.findMany({
+      select: { id: true, platformAffiliateName: true },
+      orderBy: { platformAffiliateName: "asc" },
     }),
   ]);
 
@@ -56,6 +60,7 @@ export default async function WorkLogsPage() {
       logs={rows}
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       projects={(projects as any[]).map((p) => ({ id: p.id, name: p.name }))}
+      affiliates={affiliates.map((a) => ({ id: a.id, name: a.platformAffiliateName }))}
       currentUserId={session.userId}
       isAdmin={session.role === "ADMIN"}
     />
