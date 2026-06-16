@@ -17,7 +17,7 @@ export interface ExistingRule {
 }
 
 const COMMISSION_PRESETS = [0.15, 0.25];
-const FIXED_PRESETS = [0.3, 0.5];
+const FIXED_PRESETS = [0.15, 0.25];
 
 function toPct(r: number | null | undefined): string {
   if (r === null || r === undefined || !Number.isFinite(r)) return "";
@@ -55,7 +55,7 @@ export function ChannelSplitRuleModal({
 
   const [ruleType, setRuleType] = useState<"A" | "B">(existing?.ruleType ?? "A");
   const [splitEndDate, setSplitEndDate] = useState(existing?.splitEndDate?.slice(0, 10) ?? "");
-  const [fixedFeePct, setFixedFeePct] = useState(toPct(existing?.fixedFeeRate ?? 0.3));
+  const [fixedFeePct, setFixedFeePct] = useState(toPct(existing?.fixedFeeRate ?? 0.15));
   const [commissionPct, setCommissionPct] = useState(toPct(existing?.commissionRate ?? 0.15));
   const [tiers, setTiers] = useState<Tier[]>(initialTiers);
 

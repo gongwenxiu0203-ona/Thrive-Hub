@@ -2,6 +2,8 @@ import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { isStaff } from "@/lib/permissions";
+import { deriveChannelPeriod, parseTieredRules, type PeriodDerived } from "@/lib/channelSplit";
+import { ensureChannelDueDateReminders } from "@/actions/channelSplit";
 import { ChannelReconciliationDetail } from "./ChannelReconciliationDetail";
 
 export const dynamic = "force-dynamic";
@@ -29,11 +31,12 @@ export default async function ChannelReconciliationDetailPage({
   if (!rec) notFound();
   if (session.role === "CHANNEL" && rec.channelUserId !== session.userId) notFound();
 
-  // Customer reconciliation history (used for timeline + amount sourcing)
+  // Pull all customer reconciliations (confirmed and not) for the customer,
+  // along with their Settlement actualDates (for "Thraive 实际收款").
   const customerRecs = await prisma.customerReconciliation.findMany({
     where: { customerId: rec.customerId, deletedAt: null },
     orderBy: { periodStart: "desc" },
-    take: 24,
+    take: 60,
     select: {
       id: true,
       periodStart: true,
@@ -41,10 +44,64 @@ export default async function ChannelReconciliationDetailPage({
       status: true,
       feeAmount: true,
       commissionAmount: true,
+      actualSalesAmount: true,
+      finalSalesAmount: true,
+      finalCommissionAmount: true,
       createdAt: true,
       submittedAt: true,
+      settlements: {
+        select: { type: true, actualDate: true, status: true },
+      },
     },
   });
+
+  // Build month → matched CR map (CONFIRMED preferred; fallback to latest non-deleted)
+  const monthMap = new Map<string, typeof customerRecs[number]>();
+  for (const c of customerRecs) {
+    const key = c.periodStart.toISOString().slice(0, 7); // YYYY-MM
+    const prev = monthMap.get(key);
+    if (!prev) monthMap.set(key, c);
+    else if (c.status === "CONFIRMED" && prev.status !== "CONFIRMED") monthMap.set(key, c);
+  }
+
+  // Rule snapshot for derive()
+  const rule = rec.splitRule;
+  const tierBrackets = rule ? parseTieredRules((() => {
+    try { return JSON.parse(rule.tieredRules); } catch { return []; }
+  })()) : [];
+
+  const derivedPeriods: PeriodDerived[] = rec.periods.map((p) => {
+    const month = p.periodLabel ?? "";
+    const cr = month ? monthMap.get(month) : undefined;
+    const confirmed = cr && cr.status === "CONFIRMED" ? cr : null;
+    const feeSettlement = cr?.settlements.find((s) => s.type === "FIXED_FEE" && s.actualDate);
+    const commSettlement = cr?.settlements.find((s) => s.type === "COMMISSION" && s.actualDate);
+
+    // Approximate coefficient: full month = 1.0 (partial-month coefficient is captured
+    // at period creation time but not persisted; for view we recompute based on label).
+    const coefficient = 1.0;
+
+    return deriveChannelPeriod({
+      periodIndex: p.periodIndex,
+      monthLabel: month,
+      coefficient,
+      confirmedFee: confirmed ? confirmed.feeAmount : null,
+      confirmedGmv: confirmed ? (confirmed.finalSalesAmount ?? confirmed.actualSalesAmount) : null,
+      confirmedCommission: confirmed ? (confirmed.finalCommissionAmount ?? confirmed.commissionAmount) : null,
+      feeReceivedAt: feeSettlement?.actualDate?.toISOString() ?? null,
+      commissionReceivedAt: commSettlement?.actualDate?.toISOString() ?? null,
+      fixedFeeRate: rule ? rule.fixedFeeRate : rec.fixedFeeShareRate,
+      ruleType: (rule?.ruleType ?? "A") as "A" | "B",
+      flatCommissionRate: rule?.ruleType === "A" ? (rule.commissionRate ?? 0) : 0,
+      tierBrackets,
+    });
+  });
+
+  // Best-effort: ensure due-date reminders exist for Shallow (fire-and-forget).
+  // Errors here MUST NOT block page render.
+  try {
+    await ensureChannelDueDateReminders(rec.id, derivedPeriods);
+  } catch {}
 
   return (
     <ChannelReconciliationDetail
@@ -99,15 +156,7 @@ export default async function ChannelReconciliationDetailPage({
           notes: p.notes,
         })),
       }}
-      customerRecs={customerRecs.map((c) => ({
-        id: c.id,
-        periodLabel: `${c.periodStart.toISOString().slice(0, 7)}`,
-        status: c.status,
-        feeAmount: c.feeAmount,
-        commissionAmount: c.commissionAmount,
-        createdAt: c.createdAt.toISOString(),
-        submittedAt: c.submittedAt?.toISOString() ?? null,
-      }))}
+      derivedPeriods={derivedPeriods}
     />
   );
 }

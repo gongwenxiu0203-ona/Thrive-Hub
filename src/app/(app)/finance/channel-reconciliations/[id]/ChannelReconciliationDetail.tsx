@@ -4,9 +4,10 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  ArrowLeft, Settings, Calendar, CheckCircle2, FileText, DollarSign, Percent, TrendingUp,
+  ArrowLeft, Settings, CheckCircle2, DollarSign, TrendingUp, Calendar, Clock,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
+import type { PeriodDerived } from "@/lib/channelSplit";
 import {
   ChannelReconciliationDetailModal,
   type ChannelReconciliationRecord,
@@ -63,165 +64,101 @@ export interface DetailRecord {
   }[];
 }
 
-export interface CustomerRecRow {
-  id: string;
-  periodLabel: string;
-  status: string;
-  feeAmount: number;
-  commissionAmount: number;
-  createdAt: string;
-  submittedAt: string | null;
+function fmtMoney(v: number | null | undefined): string {
+  if (v === null || v === undefined || !Number.isFinite(v)) return "—";
+  return `¥${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+}
+function fmtPct(v: number | null | undefined): string {
+  if (v === null || v === undefined || !Number.isFinite(v)) return "—";
+  return `${(v * 100).toFixed(1)}%`;
 }
 
-type TimelineEvent = {
+type WaterfallEvent = {
   at: string;
-  kind: "customer_rec_created" | "customer_rec_submitted" | "customer_rec_confirmed"
-       | "fixed_fee_estimated" | "fixed_fee_actual"
-       | "commission_estimated" | "commission_actual";
-  label: string;
-  meta?: string;
+  kind: "confirmed" | "received_fee" | "received_commission";
+  title: string;
+  amount: string;        // formatted money
+  period: string;        // YYYY-MM label
+  dueDate?: string | null;
 };
 
-function buildTimeline(record: DetailRecord, customerRecs: CustomerRecRow[]): TimelineEvent[] {
-  const events: TimelineEvent[] = [];
-
-  for (const c of customerRecs) {
-    events.push({
-      at: c.createdAt,
-      kind: "customer_rec_created",
-      label: `客户对账 ${c.periodLabel} 创建`,
-      meta: `固费 ¥${c.feeAmount.toLocaleString()} · 佣金 ¥${c.commissionAmount.toLocaleString()}`,
-    });
-    if (c.submittedAt) {
+function buildWaterfall(derived: PeriodDerived[]): WaterfallEvent[] {
+  const events: WaterfallEvent[] = [];
+  for (const p of derived) {
+    // 客户对账确认（用 feeReceivedAt/commissionReceivedAt 之前的"确认"时间，简化为收款日之前）
+    // 这里以"已确认"视为：confirmedFee 不为 null（CR.status === "CONFIRMED"）
+    if (p.confirmedFee !== null || p.confirmedCommission !== null) {
+      // No explicit confirmedAt — use earliest received date as a proxy timestamp,
+      // or fall back to a synthetic timestamp based on the period month.
+      const proxyAt =
+        p.feeReceivedAt ?? p.commissionReceivedAt ?? `${p.monthLabel}-01T00:00:00Z`;
       events.push({
-        at: c.submittedAt,
-        kind: "customer_rec_submitted",
-        label: `客户对账 ${c.periodLabel} 已提交审核`,
+        at: proxyAt,
+        kind: "confirmed",
+        title: `${p.monthLabel} 客户对账确认`,
+        amount: `固费 ${fmtMoney(p.confirmedFee)} · 佣金 ${fmtMoney(p.confirmedCommission)}`,
+        period: p.monthLabel,
       });
     }
-    if (c.status === "CONFIRMED") {
-      // Approximation: no explicit confirmedAt — use submittedAt as proxy if present
-      const at = c.submittedAt ?? c.createdAt;
+    if (p.feeReceivedAt) {
       events.push({
-        at,
-        kind: "customer_rec_confirmed",
-        label: `客户对账 ${c.periodLabel} 终版确认`,
+        at: p.feeReceivedAt,
+        kind: "received_fee",
+        title: `${p.monthLabel} Thraive 收到固费`,
+        amount: fmtMoney(p.confirmedFee),
+        period: p.monthLabel,
+        dueDate: p.dueDate,
       });
     }
-  }
-
-  if (record.fixedFeeEstimatedDate) {
-    events.push({
-      at: record.fixedFeeEstimatedDate,
-      kind: "fixed_fee_estimated",
-      label: "固费应收日",
-      meta: `应收 ${record.fixedFeeShareCurrency} ${record.fixedFeeShareAmount.toLocaleString()}`,
-    });
-  }
-  if (record.fixedFeeActualDate) {
-    events.push({
-      at: record.fixedFeeActualDate,
-      kind: "fixed_fee_actual",
-      label: "固费实际入账",
-      meta: `${record.fixedFeeShareCurrency} ${record.fixedFeeShareAmount.toLocaleString()}`,
-    });
-  }
-  if (record.commissionEstimatedDate) {
-    events.push({
-      at: record.commissionEstimatedDate,
-      kind: "commission_estimated",
-      label: "佣金应收日",
-      meta: `应收 ${record.commissionShareCurrency} ${record.commissionShareAmount.toLocaleString()}`,
-    });
-  }
-  if (record.commissionActualDate) {
-    events.push({
-      at: record.commissionActualDate,
-      kind: "commission_actual",
-      label: "佣金实际入账",
-      meta: `${record.commissionShareCurrency} ${record.commissionShareAmount.toLocaleString()}`,
-    });
-  }
-
-  for (const p of record.periods) {
-    if (p.fixedFeePaidAt) {
+    if (p.commissionReceivedAt) {
       events.push({
-        at: p.fixedFeePaidAt,
-        kind: "fixed_fee_actual",
-        label: `第 ${p.periodIndex} 期 固费已收`,
-        meta: p.fixedFeeAmount !== null ? `¥${p.fixedFeeAmount.toLocaleString()}` : undefined,
-      });
-    }
-    if (p.commissionPaidAt) {
-      events.push({
-        at: p.commissionPaidAt,
-        kind: "commission_actual",
-        label: `第 ${p.periodIndex} 期 佣金已收`,
-        meta: p.commissionAmount !== null ? `¥${p.commissionAmount.toLocaleString()}` : undefined,
+        at: p.commissionReceivedAt,
+        kind: "received_commission",
+        title: `${p.monthLabel} Thraive 收到佣金`,
+        amount: fmtMoney(p.confirmedCommission),
+        period: p.monthLabel,
+        dueDate: p.dueDate,
       });
     }
   }
-
   return events.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
 }
 
-function calcSummary(record: DetailRecord) {
-  // 按渠道商实际收款汇总（only count rows where actual date is filled）
-  let fixedTotal = 0;
-  let commissionTotal = 0;
-
-  if (record.periods.length > 0) {
-    for (const p of record.periods) {
-      if (p.fixedFeePaidAt && p.fixedFeeAmount !== null) fixedTotal += p.fixedFeeAmount;
-      if (p.commissionPaidAt && p.commissionAmount !== null) commissionTotal += p.commissionAmount;
-    }
-  } else {
-    if (record.fixedFeeActualDate) fixedTotal += record.fixedFeeShareAmount;
-    if (record.commissionActualDate) commissionTotal += record.commissionShareAmount;
-  }
-
-  return { fixedTotal, commissionTotal };
-}
-
-const KIND_STYLE: Record<TimelineEvent["kind"], { color: string; icon: typeof CheckCircle2 }> = {
-  customer_rec_created: { color: "bg-slate-200 text-slate-600", icon: FileText },
-  customer_rec_submitted: { color: "bg-amber-100 text-amber-700", icon: FileText },
-  customer_rec_confirmed: { color: "bg-emerald-100 text-emerald-700", icon: CheckCircle2 },
-  fixed_fee_estimated: { color: "bg-blue-100 text-blue-700", icon: Calendar },
-  fixed_fee_actual: { color: "bg-emerald-100 text-emerald-700", icon: DollarSign },
-  commission_estimated: { color: "bg-blue-100 text-blue-700", icon: Calendar },
-  commission_actual: { color: "bg-emerald-100 text-emerald-700", icon: Percent },
+const KIND_BADGE: Record<WaterfallEvent["kind"], { color: string; label: string; icon: typeof CheckCircle2 }> = {
+  confirmed: { color: "bg-amber-100 text-amber-700 border-amber-200", label: "对账确认", icon: CheckCircle2 },
+  received_fee: { color: "bg-emerald-100 text-emerald-700 border-emerald-200", label: "固费入账", icon: DollarSign },
+  received_commission: { color: "bg-emerald-100 text-emerald-700 border-emerald-200", label: "佣金入账", icon: TrendingUp },
 };
 
 export function ChannelReconciliationDetail({
   record,
-  customerRecs,
+  derivedPeriods,
   isAdmin: _isAdmin,
   isStaff,
 }: {
   record: DetailRecord;
-  customerRecs: CustomerRecRow[];
+  derivedPeriods: PeriodDerived[];
   isAdmin: boolean;
   isStaff: boolean;
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
 
-  const timeline = buildTimeline(record, customerRecs);
-  const summary = calcSummary(record);
+  const waterfall = buildWaterfall(derivedPeriods);
 
-  // Adapter for the existing modal (it expects Date | string types)
+  // 汇总：按 Thraive 实际收款汇总 → 渠道商待收
+  const summary = derivedPeriods.reduce(
+    (acc, p) => {
+      if (p.feeReceivedAt && p.channelReceivableFee !== null) acc.feeTotal += p.channelReceivableFee;
+      if (p.commissionReceivedAt && p.channelReceivableCommission !== null) acc.commissionTotal += p.channelReceivableCommission;
+      return acc;
+    },
+    { feeTotal: 0, commissionTotal: 0 }
+  );
+
+  // Adapter for the existing modal
   const editRecord: ChannelReconciliationRecord = {
     ...record,
-    customer: record.customer,
-    contract: record.contract,
-    channelUser: record.channelUser,
-    periodStart: record.periodStart,
-    periodEnd: record.periodEnd,
-    fixedFeeEstimatedDate: record.fixedFeeEstimatedDate,
-    fixedFeeActualDate: record.fixedFeeActualDate,
-    commissionEstimatedDate: record.commissionEstimatedDate,
-    commissionActualDate: record.commissionActualDate,
     periods: record.periods.map((p): CRPeriod => ({
       id: p.id,
       periodIndex: p.periodIndex,
@@ -235,7 +172,7 @@ export function ChannelReconciliationDetail({
     })),
   };
 
-  const tieredRules = (() => {
+  const tieredRules: { gmvMin: number; gmvMax: number | null; rate: number }[] = (() => {
     if (!record.splitRule) return [];
     try {
       const parsed = JSON.parse(record.splitRule.tieredRules);
@@ -271,26 +208,22 @@ export function ChannelReconciliationDetail({
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="card p-5">
           <div className="flex items-center gap-2 text-xs text-slate-400">
-            <DollarSign className="h-4 w-4" /> 固费分账总额（按实际收款）
+            <DollarSign className="h-4 w-4" /> 固费分账总额（按 Thraive 实际收款汇总）
           </div>
-          <p className="mt-2 text-3xl font-bold text-emerald-600">
-            ¥{summary.fixedTotal.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-          </p>
+          <p className="mt-2 text-3xl font-bold text-emerald-600">{fmtMoney(summary.feeTotal)}</p>
           <p className="mt-1 text-[11px] text-slate-400">
-            分账比例 {(record.fixedFeeShareRate * 100).toFixed(1)}%
+            分账比例 {fmtPct(record.splitRule?.fixedFeeRate ?? record.fixedFeeShareRate)}
           </p>
         </div>
         <div className="card p-5">
           <div className="flex items-center gap-2 text-xs text-slate-400">
-            <TrendingUp className="h-4 w-4" /> 佣金分账总额（按实际收款）
+            <TrendingUp className="h-4 w-4" /> 佣金分账总额（按 Thraive 实际收款汇总）
           </div>
-          <p className="mt-2 text-3xl font-bold text-emerald-600">
-            ¥{summary.commissionTotal.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-          </p>
+          <p className="mt-2 text-3xl font-bold text-emerald-600">{fmtMoney(summary.commissionTotal)}</p>
           <p className="mt-1 text-[11px] text-slate-400">
             {record.splitRule?.ruleType === "B"
               ? `B 阶梯（${tieredRules.length} 档）`
-              : `A 单一比例 ${(record.commissionShareRate * 100).toFixed(1)}%`}
+              : `A 单一比例 ${fmtPct(record.splitRule?.commissionRate ?? record.commissionShareRate)}`}
           </p>
         </div>
       </div>
@@ -310,7 +243,7 @@ export function ChannelReconciliationDetail({
             </div>
             <div>
               <p className="text-[11px] text-slate-400">固费分账比例</p>
-              <p className="font-medium text-slate-800">{(record.splitRule.fixedFeeRate * 100).toFixed(1)}%</p>
+              <p className="font-medium text-slate-800">{fmtPct(record.splitRule.fixedFeeRate)}</p>
             </div>
           </div>
           {record.splitRule.ruleType === "B" && tieredRules.length > 0 && (
@@ -324,11 +257,11 @@ export function ChannelReconciliationDetail({
                   </tr>
                 </thead>
                 <tbody>
-                  {tieredRules.map((t: { gmvMin: number; gmvMax: number | null; rate: number }, i: number) => (
+                  {tieredRules.map((t, i) => (
                     <tr key={i} className="border-t border-slate-100">
-                      <td className="px-3 py-1.5">¥{t.gmvMin.toLocaleString()}</td>
-                      <td className="px-3 py-1.5">{t.gmvMax === null ? "+∞" : `¥${t.gmvMax.toLocaleString()}`}</td>
-                      <td className="px-3 py-1.5 text-right font-medium">{(t.rate * 100).toFixed(1)}%</td>
+                      <td className="px-3 py-1.5">{fmtMoney(t.gmvMin)}</td>
+                      <td className="px-3 py-1.5">{t.gmvMax === null ? "+∞" : fmtMoney(t.gmvMax)}</td>
+                      <td className="px-3 py-1.5 text-right font-medium">{fmtPct(t.rate)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -338,78 +271,101 @@ export function ChannelReconciliationDetail({
         </div>
       )}
 
-      <div className="grid gap-5 lg:grid-cols-2">
-        {/* Periods table */}
-        <div className="card p-5">
-          <p className="mb-3 text-sm font-semibold text-slate-700">期数明细 ({record.periods.length})</p>
-          {record.periods.length === 0 ? (
-            <p className="text-xs text-slate-400">暂无期数（未配置分账规则时不会自动生成期数）</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead className="bg-slate-50 text-slate-500">
-                  <tr>
-                    <th className="px-2 py-1.5 text-left">期</th>
-                    <th className="px-2 py-1.5 text-left">月份</th>
-                    <th className="px-2 py-1.5 text-right">固费</th>
-                    <th className="px-2 py-1.5 text-right">佣金</th>
-                    <th className="px-2 py-1.5 text-left">收款</th>
+      {/* Periods table — 7 columns */}
+      <div className="card p-5">
+        <div className="mb-3 flex items-center justify-between">
+          <p className="text-sm font-semibold text-slate-700">期数明细 ({derivedPeriods.length})</p>
+          <p className="text-[11px] text-slate-400">"—"表示该月客户对账尚未确认</p>
+        </div>
+        {derivedPeriods.length === 0 ? (
+          <p className="text-xs text-slate-400">暂无期数（未配置分账规则时不会自动生成期数）</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="bg-slate-50 text-slate-500">
+                <tr>
+                  <th className="px-2 py-2 text-left">期</th>
+                  <th className="px-2 py-2 text-left">月份</th>
+                  <th className="px-2 py-2 text-right">确认固费金额</th>
+                  <th className="px-2 py-2 text-right">固费分账比例</th>
+                  <th className="px-2 py-2 text-right">渠道商待收固费</th>
+                  <th className="px-2 py-2 text-right">已对账GMV</th>
+                  <th className="px-2 py-2 text-right">已对账GMV佣金</th>
+                  <th className="px-2 py-2 text-right">分账佣金比例</th>
+                  <th className="px-2 py-2 text-right">渠道商待收佣金</th>
+                  <th className="px-2 py-2 text-left">付款截止</th>
+                </tr>
+              </thead>
+              <tbody>
+                {derivedPeriods.map((p) => (
+                  <tr key={p.periodIndex} className="border-t border-slate-100 hover:bg-slate-50/50">
+                    <td className="px-2 py-2 text-slate-600">{p.periodIndex}</td>
+                    <td className="px-2 py-2 text-slate-600">{p.monthLabel}</td>
+                    <td className="px-2 py-2 text-right font-medium text-slate-800">{fmtMoney(p.confirmedFee)}</td>
+                    <td className="px-2 py-2 text-right text-slate-500">{fmtPct(p.fixedFeeRate)}</td>
+                    <td className="px-2 py-2 text-right font-semibold text-emerald-600">{fmtMoney(p.channelReceivableFee)}</td>
+                    <td className="px-2 py-2 text-right text-slate-600">{fmtMoney(p.confirmedGmv)}</td>
+                    <td className="px-2 py-2 text-right font-medium text-slate-800">{fmtMoney(p.confirmedCommission)}</td>
+                    <td className="px-2 py-2 text-right text-slate-500">{fmtPct(p.channelCommissionRate)}</td>
+                    <td className="px-2 py-2 text-right font-semibold text-emerald-600">{fmtMoney(p.channelReceivableCommission)}</td>
+                    <td className="px-2 py-2 text-slate-600">
+                      {p.dueDate ? (
+                        <span className="inline-flex items-center gap-1 rounded bg-blue-50 px-1.5 py-0.5 text-[11px] text-blue-700">
+                          <Clock className="h-3 w-3" /> {formatDate(new Date(p.dueDate))}
+                        </span>
+                      ) : "—"}
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {record.periods.map((p) => (
-                    <tr key={p.id} className="border-t border-slate-100">
-                      <td className="px-2 py-1.5">{p.periodIndex}</td>
-                      <td className="px-2 py-1.5">{p.periodLabel ?? "—"}</td>
-                      <td className="px-2 py-1.5 text-right">{p.fixedFeeAmount !== null ? `¥${p.fixedFeeAmount.toLocaleString()}` : "—"}</td>
-                      <td className="px-2 py-1.5 text-right">{p.commissionAmount !== null ? `¥${p.commissionAmount.toLocaleString()}` : "—"}</td>
-                      <td className="px-2 py-1.5">
-                        {p.fixedFeePaidAt ? <span className="text-emerald-600">✓固费</span> : <span className="text-slate-300">○固费</span>}
-                        {" "}
-                        {p.commissionPaidAt ? <span className="text-emerald-600">✓佣金</span> : <span className="text-slate-300">○佣金</span>}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
-        {/* Timeline */}
-        <div className="card p-5">
-          <p className="mb-3 text-sm font-semibold text-slate-700">时间流（对账 + 收费进度）</p>
-          {timeline.length === 0 ? (
-            <p className="text-xs text-slate-400">暂无事件</p>
-          ) : (
-            <ul className="space-y-3">
-              {timeline.slice(0, 20).map((e, i) => {
-                const cfg = KIND_STYLE[e.kind];
-                const Icon = cfg.icon;
-                return (
-                  <li key={i} className="flex items-start gap-3">
-                    <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${cfg.color}`}>
-                      <Icon className="h-3.5 w-3.5" />
+      {/* Waterfall timeline */}
+      <div className="card p-5">
+        <p className="mb-4 text-sm font-semibold text-slate-700">时间流瀑布（仅显示对账确认 & Thraive 实际收款）</p>
+        {waterfall.length === 0 ? (
+          <p className="text-xs text-slate-400">暂无事件 — 等客户对账确认或 Thraive 实际收款后此处会自动填充</p>
+        ) : (
+          <ol className="relative space-y-4 border-l-2 border-slate-200 pl-6">
+            {waterfall.map((e, i) => {
+              const cfg = KIND_BADGE[e.kind];
+              const Icon = cfg.icon;
+              return (
+                <li key={i} className="relative">
+                  <div className={`absolute -left-[34px] flex h-7 w-7 items-center justify-center rounded-full border-2 ${cfg.color}`}>
+                    <Icon className="h-3.5 w-3.5" />
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${cfg.color}`}>{cfg.label}</span>
+                          <span className="text-sm font-semibold text-slate-800">{e.title}</span>
+                        </div>
+                        <p className="mt-1 text-xs text-slate-600">{e.amount}</p>
+                        {e.dueDate && (
+                          <p className="mt-1 inline-flex items-center gap-1 rounded bg-blue-50 px-1.5 py-0.5 text-[11px] text-blue-700">
+                            <Calendar className="h-3 w-3" /> 渠道商付款截止：{formatDate(new Date(e.dueDate))}（实收+7工作日）
+                          </p>
+                        )}
+                      </div>
+                      <p className="shrink-0 text-[11px] text-slate-400">{formatDate(new Date(e.at))}</p>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-slate-800">{e.label}</p>
-                      {e.meta && <p className="text-[11px] text-slate-400">{e.meta}</p>}
-                      <p className="mt-0.5 text-[10px] text-slate-400">{formatDate(new Date(e.at))}</p>
-                    </div>
-                  </li>
-                );
-              })}
-              {timeline.length > 20 && (
-                <li className="text-center text-[11px] text-slate-400">显示最近 20 条 / 共 {timeline.length} 条</li>
-              )}
-            </ul>
-          )}
-        </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        )}
       </div>
 
       {editing && (
         <ChannelReconciliationDetailModal
           record={editRecord}
+          derivedPeriods={derivedPeriods}
           onClose={() => setEditing(false)}
           onSaved={() => {
             setEditing(false);

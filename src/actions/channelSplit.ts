@@ -7,6 +7,8 @@ import { isStaff } from "@/lib/permissions";
 import {
   splitPeriodsByMonth,
   parseTieredRules,
+  addWorkdays,
+  type PeriodDerived,
 } from "@/lib/channelSplit";
 
 export interface SplitRuleInput {
@@ -166,4 +168,62 @@ export async function ensureReconciliationForContract(args: {
   }
 
   return { ok: true, data: { reconciliationId: main.id } };
+}
+
+// Cache the Shallow user id at module level (cheap re-lookup ok if missing).
+async function findShallowUser(): Promise<{ id: string; name: string } | null> {
+  const u = await prisma.user.findFirst({
+    where: {
+      OR: [
+        { email: "shallow@demo.com" },
+        { name: { contains: "Shallow" } },
+        { name: { contains: "shallow" } },
+      ],
+    },
+    select: { id: true, name: true },
+  });
+  return u;
+}
+
+/**
+ * For each derived period that has a dueDate, ensure there is a Reminder
+ * targeting Shallow for "1 workday before dueDate". Idempotent: skips when
+ * an equivalent reminder already exists (matched by title+target).
+ *
+ * Called lazily from the detail page render. Errors here are swallowed by
+ * the caller — must not crash the page.
+ */
+export async function ensureChannelDueDateReminders(
+  reconciliationId: string,
+  derivedPeriods: PeriodDerived[]
+): Promise<void> {
+  const due = derivedPeriods.filter((p) => p.dueDate);
+  if (due.length === 0) return;
+
+  const shallow = await findShallowUser();
+  if (!shallow) return; // No target user — silently skip
+
+  for (const p of due) {
+    if (!p.dueDate) continue;
+    const remindAt = addWorkdays(new Date(p.dueDate), -1);
+    const title = `渠道商分账付款提醒 · ${p.monthLabel}（第${p.periodIndex}期）`;
+
+    // De-dupe by (target, title) within this reconciliation
+    const existing = await prisma.reminder.findFirst({
+      where: { targetId: shallow.id, title, deletedAt: null },
+      select: { id: true },
+    });
+    if (existing) continue;
+
+    await prisma.reminder.create({
+      data: {
+        title,
+        content: `渠道商分账 ${reconciliationId} 的第 ${p.periodIndex} 期（${p.monthLabel}）付款截止 ${new Date(p.dueDate).toISOString().slice(0, 10)}（Thraive 实收+7工作日）。请于截止前完成对渠道商的付款。`,
+        remindDate: remindAt,
+        type: "REVIEW",
+        targetId: shallow.id,
+        createdById: shallow.id, // system-generated; attribute to Shallow as a self-task
+      },
+    });
+  }
 }

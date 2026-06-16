@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Send, Settings, Calendar, CheckCircle2 } from "lucide-react";
+import { Send, Settings, Calendar, CheckCircle2, Clock } from "lucide-react";
 import { FEE_CURRENCY_OPTIONS } from "@/lib/constants";
 import { toInputDate, formatDate } from "@/lib/utils";
+import type { PeriodDerived } from "@/lib/channelSplit";
 
 export type CRPeriod = {
   id: string;
@@ -52,10 +53,12 @@ export type ChannelReconciliationRecord = {
 
 export function ChannelReconciliationDetailModal({
   record,
+  derivedPeriods,
   onClose,
   onSaved,
 }: {
   record: ChannelReconciliationRecord;
+  derivedPeriods?: PeriodDerived[];
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -106,7 +109,7 @@ export function ChannelReconciliationDetailModal({
           {view === "setup" ? (
             <SetupView record={record} onSaved={onSaved} />
           ) : (
-            <PeriodsView record={record} onSaved={onSaved} />
+            <PeriodsView record={record} derivedPeriods={derivedPeriods} onSaved={onSaved} />
           )}
         </div>
 
@@ -259,11 +262,22 @@ function SetupView({
 }
 
 // ── 新版：期数管理视图 ────────────────────────────────────────────────────────
+function fmtMoneyDM(v: number | null | undefined): string {
+  if (v === null || v === undefined || !Number.isFinite(v)) return "—";
+  return `¥${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+}
+function fmtPctDM(v: number | null | undefined): string {
+  if (v === null || v === undefined || !Number.isFinite(v)) return "—";
+  return `${(v * 100).toFixed(1)}%`;
+}
+
 function PeriodsView({
   record,
+  derivedPeriods,
   onSaved,
 }: {
   record: ChannelReconciliationRecord;
+  derivedPeriods?: PeriodDerived[];
   onSaved: () => void;
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -293,6 +307,55 @@ function PeriodsView({
         {hasComm && <Stat label="佣金已付" value={`${paidComm}/${record.periods.length}`}
           accent={paidComm === record.periods.length ? "text-emerald-700" : "text-amber-700"} />}
       </div>
+
+      {/* 自动派生：7 列只读表（从客户对账与 Thraive 实际收款抽取） */}
+      {derivedPeriods && derivedPeriods.length > 0 && (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <p className="mb-2 text-xs font-semibold text-slate-600">
+            分账明细（自动派生，来源：客户对账 + Thraive 实际收款）
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-[11px]">
+              <thead className="text-slate-500">
+                <tr>
+                  <th className="px-1.5 py-1 text-left">期</th>
+                  <th className="px-1.5 py-1 text-left">月份</th>
+                  <th className="px-1.5 py-1 text-right">确认固费</th>
+                  <th className="px-1.5 py-1 text-right">固费比例</th>
+                  <th className="px-1.5 py-1 text-right">待收固费</th>
+                  <th className="px-1.5 py-1 text-right">已对账GMV</th>
+                  <th className="px-1.5 py-1 text-right">GMV佣金</th>
+                  <th className="px-1.5 py-1 text-right">佣金比例</th>
+                  <th className="px-1.5 py-1 text-right">待收佣金</th>
+                  <th className="px-1.5 py-1 text-left">付款截止</th>
+                </tr>
+              </thead>
+              <tbody>
+                {derivedPeriods.map((p) => (
+                  <tr key={p.periodIndex} className="border-t border-slate-200">
+                    <td className="px-1.5 py-1">{p.periodIndex}</td>
+                    <td className="px-1.5 py-1">{p.monthLabel}</td>
+                    <td className="px-1.5 py-1 text-right">{fmtMoneyDM(p.confirmedFee)}</td>
+                    <td className="px-1.5 py-1 text-right text-slate-500">{fmtPctDM(p.fixedFeeRate)}</td>
+                    <td className="px-1.5 py-1 text-right font-semibold text-emerald-700">{fmtMoneyDM(p.channelReceivableFee)}</td>
+                    <td className="px-1.5 py-1 text-right">{fmtMoneyDM(p.confirmedGmv)}</td>
+                    <td className="px-1.5 py-1 text-right">{fmtMoneyDM(p.confirmedCommission)}</td>
+                    <td className="px-1.5 py-1 text-right text-slate-500">{fmtPctDM(p.channelCommissionRate)}</td>
+                    <td className="px-1.5 py-1 text-right font-semibold text-emerald-700">{fmtMoneyDM(p.channelReceivableCommission)}</td>
+                    <td className="px-1.5 py-1">
+                      {p.dueDate ? (
+                        <span className="inline-flex items-center gap-0.5 rounded bg-blue-50 px-1 py-0.5 text-[10px] text-blue-700">
+                          <Clock className="h-2.5 w-2.5" />{formatDate(new Date(p.dueDate))}
+                        </span>
+                      ) : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* 期数列表 */}
       <div className="divide-y divide-slate-100 rounded-xl border border-slate-200">

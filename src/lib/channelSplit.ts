@@ -152,4 +152,111 @@ export const RULE_TYPE_LABELS: Record<string, string> = {
 };
 
 export const COMMISSION_RATE_PRESETS = [0.15, 0.25];
-export const FIXED_FEE_RATE_PRESETS = [0.3, 0.5];
+export const FIXED_FEE_RATE_PRESETS = [0.15, 0.25];
+
+/**
+ * Add N workdays to a date (skips Sat/Sun; does NOT consider PRC holidays).
+ * addWorkdays(Mon, 1) = Tue;   addWorkdays(Fri, 1) = next Mon
+ * addWorkdays(Sat, 1) = next Tue (Sat itself is not a workday; result skips Sun too)
+ * Negative n moves backward.
+ */
+export function addWorkdays(start: Date, n: number): Date {
+  const d = new Date(start.getTime());
+  const direction = n >= 0 ? 1 : -1;
+  let remaining = Math.abs(n);
+  while (remaining > 0) {
+    d.setDate(d.getDate() + direction);
+    const dow = d.getDay(); // 0=Sun, 6=Sat
+    if (dow !== 0 && dow !== 6) remaining -= 1;
+  }
+  return d;
+}
+
+/**
+ * Per-period derived view = matched CustomerReconciliation amounts + share calcs.
+ * Pure: no DB access. Pass the matched CR row (or null if no match yet).
+ */
+export interface PeriodDerivedInput {
+  periodIndex: number;
+  monthLabel: string;            // "YYYY-MM"
+  coefficient: number;           // 0~1
+  // From matched CustomerReconciliation (status CONFIRMED) or null:
+  confirmedFee: number | null;        // CR.feeAmount
+  confirmedGmv: number | null;        // CR.finalSalesAmount ?? actualSalesAmount
+  confirmedCommission: number | null; // CR.finalCommissionAmount ?? commissionAmount
+  // From matching Settlements (per-type actualDate or null):
+  feeReceivedAt: string | null;
+  commissionReceivedAt: string | null;
+  // From rule:
+  fixedFeeRate: number;
+  ruleType: "A" | "B";
+  flatCommissionRate: number;        // A only (0 for B)
+  tierBrackets: TierBracket[];       // B only ([] for A)
+}
+
+export interface PeriodDerived {
+  periodIndex: number;
+  monthLabel: string;
+  coefficient: number;
+  // 7 columns the user asked for:
+  confirmedFee: number | null;
+  fixedFeeRate: number;
+  channelReceivableFee: number | null;          // confirmedFee * fixedFeeRate * coefficient
+  confirmedGmv: number | null;
+  confirmedCommission: number | null;
+  channelCommissionRate: number;                // A: flat; B: effective = share / commission (or 0 if commission null)
+  channelReceivableCommission: number | null;   // A: confirmedCommission * rate; B: calcTieredCommission(GMV, brackets) (capped by confirmedCommission)
+  // Timing:
+  feeReceivedAt: string | null;
+  commissionReceivedAt: string | null;
+  dueDate: string | null;                       // max(feeReceived,commReceived) + 7 workdays
+}
+
+export function deriveChannelPeriod(input: PeriodDerivedInput): PeriodDerived {
+  const fee = input.confirmedFee;
+  const receivableFee = fee !== null
+    ? fee * input.fixedFeeRate * input.coefficient
+    : null;
+
+  let receivableCommission: number | null = null;
+  let channelCommissionRate = 0;
+
+  if (input.ruleType === "A") {
+    channelCommissionRate = input.flatCommissionRate;
+    receivableCommission = input.confirmedCommission !== null
+      ? input.confirmedCommission * input.flatCommissionRate
+      : null;
+  } else {
+    // B: 阶梯佣金 按累计 GMV 分段（个税口径），上限 = confirmedCommission（不能超出客户对账已确认的佣金池）
+    if (input.confirmedGmv !== null && input.confirmedGmv > 0) {
+      const raw = calcTieredCommission(input.confirmedGmv, input.tierBrackets);
+      receivableCommission = input.confirmedCommission !== null
+        ? Math.min(raw, input.confirmedCommission)
+        : raw;
+      channelCommissionRate = raw / input.confirmedGmv; // effective rate, for display
+    }
+  }
+
+  let dueDate: string | null = null;
+  const dates = [input.feeReceivedAt, input.commissionReceivedAt].filter((x): x is string => !!x);
+  if (dates.length > 0) {
+    const latest = dates.map((s) => new Date(s).getTime()).reduce((a, b) => Math.max(a, b));
+    dueDate = addWorkdays(new Date(latest), 7).toISOString();
+  }
+
+  return {
+    periodIndex: input.periodIndex,
+    monthLabel: input.monthLabel,
+    coefficient: input.coefficient,
+    confirmedFee: fee,
+    fixedFeeRate: input.fixedFeeRate,
+    channelReceivableFee: receivableFee,
+    confirmedGmv: input.confirmedGmv,
+    confirmedCommission: input.confirmedCommission,
+    channelCommissionRate,
+    channelReceivableCommission: receivableCommission,
+    feeReceivedAt: input.feeReceivedAt,
+    commissionReceivedAt: input.commissionReceivedAt,
+    dueDate,
+  };
+}
