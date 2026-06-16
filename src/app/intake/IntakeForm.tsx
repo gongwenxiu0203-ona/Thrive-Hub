@@ -9,7 +9,7 @@ import {
 import { MAIN_SITES, PROMO_PLATFORMS } from "@/lib/constants";
 
 // Build the intake JSON payload from the CustomerSectionFields form.
-function buildPayload(form: HTMLFormElement, customerId?: string, channelId?: string) {
+function buildPayload(form: HTMLFormElement, customerId?: string, channelId?: string, staffId?: string) {
   const fd = new FormData(form);
   const str = (k: string) => String(fd.get(k) ?? "").trim();
 
@@ -34,6 +34,7 @@ function buildPayload(form: HTMLFormElement, customerId?: string, channelId?: st
   return {
     customerId: customerId ?? "",
     channelId: channelId ?? "",
+    staffId: staffId ?? "",
     brandName: str("brandName"),
     mainSites,
     siteLinks,
@@ -58,10 +59,12 @@ function buildPayload(form: HTMLFormElement, customerId?: string, channelId?: st
 export function IntakeForm({
   customerId,
   channelId,
+  staffId,
   defaults,
 }: {
   customerId?: string;
   channelId?: string;
+  staffId?: string;
   defaults?: CustomerSectionDefaults;
 }) {
   const router = useRouter();
@@ -72,7 +75,7 @@ export function IntakeForm({
     e.preventDefault();
     setError(null);
     setPending(true);
-    const payload = buildPayload(e.currentTarget, customerId, channelId);
+    const payload = buildPayload(e.currentTarget, customerId, channelId, staffId);
     if (!payload.brandName) {
       setError("请填写品牌/店铺名称");
       setPending(false);

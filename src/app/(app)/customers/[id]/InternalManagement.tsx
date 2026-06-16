@@ -246,18 +246,24 @@ export function InternalManagement({
           </div>
           <p className="text-sm font-semibold text-slate-700">后端负责人</p>
         </div>
-        {!backendOwnerId && (
-          <div>
-            <label className="label text-xs">Demo 方案任务截止日期</label>
-            <input
-              type="date"
-              className="input"
-              value={demoDue}
-              min={toInputDate(new Date())}
-              onChange={(e) => setDemoDue(e.target.value)}
-            />
-          </div>
-        )}
+        <div>
+          <label className="label text-xs">Demo 方案任务截止日期</label>
+          <input
+            type="date"
+            className="input"
+            value={demoDue}
+            min={toInputDate(new Date())}
+            onChange={(e) => {
+              const v = e.target.value;
+              setDemoDue(v);
+              // 若后端负责人已选，则同步保存到客户记录与 Demo 任务（独立于选人顺序）
+              if (backendOwnerId) {
+                run(() => setBackendOwner(customerId, backendOwnerId, v));
+              }
+            }}
+          />
+          <p className="mt-1 text-[10px] text-slate-400">截止日期与后端负责人可独立选择，无先后顺序。</p>
+        </div>
         <select
           className="input"
           value={backendOwnerId ?? ""}

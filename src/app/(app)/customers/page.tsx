@@ -124,10 +124,8 @@ export default async function CustomersPage({
 
   const isChannel = session.role === "CHANNEL";
   const sp = await searchParams;
-  // 内部员工默认"全部"，?scope=mine 可切回"我的"；其他角色保持原逻辑
-  const view: import("@/lib/dataScope").ViewScope = isStaff(session.role)
-    ? sp.scope === "mine" ? "mine" : "all"
-    : parseViewScope(sp);
+  // 默认"我的"；?scope=all 切换到"全部"（与 ScopeToggle 默认行为一致，避免回切丢失）
+  const view = parseViewScope(sp);
   const scope = customerScope(
     {
       userId: session.userId,
@@ -198,14 +196,17 @@ export default async function CustomersPage({
         description={
           isStaff(session.role)
             ? view === "mine"
-              ? "仅显示与你相关的客户"
-              : "全部客户视图（默认）"
+              ? "仅显示与你相关的客户（默认）"
+              : "全部客户视图"
             : "品牌客户管理"
         }
         actions={
           <>
-            {isStaff(session.role) && <ScopeToggle defaultView="all" />}
-            <IntakeLinkButton channelUserId={isChannel ? session.userId : undefined} />
+            {isStaff(session.role) && <ScopeToggle />}
+            <IntakeLinkButton
+              channelUserId={isChannel ? session.userId : undefined}
+              staffUserId={isStaff(session.role) ? session.userId : undefined}
+            />
             <CustomerImportModal />
             <QuickCreateModal />
             <CustomerFormModal users={userOptions} />
@@ -280,7 +281,7 @@ export default async function CustomersPage({
                   <td>
                     <Link
                       href={`/customers/${c.id}`}
-                      className="font-medium text-brand-700 hover:underline"
+                      className="font-medium text-brand-700 hover:underline capitalize-first"
                     >
                       {c.brandName}
                     </Link>
@@ -323,6 +324,8 @@ export default async function CustomersPage({
                       <ShareIntakeButton
                         customerId={c.id}
                         brandName={c.brandName}
+                        channelUserId={isChannel ? session.userId : undefined}
+                        staffUserId={isStaff(session.role) ? session.userId : undefined}
                       />
                     </div>
                   </td>

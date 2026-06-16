@@ -7,6 +7,53 @@ import { requireSession } from "@/lib/session";
 import { MAIN_SITES, PROMO_PLATFORMS } from "@/lib/constants";
 import { sendOwnerAssignmentNotification } from "@/lib/notify";
 import { canDeleteCustomer } from "@/lib/permissions";
+import { capitalizeBrandName } from "@/lib/customer";
+
+const LEO_EMAIL = "leo.g@thraiveagency.com";
+const LEDO_EMAIL = "ledo.h@thraiveagency.com";
+
+/** Find a user id by exact email; returns null if missing (silent fallback). */
+async function userIdByEmail(email: string): Promise<string | null> {
+  const u = await prisma.user.findFirst({ where: { email }, select: { id: true } });
+  return u?.id ?? null;
+}
+
+/** After customer create: notify Leo with a task + in-app reminder.
+ *  Idempotent per customer (skips if a "客户分配" task already exists for Leo). */
+async function notifyLeoOnCustomerCreate(customerId: string, brandName: string): Promise<void> {
+  const leoId = await userIdByEmail(LEO_EMAIL);
+  if (!leoId) return;
+  const exists = await prisma.task.findFirst({
+    where: { customerId, ownerId: leoId, category: "FOLLOWUP", title: { startsWith: "客户分配" } },
+    select: { id: true },
+  });
+  if (!exists) {
+    const count = await prisma.task.count({ where: { status: "TODO" } });
+    await prisma.task.create({
+      data: {
+        title: `客户分配 · ${brandName}`,
+        description: "新客户创建，请跟进处理客户分配事宜。",
+        customerId,
+        ownerId: leoId,
+        publisherId: leoId,
+        priority: "MID",
+        category: "FOLLOWUP",
+        status: "TODO",
+        sortOrder: count,
+      },
+    });
+  }
+  await prisma.reminder.create({
+    data: {
+      title: `新客户分配：${brandName}`,
+      content: `客户「${brandName}」已创建，请处理客户分配。`,
+      remindDate: new Date(),
+      type: "FOLLOWUP",
+      targetId: leoId,
+      createdById: leoId,
+    },
+  });
+}
 
 export type SaveResult = {
   ok: boolean;
@@ -45,7 +92,7 @@ function collectCustomerData(fd: FormData) {
   const promotionGoals = fd.getAll("promotionGoals").map(String);
 
   return {
-    brandName: str(fd, "brandName"),
+    brandName: capitalizeBrandName(str(fd, "brandName")),
     mainSites: JSON.stringify(mainSites),
     siteLinks: JSON.stringify(siteLinks),
     competitor: str(fd, "competitor") || null,
@@ -70,23 +117,36 @@ function collectCustomerData(fd: FormData) {
 
 /** Quick create — only the brand/shop name is required. */
 export async function quickCreateCustomer(name: string): Promise<SaveResult> {
-  await requireSession();
-  const brandName = name.trim();
+  const session = await requireSession();
+  const brandName = capitalizeBrandName(name);
   if (!brandName) {
     return {
       ok: false,
       fieldErrors: { brandName: "品牌/店铺名称为必填项" },
     };
   }
+  // If no owner can be auto-identified, default to ledo.h (fall back to creator).
+  const ledoId = await userIdByEmail(LEDO_EMAIL);
+  const defaultBusinessOwnerId = ledoId ?? session.userId;
   const customer = await prisma.customer.create({
-    data: { brandName, source: "INTERNAL" },
+    data: {
+      brandName,
+      source: "INTERNAL",
+      createdById: session.userId,
+      businessOwnerId: defaultBusinessOwnerId,
+    },
   });
+  if (defaultBusinessOwnerId) {
+    await createMeetingTask(customer.id, customer.brandName, defaultBusinessOwnerId);
+  }
+  await notifyLeoOnCustomerCreate(customer.id, customer.brandName);
   revalidatePath("/customers");
+  revalidatePath("/tasks");
   return { ok: true, customerId: customer.id };
 }
 
 export async function createCustomer(fd: FormData): Promise<SaveResult> {
-  await requireSession();
+  const session = await requireSession();
   const data = collectCustomerData(fd);
   if (!data.brandName) {
     return {
@@ -95,16 +155,23 @@ export async function createCustomer(fd: FormData): Promise<SaveResult> {
     };
   }
 
-  const businessOwnerId = str(fd, "businessOwnerId") || null;
+  let businessOwnerId = str(fd, "businessOwnerId") || null;
   const backendOwnerId = str(fd, "backendOwnerId") || null;
   const manualStatus = str(fd, "status") || null;       // 手动选择的合作状态
   const demoDueDate = str(fd, "demoDueDate") || null;    // Demo方案截止日期
+
+  // 如果用户没选商务负责人，默认填充 ledo.h（无法识别时回退到创建人）
+  if (!businessOwnerId) {
+    const ledoId = await userIdByEmail(LEDO_EMAIL);
+    businessOwnerId = ledoId ?? session.userId;
+  }
 
   const customer = await prisma.customer.create({
     data: {
       ...data,
       businessOwnerId,
       backendOwnerId,
+      createdById: session.userId,
       // 无论是否分配后端负责人，只要选了日期就保存到客户记录
       demoDueDate: demoDueDate ? new Date(demoDueDate) : null,
       source: "INTERNAL",
@@ -124,8 +191,10 @@ export async function createCustomer(fd: FormData): Promise<SaveResult> {
     // 使用创建时填写的截止日期，避免在详情页二次选择
     await createDemoTask(customer.id, customer.brandName, backendOwnerId, demoDueDate);
   }
+  await notifyLeoOnCustomerCreate(customer.id, customer.brandName);
 
   revalidatePath("/customers");
+  revalidatePath("/tasks");
   return { ok: true, customerId: customer.id };
 }
 
@@ -213,6 +282,7 @@ export async function setBusinessOwner(customerId: string, userId: string) {
   }
   revalidatePath(`/customers/${customerId}`);
   revalidatePath("/tasks");
+  revalidatePath("/dashboard");
 }
 
 /**

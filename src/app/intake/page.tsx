@@ -12,6 +12,7 @@ export default async function IntakePage({
 }) {
   const sp = await searchParams;
   const channelId = sp.channel ?? "";
+  const staffId = sp.staff ?? "";
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-100 to-brand-50 py-10 px-4">
@@ -28,7 +29,7 @@ export default async function IntakePage({
           </p>
         </div>
         <div className="card p-6 sm:p-8">
-          <IntakeForm channelId={channelId} />
+          <IntakeForm channelId={channelId} staffId={staffId} />
         </div>
         <p className="mt-6 text-center text-xs text-slate-400">
           您提交的信息将仅用于联盟营销服务对接

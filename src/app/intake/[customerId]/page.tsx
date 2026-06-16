@@ -14,10 +14,15 @@ export const metadata = {
 
 export default async function CustomerIntakePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ customerId: string }>;
+  searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const { customerId } = await params;
+  const sp = await searchParams;
+  const channelId = sp.channel ?? "";
+  const staffId = sp.staff ?? "";
   const customer = await prisma.customer.findUnique({
     where: { id: customerId },
   });
@@ -59,7 +64,7 @@ export default async function CustomerIntakePage({
           </p>
         </div>
         <div className="card p-6 sm:p-8">
-          <IntakeForm customerId={customer.id} defaults={defaults} />
+          <IntakeForm customerId={customer.id} channelId={channelId} staffId={staffId} defaults={defaults} />
         </div>
         <p className="mt-6 text-center text-xs text-slate-400">
           您提交的信息将仅用于联盟营销服务对接

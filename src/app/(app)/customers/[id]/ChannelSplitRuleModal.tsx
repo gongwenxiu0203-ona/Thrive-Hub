@@ -54,7 +54,7 @@ export function ChannelSplitRuleModal({
   })();
 
   const [ruleType, setRuleType] = useState<"A" | "B">(existing?.ruleType ?? "A");
-  const [splitEndDate, setSplitEndDate] = useState(existing?.splitEndDate?.slice(0, 10) ?? "");
+  const [splitEndDate, setSplitEndDate] = useState(existing?.splitEndDate?.slice(0, 10) ?? "2026-12-31");
   const [fixedFeePct, setFixedFeePct] = useState(toPct(existing?.fixedFeeRate ?? 0.15));
   const [commissionPct, setCommissionPct] = useState(toPct(existing?.commissionRate ?? 0.15));
   const [tiers, setTiers] = useState<Tier[]>(initialTiers);

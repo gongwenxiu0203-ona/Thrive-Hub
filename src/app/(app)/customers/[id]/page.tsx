@@ -135,7 +135,7 @@ export default async function CustomerDetailPage({
         <div className="bg-gradient-to-r from-brand-600 to-brand-500 px-6 py-5">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-bold text-white">{customer.brandName}</h1>
+              <h1 className="text-2xl font-bold text-white capitalize-first">{customer.brandName}</h1>
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <Badge className={`${CUSTOMER_STATUS_COLORS[customer.status]} border-0`}>
                   {labelOf(CUSTOMER_STATUS_LABELS, customer.status)}
@@ -165,7 +165,13 @@ export default async function CustomerDetailPage({
                   } as ExistingRule : null}
                 />
               )}
-              <ShareIntakeButton customerId={customer.id} brandName={customer.brandName} size="md" />
+              <ShareIntakeButton
+                customerId={customer.id}
+                brandName={customer.brandName}
+                size="md"
+                channelUserId={session.role === "CHANNEL" ? session.userId : undefined}
+                staffUserId={isStaff(session.role) ? session.userId : undefined}
+              />
               <CustomerFormModal users={userOptions} customer={editData} />
               {isStaff(session.role) && <DeleteCustomerButton id={customer.id} />}
             </div>
@@ -253,13 +259,15 @@ export default async function CustomerDetailPage({
               paidCommission: channelRec.periods.reduce((s: number, p: { commissionAmount: number | null; commissionPaidAt: Date | null }) => s + (p.commissionPaidAt && p.commissionAmount ? p.commissionAmount : 0), 0),
             } : null}
           />
-          <div className="sticky top-4">
-            <EvaluationModule
-              customerId={customer.id}
-              initialData={evalData}
-              initialRating={customer.rating}
-            />
-          </div>
+          {session.role !== "CHANNEL" && (
+            <div className="sticky top-4">
+              <EvaluationModule
+                customerId={customer.id}
+                initialData={evalData}
+                initialRating={customer.rating}
+              />
+            </div>
+          )}
         </div>
       </div>
 

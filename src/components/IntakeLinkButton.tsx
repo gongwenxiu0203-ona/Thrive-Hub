@@ -4,16 +4,25 @@ import { useState } from "react";
 import { Share2, Copy, Check, ExternalLink } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 
-/** Shares the general (no-login) intake form link — no customer pre-fill. */
-export function IntakeLinkButton({ channelUserId }: { channelUserId?: string }) {
+/** Shares the general (no-login) intake form link.
+ *  Encodes the sharer identity so the public submission can auto-attribute
+ *  the customer to the correct channel user (CHANNEL) or business owner (staff). */
+export function IntakeLinkButton({
+  channelUserId,
+  staffUserId,
+}: {
+  channelUserId?: string;
+  staffUserId?: string;
+}) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const base =
     typeof window !== "undefined" ? window.location.origin : "";
-  const url = channelUserId
-    ? `${base}/intake?channel=${channelUserId}`
-    : `${base}/intake`;
+  const params = new URLSearchParams();
+  if (channelUserId) params.set("channel", channelUserId);
+  else if (staffUserId) params.set("staff", staffUserId);
+  const url = params.toString() ? `${base}/intake?${params}` : `${base}/intake`;
 
   function copy() {
     navigator.clipboard?.writeText(url).then(() => {

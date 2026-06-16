@@ -135,7 +135,12 @@ export async function ensureReconciliationForContract(args: {
   }
 
   // Rule-driven: generate main record + N period rows.
-  const start = new Date();
+  // 开始时间 = 合同开始时间（contract.startDate）；如果合同未填写则回退到今天。
+  const contractRow = await prisma.contract.findUnique({
+    where: { id: contractId },
+    select: { startDate: true },
+  });
+  const start = contractRow?.startDate ?? new Date();
   const end = rule.splitEndDate;
   const periods = splitPeriodsByMonth(start, end);
 

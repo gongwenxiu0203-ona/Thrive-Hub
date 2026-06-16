@@ -12,18 +12,26 @@ export function ShareIntakeButton({
   customerId,
   brandName,
   size = "sm",
+  channelUserId,
+  staffUserId,
 }: {
   customerId: string;
   brandName: string;
   size?: "sm" | "md";
+  channelUserId?: string;
+  staffUserId?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const url =
-    typeof window !== "undefined"
-      ? `${window.location.origin}/intake/${customerId}`
-      : `/intake/${customerId}`;
+  const base = typeof window !== "undefined" ? window.location.origin : "";
+  const params = new URLSearchParams();
+  if (channelUserId) params.set("channel", channelUserId);
+  else if (staffUserId) params.set("staff", staffUserId);
+  const qs = params.toString();
+  const url = qs
+    ? `${base}/intake/${customerId}?${qs}`
+    : `${base}/intake/${customerId}`;
 
   function copy() {
     navigator.clipboard?.writeText(url).then(() => {

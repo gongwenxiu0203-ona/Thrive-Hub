@@ -15,6 +15,7 @@ import type { KanbanTask } from "./KanbanBoard";
 import { KanbanBoardWrapper } from "./KanbanBoardWrapper";
 import { ViewAsSelector } from "./ViewAsSelector";
 
+export const dynamic = "force-dynamic";
 export const metadata = { title: "任务管理 · Thraive联盟营销系统" };
 
 const PRIORITY_ORDER: Record<string, number> = {

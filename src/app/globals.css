@@ -72,4 +72,9 @@ body {
   table.data tbody tr:hover {
     @apply bg-slate-50/70;
   }
+
+  /* Brand-name first-letter force-uppercase at display time (no data mutation) */
+  .capitalize-first::first-letter {
+    text-transform: uppercase;
+  }
 }

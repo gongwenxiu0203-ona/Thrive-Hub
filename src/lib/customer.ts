@@ -6,6 +6,19 @@ import { CUSTOMER_STATUS_ORDER } from "@/lib/constants";
 export type SiteLink = { link: string; price: string; asin: string };
 export type SiteLinks = Record<string, SiteLink>;
 
+/**
+ * Capitalize the first letter of a brand name (e.g. "shopify" -> "Shopify").
+ * Returns "" for null/empty. Non-letter first chars (digits, CJK) returned unchanged.
+ */
+export function capitalizeBrandName(raw: string | null | undefined): string {
+  if (!raw) return "";
+  const s = raw.trim();
+  if (!s) return "";
+  const first = s.charAt(0);
+  if (first >= "a" && first <= "z") return first.toUpperCase() + s.slice(1);
+  return s;
+}
+
 export function parseStringArray(value: string | null | undefined): string[] {
   if (!value) return [];
   try {

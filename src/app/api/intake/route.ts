@@ -1,6 +1,52 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { MAIN_SITES, PROMO_PLATFORMS, PROMOTION_GOALS } from "@/lib/constants";
+import { capitalizeBrandName } from "@/lib/customer";
+
+const LEO_EMAIL = "leo.g@thraiveagency.com";
+const LEDO_EMAIL = "ledo.h@thraiveagency.com";
+
+async function userIdByEmail(email: string): Promise<string | null> {
+  const u = await prisma.user.findFirst({ where: { email }, select: { id: true } });
+  return u?.id ?? null;
+}
+
+/** Mirror of notifyLeoOnCustomerCreate in actions/customers.ts (kept inline so
+ *  the public intake route stays a single edge function with no server-action import). */
+async function notifyLeo(customerId: string, brandName: string): Promise<void> {
+  const leoId = await userIdByEmail(LEO_EMAIL);
+  if (!leoId) return;
+  const exists = await prisma.task.findFirst({
+    where: { customerId, ownerId: leoId, category: "FOLLOWUP", title: { startsWith: "客户分配" } },
+    select: { id: true },
+  });
+  if (!exists) {
+    const count = await prisma.task.count({ where: { status: "TODO" } });
+    await prisma.task.create({
+      data: {
+        title: `客户分配 · ${brandName}`,
+        description: "新客户创建（信息收集表），请跟进处理客户分配事宜。",
+        customerId,
+        ownerId: leoId,
+        publisherId: leoId,
+        priority: "MID",
+        category: "FOLLOWUP",
+        status: "TODO",
+        sortOrder: count,
+      },
+    });
+  }
+  await prisma.reminder.create({
+    data: {
+      title: `新客户分配：${brandName}`,
+      content: `客户「${brandName}」已通过信息收集表创建，请处理客户分配。`,
+      remindDate: new Date(),
+      type: "FOLLOWUP",
+      targetId: leoId,
+      createdById: leoId,
+    },
+  });
+}
 
 // Public endpoint — no session required (allowed by middleware).
 // Accepts the 4-section intake form. If `customerId` is provided the existing
@@ -23,7 +69,7 @@ export async function POST(req: Request) {
     return v && typeof v === "object" ? (v as Record<string, unknown>) : {};
   };
 
-  const brandName = get("brandName");
+  const brandName = capitalizeBrandName(get("brandName"));
   if (!brandName) {
     return NextResponse.json(
       { error: "请填写品牌/店铺名称" },
@@ -40,6 +86,17 @@ export async function POST(req: Request) {
       select: { id: true },
     });
     channelUserId = channelUser?.id ?? null;
+  }
+
+  // Resolve staff sharer — used as createdById + default businessOwnerId
+  const staffIdRaw = get("staffId");
+  let sharerStaffId: string | null = null;
+  if (staffIdRaw) {
+    const staffUser = await prisma.user.findFirst({
+      where: { id: staffIdRaw, role: { in: ["ADMIN", "USER"] } },
+      select: { id: true },
+    });
+    sharerStaffId = staffUser?.id ?? null;
   }
 
   const mainSites = getArr("mainSites").filter((s) => MAIN_SITES.includes(s));
@@ -71,6 +128,13 @@ export async function POST(req: Request) {
     contactPhone: get("contactPhone") || null,
   };
 
+  // Sharer attribution:
+  //  - createdById = whoever shared the link (staff first; channel as fallback; null for anonymous)
+  //  - businessOwnerId = staff sharer; else ledo.h@thraiveagency.com fallback (only when creating new)
+  const createdById = sharerStaffId ?? channelUserId ?? null;
+  const ledoId = await userIdByEmail(LEDO_EMAIL);
+  const defaultBusinessOwnerId = sharerStaffId ?? ledoId ?? null;
+
   const customerId = get("customerId");
   if (customerId) {
     const existing = await prisma.customer.findUnique({
@@ -83,6 +147,10 @@ export async function POST(req: Request) {
           ...data,
           // Only set channelUserId if not already assigned
           ...(channelUserId && !existing.channelUserId ? { channelUserId } : {}),
+          // Only set businessOwnerId if not already assigned and a sharer is known
+          ...(!existing.businessOwnerId && defaultBusinessOwnerId
+            ? { businessOwnerId: defaultBusinessOwnerId }
+            : {}),
         },
       });
       return NextResponse.json({ ok: true });
@@ -97,17 +165,24 @@ export async function POST(req: Request) {
       data: {
         ...data,
         ...(channelUserId && !byName.channelUserId ? { channelUserId } : {}),
+        ...(!byName.businessOwnerId && defaultBusinessOwnerId
+          ? { businessOwnerId: defaultBusinessOwnerId }
+          : {}),
       },
     });
+    await notifyLeo(byName.id, byName.brandName);
   } else {
-    await prisma.customer.create({
+    const created = await prisma.customer.create({
       data: {
         ...data,
         source: "INTAKE",
         status: "UNASSIGNED",
         ...(channelUserId ? { channelUserId } : {}),
+        ...(defaultBusinessOwnerId ? { businessOwnerId: defaultBusinessOwnerId } : {}),
+        ...(createdById ? { createdById } : {}),
       },
     });
+    await notifyLeo(created.id, created.brandName);
   }
 
   return NextResponse.json({ ok: true });
