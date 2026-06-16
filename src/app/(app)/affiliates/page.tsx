@@ -32,7 +32,7 @@ async function loadOptions() {
     prisma.salesRecord.findMany({ select: { brand: true }, distinct: ["brand"] }),
   ]);
 
-  const distinct = <T>(arr: (T | null | undefined)[]) =>
+  const distinct = <T,>(arr: (T | null | undefined)[]) =>
     [...new Set(arr.filter(Boolean))] as T[];
 
   const flatJson = (arr: (string | null | undefined)[]) => {

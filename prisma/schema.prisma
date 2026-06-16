@@ -57,6 +57,11 @@ model User {
   projectsOwned   Project[]      @relation("ProjectOwner")
   projectEntries  ProjectEntry[] @relation("ProjectEntryAuthor")
   workLogs        WorkLog[]      @relation("WorkLogAuthor")
+  // 财务经营管理
+  revenueSnapshotsAm ClientRevenueSnapshot[] @relation("RevenueSnapshotAm")
+  revenueSnapshotsBd ClientRevenueSnapshot[] @relation("RevenueSnapshotBd")
+  arFollowing        AccountsReceivable[]    @relation("ARFollowOwner")
+  pipelinesOwned     SalesPipeline[]         @relation("PipelineBdOwner")
   // Permission overrides
   permissionOverrides            UserPermissionOverride[]
   invitedBy                      User?  @relation("UserInvitedBy", fields: [invitedById], references: [id])
@@ -148,6 +153,8 @@ model Customer {
   channelReconciliations ChannelReconciliation[] @relation("CustomerChannelReconciliations")
   affiliateReconciliations AffiliateReconciliation[]
   projects               Project[]
+  revenueSnapshots       ClientRevenueSnapshot[]
+  accountsReceivable     AccountsReceivable[]
 }
 
 model Contract {
@@ -881,4 +888,99 @@ model AffiliateReconciliation {
   @@index([affiliateId])
   @@index([customerId])
   @@index([submitterId])
+}
+
+// ─── 财务经营管理（新增，不影响现有 finance 模块）─────────────────────────────
+
+// 客户收入月度快照（按客户+月份汇总，用于经营客户收入总表）
+// 不复用 Customer.rating，经营等级 revenueGrade 由当月 monthlyTotalIncome 自动计算
+model ClientRevenueSnapshot {
+  id                       String    @id @default(cuid())
+  customerId               String?
+  month                    String    // YYYY-MM 文本，便于按月筛选
+  projectStartDate         DateTime?
+  clientStatus             String    @default("ACTIVE") // NEW | ACTIVE | CHURNED | PAUSED
+  churnedAt                DateTime?
+  monthlyFeeCurrency       String    @default("USD") // USD | RMB
+  monthlyFeeAmount         Float     @default(0)
+  exchangeRate             Float     @default(1) // 锁定当月汇率
+  monthlyFeeRmb            Float     @default(0)
+  commissionRate           Float     @default(0) // 0.05 = 5%
+  monthlyGmv               Float     @default(0) // 自 SalesRecord 拉取
+  monthlyCommissionIncome  Float     @default(0)
+  monthlyTotalIncome       Float     @default(0)
+  cumulativeIncome         Float     @default(0) // 历史累计
+  amOwnerId                String?   // AM = 后端负责人
+  bdOwnerId                String?   // BD = 商务负责人
+  revenueGrade             String    @default("C") // S | A | B | C
+  signingCompany           String?   // FOSHAN | HONGKONG
+  receivingCompany         String?   // FOSHAN | HONGKONG
+  remark                   String?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+
+  customer Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  amOwner  User?     @relation("RevenueSnapshotAm", fields: [amOwnerId], references: [id], onDelete: SetNull)
+  bdOwner  User?     @relation("RevenueSnapshotBd", fields: [bdOwnerId], references: [id], onDelete: SetNull)
+
+  @@unique([customerId, month])
+  @@index([month])
+  @@index([clientStatus])
+  @@index([revenueGrade])
+}
+
+// 应收账款（独立建模，不复用 Settlement —— Settlement 是对账后的结算跟踪）
+model AccountsReceivable {
+  id                  String    @id @default(cuid())
+  customerId          String?
+  invoiceNo           String    @unique
+  invoiceDate         DateTime
+  invoiceAmount       Float
+  currency            String    @default("USD") // USD | RMB
+  exchangeRate        Float     @default(1)
+  amountRmb           Float     @default(0)
+  receivedAmount      Float     @default(0)
+  dueDate             DateTime
+  actualReceivedDate  DateTime?
+  status              String    @default("NOT_DUE") // NOT_DUE | PAID | PARTIAL | OVERDUE
+  riskLevel           String    @default("GREEN") // GREEN | YELLOW | ORANGE | RED
+  followOwnerId       String?
+  remark              String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  customer    Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  followOwner User?     @relation("ARFollowOwner", fields: [followOwnerId], references: [id], onDelete: SetNull)
+
+  @@index([customerId])
+  @@index([status])
+  @@index([riskLevel])
+  @@index([dueDate])
+}
+
+// 销售漏斗（独立建模，不复用 Project.stage —— Project.stage 是项目流程）
+model SalesPipeline {
+  id                      String    @id @default(cuid())
+  prospectName            String    // 潜在客户名称
+  source                  String?   // 客户来源
+  countryRegion           String?
+  category                String?
+  estimatedMonthlyFee     Float?
+  estimatedCommissionRate Float?
+  estimatedGmv            Float?
+  stage                   String    @default("LEAD") // LEAD | CONTACTED | MEETING_SCHEDULED | PROPOSAL_SENT | NEGOTIATION | CONTRACT_SENT | WON | LOST
+  probability             Float     @default(10) // 0-100，由 stage 自动映射
+  expectedSignDate        DateTime?
+  bdOwnerId               String?
+  nextAction              String?
+  nextFollowUpAt          DateTime?
+  remark                  String?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  bdOwner User? @relation("PipelineBdOwner", fields: [bdOwnerId], references: [id], onDelete: SetNull)
+
+  @@index([stage])
+  @@index([bdOwnerId])
+  @@index([expectedSignDate])
 }

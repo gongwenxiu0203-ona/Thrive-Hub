@@ -19,6 +19,7 @@ import {
   Trash2,
   FolderKanban,
   BookOpen,
+  TrendingUp,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -38,6 +39,7 @@ const NAV: NavItem[] = [
   { href: "/worklogs", label: "工作日志", icon: BookOpen },
   { href: "/contracts", label: "合同管理", icon: FileText },
   { href: "/finance", label: "财务对账", icon: Receipt },
+  { href: "/operations", label: "经营管理", icon: TrendingUp },
   { href: "/bi", label: "推广数据BI", icon: BarChart3 },
   { href: "/affiliates", label: "联盟资源库", icon: Handshake },
 ];

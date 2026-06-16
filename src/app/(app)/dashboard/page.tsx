@@ -49,6 +49,11 @@ export default async function DashboardPage({
   const contractWhere = { ...contractScope(sessForScope, view), deletedAt: null };
   const taskWhere = { ...taskScope(sessForScope, view), deletedAt: null };
 
+  // Client Count Summary: staff-only widget, counts current-month snapshots
+  const showClientCountSummary = isStaff(session.role);
+  const { currentMonthKey } = await import("@/lib/financeOperations");
+  const month = currentMonthKey();
+
   const [
     customerCount,
     activeTaskCount,
@@ -56,6 +61,7 @@ export default async function DashboardPage({
     unreadCount,
     recentCustomers,
     urgentTasks,
+    clientCountSummary,
   ] = await Promise.all([
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prisma.customer.count({ where: custWhere as any }),
@@ -96,6 +102,33 @@ export default async function DashboardPage({
       take: 8,
       include: { customer: true, owner: true },
     }),
+    // Client Count Summary (rendered on the staff dashboard only)
+    showClientCountSummary
+      ? (async () => {
+          const snaps = await prisma.clientRevenueSnapshot.findMany({
+            where: { month },
+            select: { clientStatus: true, revenueGrade: true },
+          });
+          const cumulativeCount = await prisma.customer.count({
+            where: {
+              deletedAt: null,
+              contracts: { some: { status: { in: ["SIGNING", "COMPLETED"] } } },
+            },
+          });
+          return {
+            newCount: snaps.filter((s) => s.clientStatus === "NEW").length,
+            activeCount: snaps.filter((s) => s.clientStatus === "ACTIVE" || s.clientStatus === "NEW").length,
+            cumulativeCount,
+            churnedCount: snaps.filter((s) => s.clientStatus === "CHURNED").length,
+            pausedCount: snaps.filter((s) => s.clientStatus === "PAUSED").length,
+            gradeS: snaps.filter((s) => s.revenueGrade === "S").length,
+            gradeA: snaps.filter((s) => s.revenueGrade === "A").length,
+            gradeB: snaps.filter((s) => s.revenueGrade === "B").length,
+            gradeC: snaps.filter((s) => s.revenueGrade === "C").length,
+            month,
+          };
+        })()
+      : Promise.resolve(null),
   ]);
 
   return (
@@ -241,9 +274,56 @@ export default async function DashboardPage({
         </section>
       </div>
 
+      {/* Client Count Summary: based on operations snapshots (staff only) */}
+      {clientCountSummary && (
+        <section className="card mt-6 p-5">
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <h2 className="font-semibold text-slate-900">客户数统计</h2>
+              <p className="text-xs text-slate-400">{clientCountSummary.month} · 基于经营管理客户收入快照</p>
+            </div>
+            <Link href="/operations?tab=count" className="flex items-center gap-1 text-sm text-brand-600 hover:underline">
+              查看详情 <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            <SummaryStat label="本月新增" value={clientCountSummary.newCount} color="text-emerald-600" />
+            <SummaryStat label="服务中" value={clientCountSummary.activeCount} color="text-brand-600" />
+            <SummaryStat label="累计签约" value={clientCountSummary.cumulativeCount} />
+            <SummaryStat label="本月流失" value={clientCountSummary.churnedCount} color="text-rose-600" />
+            <SummaryStat label="暂停" value={clientCountSummary.pausedCount} color="text-amber-600" />
+          </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-4">
+            <GradeStat grade="S" count={clientCountSummary.gradeS} hint="月收入≥10万" color="bg-fuchsia-50 border-fuchsia-200 text-fuchsia-700" />
+            <GradeStat grade="A" count={clientCountSummary.gradeA} hint="5-10万" color="bg-emerald-50 border-emerald-200 text-emerald-700" />
+            <GradeStat grade="B" count={clientCountSummary.gradeB} hint="2-5万" color="bg-amber-50 border-amber-200 text-amber-700" />
+            <GradeStat grade="C" count={clientCountSummary.gradeC} hint="<2万" color="bg-slate-50 border-slate-200 text-slate-600" />
+          </div>
+        </section>
+      )}
+
       <p className="mt-6 text-xs text-slate-400">
         数据更新于 {formatDate(new Date())}
       </p>
+    </div>
+  );
+}
+
+function SummaryStat({ label, value, color }: { label: string; value: number; color?: string }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-3">
+      <p className="text-[11px] text-slate-400">{label}</p>
+      <p className={`mt-1 text-2xl font-bold ${color ?? "text-slate-800"}`}>{value}</p>
+    </div>
+  );
+}
+
+function GradeStat({ grade, count, hint, color }: { grade: string; count: number; hint: string; color: string }) {
+  return (
+    <div className={`rounded-xl border p-3 text-center ${color}`}>
+      <p className="text-lg font-bold">{grade} 级</p>
+      <p className="mt-1 text-2xl font-bold">{count}</p>
+      <p className="text-[11px] opacity-70">{hint}</p>
     </div>
   );
 }
