@@ -826,11 +826,9 @@ function ChannelReconciliationTab({
   channelUsers: { id: string; name: string }[];
 }) {
   void channelUsers;
-  const [editingId, setEditingId] = useState<string | null>(null);
   const [customerFilter, setCustomerFilter] = useState<string[]>([]);
   const [channelFilter, setChannelFilter] = useState<string[]>([]);
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
-  const router = useRouter();
 
   // 筛选选项
   const allCustomerNames = [
@@ -906,8 +904,6 @@ function ChannelReconciliationTab({
       </span>
     );
   }
-
-  const editing = channelReconciliations.find((c) => c.id === editingId);
 
   return (
     <div className="space-y-4">
@@ -1023,12 +1019,13 @@ function ChannelReconciliationTab({
                     </td>
                     <td className="px-4 py-3"><Badge className={agg.color}>{agg.label}</Badge></td>
                     <td className="px-4 py-3">
-                      <button type="button"
+                      <Link
+                        href={`/finance/channel-reconciliations/${cr.id}`}
                         className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-brand-600 hover:bg-brand-50"
-                        onClick={() => setEditingId(cr.id)}>
+                      >
                         <Pencil className="h-3.5 w-3.5" />
                         {cr.autoCreated ? "管理" : "编辑"}
-                      </button>
+                      </Link>
                     </td>
                   </tr>
                 );
@@ -1038,16 +1035,6 @@ function ChannelReconciliationTab({
         </table>
       </div>
 
-      {editing && (
-        <ChannelReconciliationDetailModal
-          record={editing}
-          onClose={() => setEditingId(null)}
-          onSaved={() => {
-            setEditingId(null);
-            router.refresh();
-          }}
-        />
-      )}
     </div>
   );
 }

@@ -7,6 +7,7 @@ import { requireSession } from "@/lib/session";
 import { bumpCustomerStatus } from "@/lib/customer";
 import { CONTRACT_REVIEW_FIELDS } from "@/lib/constants";
 import { syncContractProgressToProjects } from "@/actions/projects";
+import { ensureReconciliationForContract } from "@/actions/channelSplit";
 
 function str(fd: FormData, key: string): string {
   return String(fd.get(key) ?? "").trim();
@@ -357,26 +358,20 @@ export async function markCompleted(id: string) {
   await syncContractProgressToProjects(id, "签署完成");
   await bumpCustomerStatus(contract.customerId, "CONTRACT_SIGNED");
 
-  // 自动为有渠道商的客户创建渠道商分账管理记录
+  // Auto-create channel reconciliation for customers with a channel user.
+  // If the customer has a ChannelSplitRule configured, generates rule-driven
+  // periods; otherwise falls back to a single stub record.
   const customer = await prisma.customer.findUnique({
     where: { id: contract.customerId },
     select: { channelUserId: true },
   });
   if (customer?.channelUserId) {
-    const existing = await prisma.channelReconciliation.findFirst({
-      where: { contractId: id, autoCreated: true },
+    await ensureReconciliationForContract({
+      contractId: id,
+      customerId: contract.customerId,
+      channelUserId: customer.channelUserId,
+      createdById: session.userId,
     });
-    if (!existing) {
-      await prisma.channelReconciliation.create({
-        data: {
-          customerId: contract.customerId,
-          contractId: id,
-          channelUserId: customer.channelUserId,
-          autoCreated: true,
-          createdById: session.userId,
-        },
-      });
-    }
   }
 
   revalidatePath("/contracts");

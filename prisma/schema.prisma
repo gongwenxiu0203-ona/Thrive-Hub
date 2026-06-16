@@ -155,6 +155,7 @@ model Customer {
   projects               Project[]
   revenueSnapshots       ClientRevenueSnapshot[]
   accountsReceivable     AccountsReceivable[]
+  splitRule              ChannelSplitRule?
 }
 
 model Contract {
@@ -810,6 +811,9 @@ model ChannelReconciliation {
   fixedFeeTotal   Float?
   commissionTotal Float?
 
+  // 关联到客户配置的分账规则（autoCreated=true 时由规则触发器写入；手动创建为 null）
+  splitRuleId     String?
+
   createdById String
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -820,12 +824,35 @@ model ChannelReconciliation {
   channelUser            User                    @relation("ChannelUserReconciliations", fields: [channelUserId], references: [id])
   settlement             Settlement?             @relation(fields: [settlementId], references: [id])
   createdBy              User                    @relation("ChannelReconciliationCreator", fields: [createdById], references: [id])
+  splitRule              ChannelSplitRule?       @relation(fields: [splitRuleId], references: [id])
   periods                ChannelReconciliationPeriod[]
 
   @@index([customerId])
   @@index([channelUserId])
   @@index([customerReconciliationId])
   @@index([periodStart])
+  @@index([splitRuleId])
+}
+
+// 客户级渠道商分账规则配置（1 客户 : 1 规则）
+// ruleType=A：commissionRate 单一比例
+// ruleType=B：tieredRules JSON 数组 [{gmvMin,gmvMax,rate}]，累计 GMV 分段（个税口径）
+model ChannelSplitRule {
+  id              String   @id @default(cuid())
+  customerId      String   @unique
+  ruleType        String   // "A" | "B"
+  splitEndDate    DateTime
+  fixedFeeRate    Float    // 给渠道商的固费分账比例（小数 0.0~1.0）
+  commissionRate  Float?   // 仅 A：佣金分账比例（小数；UI 默认 0.15，可选 0.25 或自定义）
+  tieredRules     String   @default("[]") // 仅 B：JSON [{gmvMin:number,gmvMax:number|null,rate:number}]
+  createdById     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  customer        Customer                @relation(fields: [customerId], references: [id])
+  reconciliations ChannelReconciliation[]
+
+  @@index([customerId])
 }
 
 model ChannelReconciliationPeriod {

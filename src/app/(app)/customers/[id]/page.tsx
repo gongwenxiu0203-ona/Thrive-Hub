@@ -14,6 +14,7 @@ import { CustomerSectionsView } from "@/components/CustomerSectionsView";
 import { ShareIntakeButton } from "@/components/ShareIntakeButton";
 import { CustomerFormModal } from "../CustomerFormModal";
 import { DeleteCustomerButton } from "./DeleteCustomerButton";
+import { ChannelSplitRuleModal, type ExistingRule } from "./ChannelSplitRuleModal";
 import { InternalManagement } from "./InternalManagement";
 import { EvaluationModule, type EvaluationData } from "./EvaluationModule";
 import {
@@ -34,7 +35,7 @@ export default async function CustomerDetailPage({
   const session = await requireSession();
   const { id } = await params;
 
-  const [customer, channelRec] = await Promise.all([
+  const [customer, channelRec, splitRule] = await Promise.all([
     prisma.customer.findUnique({
       where: { id },
       include: {
@@ -51,6 +52,7 @@ export default async function CustomerDetailPage({
       orderBy: { createdAt: "desc" },
       include: { periods: { orderBy: { periodIndex: "asc" } } },
     }),
+    prisma.channelSplitRule.findUnique({ where: { customerId: id } }),
   ]);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   if (!customer || (customer as any).deletedAt) notFound();
@@ -149,6 +151,20 @@ export default async function CustomerDetailPage({
               </div>
             </div>
             <div className="flex items-center gap-2">
+              {isStaff(session.role) && (
+                <ChannelSplitRuleModal
+                  customerId={customer.id}
+                  isAdmin={session.role === "ADMIN"}
+                  existing={splitRule ? {
+                    id: splitRule.id,
+                    ruleType: splitRule.ruleType as "A" | "B",
+                    splitEndDate: splitRule.splitEndDate.toISOString(),
+                    fixedFeeRate: splitRule.fixedFeeRate,
+                    commissionRate: splitRule.commissionRate,
+                    tieredRules: splitRule.tieredRules,
+                  } as ExistingRule : null}
+                />
+              )}
               <ShareIntakeButton customerId={customer.id} brandName={customer.brandName} size="md" />
               <CustomerFormModal users={userOptions} customer={editData} />
               {isStaff(session.role) && <DeleteCustomerButton id={customer.id} />}
