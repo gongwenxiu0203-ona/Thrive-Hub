@@ -1,5 +1,5 @@
 ﻿import Link from "next/link";
-import { Download, FilePlus, Upload } from "lucide-react";
+import { FilePlus, FolderOpen } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -14,7 +14,6 @@ import {
   labelOf,
 } from "@/lib/constants";
 import { formatDate } from "@/lib/utils";
-import { ContractFormModal } from "./ContractFormModal";
 import { ScopeToggle } from "@/components/ScopeToggle";
 import { isStaff } from "@/lib/dataScope";
 
@@ -101,25 +100,16 @@ export default async function ContractsPage({
         actions={
           <div className="flex items-center gap-2">
             {isStaff(session.role) && <ScopeToggle />}
-            <a
-              href="/templates/contract-template.docx"
-              download="平台联盟营销服务合同模板.docx"
+            <Link
+              href="/contracts/templates"
               className="btn-secondary flex items-center gap-1.5 text-sm"
             >
-              <Download className="h-4 w-4" />
-              下载合同模板
-            </a>
-            {/* 新建合同（V4 模板） */}
+              <FolderOpen className="h-4 w-4" />
+              合同模板库
+            </Link>
             <Link href="/contracts/new" className="btn-primary flex items-center gap-1.5 text-sm">
               <FilePlus className="h-4 w-4" /> 新建合同
             </Link>
-            {/* 上传已有合同（原有智能提取流程） */}
-            <ContractFormModal
-              customers={customerOptions}
-              users={userOptions}
-              currentUserId={session.userId}
-              trigger="upload"
-            />
           </div>
         }
       />

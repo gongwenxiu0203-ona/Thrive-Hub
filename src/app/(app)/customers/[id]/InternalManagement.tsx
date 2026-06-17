@@ -11,7 +11,6 @@ import {
   updateCustomerStatus,
   setChannelUser,
 } from "@/actions/customers";
-import { ContractFormModal } from "../../contracts/ContractFormModal";
 import {
   CUSTOMER_STATUS_LABELS,
   CUSTOMER_STATUS_COLORS,

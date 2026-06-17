@@ -66,6 +66,9 @@ model User {
   permissionOverrides            UserPermissionOverride[]
   invitedBy                      User?  @relation("UserInvitedBy", fields: [invitedById], references: [id])
   invitedUsers                   User[] @relation("UserInvitedBy")
+  // 合同模板与版本
+  contractTemplatesUploaded ContractTemplate[] @relation("ContractTemplateUploader")
+  contractVersionsCreated   ContractVersion[]  @relation("ContractVersionCreator")
 }
 
 // 角色级权限配置（每个角色 + 功能 = 一个等级）
@@ -225,6 +228,25 @@ model Contract {
   // 生成的合同文档
   generatedDocUrl String? // 生成的 DOCX/PDF 文件路径
 
+  // ── P1 模板化合同字段（乙方/模板/盖章/版本）─────────────────────────────────
+  // 乙方信息（选乙方公司时自动联动；灵跃公司无 partyBLegalRep）
+  partyBCompany       String?  // "THRAIVE" | "LINGYUE"
+  partyBCreditCode    String?
+  partyBLegalRep      String?  // 仅 THRAIVE 有值
+  partyBAddress       String?
+  partyBContact       String?
+  partyBPhone         String?
+  partyBEmail         String?
+  partyBBankAccounts  String   @default("[]") // JSON: ["THRAIVE","LINGYUE"] 可多选
+  // 模板引用
+  templateId          String?
+  // 特殊佣金机制专用文本
+  specialCommissionTerms String?
+  // 盖章 / 审核 / 版本
+  stampedDocUrl       String?
+  stampStatus         String   @default("NONE") // NONE | STAMPED | FAILED
+  pendingNewUpload    Boolean  @default(false)  // 审核选了"上传新版"等待重抽字段
+
   startDate DateTime? // 合作期限-开始
   endDate   DateTime? // 合作期限-结束
 
@@ -240,6 +262,8 @@ model Contract {
   createdBy    User                  @relation("ContractCreator", fields: [createdById], references: [id])
   owner        User?                 @relation("ContractOwner", fields: [ownerId], references: [id])
   reviewer     User?                 @relation("ContractReviewer", fields: [reviewerId], references: [id])
+  template     ContractTemplate?     @relation(fields: [templateId], references: [id])
+  versions     ContractVersion[]
   fieldReviews ContractFieldReview[]
   reconciliations CustomerReconciliation[]
   channelReconciliations ChannelReconciliation[] @relation("ContractChannelReconciliations")
@@ -1010,4 +1034,42 @@ model SalesPipeline {
   @@index([stage])
   @@index([bdOwnerId])
   @@index([expectedSignDate])
+}
+
+// 合同模板库（管理员上传的 .docx 模板）
+// templateKey 枚举：FIXED 全量·固佣 / SPECIAL 特殊佣金 / TIERED 全量·阶梯 / THRESHOLD 全量·门槛 / INCREMENTAL 增量
+model ContractTemplate {
+  id           String   @id @default(cuid())
+  name         String                       // 显示名（如 "全量·固佣同模板"）
+  templateKey  String                       // 见上枚举（多模板可共享 key）
+  fileUrl      String                       // 服务器存储路径
+  description  String?
+  uploadedById String
+  deletedAt    DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  uploader  User       @relation("ContractTemplateUploader", fields: [uploadedById], references: [id])
+  contracts Contract[]
+
+  @@index([templateKey])
+  @@index([deletedAt])
+}
+
+// 合同版本历史（每次生成 / 上传新版 / 盖章归档）
+model ContractVersion {
+  id          String   @id @default(cuid())
+  contractId  String
+  versionNo   Int                          // 1, 2, 3 …
+  fileUrl     String                       // 该版本 .docx 或 .pdf 路径
+  fileType    String   @default("docx")   // docx | pdf
+  reason      String                       // "首次生成" | "审核后重传" | "盖章后归档"
+  createdById String
+  createdAt   DateTime @default(now())
+
+  contract  Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  createdBy User     @relation("ContractVersionCreator", fields: [createdById], references: [id])
+
+  @@index([contractId])
+  @@unique([contractId, versionNo])
 }
