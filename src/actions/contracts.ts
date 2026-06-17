@@ -421,6 +421,50 @@ export interface ContractV4Payload {
   coopChannels?: string;    // JSON string
   // 填写方式
   fillMethod?: string;
+  // 模板 + 乙方信息（P1/P2）
+  templateId?: string;
+  partyBCompany?: string;             // "THRAIVE" | "LINGYUE"
+  partyBBankAccounts?: string;        // JSON array of bank keys
+  specialCommissionTerms?: string;
+}
+
+/** Resolve fixed Party B identity fields based on the selected company key.
+ *  Returns an object that can be spread into prisma.contract.create/update data.
+ *  No DB hit — all values are constants in src/lib/partyB.ts. */
+function resolvePartyB(companyKey: string | null | undefined) {
+  if (companyKey !== "THRAIVE" && companyKey !== "LINGYUE") {
+    return {
+      partyBCompany: null,
+      partyBCreditCode: null,
+      partyBLegalRep: null,
+      partyBAddress: null,
+      partyBContact: null,
+      partyBPhone: null,
+      partyBEmail: null,
+    };
+  }
+  // Inline constants (avoid client/lib import in server action keeps bundle clean)
+  const map = {
+    THRAIVE: {
+      partyBCompany: "THRAIVE",
+      partyBCreditCode: "80456388",
+      partyBLegalRep: "温志倩",
+      partyBAddress: "RM 29-33 5/F BEVERLEY COMMCTR 87-105 CHATHAM RD TSIMSHA TSUIHONG KONG",
+      partyBContact: "胡铭",
+      partyBPhone: "18721724179",
+      partyBEmail: "ledo.h@thraiveagency.com",
+    },
+    LINGYUE: {
+      partyBCompany: "LINGYUE",
+      partyBCreditCode: "91440606MAEMCQTB37",
+      partyBLegalRep: null, // 灵跃无 法定代表人 字段
+      partyBAddress: "佛山市顺德区大良街道北区新桂北路192号铺",
+      partyBContact: "胡铭",
+      partyBPhone: "18721724179",
+      partyBEmail: "ledo.h@thraiveagency.com",
+    },
+  } as const;
+  return map[companyKey];
 }
 
 export async function createContractV4(
@@ -489,6 +533,11 @@ export async function createContractV4(
       // 推广信息
       productList: payload.productList || null,
       coopChannels: payload.coopChannels || null,
+      // 模板 + 乙方信息（P1/P2）
+      templateId: payload.templateId || null,
+      ...resolvePartyB(payload.partyBCompany),
+      partyBBankAccounts: payload.partyBBankAccounts ?? "[]",
+      specialCommissionTerms: payload.specialCommissionTerms || null,
     },
   });
 
@@ -534,6 +583,11 @@ export async function updateContractV4(
       gmvSettlementCycle: payload.gmvSettlementCycle ?? undefined,
       productList: payload.productList ?? undefined,
       coopChannels: payload.coopChannels ?? undefined,
+      // 模板 + 乙方（P1/P2）
+      templateId: payload.templateId ?? undefined,
+      ...(payload.partyBCompany !== undefined ? resolvePartyB(payload.partyBCompany) : {}),
+      partyBBankAccounts: payload.partyBBankAccounts ?? undefined,
+      specialCommissionTerms: payload.specialCommissionTerms ?? undefined,
     },
   });
   revalidatePath("/contracts");

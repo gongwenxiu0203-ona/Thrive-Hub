@@ -1,16 +1,24 @@
 "use client";
 
-import { useState, useTransition, useCallback, useEffect } from "react";
+import { useState, useTransition, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
   Pencil, Sparkles, Link2, Plus, Trash2, Copy, Check,
-  ChevronDown, ChevronUp, FileDown, Upload, PenLine,
+  ChevronDown, ChevronUp, FileDown, Upload,
 } from "lucide-react";
 import { createContractV4, updateContractV4, type ContractV4Payload } from "@/actions/contracts";
 import { cn } from "@/lib/utils";
+import {
+  PARTY_B_COMPANIES,
+  PARTY_B_BANKS,
+  parsePartyBBanks,
+  type PartyBCompanyKey,
+  type PartyBBankKey,
+} from "@/lib/partyB";
 
 type Customer = { id: string; brandName: string };
 type UserOption = { id: string; name: string };
+type TemplateOption = { id: string; name: string; templateKey: string };
 
 // 合作渠道选项
 const COOP_CHANNELS = [
@@ -43,6 +51,7 @@ function emptyProduct(): ProductRow {
 interface Props {
   customers: Customer[];
   users: UserOption[];
+  templates: TemplateOption[];
   presetCustomerId?: string;
   presetCustomerName?: string;
   currentUserId?: string;
@@ -50,7 +59,7 @@ interface Props {
   existingContract?: any;
 }
 
-export function ContractV4Form({ customers, users, presetCustomerId, presetCustomerName, currentUserId, existingContract }: Props) {
+export function ContractV4Form({ customers, users, templates, presetCustomerId, presetCustomerName, currentUserId, existingContract }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const isEdit = !!existingContract;
@@ -78,6 +87,39 @@ export function ContractV4Form({ customers, users, presetCustomerId, presetCusto
   const [partyAContact,    setPartyAContact]    = useState(existingContract?.partyAContact ?? "");
   const [partyAPhone,      setPartyAPhone]      = useState(existingContract?.partyAPhone ?? "");
   const [partyAEmail,      setPartyAEmail]      = useState(existingContract?.partyAEmail ?? "");
+
+  // ── 模板选择 ──
+  const [templateId, setTemplateId] = useState<string>(existingContract?.templateId ?? "");
+
+  // ── 乙方信息：选公司后自动联动地址/联系人/法人 ──
+  const [partyBCompany, setPartyBCompany] = useState<PartyBCompanyKey | "">(
+    (existingContract?.partyBCompany as PartyBCompanyKey) || ""
+  );
+  const initialBanks: PartyBBankKey[] = (() => {
+    try { return parsePartyBBanks(JSON.parse(existingContract?.partyBBankAccounts ?? "[]")); }
+    catch { return []; }
+  })();
+  const [partyBBankAccounts, setPartyBBankAccounts] = useState<PartyBBankKey[]>(initialBanks);
+  // 特殊佣金条款（仅 SPECIAL 模板使用）
+  const [specialCommissionTerms, setSpecialCommissionTerms] = useState<string>(
+    existingContract?.specialCommissionTerms ?? ""
+  );
+
+  const selectedTemplate = templates.find((t) => t.id === templateId) ?? null;
+  const isSpecialTemplate = selectedTemplate?.templateKey === "SPECIAL";
+
+  function toggleBank(k: PartyBBankKey) {
+    setPartyBBankAccounts((prev) =>
+      prev.includes(k) ? prev.filter((x) => x !== k) : [...prev, k]
+    );
+  }
+
+  function selectPartyBCompany(key: PartyBCompanyKey) {
+    setPartyBCompany(key);
+    // 选公司时，若未勾任何账户则默认勾上该公司的账户
+    const info = PARTY_B_COMPANIES[key];
+    setPartyBBankAccounts((prev) => (prev.length === 0 ? [info.defaultBank] : prev));
+  }
 
   // 合作信息 — 销售平台（多选，第一条 + 推广平台 共用）
   const STD_PLATFORMS = ["亚马逊（Amazon）", "独立站", "沃尔玛（Walmart）"];
@@ -305,6 +347,11 @@ export function ContractV4Form({ customers, users, presetCustomerId, presetCusto
       productList: JSON.stringify(products.filter(p => p.name || p.asin || p.price || p.trackLink)),
       coopChannels: JSON.stringify(channels),
       fillMethod: mode === "ai" ? "AI_EXTRACT" : "MANUAL",
+      // 模板 + 乙方信息（P1/P2 新增）
+      templateId: templateId || undefined,
+      partyBCompany: partyBCompany || undefined,
+      partyBBankAccounts: JSON.stringify(partyBBankAccounts),
+      specialCommissionTerms: isSpecialTemplate ? (specialCommissionTerms || undefined) : undefined,
     };
   }
 
@@ -466,6 +513,7 @@ export function ContractV4Form({ customers, users, presetCustomerId, presetCusto
                 </select>
               </div>
             </div>
+            <TemplatePicker templates={templates} value={templateId} onChange={setTemplateId} />
           </div>
         )}
         {presetCustomerId && (
@@ -500,19 +548,45 @@ export function ContractV4Form({ customers, users, presetCustomerId, presetCusto
                 </select>
               </div>
             </div>
+            <TemplatePicker templates={templates} value={templateId} onChange={setTemplateId} />
           </div>
         )}
 
-        {/* ── ① 甲方信息（链接模式下由客户填写，隐藏）── */}
+        {/* ── ② 乙方信息（公司选择 + 收款账户多选 + 自动联动）── */}
+        <PartyBSection
+          partyBCompany={partyBCompany}
+          onSelectCompany={selectPartyBCompany}
+          partyBBankAccounts={partyBBankAccounts}
+          onToggleBank={toggleBank}
+        />
+
+        {/* SPECIAL 模板：阶梯/特殊佣金条款专用文本框 */}
+        {isSpecialTemplate && (
+          <div className="card p-5 space-y-3">
+            <p className="text-sm font-semibold text-slate-700">特殊佣金条款</p>
+            <p className="text-xs text-slate-500">
+              填写后将写入合同项目确认书的佣金机制段。其他模板默认按 GMV/阶梯/门槛/增量结构生成，无需填此项。
+            </p>
+            <textarea
+              className="input"
+              rows={4}
+              value={specialCommissionTerms}
+              onChange={(e) => setSpecialCommissionTerms(e.target.value)}
+              placeholder="例：本协议项下…（自定义佣金安排说明）"
+            />
+          </div>
+        )}
+
+        {/* ── ③ 甲方信息（链接模式下由客户填写，隐藏）── */}
         {mode === "link" ? (
           <div className="rounded-2xl border border-blue-100 bg-blue-50 px-5 py-4">
-            <p className="text-sm font-semibold text-slate-700">① 甲方信息</p>
+            <p className="text-sm font-semibold text-slate-700">③ 甲方信息</p>
             <p className="mt-1 text-xs text-slate-500">
               链接模式下，甲方信息由客户通过填写链接提交，无需在此填写。
             </p>
           </div>
         ) : (
-        <FormSection title="① 甲方信息" color="blue">
+        <FormSection title="③ 甲方信息" color="blue">
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="sm:col-span-2">
               <label className="label">甲方签约主体公司名称 <span className="text-rose-500">*</span></label>
@@ -557,7 +631,7 @@ export function ContractV4Form({ customers, users, presetCustomerId, presetCusto
         )}
 
         {/* ── ② 合作信息 ── */}
-        <FormSection title="② 合作信息" color="amber">
+        <FormSection title="④ 合作信息" color="amber">
           <div className="space-y-4">
             {/* 销售平台（多选，对应合同第一条勾选 + 推广平台）*/}
             <div>
@@ -755,7 +829,7 @@ export function ContractV4Form({ customers, users, presetCustomerId, presetCusto
         </FormSection>
 
         {/* ── ③ 推广信息 ── */}
-        <FormSection title="③ 推广信息" color="green">
+        <FormSection title="⑤ 推广信息" color="green">
           {/* 推广商品清单 */}
           <ProductListSection
             products={products}
@@ -803,9 +877,6 @@ export function ContractV4Form({ customers, users, presetCustomerId, presetCusto
             保存成功，正在跳转…
           </div>
         )}
-
-        {/* ── 乙方签字图片（主合同 + 项目确认书通用）── */}
-        <SignatureUpload />
 
         {/* 提交按钮 */}
         <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-4">
@@ -871,75 +942,144 @@ function FormSection({
   );
 }
 
-// ── 乙方签字图片上传（全局，主合同+项目确认书两处签字通用） ──────────────────
+// ── 模板选择器（按佣金机制类型分组） ──────────────────────────────────────────
 
-function SignatureUpload() {
-  const [exists, setExists] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [note, setNote] = useState<string | null>(null);
-  const [previewKey, setPreviewKey] = useState(0);
+const TEMPLATE_KEY_LABELS_INLINE: Record<string, string> = {
+  FIXED: "全量·固佣",
+  SPECIAL: "特殊佣金",
+  TIERED: "全量·阶梯式佣金",
+  THRESHOLD: "全量·门槛佣金",
+  INCREMENTAL: "增量·佣金",
+};
 
-  useEffect(() => {
-    fetch("/api/contracts/signature")
-      .then(r => r.json())
-      .then(d => setExists(!!d.exists))
-      .catch(() => {});
-  }, []);
-
-  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploading(true);
-    setNote(null);
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const res = await fetch("/api/contracts/signature", { method: "POST", body: fd });
-      const data = await res.json();
-      if (!res.ok) { setNote(data.error ?? "上传失败"); return; }
-      setExists(true);
-      setPreviewKey(k => k + 1);
-      setNote("✅ 签名已上传，将自动应用到所有合同的乙方签字处");
-    } catch {
-      setNote("上传失败，请重试");
-    } finally {
-      setUploading(false);
-      if (e.target) e.target.value = "";
-    }
-  }
-
+function TemplatePicker({
+  templates,
+  value,
+  onChange,
+}: {
+  templates: TemplateOption[];
+  value: string;
+  onChange: (v: string) => void;
+}) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5">
-      <div className="mb-3 flex items-center gap-2">
-        <PenLine className="h-4 w-4 text-brand-600" />
-        <p className="text-sm font-semibold text-slate-700">乙方签字图片</p>
-        <span className="text-xs text-slate-400">（主合同 + 项目确认书两处签字通用，盖章处留空）</span>
+    <div>
+      <label className="label">选择适用的合同模板</label>
+      <select className="input" value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">未选择（暂不绑定模板）</option>
+        {Object.entries(TEMPLATE_KEY_LABELS_INLINE).map(([key, label]) => {
+          const items = templates.filter((t) => t.templateKey === key);
+          if (items.length === 0) return null;
+          return (
+            <optgroup key={key} label={label}>
+              {items.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </optgroup>
+          );
+        })}
+      </select>
+      <p className="mt-1 text-[11px] text-slate-400">
+        模板由管理员在「合同模板库」上传维护；选择后将作为生成 docx 的基础。
+      </p>
+    </div>
+  );
+}
+
+// ── 乙方信息：公司二选一 + 收款账户多选 + 联动地址联系人 ──────────────────────
+
+function PartyBSection({
+  partyBCompany,
+  onSelectCompany,
+  partyBBankAccounts,
+  onToggleBank,
+}: {
+  partyBCompany: PartyBCompanyKey | "";
+  onSelectCompany: (k: PartyBCompanyKey) => void;
+  partyBBankAccounts: PartyBBankKey[];
+  onToggleBank: (k: PartyBBankKey) => void;
+}) {
+  const info = partyBCompany ? PARTY_B_COMPANIES[partyBCompany] : null;
+  return (
+    <div className="rounded-2xl border border-emerald-100 bg-emerald-50 overflow-hidden">
+      <div className="border-b border-emerald-100 px-5 py-3">
+        <p className="text-sm font-semibold text-slate-700">② 乙方信息</p>
+        <p className="mt-0.5 text-[11px] text-slate-500">选择签约主体后，地址/联系人/电话/邮箱自动联动。可多选收款账户，多选则均写入合同。</p>
       </div>
-      <div className="flex items-center gap-4">
-        {exists ? (
-          <img
-            key={previewKey}
-            src={`/signature-party-b.png?v=${previewKey}`}
-            alt="乙方签名"
-            className="h-16 rounded border border-slate-200 bg-slate-50 object-contain px-2"
-          />
-        ) : (
-          <div className="flex h-16 w-40 items-center justify-center rounded border border-dashed border-slate-300 text-xs text-slate-400">
-            未上传签名
+      <div className="px-5 py-4 space-y-4">
+        {/* 乙方签约公司：单选 */}
+        <div>
+          <p className="label">乙方签约公司 <span className="text-rose-500">*</span></p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {(Object.keys(PARTY_B_COMPANIES) as PartyBCompanyKey[]).map((k) => {
+              const c = PARTY_B_COMPANIES[k];
+              const selected = partyBCompany === k;
+              return (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => onSelectCompany(k)}
+                  className={cn(
+                    "flex flex-col items-start rounded-lg border px-3 py-2 text-left text-xs transition-colors",
+                    selected
+                      ? "border-emerald-500 bg-white text-slate-800 shadow-sm"
+                      : "border-slate-200 bg-white/70 text-slate-600 hover:border-emerald-300"
+                  )}
+                >
+                  <span className="text-sm font-semibold">{c.label}</span>
+                  <span className="mt-0.5 break-all text-[10px] text-slate-400">{c.name}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* 联动信息卡 */}
+        {info && (
+          <div className="rounded-lg border border-emerald-200 bg-white p-3 text-xs text-slate-600">
+            <div className="grid gap-1.5 sm:grid-cols-2">
+              <div><span className="text-slate-400">统一社会信用代码：</span>{info.creditCode}</div>
+              {info.legalRep && <div><span className="text-slate-400">法定代表人：</span>{info.legalRep}</div>}
+              <div className="sm:col-span-2"><span className="text-slate-400">地址：</span>{info.address}</div>
+              <div><span className="text-slate-400">联系人：</span>{info.contact}</div>
+              <div><span className="text-slate-400">电话：</span>{info.phone}</div>
+              <div className="sm:col-span-2"><span className="text-slate-400">邮箱：</span>{info.email}</div>
+            </div>
           </div>
         )}
-        <label className="btn-secondary cursor-pointer text-sm">
-          <Upload className="h-4 w-4" />
-          {uploading ? "上传中…" : exists ? "更换签名" : "上传签名图片"}
-          <input type="file" accept="image/png,image/jpeg" className="hidden" onChange={handleFile} disabled={uploading} />
-        </label>
+
+        {/* 收款账户多选 */}
+        <div>
+          <p className="label">收款账户（可多选）</p>
+          <div className="space-y-2">
+            {(Object.keys(PARTY_B_BANKS) as PartyBBankKey[]).map((k) => {
+              const b = PARTY_B_BANKS[k];
+              const checked = partyBBankAccounts.includes(k);
+              return (
+                <label
+                  key={k}
+                  className={cn(
+                    "flex cursor-pointer items-start gap-2 rounded-lg border bg-white p-3 text-xs transition-colors",
+                    checked ? "border-emerald-500" : "border-slate-200 hover:border-emerald-300"
+                  )}
+                >
+                  <input
+                    type="checkbox"
+                    className="mt-1 h-4 w-4"
+                    checked={checked}
+                    onChange={() => onToggleBank(k)}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-slate-800">{b.label}</p>
+                    <p className="mt-0.5 text-[11px] text-slate-500">
+                      户名 {b.accountName} · 行 {b.bankName} · 账号 {b.accountNo}{b.swift ? ` · SWIFT ${b.swift}` : ""}
+                    </p>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+        </div>
       </div>
-      {note && (
-        <p className={`mt-2 text-xs ${note.startsWith("✅") ? "text-emerald-600" : "text-rose-500"}`}>{note}</p>
-      )}
-      <p className="mt-2 text-[11px] text-slate-400">
-        建议上传背景透明的 PNG 签名图片，下载合同时自动嵌入乙方两处签字位置。
-      </p>
     </div>
   );
 }
