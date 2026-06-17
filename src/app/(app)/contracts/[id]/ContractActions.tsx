@@ -2,9 +2,8 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Send, CheckCircle2, FileSignature, Trash2 } from "lucide-react";
+import { CheckCircle2, FileSignature, Trash2 } from "lucide-react";
 import {
-  submitForReview,
   finalizeReview,
   markCompleted,
   deleteContract,
@@ -39,15 +38,7 @@ export function ContractActions({
     <div className="flex items-center gap-2">
       {error && <span className="text-xs text-rose-600">{error}</span>}
 
-      {status === "IN_PROGRESS" && (
-        <button
-          className="btn-primary"
-          disabled={pending}
-          onClick={() => run(() => submitForReview(contractId))}
-        >
-          <Send className="h-4 w-4" /> 提交审核
-        </button>
-      )}
+      {/* "提交审核" 已迁移到 ContractWorkflowPanel（支持沿用/上传新版双路径） */}
       {isAdmin && status === "REVIEWING" && (
         <button
           className="btn-primary"

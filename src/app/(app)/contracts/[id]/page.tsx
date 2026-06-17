@@ -9,6 +9,7 @@ import { FileUploader } from "@/components/FileUploader";
 import { ContractFormModal } from "../ContractFormModal";
 import { ContractActions } from "./ContractActions";
 import { ContractCompare } from "./ContractCompare";
+import { ContractWorkflowPanel, type ContractVersionRow } from "./ContractWorkflowPanel";
 import { ReviewPanel, type ReviewFieldState } from "./ReviewPanel";
 import {
   CONTRACT_STATUS_LABELS,
@@ -37,6 +38,10 @@ export default async function ContractDetailPage({
       owner: true,
       reviewer: true,
       fieldReviews: true,
+      versions: {
+        orderBy: { versionNo: "desc" },
+        include: { createdBy: { select: { name: true } } },
+      },
     },
   });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -247,6 +252,24 @@ export default async function ContractDetailPage({
           );
         })}
       </div>
+
+      {/* 合同流程：生成 + 提交审核（双路径）+ 版本历史 */}
+      <ContractWorkflowPanel
+        contractId={contract.id}
+        status={contract.status}
+        hasTemplate={!!c.templateId}
+        hasGeneratedDoc={!!contract.generatedDocUrl}
+        pendingNewUpload={!!c.pendingNewUpload}
+        versions={contract.versions.map((v): ContractVersionRow => ({
+          id: v.id,
+          versionNo: v.versionNo,
+          fileUrl: v.fileUrl,
+          fileType: v.fileType,
+          reason: v.reason,
+          createdByName: v.createdBy?.name ?? "—",
+          createdAt: v.createdAt.toISOString(),
+        }))}
+      />
 
       {/* 基本信息 */}
       <section className="card p-5">
