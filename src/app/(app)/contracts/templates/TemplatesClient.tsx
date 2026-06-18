@@ -165,7 +165,6 @@ function UploadModal({
   const [templateKey, setTemplateKey] = useState("");
   const [description, setDescription] = useState("");
   const [file, setFile] = useState<File | null>(null);
-  const fileInputId = "contract-template-file";
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const selected = e.currentTarget.files?.[0] ?? null;
@@ -258,22 +257,21 @@ function UploadModal({
           </div>
           <div>
             <label className="label">.docx 文件 <span className="text-rose-500">*</span></label>
-            <input
-              id={fileInputId}
-              name="file"
-              type="file"
-              accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-              onChange={handleFileChange}
-              className="sr-only"
-            />
-            <label
-              htmlFor={fileInputId}
-              className={`flex flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed p-6 cursor-pointer transition-colors ${
+            <div
+              className={`relative flex flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed p-6 transition-colors ${
                 file
                   ? "border-emerald-300 bg-emerald-50/40"
                   : "border-slate-300 bg-slate-50 hover:border-brand-400 hover:bg-brand-50/30"
               }`}
             >
+              <input
+                name="file"
+                type="file"
+                accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                onChange={handleFileChange}
+                className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
+                aria-label="Choose .docx contract template file"
+              />
               <Upload className="h-4 w-4 text-slate-400" />
               {file ? (
                 <>
@@ -283,7 +281,7 @@ function UploadModal({
               ) : (
                 <span className="text-xs text-slate-500">点击选择文件（最大 20MB）</span>
               )}
-            </label>
+            </div>
           </div>
         </div>
 
