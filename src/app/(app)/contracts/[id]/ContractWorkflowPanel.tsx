@@ -3,13 +3,14 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Send, Upload, RefreshCw, FileDown, X, History, AlertCircle,
+  Send, Upload, RefreshCw, FileDown, X, History, AlertCircle, Stamp,
 } from "lucide-react";
 import {
   generateContractFromTemplate,
   submitForReviewUseCurrent,
   submitForReviewUploadNew,
 } from "@/actions/contractWorkflow";
+import { stampContract } from "@/actions/contractStamp";
 import { formatDate } from "@/lib/utils";
 
 export interface ContractVersionRow {
@@ -28,6 +29,9 @@ export function ContractWorkflowPanel({
   hasTemplate,
   hasGeneratedDoc,
   pendingNewUpload,
+  stampStatus,
+  stampedDocUrl,
+  isAdmin,
   versions,
 }: {
   contractId: string;
@@ -35,6 +39,9 @@ export function ContractWorkflowPanel({
   hasTemplate: boolean;
   hasGeneratedDoc: boolean;
   pendingNewUpload: boolean;
+  stampStatus: string;
+  stampedDocUrl: string | null;
+  isAdmin: boolean;
   versions: ContractVersionRow[];
 }) {
   const router = useRouter();
@@ -51,6 +58,17 @@ export function ContractWorkflowPanel({
     });
   }
 
+  function doStamp() {
+    setError(null);
+    if (!confirm("确认对当前最新版本进行盖章？将转 PDF 并每页右下贴公章，作为归档版本。")) return;
+    startTransition(async () => {
+      const r = await stampContract(contractId);
+      if (!r.ok) { setError(r.error); return; }
+      router.refresh();
+    });
+  }
+  const canStamp = isAdmin && (status === "SIGNING" || status === "COMPLETED");
+
   return (
     <section className="card p-5">
       <div className="mb-4 flex items-center justify-between">
@@ -60,19 +78,19 @@ export function ContractWorkflowPanel({
             生成合同 → 提交审核（沿用当前 / 上传新版） → 审核通过 → 盖章归档
           </p>
         </div>
-        {status === "IN_PROGRESS" && (
-          <div className="flex items-center gap-2">
-            {hasTemplate && (
-              <button
-                type="button"
-                onClick={regenerate}
-                disabled={pending}
-                className="btn-secondary flex items-center gap-1.5 text-sm"
-              >
-                <RefreshCw className="h-4 w-4" />
-                {hasGeneratedDoc ? "重新生成" : "生成合同 DOCX"}
-              </button>
-            )}
+        <div className="flex items-center gap-2">
+          {status === "IN_PROGRESS" && hasTemplate && (
+            <button
+              type="button"
+              onClick={regenerate}
+              disabled={pending}
+              className="btn-secondary flex items-center gap-1.5 text-sm"
+            >
+              <RefreshCw className="h-4 w-4" />
+              {hasGeneratedDoc ? "重新生成" : "生成合同 DOCX"}
+            </button>
+          )}
+          {status === "IN_PROGRESS" && (
             <button
               type="button"
               onClick={() => setShowSubmit(true)}
@@ -81,8 +99,27 @@ export function ContractWorkflowPanel({
             >
               <Send className="h-4 w-4" /> 提交审核
             </button>
-          </div>
-        )}
+          )}
+          {canStamp && stampStatus !== "STAMPED" && (
+            <button
+              type="button"
+              onClick={doStamp}
+              disabled={pending}
+              className="flex items-center gap-1.5 rounded-lg bg-rose-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-rose-700 disabled:opacity-50"
+            >
+              <Stamp className="h-4 w-4" /> 自动盖章
+            </button>
+          )}
+          {stampStatus === "STAMPED" && stampedDocUrl && (
+            <a
+              href={stampedDocUrl}
+              download
+              className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700"
+            >
+              <FileDown className="h-4 w-4" /> 下载已盖章归档 PDF
+            </a>
+          )}
+        </div>
       </div>
 
       {!hasTemplate && status === "IN_PROGRESS" && (
@@ -99,6 +136,20 @@ export function ContractWorkflowPanel({
         <div className="mb-3 flex items-start gap-2 rounded-lg bg-blue-50 border border-blue-200 px-3 py-2 text-xs text-blue-700">
           <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <p>本合同上传了新版本，等待审核人重新识别字段。</p>
+        </div>
+      )}
+      {stampStatus === "FAILED" && (
+        <div className="mb-3 flex items-start gap-2 rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-xs text-rose-700">
+          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <p>
+            上次盖章失败。请确认服务器已安装 LibreOffice、公章 PNG 已上传，然后重试。
+          </p>
+        </div>
+      )}
+      {stampStatus === "STAMPED" && (
+        <div className="mb-3 flex items-start gap-2 rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs text-emerald-700">
+          <Stamp className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <p>本合同已盖章并归档；后续如需重新盖章，请先做新版本。</p>
         </div>
       )}
       {error && (

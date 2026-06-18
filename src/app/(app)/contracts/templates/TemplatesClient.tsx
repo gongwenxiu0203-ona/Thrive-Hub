@@ -2,13 +2,14 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Upload, Download, Trash2, Plus, X, FileText, FolderOpen } from "lucide-react";
+import { Upload, Download, Trash2, Plus, X, FileText, FolderOpen, Stamp } from "lucide-react";
 import {
   uploadContractTemplate,
   deleteContractTemplate,
   TEMPLATE_KEY_LABELS,
   TEMPLATE_KEYS,
 } from "@/actions/contractTemplates";
+import { uploadSeal } from "@/actions/contractStamp";
 import { formatDate } from "@/lib/utils";
 
 export interface TemplateRow {
@@ -24,9 +25,11 @@ export interface TemplateRow {
 
 export function TemplatesClient({
   isAdmin,
+  hasSeal,
   templates,
 }: {
   isAdmin: boolean;
+  hasSeal: boolean;
   templates: TemplateRow[];
 }) {
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -55,6 +58,8 @@ export function TemplatesClient({
 
   return (
     <div>
+      {isAdmin && <SealUploadCard hasSeal={hasSeal} />}
+
       <div className="mb-4 flex items-center justify-between">
         <p className="text-xs text-slate-400">
           {templates.length === 0
@@ -234,6 +239,71 @@ function UploadModal({
           </button>
         </div>
       </form>
+    </div>
+  );
+}
+
+function SealUploadCard({ hasSeal }: { hasSeal: boolean }) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const [previewKey, setPreviewKey] = useState(0);
+
+  function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setError(null); setNote(null);
+    const fd = new FormData();
+    fd.append("file", file);
+    startTransition(async () => {
+      const r = await uploadSeal(fd);
+      if (!r.ok) { setError(r.error); return; }
+      setNote("✅ 公章已更新");
+      setPreviewKey((k) => k + 1);
+      router.refresh();
+    });
+    if (e.target) e.target.value = "";
+  }
+
+  return (
+    <div className="card mb-5 p-4">
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <Stamp className="h-5 w-5 text-rose-600" />
+          <div>
+            <p className="text-sm font-semibold text-slate-800">公章 PNG（自动盖章用）</p>
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              透明背景 PNG，建议 ≥ 300×300px；自动盖章时按每页右下贴章。
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          {hasSeal ? (
+            <img
+              key={previewKey}
+              src={`/seal/thraive-seal.png?v=${previewKey}`}
+              alt="公章预览"
+              className="h-12 w-12 rounded border border-slate-200 bg-slate-50 object-contain p-1"
+            />
+          ) : (
+            <div className="flex h-12 w-12 items-center justify-center rounded border border-dashed border-slate-300 text-[10px] text-slate-400">
+              未上传
+            </div>
+          )}
+          <label className="btn-secondary flex items-center gap-1.5 cursor-pointer text-sm">
+            <Upload className="h-4 w-4" />
+            {pending ? "上传中…" : hasSeal ? "更换公章" : "上传公章"}
+            <input type="file" accept=".png" className="hidden" onChange={onFile} disabled={pending} />
+          </label>
+        </div>
+      </div>
+      {error && (
+        <p className="mt-2 text-xs text-rose-600">{error}</p>
+      )}
+      {note && !error && (
+        <p className="mt-2 text-xs text-emerald-600">{note}</p>
+      )}
     </div>
   );
 }

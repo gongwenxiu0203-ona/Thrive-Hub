@@ -253,13 +253,16 @@ export default async function ContractDetailPage({
         })}
       </div>
 
-      {/* 合同流程：生成 + 提交审核（双路径）+ 版本历史 */}
+      {/* 合同流程：生成 + 提交审核（双路径）+ 盖章 + 版本历史 */}
       <ContractWorkflowPanel
         contractId={contract.id}
         status={contract.status}
         hasTemplate={!!c.templateId}
         hasGeneratedDoc={!!contract.generatedDocUrl}
         pendingNewUpload={!!c.pendingNewUpload}
+        stampStatus={c.stampStatus ?? "NONE"}
+        stampedDocUrl={c.stampedDocUrl ?? null}
+        isAdmin={isAdmin}
         versions={contract.versions.map((v): ContractVersionRow => ({
           id: v.id,
           versionNo: v.versionNo,

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { TEMPLATE_KEY_LABELS } from "@/actions/contractTemplates";
+import { sealExists } from "@/actions/contractStamp";
 import { TemplatesClient } from "./TemplatesClient";
 
 export const dynamic = "force-dynamic";
@@ -12,11 +13,14 @@ export const metadata = { title: "合同模板库 · Thraive联盟营销系统" 
 export default async function ContractTemplatesPage() {
   const session = await requireSession();
 
-  const templates = await prisma.contractTemplate.findMany({
-    where: { deletedAt: null },
-    orderBy: [{ templateKey: "asc" }, { createdAt: "desc" }],
-    include: { uploader: { select: { id: true, name: true } } },
-  });
+  const [templates, hasSeal] = await Promise.all([
+    prisma.contractTemplate.findMany({
+      where: { deletedAt: null },
+      orderBy: [{ templateKey: "asc" }, { createdAt: "desc" }],
+      include: { uploader: { select: { id: true, name: true } } },
+    }),
+    sealExists(),
+  ]);
 
   return (
     <div>
@@ -33,6 +37,7 @@ export default async function ContractTemplatesPage() {
       <div className="mt-5">
         <TemplatesClient
           isAdmin={session.role === "ADMIN"}
+          hasSeal={hasSeal}
           templates={templates.map((t) => ({
             id: t.id,
             name: t.name,
