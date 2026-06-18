@@ -159,11 +159,47 @@ function UploadModal({
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  // 受控 file 字段：避免 display:none 在部分浏览器里被 FormData 漏掉，
+  // 同时给用户可见的"已选文件"反馈
+  const [name, setName] = useState("");
+  const [templateKey, setTemplateKey] = useState("");
+  const [description, setDescription] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const fileInputId = "contract-template-file";
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const selected = e.currentTarget.files?.[0] ?? null;
+    if (!selected) {
+      setFile(null);
+      return;
+    }
+    if (!selected.name.toLowerCase().endsWith(".docx")) {
+      setFile(null);
+      setError("仅支持 .docx 文件");
+      e.currentTarget.value = "";
+      return;
+    }
+    if (selected.size > 20 * 1024 * 1024) {
+      setFile(null);
+      setError("文件超过 20MB");
+      e.currentTarget.value = "";
+      return;
+    }
+    setError(null);
+    setFile(selected);
+  }
 
   function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
-    const fd = new FormData(e.currentTarget);
+    if (!name.trim()) { setError("请填写模板名称"); return; }
+    if (!templateKey) { setError("请选择佣金机制类型"); return; }
+    if (!file) { setError("请选择 .docx 文件"); return; }
+    const fd = new FormData();
+    fd.append("name", name.trim());
+    fd.append("templateKey", templateKey);
+    fd.append("description", description);
+    fd.append("file", file);
     startTransition(async () => {
       const r = await uploadContractTemplate(fd);
       if (!r.ok) { setError(r.error); return; }
@@ -189,15 +225,21 @@ function UploadModal({
           <div>
             <label className="label">模板名称 <span className="text-rose-500">*</span></label>
             <input
-              name="name"
               className="input"
               placeholder="如：0616 亚马逊基础月费·全量·固佣"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
               required
             />
           </div>
           <div>
             <label className="label">佣金机制类型 <span className="text-rose-500">*</span></label>
-            <select name="templateKey" className="input" required defaultValue="">
+            <select
+              className="input"
+              value={templateKey}
+              onChange={(e) => setTemplateKey(e.target.value)}
+              required
+            >
               <option value="" disabled>请选择…</option>
               {TEMPLATE_KEYS.map((k) => (
                 <option key={k} value={k}>{TEMPLATE_KEY_LABELS[k]}</option>
@@ -207,18 +249,40 @@ function UploadModal({
           <div>
             <label className="label">备注（可选）</label>
             <textarea
-              name="description"
               rows={2}
               className="input"
               placeholder="模板适用场景或差异说明"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
             />
           </div>
           <div>
             <label className="label">.docx 文件 <span className="text-rose-500">*</span></label>
-            <label className="flex items-center justify-center gap-2 rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 p-6 cursor-pointer hover:border-brand-400 hover:bg-brand-50/30">
+            <input
+              id={fileInputId}
+              name="file"
+              type="file"
+              accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              onChange={handleFileChange}
+              className="sr-only"
+            />
+            <label
+              htmlFor={fileInputId}
+              className={`flex flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed p-6 cursor-pointer transition-colors ${
+                file
+                  ? "border-emerald-300 bg-emerald-50/40"
+                  : "border-slate-300 bg-slate-50 hover:border-brand-400 hover:bg-brand-50/30"
+              }`}
+            >
               <Upload className="h-4 w-4 text-slate-400" />
-              <span className="text-xs text-slate-500">点击选择文件（最大 20MB）</span>
-              <input type="file" name="file" accept=".docx" required className="hidden" />
+              {file ? (
+                <>
+                  <span className="max-w-full truncate text-xs font-medium text-emerald-700">{file.name}</span>
+                  <span className="text-[10px] text-slate-400">{(file.size / 1024 / 1024).toFixed(2)} MB · 点击可重新选择</span>
+                </>
+              ) : (
+                <span className="text-xs text-slate-500">点击选择文件（最大 20MB）</span>
+              )}
             </label>
           </div>
         </div>
@@ -233,7 +297,7 @@ function UploadModal({
           <button type="button" onClick={onClose} className="btn-secondary text-sm">
             取消
           </button>
-          <button type="submit" disabled={pending} className="btn-primary flex items-center gap-1 text-sm">
+          <button type="submit" disabled={pending || !file} className="btn-primary flex items-center gap-1 text-sm disabled:cursor-not-allowed disabled:opacity-50">
             <Upload className="h-4 w-4" /> {pending ? "上传中…" : "上传"}
           </button>
         </div>
