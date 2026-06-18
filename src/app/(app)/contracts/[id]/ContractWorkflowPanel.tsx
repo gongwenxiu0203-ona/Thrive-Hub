@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Send, Upload, RefreshCw, FileDown, X, History, AlertCircle, Stamp,
+  Send, Upload, RefreshCw, FileDown, X, History, AlertCircle, Stamp, ExternalLink,
 } from "lucide-react";
 import {
   generateContractFromTemplate,
@@ -48,6 +48,7 @@ export function ContractWorkflowPanel({
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [showSubmit, setShowSubmit] = useState(false);
+  const [showStamp, setShowStamp] = useState(false);
 
   function regenerate() {
     setError(null);
@@ -58,12 +59,12 @@ export function ContractWorkflowPanel({
     });
   }
 
-  function doStamp() {
+  function doStamp(sealCompany: "FOSHAN" | "HONGKONG") {
     setError(null);
-    if (!confirm("确认对当前最新版本进行盖章？将转 PDF 并每页右下贴公章，作为归档版本。")) return;
     startTransition(async () => {
-      const r = await stampContract(contractId);
+      const r = await stampContract(contractId, sealCompany);
       if (!r.ok) { setError(r.error); return; }
+      setShowStamp(false);
       router.refresh();
     });
   }
@@ -103,7 +104,7 @@ export function ContractWorkflowPanel({
           {canStamp && stampStatus !== "STAMPED" && (
             <button
               type="button"
-              onClick={doStamp}
+              onClick={() => setShowStamp(true)}
               disabled={pending}
               className="flex items-center gap-1.5 rounded-lg bg-rose-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-rose-700 disabled:opacity-50"
             >
@@ -181,13 +182,25 @@ export function ContractWorkflowPanel({
                         {v.createdByName} · {formatDate(new Date(v.createdAt))} · {v.fileType.toUpperCase()}
                       </p>
                     </div>
-                    <a
-                      href={v.fileUrl}
-                      download
-                      className="flex shrink-0 items-center gap-1 rounded bg-brand-50 px-2 py-1 text-[11px] text-brand-700 hover:bg-brand-100"
-                    >
-                      <FileDown className="h-3 w-3" /> 下载
-                    </a>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <a
+                        href={v.fileUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center gap-1 rounded bg-slate-50 px-2 py-1 text-[11px] text-slate-700 hover:bg-slate-100"
+                      >
+                        <ExternalLink className="h-3 w-3" /> 在线查看
+                      </a>
+                      <a
+                        href={`/api/contracts/version-download/${v.id}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        download
+                        className="flex items-center gap-1 rounded bg-brand-50 px-2 py-1 text-[11px] text-brand-700 hover:bg-brand-100"
+                      >
+                        <FileDown className="h-3 w-3" /> 下载
+                      </a>
+                    </div>
                   </div>
                 </div>
               </li>
@@ -207,6 +220,13 @@ export function ContractWorkflowPanel({
           }}
         />
       )}
+      {showStamp && (
+        <StampCompanyModal
+          pending={pending}
+          onClose={() => setShowStamp(false)}
+          onConfirm={doStamp}
+        />
+      )}
     </section>
   );
 }
@@ -222,30 +242,39 @@ function SubmitReviewModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [path, setPath] = useState<"current" | "upload">(hasGeneratedDoc ? "current" : "upload");
+  const [fieldChanged, setFieldChanged] = useState<"no" | "yes" | null>(null);
+  const [termsChanged, setTermsChanged] = useState<"no" | "yes" | null>(null);
   const [file, setFile] = useState<File | null>(null);
 
   function submit() {
     setError(null);
-    if (path === "current") {
+    if (!fieldChanged) { setError("请先确认合同字段细项是否有修改"); return; }
+    if (fieldChanged === "yes") {
+      router.push(`/contracts/new?contractId=${contractId}`);
+      return;
+    }
+    if (!termsChanged) { setError("请先确认合同条款是否有修改"); return; }
+    if (termsChanged === "no") {
+      if (!hasGeneratedDoc) { setError("请先生成一份合同文件"); return; }
       startTransition(async () => {
         const r = await submitForReviewUseCurrent(contractId);
         if (!r.ok) { setError(r.error); return; }
         onSaved();
       });
-    } else {
-      if (!file) { setError("请选择文件"); return; }
-      const fd = new FormData();
-      fd.append("contractId", contractId);
-      fd.append("file", file);
-      startTransition(async () => {
-        const r = await submitForReviewUploadNew(fd);
-        if (!r.ok) { setError(r.error); return; }
-        onSaved();
-      });
+      return;
     }
+    if (!file) { setError("合同条款有修改时，必须上传新的合同 DOCX"); return; }
+    const fd = new FormData();
+    fd.append("contractId", contractId);
+    fd.append("file", file);
+    startTransition(async () => {
+      const r = await submitForReviewUploadNew(fd);
+      if (!r.ok) { setError(r.error); return; }
+      onSaved();
+    });
   }
 
   return (
@@ -258,52 +287,44 @@ function SubmitReviewModal({
           </button>
         </div>
 
-        <div className="space-y-2">
-          <button
-            type="button"
-            onClick={() => setPath("current")}
-            disabled={!hasGeneratedDoc}
-            className={`flex w-full items-start gap-2 rounded-lg border p-3 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-              path === "current"
-                ? "border-brand-500 bg-brand-50"
-                : "border-slate-200 hover:border-brand-300"
-            }`}
-          >
-            <Send className="mt-0.5 h-4 w-4 text-brand-600" />
-            <div>
-              <p className="font-semibold text-slate-800">沿用当前合同</p>
-              <p className="mt-0.5 text-[11px] text-slate-500">
-                {hasGeneratedDoc
-                  ? "用当前已生成/上传的版本直接推送审核，无需重新抽取字段。"
-                  : "本合同尚未生成任何版本，请先生成或选用「上传新版」。"}
-              </p>
+        <div className="space-y-4">
+          <ChoiceGroup
+            title="合同字段细项是否有修改？"
+            description="例如甲方信息、费用、佣金比例、合作期限、渠道等结构化字段。"
+            value={fieldChanged}
+            onChange={setFieldChanged}
+          />
+          {fieldChanged === "yes" && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+              请先跳转字段页面修改并保存。保存后回到合同详情页重新生成合同，再提交审核。
             </div>
-          </button>
-          <button
-            type="button"
-            onClick={() => setPath("upload")}
-            className={`flex w-full items-start gap-2 rounded-lg border p-3 text-left text-sm transition-colors ${
-              path === "upload"
-                ? "border-brand-500 bg-brand-50"
-                : "border-slate-200 hover:border-brand-300"
-            }`}
-          >
-            <Upload className="mt-0.5 h-4 w-4 text-brand-600" />
-            <div>
-              <p className="font-semibold text-slate-800">上传新版合同</p>
-              <p className="mt-0.5 text-[11px] text-slate-500">
-                替换为外部修改过的 .docx；提交后会标记为"待重抽字段"，审核人重新识别后再确认。
-              </p>
+          )}
+          {fieldChanged === "no" && (
+            <ChoiceGroup
+              title="合同条款是否有修改？"
+              description="例如正文条款、补充条款、项目确认书文字有人工调整。"
+              value={termsChanged}
+              onChange={setTermsChanged}
+            />
+          )}
+          {fieldChanged === "no" && termsChanged === "yes" && (
+            <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+              条款已修改，必须上传新版 DOCX。提交后审核人会看到“合同条款有修改，请重点查看”的提示。
             </div>
-          </button>
+          )}
+          {fieldChanged === "no" && termsChanged === "no" && !hasGeneratedDoc && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+              当前还没有生成合同文件，请先关闭弹窗并生成合同 DOCX。
+            </div>
+          )}
         </div>
 
-        {path === "upload" && (
+        {fieldChanged === "no" && termsChanged === "yes" && (
           <div className="mt-3">
             <label className="flex items-center justify-center gap-2 rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 p-6 cursor-pointer hover:border-brand-400 hover:bg-brand-50/30">
               <Upload className="h-4 w-4 text-slate-400" />
               <span className="text-xs text-slate-500">
-                {file ? file.name : "点击选择 .docx（最大 20MB）"}
+                {file ? file.name : "点击选择新版 .docx（最大 20MB）"}
               </span>
               <input
                 type="file"
@@ -331,7 +352,108 @@ function SubmitReviewModal({
             disabled={pending}
             className="btn-primary flex items-center gap-1 text-sm"
           >
-            <Send className="h-4 w-4" /> {pending ? "提交中…" : "确认提交"}
+            <Send className="h-4 w-4" /> {pending ? "提交中…" : fieldChanged === "yes" ? "去修改字段" : "确认提交"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ChoiceGroup({
+  title,
+  description,
+  value,
+  onChange,
+}: {
+  title: string;
+  description: string;
+  value: "no" | "yes" | null;
+  onChange: (value: "no" | "yes") => void;
+}) {
+  return (
+    <div>
+      <p className="text-sm font-semibold text-slate-800">{title}</p>
+      <p className="mt-0.5 text-xs text-slate-500">{description}</p>
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        {([
+          ["no", "没有修改"],
+          ["yes", "有修改"],
+        ] as const).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => onChange(key)}
+            className={`rounded-lg border px-3 py-2 text-sm transition-colors ${
+              value === key
+                ? "border-brand-500 bg-brand-50 text-brand-700"
+                : "border-slate-200 text-slate-600 hover:border-brand-300"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function StampCompanyModal({
+  pending,
+  onClose,
+  onConfirm,
+}: {
+  pending: boolean;
+  onClose: () => void;
+  onConfirm: (sealCompany: "FOSHAN" | "HONGKONG") => void;
+}) {
+  const [sealCompany, setSealCompany] = useState<"FOSHAN" | "HONGKONG">("FOSHAN");
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="card w-full max-w-md p-6">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-slate-900">选择盖章公司</h2>
+          <button onClick={onClose} className="rounded p-1 hover:bg-slate-100">
+            <X className="h-4 w-4 text-slate-500" />
+          </button>
+        </div>
+        <p className="mb-3 text-sm text-slate-500">
+          系统会用当前最新合同版本生成盖章 PDF，并保存为新的归档版本。
+        </p>
+        <div className="space-y-2">
+          {([
+            ["FOSHAN", "佛山公司"],
+            ["HONGKONG", "香港公司"],
+          ] as const).map(([key, label]) => (
+            <label
+              key={key}
+              className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
+                sealCompany === key
+                  ? "border-rose-400 bg-rose-50 text-rose-700"
+                  : "border-slate-200 text-slate-600"
+              }`}
+            >
+              <input
+                type="radio"
+                className="accent-rose-600"
+                checked={sealCompany === key}
+                onChange={() => setSealCompany(key)}
+              />
+              {label}
+            </label>
+          ))}
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="btn-secondary text-sm">
+            取消
+          </button>
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => onConfirm(sealCompany)}
+            className="flex items-center gap-1 rounded-lg bg-rose-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-rose-700 disabled:opacity-50"
+          >
+            <Stamp className="h-4 w-4" /> {pending ? "盖章中…" : "确认盖章"}
           </button>
         </div>
       </div>

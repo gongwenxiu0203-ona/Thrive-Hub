@@ -331,7 +331,6 @@ export default async function ContractDetailPage({
           <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
             <Field label="甲方签约主体" value={contract.partyA ?? "—"} />
             <Field label="统一社会信用代码" value={c.partyACreditCode ?? "—"} />
-            <Field label="法定代表人" value={c.partyALegalRep ?? "—"} />
             <Field label="甲方地址" value={c.partyAAddress ?? "—"} />
             <Field label="甲方指定联系人" value={c.partyAContact ?? "—"} />
             <Field label="联系电话" value={c.partyAPhone ?? "—"} />

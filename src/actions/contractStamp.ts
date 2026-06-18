@@ -7,7 +7,15 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { convertDocxToPdf } from "@/lib/docxToPdf";
 import { stampPdf } from "@/lib/contractStamp";
-import { SEAL_DIR_ABS, SEAL_ABS_PATH, SEAL_PUBLIC, sealExistsServer } from "@/lib/contractSeal";
+import { stampDocx } from "@/lib/stampDocx";
+import {
+  COMPANY_SEALS,
+  SEAL_DIR_ABS,
+  SealCompany,
+  companySealExistsServer,
+  resolveSealCompany,
+  sealExistsServer,
+} from "@/lib/contractSeal";
 
 type Result<T = void> = { ok: true; data?: T } | { ok: false; error: string };
 
@@ -19,6 +27,8 @@ export async function uploadSeal(fd: FormData): Promise<Result<{ fileUrl: string
   const session = await requireSession();
   if (session.role !== "ADMIN") return { ok: false, error: "仅管理员可上传公章" };
 
+  const company = resolveSealCompany(String(fd.get("sealCompany") ?? ""));
+  if (!company) return { ok: false, error: "请选择公章所属公司" };
   const file = fd.get("file");
   if (!(file instanceof File)) return { ok: false, error: "请选择文件" };
   if (!file.name.toLowerCase().endsWith(".png")) return { ok: false, error: "仅支持 PNG（建议透明背景）" };
@@ -26,10 +36,10 @@ export async function uploadSeal(fd: FormData): Promise<Result<{ fileUrl: string
 
   await fs.mkdir(SEAL_DIR_ABS, { recursive: true });
   const buf = Buffer.from(await file.arrayBuffer());
-  await fs.writeFile(SEAL_ABS_PATH, buf);
+  await fs.writeFile(COMPANY_SEALS[company].absPath, buf);
 
   revalidatePath("/contracts/templates");
-  return { ok: true, data: { fileUrl: SEAL_PUBLIC } };
+  return { ok: true, data: { fileUrl: COMPANY_SEALS[company].publicUrl } };
 }
 
 
@@ -49,7 +59,7 @@ async function nextVersionNo(contractId: string): Promise<number> {
  *  4) Save as new ContractVersion with reason="盖章后归档" + fileType="pdf".
  *  5) Update contract.stampedDocUrl + stampStatus="STAMPED".
  */
-export async function stampContract(contractId: string): Promise<Result<{ fileUrl: string }>> {
+export async function stampContract(contractId: string, sealCompany?: SealCompany): Promise<Result<{ fileUrl: string }>> {
   const session = await requireSession();
   if (session.role !== "ADMIN") return { ok: false, error: "仅管理员可执行盖章" };
 
@@ -63,8 +73,18 @@ export async function stampContract(contractId: string): Promise<Result<{ fileUr
     return { ok: false, error: "仅「合同签署中」或「合同签署完成」状态可盖章" };
   }
 
-  if (!(await sealExistsServer())) {
-    return { ok: false, error: "未上传公章 PNG。请管理员先在合同模板库上传公章。" };
+  const company = resolveSealCompany(sealCompany);
+  if (!company) {
+    return { ok: false, error: "请选择需要盖章的公司" };
+  }
+  const sealPath = COMPANY_SEALS[company].absPath;
+  const sealLabel = COMPANY_SEALS[company].label;
+  if (!(await companySealExistsServer(company))) {
+    const legacyOk = await sealExistsServer();
+    if (!legacyOk) {
+      return { ok: false, error: `未找到${sealLabel}公章 PNG。请先上传或放置 ${COMPANY_SEALS[company].file}。` };
+    }
+    return { ok: false, error: `未找到${sealLabel}公章 PNG。请将对应公章文件放到 public/seal/${COMPANY_SEALS[company].file}。` };
   }
 
   const latest = await prisma.contractVersion.findFirst({
@@ -79,31 +99,44 @@ export async function stampContract(contractId: string): Promise<Result<{ fileUr
     const latestAbs = path.join(process.cwd(), "public", latest.fileUrl.replace(/^\//, ""));
     await fs.access(latestAbs);
 
-    // 2) ensure we have a PDF
-    let pdfAbs: string;
-    if (latest.fileType === "pdf") {
-      pdfAbs = latestAbs;
-    } else {
-      // docx → PDF via LibreOffice (writes alongside, we'll move into staged)
-      pdfAbs = await convertDocxToPdf(latestAbs);
-    }
-    const pdfBytes = await fs.readFile(pdfAbs);
-
-    // 3) stamp
-    const sealBytes = await fs.readFile(SEAL_ABS_PATH);
-    const stamped = await stampPdf(pdfBytes, sealBytes, {
-      widthPt: 90,
-      insetPt: 36,
-      opacity: 0.85,
-      corner: "br",
-    });
-
-    // 4) save as new version
+    const sealBytes = await fs.readFile(sealPath);
     await fs.mkdir(STAMPED_DIR_ABS, { recursive: true });
     const versionNo = await nextVersionNo(contractId);
-    const fileName = `${contractId}-v${versionNo}-stamped.pdf`;
-    const outAbs = path.join(STAMPED_DIR_ABS, fileName);
-    await fs.writeFile(outAbs, stamped);
+    let fileType: "pdf" | "docx" = "pdf";
+    let fileName = `${contractId}-v${versionNo}-stamped.pdf`;
+    let outAbs = path.join(STAMPED_DIR_ABS, fileName);
+
+    if (latest.fileType === "pdf") {
+      const pdfBytes = await fs.readFile(latestAbs);
+      const stamped = await stampPdf(pdfBytes, sealBytes, {
+        widthPt: 90,
+        insetPt: 36,
+        opacity: 0.85,
+        corner: "br",
+      });
+      await fs.writeFile(outAbs, stamped);
+    } else {
+      try {
+        const pdfAbs = await convertDocxToPdf(latestAbs);
+        const pdfBytes = await fs.readFile(pdfAbs);
+        const stamped = await stampPdf(pdfBytes, sealBytes, {
+          widthPt: 90,
+          insetPt: 36,
+          opacity: 0.85,
+          corner: "br",
+        });
+        await fs.writeFile(outAbs, stamped);
+      } catch (convertError) {
+        const docxBytes = await fs.readFile(latestAbs);
+        const stampedDocx = await stampDocx(docxBytes, sealBytes);
+        fileType = "docx";
+        fileName = `${contractId}-v${versionNo}-stamped.docx`;
+        outAbs = path.join(STAMPED_DIR_ABS, fileName);
+        await fs.writeFile(outAbs, stampedDocx);
+        console.warn("[stampContract] LibreOffice unavailable, generated stamped DOCX fallback:", convertError);
+      }
+    }
+
     const fileUrl = `${STAMPED_PREFIX}/${fileName}`;
 
     await prisma.contractVersion.create({
@@ -111,8 +144,8 @@ export async function stampContract(contractId: string): Promise<Result<{ fileUr
         contractId,
         versionNo,
         fileUrl,
-        fileType: "pdf",
-        reason: "盖章后归档",
+        fileType,
+        reason: `盖章后归档（${sealLabel}）`,
         createdById: session.userId,
       },
     });

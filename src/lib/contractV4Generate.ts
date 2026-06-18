@@ -9,7 +9,6 @@ import * as path from "path";
 export const PARTY_B = {
   name: "HONG KONG THRAIVE DIGITAL MARKETING TECHNOLOGY CO., LIMITED",
   creditCode: "80456388",
-  legalRep: "温志倩",
   address: "RM 29-33 5/F BEVERLEY COMMCTR 87-105 CHATHAM RD TSIMSHA TSUIHONG KONG",
   contact: "胡铭",
   phone: "18721724179",
@@ -25,7 +24,6 @@ export interface ContractV4Data {
   contractNo: string;
   partyAName: string;
   partyACreditCode?: string | null;
-  partyALegalRep?: string | null;
   partyAAddress?: string | null;
   partyAContact?: string | null;
   partyAPhone?: string | null;
@@ -293,13 +291,11 @@ export async function generateContractDocx(data: ContractV4Data): Promise<Buffer
   // 甲方基本信息（第1次出现）
   xml = replaceNth(xml, "甲方（客户）：________________________", `甲方（客户）：${fmt(data.partyAName)}`, 1);
   xml = replaceNth(xml, "统一社会信用代码：__________________", `统一社会信用代码：${fmt(data.partyACreditCode)}`, 1);
-  xml = replaceNth(xml, "法定代表人：________________________", `法定代表人：${fmt(data.partyALegalRep)}`, 1);
 
   // 乙方固定信息
   xml = xml.replace("乙方（服务方）：____________________</w:t>",
     `乙方（服务方）：${PARTY_B.name}</w:t>`);
   xml = replaceNth(xml, "统一社会信用代码：__________________", `统一社会信用代码：${PARTY_B.creditCode}`, 1);
-  xml = replaceNth(xml, "法定代表人：________________________", `法定代表人：${PARTY_B.legalRep}`, 1);
 
   // ════════════════════════════════════════════════════════════════════════════
   // 第一条：销售平台勾选（多选，含「其他」自定义平台）

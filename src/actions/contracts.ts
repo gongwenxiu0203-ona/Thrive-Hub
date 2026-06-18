@@ -390,7 +390,6 @@ export interface ContractV4Payload {
   // 甲方信息
   partyAName: string;
   partyACreditCode?: string;
-  partyALegalRep?: string;
   partyAAddress?: string;
   partyAContact?: string;
   partyAPhone?: string;
@@ -448,7 +447,7 @@ function resolvePartyB(companyKey: string | null | undefined) {
     THRAIVE: {
       partyBCompany: "THRAIVE",
       partyBCreditCode: "80456388",
-      partyBLegalRep: "温志倩",
+      partyBLegalRep: null,
       partyBAddress: "RM 29-33 5/F BEVERLEY COMMCTR 87-105 CHATHAM RD TSIMSHA TSUIHONG KONG",
       partyBContact: "胡铭",
       partyBPhone: "18721724179",
@@ -504,7 +503,7 @@ export async function createContractV4(
       // 甲方信息
       partyA: partyAName,
       partyACreditCode: payload.partyACreditCode || null,
-      partyALegalRep: payload.partyALegalRep || null,
+      partyALegalRep: null,
       partyAAddress: payload.partyAAddress || null,
       partyAContact: payload.partyAContact || null,
       partyAPhone: payload.partyAPhone || null,
@@ -558,7 +557,7 @@ export async function updateContractV4(
     data: {
       partyA: payload.partyAName,
       partyACreditCode: payload.partyACreditCode ?? undefined,
-      partyALegalRep: payload.partyALegalRep ?? undefined,
+      partyALegalRep: null,
       partyAAddress: payload.partyAAddress ?? undefined,
       partyAContact: payload.partyAContact ?? undefined,
       partyAPhone: payload.partyAPhone ?? undefined,

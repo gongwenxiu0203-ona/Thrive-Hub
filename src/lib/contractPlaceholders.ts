@@ -47,7 +47,6 @@ export const PLACEHOLDER_KEYS: { key: string; desc: string; group: string }[] = 
   // Party A
   { key: "partyAName",            desc: "甲方公司名称",          group: "甲方信息" },
   { key: "partyACreditCode",      desc: "甲方统一社会信用代码",   group: "甲方信息" },
-  { key: "partyALegalRep",        desc: "甲方法定代表人",        group: "甲方信息" },
   { key: "partyAAddress",         desc: "甲方地址",             group: "甲方信息" },
   { key: "partyAContact",         desc: "甲方指定联系人",        group: "甲方信息" },
   { key: "partyAPhone",           desc: "甲方电话",             group: "甲方信息" },
@@ -55,7 +54,6 @@ export const PLACEHOLDER_KEYS: { key: string; desc: string; group: string }[] = 
   // Party B
   { key: "partyBName",            desc: "乙方公司名称",          group: "乙方信息" },
   { key: "partyBCreditCode",      desc: "乙方统一社会信用代码",   group: "乙方信息" },
-  { key: "partyBLegalRep",        desc: "乙方法定代表人（灵跃为空）", group: "乙方信息" },
   { key: "partyBAddress",         desc: "乙方地址",             group: "乙方信息" },
   { key: "partyBContact",         desc: "乙方指定联系人",        group: "乙方信息" },
   { key: "partyBPhone",           desc: "乙方电话",             group: "乙方信息" },
@@ -124,7 +122,6 @@ export function buildPlaceholderMap(c: Loose): Record<string, string> {
     // party A — DB column is `partyA`, schema-wise; mirror for both keys
     partyAName: s(c.partyA),
     partyACreditCode: s(c.partyACreditCode),
-    partyALegalRep: s(c.partyALegalRep),
     partyAAddress: s(c.partyAAddress),
     partyAContact: s(c.partyAContact),
     partyAPhone: s(c.partyAPhone),
@@ -132,7 +129,6 @@ export function buildPlaceholderMap(c: Loose): Record<string, string> {
     // party B (auto from selected company)
     partyBName: partyB?.name ?? s(c.partyBCompany),
     partyBCreditCode: partyB?.creditCode ?? "",
-    partyBLegalRep: partyB?.legalRep ?? "",
     partyBAddress: partyB?.address ?? "",
     partyBContact: partyB?.contact ?? "",
     partyBPhone: partyB?.phone ?? "",

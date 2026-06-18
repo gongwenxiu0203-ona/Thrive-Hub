@@ -24,11 +24,11 @@ export interface TemplateRow {
 
 export function TemplatesClient({
   isAdmin,
-  hasSeal,
+  sealStatus,
   templates,
 }: {
   isAdmin: boolean;
-  hasSeal: boolean;
+  sealStatus: Record<"FOSHAN" | "HONGKONG", boolean>;
   templates: TemplateRow[];
 }) {
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -57,7 +57,7 @@ export function TemplatesClient({
 
   return (
     <div>
-      {isAdmin && <SealUploadCard hasSeal={hasSeal} />}
+      {isAdmin && <SealUploadCard sealStatus={sealStatus} />}
 
       <div className="mb-4 flex items-center justify-between">
         <p className="text-xs text-slate-400">
@@ -304,18 +304,19 @@ function UploadModal({
   );
 }
 
-function SealUploadCard({ hasSeal }: { hasSeal: boolean }) {
+function SealUploadCard({ sealStatus }: { sealStatus: Record<"FOSHAN" | "HONGKONG", boolean> }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [previewKey, setPreviewKey] = useState(0);
 
-  function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+  function onFile(company: "FOSHAN" | "HONGKONG", e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
     setError(null); setNote(null);
     const fd = new FormData();
+    fd.append("sealCompany", company);
     fd.append("file", file);
     startTransition(async () => {
       const r = await uploadSeal(fd);
@@ -339,24 +340,46 @@ function SealUploadCard({ hasSeal }: { hasSeal: boolean }) {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          {hasSeal ? (
-            <img
-              key={previewKey}
-              src={`/seal/thraive-seal.png?v=${previewKey}`}
-              alt="公章预览"
-              className="h-12 w-12 rounded border border-slate-200 bg-slate-50 object-contain p-1"
-            />
-          ) : (
-            <div className="flex h-12 w-12 items-center justify-center rounded border border-dashed border-slate-300 text-[10px] text-slate-400">
-              未上传
-            </div>
-          )}
-          <label className="btn-secondary flex items-center gap-1.5 cursor-pointer text-sm">
-            <Upload className="h-4 w-4" />
-            {pending ? "上传中…" : hasSeal ? "更换公章" : "上传公章"}
-            <input type="file" accept=".png" className="hidden" onChange={onFile} disabled={pending} />
-          </label>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {([
+            ["FOSHAN", "佛山公司", "/seal/foshan-seal.png"],
+            ["HONGKONG", "香港公司", "/seal/hongkong-seal.png"],
+          ] as const).map(([company, label, src]) => {
+            const hasSeal = sealStatus[company];
+            return (
+              <div key={company} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2">
+                <div className="flex items-center gap-2">
+                  {hasSeal ? (
+                    <img
+                      key={`${company}-${previewKey}`}
+                      src={`${src}?v=${previewKey}`}
+                      alt={`${label}公章预览`}
+                      className="h-12 w-12 rounded border border-slate-200 bg-white object-contain p-1"
+                    />
+                  ) : (
+                    <div className="flex h-12 w-12 items-center justify-center rounded border border-dashed border-slate-300 text-[10px] text-slate-400">
+                      未上传
+                    </div>
+                  )}
+                  <div>
+                    <p className="text-xs font-semibold text-slate-700">{label}</p>
+                    <p className="text-[10px] text-slate-400">{hasSeal ? "已上传" : "未上传"}</p>
+                  </div>
+                </div>
+                <label className="btn-secondary flex cursor-pointer items-center gap-1.5 text-xs">
+                  <Upload className="h-3.5 w-3.5" />
+                  {pending ? "上传中…" : hasSeal ? "更换" : "上传"}
+                  <input
+                    type="file"
+                    accept=".png"
+                    className="hidden"
+                    onChange={(e) => onFile(company, e)}
+                    disabled={pending}
+                  />
+                </label>
+              </div>
+            );
+          })}
         </div>
       </div>
       {error && (

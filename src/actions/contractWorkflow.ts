@@ -113,7 +113,7 @@ export async function submitForReviewUseCurrent(contractId: string): Promise<Res
 }
 
 /** Submit-review path B: upload a new .docx version, store as new
- *  ContractVersion (reason="审核前上传新版"), and move status to REVIEWING.
+ *  ContractVersion (reason records that terms changed), and move status to REVIEWING.
  *  Field re-extraction is the reviewer's next step (handled later). */
 export async function submitForReviewUploadNew(fd: FormData): Promise<Result<{ versionNo: number }>> {
   const session = await requireSession();
@@ -144,7 +144,7 @@ export async function submitForReviewUploadNew(fd: FormData): Promise<Result<{ v
       versionNo,
       fileUrl,
       fileType: "docx",
-      reason: "审核前上传新版（待重抽字段）",
+      reason: "审核前上传新版（合同条款有修改，请重点查看）",
       createdById: session.userId,
     },
   });

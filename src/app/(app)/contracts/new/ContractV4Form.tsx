@@ -82,7 +82,6 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
   const [reviewerId, setReviewerId] = useState(existingContract?.reviewerId ?? defaultReviewer);
   const [partyAName,       setPartyAName]       = useState(existingContract?.partyA ?? "");
   const [partyACreditCode, setPartyACreditCode] = useState(existingContract?.partyACreditCode ?? "");
-  const [partyALegalRep,   setPartyALegalRep]   = useState(existingContract?.partyALegalRep ?? "");
   const [partyAAddress,    setPartyAAddress]    = useState(existingContract?.partyAAddress ?? "");
   const [partyAContact,    setPartyAContact]    = useState(existingContract?.partyAContact ?? "");
   const [partyAPhone,      setPartyAPhone]      = useState(existingContract?.partyAPhone ?? "");
@@ -206,7 +205,6 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
       const d = data.data ?? {};
       if (d.partyAName) setPartyAName(d.partyAName);
       if (d.partyACreditCode) setPartyACreditCode(d.partyACreditCode);
-      if (d.partyALegalRep) setPartyALegalRep(d.partyALegalRep);
       if (d.partyAAddress) setPartyAAddress(d.partyAAddress);
       if (d.partyAContact) setPartyAContact(d.partyAContact);
       if (d.partyAPhone) setPartyAPhone(d.partyAPhone);
@@ -258,7 +256,6 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
   function validatePartyAFields(): string | null {
     if (!partyAName.trim()) return "请填写甲方签约主体公司名称";
     if (!partyACreditCode.trim()) return "请填写统一社会信用代码";
-    if (!partyALegalRep.trim()) return "请填写法定代表人";
     if (!partyAAddress.trim()) return "请填写甲方地址";
     if (!partyAContact.trim()) return "请填写甲方指定联系人";
     if (!partyAPhone.trim()) return "请填写联系电话";
@@ -322,7 +319,6 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
       type: contractType,
       partyAName,
       partyACreditCode,
-      partyALegalRep,
       partyAAddress,
       partyAContact,
       partyAPhone,
@@ -599,11 +595,6 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
               <input className="input" value={partyACreditCode}
                 onChange={e => setPartyACreditCode(e.target.value)}
                 placeholder="18位统一社会信用代码" />
-            </div>
-            <div>
-              <label className="label">法定代表人</label>
-              <input className="input" value={partyALegalRep}
-                onChange={e => setPartyALegalRep(e.target.value)} />
             </div>
             <div className="sm:col-span-2">
               <label className="label">甲方地址</label>
@@ -1038,7 +1029,6 @@ function PartyBSection({
           <div className="rounded-lg border border-emerald-200 bg-white p-3 text-xs text-slate-600">
             <div className="grid gap-1.5 sm:grid-cols-2">
               <div><span className="text-slate-400">统一社会信用代码：</span>{info.creditCode}</div>
-              {info.legalRep && <div><span className="text-slate-400">法定代表人：</span>{info.legalRep}</div>}
               <div className="sm:col-span-2"><span className="text-slate-400">地址：</span>{info.address}</div>
               <div><span className="text-slate-400">联系人：</span>{info.contact}</div>
               <div><span className="text-slate-400">电话：</span>{info.phone}</div>
