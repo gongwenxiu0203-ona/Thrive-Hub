@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { TEMPLATE_KEY_LABELS } from "@/actions/contractTemplates";
-import { sealExists } from "@/actions/contractStamp";
+import { sealExistsServer } from "@/lib/contractSeal";
 import { TemplatesClient } from "./TemplatesClient";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +19,7 @@ export default async function ContractTemplatesPage() {
       orderBy: [{ templateKey: "asc" }, { createdAt: "desc" }],
       include: { uploader: { select: { id: true, name: true } } },
     }),
-    sealExists(),
+    sealExistsServer(),
   ]);
 
   return (

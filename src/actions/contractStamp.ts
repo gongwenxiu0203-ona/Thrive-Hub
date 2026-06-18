@@ -7,13 +7,9 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { convertDocxToPdf } from "@/lib/docxToPdf";
 import { stampPdf } from "@/lib/contractStamp";
+import { SEAL_DIR_ABS, SEAL_ABS_PATH, SEAL_PUBLIC, sealExistsServer } from "@/lib/contractSeal";
 
 type Result<T = void> = { ok: true; data?: T } | { ok: false; error: string };
-
-const SEAL_DIR_ABS  = path.join(process.cwd(), "public", "seal");
-const SEAL_FILE     = "thraive-seal.png";
-const SEAL_ABS_PATH = path.join(SEAL_DIR_ABS, SEAL_FILE);
-const SEAL_PUBLIC   = `/seal/${SEAL_FILE}`;
 
 const STAMPED_DIR_ABS = path.join(process.cwd(), "public", "contracts-stamped");
 const STAMPED_PREFIX  = "/contracts-stamped";
@@ -36,15 +32,6 @@ export async function uploadSeal(fd: FormData): Promise<Result<{ fileUrl: string
   return { ok: true, data: { fileUrl: SEAL_PUBLIC } };
 }
 
-/** Check whether the seal has been uploaded. Used by UI to gate stamping. */
-export async function sealExists(): Promise<boolean> {
-  try {
-    await fs.access(SEAL_ABS_PATH);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 async function nextVersionNo(contractId: string): Promise<number> {
   const last = await prisma.contractVersion.findFirst({
@@ -76,7 +63,7 @@ export async function stampContract(contractId: string): Promise<Result<{ fileUr
     return { ok: false, error: "仅「合同签署中」或「合同签署完成」状态可盖章" };
   }
 
-  if (!(await sealExists())) {
+  if (!(await sealExistsServer())) {
     return { ok: false, error: "未上传公章 PNG。请管理员先在合同模板库上传公章。" };
   }
 
