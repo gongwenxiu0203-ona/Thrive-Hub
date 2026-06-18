@@ -6,9 +6,8 @@ import { Upload, Download, Trash2, Plus, X, FileText, FolderOpen, Stamp } from "
 import {
   uploadContractTemplate,
   deleteContractTemplate,
-  TEMPLATE_KEY_LABELS,
-  TEMPLATE_KEYS,
 } from "@/actions/contractTemplates";
+import { TEMPLATE_KEY_LABELS, TEMPLATE_KEYS } from "@/lib/contractTemplateKeys";
 import { uploadSeal } from "@/actions/contractStamp";
 import { formatDate } from "@/lib/utils";
 

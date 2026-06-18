@@ -5,18 +5,9 @@ import { promises as fs } from "fs";
 import path from "path";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { isStaff } from "@/lib/permissions";
+import { TEMPLATE_KEYS } from "@/lib/contractTemplateKeys";
 
 type Result<T = void> = { ok: true; data?: T } | { ok: false; error: string };
-
-export const TEMPLATE_KEY_LABELS: Record<string, string> = {
-  FIXED: "全量·固佣",
-  SPECIAL: "特殊佣金",
-  TIERED: "全量·阶梯式佣金",
-  THRESHOLD: "全量·门槛佣金",
-  INCREMENTAL: "增量·佣金",
-};
-export const TEMPLATE_KEYS = Object.keys(TEMPLATE_KEY_LABELS);
 
 const UPLOAD_DIR_ABS = path.join(process.cwd(), "public", "contract-templates");
 const PUBLIC_PREFIX = "/contract-templates";

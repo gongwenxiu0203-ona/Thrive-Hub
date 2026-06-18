@@ -3,7 +3,7 @@ import { ArrowLeft } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { TEMPLATE_KEY_LABELS } from "@/actions/contractTemplates";
+import { TEMPLATE_KEY_LABELS } from "@/lib/contractTemplateKeys";
 import { sealExistsServer } from "@/lib/contractSeal";
 import { TemplatesClient } from "./TemplatesClient";
 
