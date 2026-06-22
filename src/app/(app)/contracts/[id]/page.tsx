@@ -12,6 +12,20 @@ import { ContractCompare } from "./ContractCompare";
 import { ContractWorkflowPanel, type ContractVersionRow } from "./ContractWorkflowPanel";
 import { ReviewPanel, type ReviewFieldState } from "./ReviewPanel";
 import {
+  ReviewerActionsPanel,
+  type ReviewRoundRow,
+  type ReviewAnnotationRow,
+} from "./ReviewerActionsPanel";
+import { REVIEWER_EMAIL } from "@/lib/contractReviewer";
+import { PLACEHOLDER_KEYS } from "@/lib/contractPlaceholders";
+import { UPLOAD_EXTRACT_REQUIRED } from "@/lib/contractAiExtract";
+import {
+  SNAPSHOT_FIELD_KEY,
+  collectContractFieldSnapshot,
+  diffSnapshots,
+} from "@/lib/contractFieldSnapshot";
+import { AlertCircle } from "lucide-react";
+import {
   CONTRACT_STATUS_LABELS,
   CONTRACT_STATUS_COLORS,
   CONTRACT_STATUS_ORDER,
@@ -42,6 +56,17 @@ export default async function ContractDetailPage({
         orderBy: { versionNo: "desc" },
         include: { createdBy: { select: { name: true } } },
       },
+      reviews: {
+        orderBy: { round: "desc" },
+        include: {
+          reviewer: { select: { name: true } },
+          comments: { orderBy: { createdAt: "asc" } },
+        },
+      },
+      annotations: {
+        orderBy: { createdAt: "desc" },
+        include: { version: { select: { versionNo: true } } },
+      },
     },
   });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -70,6 +95,89 @@ export default async function ContractDetailPage({
 
   const isAdmin = session.role === "ADMIN";
   const userOptions = users.map((u) => ({ id: u.id, name: u.name }));
+
+  // ── 审核轮次 + 批注（用于 ReviewerActionsPanel）───────────────────────────
+  const reviewerUser = await prisma.user.findUnique({
+    where: { email: REVIEWER_EMAIL },
+    select: { id: true },
+  });
+  const isReviewer = !!reviewerUser && reviewerUser.id === session.userId;
+
+  const reviewRounds: ReviewRoundRow[] = contract.reviews.map((r) => ({
+    id: r.id,
+    round: r.round,
+    status: r.status,
+    reviewerName: r.reviewer?.name ?? "—",
+    createdAt: r.createdAt.toISOString(),
+    updatedAt: r.updatedAt.toISOString(),
+    // 过滤掉特殊快照记录，UI 不展示
+    comments: r.comments
+      .filter((cm) => cm.fieldKey !== SNAPSHOT_FIELD_KEY)
+      .map((cm) => ({
+        id: cm.id,
+        fieldKey: cm.fieldKey,
+        comment: cm.comment,
+        annotationId: cm.annotationId,
+        createdAt: cm.createdAt.toISOString(),
+        updatedAt: cm.updatedAt.toISOString(),
+      })),
+  }));
+
+  // 第二轮起：计算「本轮相比上一轮变动」字段
+  let roundDiff: { key: string; label: string; from: string; to: string }[] = [];
+  const currentRound = contract.reviews.find((r) => r.status === "PENDING");
+  if (currentRound && currentRound.round >= 2) {
+    const prevRound = contract.reviews.find((r) => r.round === currentRound.round - 1);
+    const prevSnapRow = prevRound?.comments.find((cm) => cm.fieldKey === SNAPSHOT_FIELD_KEY);
+    if (prevSnapRow) {
+      try {
+        const prevSnap = JSON.parse(prevSnapRow.comment) as Record<string, string>;
+        const currentSnap = await collectContractFieldSnapshot(contract.id);
+        roundDiff = diffSnapshots(prevSnap, currentSnap);
+      } catch {
+        // 解析失败忽略，diff 为空
+      }
+    }
+  }
+  const currentReview = reviewRounds.find((r) => r.status === "PENDING") ?? null;
+  const reviewAnnotations: ReviewAnnotationRow[] = contract.annotations.map((a) => ({
+    id: a.id,
+    versionNo: a.version?.versionNo ?? 0,
+    content: a.content,
+    fileUrl: a.fileUrl,
+    createdAt: a.createdAt.toISOString(),
+  }));
+  const canActReview =
+    (isReviewer || isAdmin) &&
+    contract.status === "REVIEWING" &&
+    !!currentReview;
+  const placeholderLabelMap: Record<string, string> = Object.fromEntries(
+    PLACEHOLDER_KEYS.map((p) => [p.key, p.desc]),
+  );
+
+  // 「上传已有合同」的缺失字段：用 contract 表实际列回查（与 AI 抽取结果分离）
+  const uploadValueByKey: Record<string, unknown> = {
+    partyAName: contract.partyA,
+    partyACreditCode: c.partyACreditCode,
+    partyAAddress: c.partyAAddress,
+    partyAContact: c.partyAContact,
+    partyAPhone: c.partyAPhone,
+    partyAEmail: c.partyAEmail,
+    startDate: contract.startDate,
+    endDate: contract.endDate,
+    feeAmount: contract.feeAmount,
+    feeCurrency: c.feeCurrency,
+    commissionRate: contract.commissionRate,
+  };
+  const uploadMissing =
+    c.uploadType === "EXISTING"
+      ? UPLOAD_EXTRACT_REQUIRED.filter((f) => {
+          const v = uploadValueByKey[f.key];
+          if (v == null) return true;
+          if (typeof v === "string" && !v.trim()) return true;
+          return false;
+        })
+      : [];
 
   // Field values keyed for compare view + review panel (v3 template fields).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -229,6 +337,31 @@ export default async function ContractDetailPage({
         </div>
       </div>
 
+      {/* 上传已有合同：缺失字段提醒 */}
+      {uploadMissing.length > 0 && (
+        <div className="card border-amber-200 bg-amber-50 p-4">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-amber-800">
+                本合同为上传已有合同，AI 未识别到以下 {uploadMissing.length} 个关键字段，请补填后再提交审核：
+              </p>
+              <ul className="mt-2 grid grid-cols-2 gap-1 text-sm text-amber-700 sm:grid-cols-3">
+                {uploadMissing.map((m) => (
+                  <li key={m.key} className="rounded bg-amber-100/60 px-2 py-1">· {m.label}</li>
+                ))}
+              </ul>
+              <Link
+                href={`/contracts/new?contractId=${contract.id}`}
+                className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-amber-800 hover:underline"
+              >
+                <Pencil className="h-3.5 w-3.5" /> 去补填字段
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 状态流转 */}
       <div className="card flex items-center gap-2 overflow-x-auto p-4">
         {CONTRACT_STATUS_ORDER.map((s, i) => {
@@ -273,6 +406,20 @@ export default async function ContractDetailPage({
           createdAt: v.createdAt.toISOString(),
         }))}
       />
+
+      {/* 合同审核（轮次 / 字段意见 / 批注） */}
+      {(reviewRounds.length > 0 || canActReview) && (
+        <ReviewerActionsPanel
+          contractId={contract.id}
+          contractStatus={contract.status}
+          canAct={canActReview}
+          currentReview={currentReview}
+          history={reviewRounds}
+          annotations={reviewAnnotations}
+          fieldLabels={placeholderLabelMap}
+          roundDiff={roundDiff}
+        />
+      )}
 
       {/* 基本信息 */}
       <section className="card p-5">

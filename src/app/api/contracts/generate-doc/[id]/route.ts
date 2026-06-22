@@ -7,6 +7,7 @@ import {
   fillContractTemplate,
   templateUrlToAbsPath,
 } from "@/lib/contractTemplateFill";
+import { contractFileBaseName } from "@/lib/contractFileName";
 
 export async function GET(
   _req: NextRequest,
@@ -17,7 +18,7 @@ export async function GET(
 
   const contract = await prisma.contract.findUnique({
     where: { id },
-    include: { template: true },
+    include: { template: true, customer: { select: { brandName: true } } },
   });
 
   if (!contract) {
@@ -35,10 +36,13 @@ export async function GET(
     const templateBuffer = await fs.readFile(templateAbs);
     const docxBuffer = await fillContractTemplate(
       templateBuffer,
-      buildPlaceholderMap(contract),
+      {
+        ...buildPlaceholderMap(contract),
+        templateKey: contract.template.templateKey,
+      },
     );
 
-    const filename = encodeURIComponent(`${contract.contractNo}-${contract.template.name}.docx`);
+    const filename = encodeURIComponent(`${contractFileBaseName(contract)}.docx`);
     return new NextResponse(docxBuffer, {
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",

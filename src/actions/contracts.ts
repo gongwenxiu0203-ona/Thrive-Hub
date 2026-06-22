@@ -420,6 +420,8 @@ export interface ContractV4Payload {
   coopChannels?: string;    // JSON string
   // 填写方式
   fillMethod?: string;
+  // 草稿支持：传 "DRAFT" 创建为草稿；不传或其他值走默认 IN_PROGRESS
+  saveAsDraft?: boolean;
   // 模板 + 乙方信息（P1/P2）
   templateId?: string;
   partyBCompany?: string;             // "THRAIVE" | "LINGYUE"
@@ -495,7 +497,7 @@ export async function createContractV4(
       customerId,
       type: "BRAND",
       type: payload.type || "BRAND",
-      status: "IN_PROGRESS",
+      status: payload.saveAsDraft ? "DRAFT" : "IN_PROGRESS",
       createdById: session.userId,
       ownerId: payload.ownerId || session.userId,
       reviewerId: payload.reviewerId || (await defaultReviewerId()),

@@ -28,6 +28,37 @@ function fmtDate(d: unknown, part?: "year" | "month" | "day"): string {
   return `${y}年${m}月${day}日`;
 }
 
+function parseJsonArray(raw: unknown): unknown[] {
+  try {
+    const parsed = JSON.parse(s(raw ?? "[]"));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function productListText(raw: unknown): string {
+  const rows = parseJsonArray(raw);
+  return rows
+    .map((row, index) => {
+      if (!row || typeof row !== "object") return "";
+      const r = row as Record<string, unknown>;
+      const name = s(r.name ?? r.productName ?? r.title).trim();
+      const asin = s(r.asin ?? r.ASIN).trim();
+      const price = s(r.price ?? r.amount).trim();
+      const link = s(r.trackLink ?? r.link ?? r.url).trim();
+      const parts = [
+        name || `商品${index + 1}`,
+        asin ? `ASIN：${asin}` : "",
+        price ? `价格：${price}` : "",
+        link ? `链接：${link}` : "",
+      ].filter(Boolean);
+      return parts.join("，");
+    })
+    .filter(Boolean)
+    .join("；");
+}
+
 /**
  * Available placeholder keys. Documented per the spec so the admin knows
  * what to type in templates. The full list is exported as PLACEHOLDER_KEYS
@@ -107,6 +138,8 @@ export function buildPlaceholderMap(c: Loose): Record<string, string> {
   const partyB = (partyBKey === "THRAIVE" || partyBKey === "LINGYUE")
     ? PARTY_B_COMPANIES[partyBKey as "THRAIVE" | "LINGYUE"]
     : null;
+  const firstBank = banks[0] ? PARTY_B_BANKS[banks[0]] : null;
+  const coopChannelKeys = parseJsonArray(c.coopChannels).map((v) => s(v)).filter(Boolean);
 
   return {
     // meta
@@ -137,6 +170,10 @@ export function buildPlaceholderMap(c: Loose): Record<string, string> {
     partyBBanks: banksText,
     partyBBankNames: banks.map((k) => PARTY_B_BANKS[k]?.bankName).filter(Boolean).join("、"),
     partyBBankAccountNos: banks.map((k) => PARTY_B_BANKS[k]?.accountNo).filter(Boolean).join("、"),
+    partyBBankAccountName: firstBank?.accountName ?? "",
+    partyBBankName: firstBank?.bankName ?? "",
+    partyBBankAccountNo: firstBank?.accountNo ?? "",
+    partyBBankSwift: firstBank?.swift ?? "",
     // fees
     feeAmount: s(c.feeAmount),
     feeCurrency: s(c.feeCurrency),
@@ -151,6 +188,10 @@ export function buildPlaceholderMap(c: Loose): Record<string, string> {
     // promo
     promoPlatform: s(c.promoPlatform),
     targetSite: s(c.targetSite),
+    productListText: productListText(c.productList),
+    customerName: s((c.customer as Loose | undefined)?.brandName ?? c.partyA),
+    templateKey: s((c.template as Loose | undefined)?.templateKey ?? c.commissionType),
+    coopChannelKeys: coopChannelKeys.join(","),
     coopChannels: (() => {
       try {
         const arr = JSON.parse(s(c.coopChannels ?? "[]"));

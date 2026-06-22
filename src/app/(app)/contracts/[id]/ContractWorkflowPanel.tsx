@@ -80,7 +80,7 @@ export function ContractWorkflowPanel({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {status === "IN_PROGRESS" && hasTemplate && (
+          {(status === "IN_PROGRESS" || status === "REJECTED") && hasTemplate && (
             <button
               type="button"
               onClick={regenerate}
@@ -91,14 +91,15 @@ export function ContractWorkflowPanel({
               {hasGeneratedDoc ? "重新生成" : "生成合同 DOCX"}
             </button>
           )}
-          {status === "IN_PROGRESS" && (
+          {(status === "IN_PROGRESS" || status === "REJECTED") && (
             <button
               type="button"
               onClick={() => setShowSubmit(true)}
               disabled={pending}
               className="btn-primary flex items-center gap-1.5 text-sm"
             >
-              <Send className="h-4 w-4" /> 提交审核
+              <Send className="h-4 w-4" />
+              {status === "REJECTED" ? "重新提交审核" : "提交审核"}
             </button>
           )}
           {canStamp && stampStatus !== "STAMPED" && (
@@ -184,7 +185,7 @@ export function ContractWorkflowPanel({
                     </div>
                     <div className="flex shrink-0 items-center gap-1">
                       <a
-                        href={v.fileUrl}
+                        href={`/api/contracts/version-download/${v.id}?inline=1`}
                         target="_blank"
                         rel="noreferrer"
                         className="flex items-center gap-1 rounded bg-slate-50 px-2 py-1 text-[11px] text-slate-700 hover:bg-slate-100"

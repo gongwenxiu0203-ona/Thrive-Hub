@@ -342,7 +342,11 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
       gmvSettlementCycle: gmvCycle,
       productList: JSON.stringify(products.filter(p => p.name || p.asin || p.price || p.trackLink)),
       coopChannels: JSON.stringify(channels),
-      fillMethod: mode === "ai" ? "AI_EXTRACT" : "MANUAL",
+      fillMethod: fillToken
+        ? "EXTERNAL_LINK"
+        : mode === "ai"
+          ? "AI_EXTRACT"
+          : "MANUAL",
       // 模板 + 乙方信息（P1/P2 新增）
       templateId: templateId || undefined,
       partyBCompany: partyBCompany || undefined,
@@ -377,101 +381,7 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
 
   return (
     <div className="space-y-6">
-      {/* ── 模式切换标签 ── */}
-      <div className="card p-1 flex gap-1">
-        {([
-          { key: "manual", icon: Pencil,   label: "手动填写" },
-          { key: "ai",     icon: Sparkles, label: "AI 识别" },
-          { key: "link",   icon: Link2,    label: "生成填写链接" },
-        ] as const).map(({ key, icon: Icon, label }) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setMode(key)}
-            className={cn(
-              "flex flex-1 items-center justify-center gap-2 rounded-lg py-2 text-sm font-medium transition-colors",
-              mode === key
-                ? "bg-brand-600 text-white"
-                : "text-slate-500 hover:text-slate-700"
-            )}
-          >
-            <Icon className="h-4 w-4" />{label}
-          </button>
-        ))}
-      </div>
-
-      {/* ── AI 识别模式 ── */}
-      {mode === "ai" && (
-        <div className="card p-5 space-y-3">
-          <p className="text-sm text-slate-600">
-            将已有的合同文本粘贴到下方，AI 将自动识别并填充甲方信息和合作条款
-          </p>
-          <textarea
-            className="input font-mono text-xs"
-            rows={8}
-            value={aiText}
-            onChange={e => setAiText(e.target.value)}
-            placeholder="粘贴合同全文或关键信息段落…"
-          />
-          {extractNote && (
-            <p className={cn("text-xs", extractNote.startsWith("✅") ? "text-emerald-600" : "text-rose-500")}>
-              {extractNote}
-            </p>
-          )}
-          <button
-            type="button"
-            onClick={runAiExtract}
-            disabled={extracting}
-            className="btn-primary"
-          >
-            <Sparkles className="h-4 w-4" />
-            {extracting ? "识别中…" : "AI 自动识别并填充"}
-          </button>
-        </div>
-      )}
-
-      {/* ── 生成填写链接模式 ── */}
-      {mode === "link" && (
-        <div className="card p-5 space-y-4">
-          <p className="text-sm text-slate-600">
-            选择上方「关联客户」后即可点击「生成填写链接」，创建合同草稿并生成专属链接。
-            发送给客户填写甲方信息（客户端全部必填）；合作信息可在客户填写完成后回本系统补充并保存合同。
-          </p>
-          {fillToken ? (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                <span className="flex-1 truncate text-xs text-slate-600 font-mono">{fillLink}</span>
-                <button type="button" onClick={copyLink} className="btn-ghost btn-sm shrink-0">
-                  {tokenCopied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
-                  {tokenCopied ? "已复制" : "复制"}
-                </button>
-              </div>
-              <p className="text-xs text-emerald-600">
-                ✅ 合同草稿已创建，链接有效期 7 天。客户填写后甲方信息自动同步，可在合同详情页查看与下载。
-              </p>
-            </div>
-          ) : (
-            <>
-              {error && (
-                <div className="rounded-lg bg-rose-50 border border-rose-200 px-4 py-2.5 text-sm text-rose-600">
-                  {error}
-                </div>
-              )}
-              <button
-                type="button"
-                onClick={generateToken}
-                disabled={generatingToken}
-                className="btn-primary"
-              >
-                <Link2 className="h-4 w-4" />
-                {generatingToken ? "生成中…" : "生成填写链接"}
-              </button>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* ── 主表单 ── */}
+      {/* ── 主表单（手动填写 + 甲方信息区可触发 AI 识别 / 生成填写链接） ── */}
       <form onSubmit={onSubmit} className="space-y-5">
         {/* 关联客户 */}
         {!presetCustomerId && (
@@ -573,16 +483,76 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
           </div>
         )}
 
-        {/* ── ③ 甲方信息（链接模式下由客户填写，隐藏）── */}
-        {mode === "link" ? (
-          <div className="rounded-2xl border border-blue-100 bg-blue-50 px-5 py-4">
-            <p className="text-sm font-semibold text-slate-700">③ 甲方信息</p>
-            <p className="mt-1 text-xs text-slate-500">
-              链接模式下，甲方信息由客户通过填写链接提交，无需在此填写。
-            </p>
-          </div>
-        ) : (
+        {/* ── ③ 甲方信息（可手动填写 / AI 识别 / 生成填写链接发给客户填）── */}
         <FormSection title="③ 甲方信息" color="blue">
+          {/* AI 识别 + 生成填写链接 内联工具栏 */}
+          <div className="mb-4 space-y-3 rounded-lg border border-blue-100 bg-white p-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setMode(mode === "ai" ? "manual" : "ai")}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors",
+                  mode === "ai"
+                    ? "border-brand-500 bg-brand-50 text-brand-700"
+                    : "border-slate-200 text-slate-600 hover:border-brand-300"
+                )}
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                {mode === "ai" ? "关闭 AI 识别面板" : "AI 识别填充"}
+              </button>
+              <button
+                type="button"
+                onClick={generateToken}
+                disabled={generatingToken}
+                className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:border-brand-300 disabled:opacity-50"
+              >
+                <Link2 className="h-3.5 w-3.5" />
+                {generatingToken ? "生成中…" : "生成填写链接发给客户"}
+              </button>
+              <p className="ml-auto text-[11px] text-slate-400">两种方式可任选其一辅助填写</p>
+            </div>
+
+            {mode === "ai" && (
+              <div className="space-y-2 rounded-md bg-slate-50 p-3">
+                <textarea
+                  className="input font-mono text-xs"
+                  rows={6}
+                  value={aiText}
+                  onChange={e => setAiText(e.target.value)}
+                  placeholder="粘贴合同全文或关键信息段落，AI 将自动填充下方字段…"
+                />
+                {extractNote && (
+                  <p className={cn("text-xs", extractNote.startsWith("✅") ? "text-emerald-600" : "text-rose-500")}>
+                    {extractNote}
+                  </p>
+                )}
+                <button
+                  type="button"
+                  onClick={runAiExtract}
+                  disabled={extracting}
+                  className="btn-primary text-xs"
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  {extracting ? "识别中…" : "运行 AI 识别"}
+                </button>
+              </div>
+            )}
+
+            {fillToken && (
+              <div className="space-y-1.5 rounded-md bg-emerald-50 p-3">
+                <div className="flex items-center gap-2 rounded border border-emerald-200 bg-white px-2 py-1.5">
+                  <span className="flex-1 truncate text-xs text-slate-600 font-mono">{fillLink}</span>
+                  <button type="button" onClick={copyLink} className="btn-ghost btn-sm shrink-0">
+                    {tokenCopied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                    {tokenCopied ? "已复制" : "复制"}
+                  </button>
+                </div>
+                <p className="text-[11px] text-emerald-700">链接有效期 7 天，客户填写后甲方信息自动同步到本合同。</p>
+              </div>
+            )}
+          </div>
+
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="sm:col-span-2">
               <label className="label">甲方签约主体公司名称 <span className="text-rose-500">*</span></label>
@@ -619,7 +589,6 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
             </div>
           </div>
         </FormSection>
-        )}
 
         {/* ── ② 合作信息 ── */}
         <FormSection title="④ 合作信息" color="amber">
@@ -885,21 +854,31 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
                 <FileDown className="h-4 w-4" /> 下载合同 DOCX
               </a>
             )}
-            {/* 链接模式：合同在「生成填写链接」时已创建，此处不再显示提交按钮 */}
-            {mode !== "link" && (
-              <button type="submit" disabled={pending} className="btn-primary">
-                {pending ? "保存中…" : (isEdit || createdContractId) ? "保存修改" : "创建合同"}
-              </button>
-            )}
-            {mode === "link" && fillToken && (
+            {/* 保存草稿（仅创建模式可用，不做强校验） */}
+            {!isEdit && !createdContractId && (
               <button
                 type="button"
-                onClick={() => router.push(`/contracts/${createdContractId}`)}
-                className="btn-primary"
+                disabled={pending}
+                onClick={() => {
+                  setError(null);
+                  if (!customerId) { setError("草稿至少需要选择关联客户"); return; }
+                  startTransition(async () => {
+                    const payload = { ...buildPayload(), saveAsDraft: true };
+                    const result = await createContractV4(payload);
+                    if (!result.ok || !result.contractId) {
+                      setError(result.error ?? "保存草稿失败"); return;
+                    }
+                    router.push(`/contracts/${result.contractId}`);
+                  });
+                }}
+                className="btn-secondary"
               >
-                完成，查看合同
+                保存草稿
               </button>
             )}
+            <button type="submit" disabled={pending} className="btn-primary">
+              {pending ? "保存中…" : (isEdit || createdContractId) ? "保存修改" : "创建合同"}
+            </button>
           </div>
         </div>
       </form>

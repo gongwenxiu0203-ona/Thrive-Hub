@@ -19,6 +19,9 @@ export interface StampOptions {
   rotateDegrees?: number;
   /** Corner: "br" | "bl" | "tr" | "tl". Default "br". */
   corner?: "br" | "bl" | "tr" | "tl";
+  /** 0-indexed page numbers to skip (typically signature pages already
+   *  stamped at marker positions during DOCX preprocessing). */
+  skipPages?: number[];
 }
 
 /**
@@ -42,8 +45,11 @@ export async function stampPdf(
   const sealAspect = seal.height / seal.width;
   const heightPt = widthPt * sealAspect;
 
+  const skip = new Set(opts.skipPages ?? []);
   const pages = pdf.getPages();
-  for (const page of pages) {
+  for (let i = 0; i < pages.length; i++) {
+    if (skip.has(i)) continue;
+    const page = pages[i];
     const { width: pw, height: ph } = page.getSize();
     let x = inset;
     let y = inset;

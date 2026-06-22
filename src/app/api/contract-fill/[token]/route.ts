@@ -33,7 +33,6 @@ export async function POST(
     data: {
       partyA: body.partyAName || undefined,
       partyACreditCode: body.partyACreditCode || null,
-      partyALegalRep: body.partyALegalRep || null,
       partyAAddress: body.partyAAddress || null,
       partyAContact: body.partyAContact || null,
       partyAPhone: body.partyAPhone || null,

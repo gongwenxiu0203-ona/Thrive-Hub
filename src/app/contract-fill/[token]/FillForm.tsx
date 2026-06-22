@@ -14,7 +14,6 @@ export function FillForm({ token, info }: { token: string; info: ContractInfo })
   const [fields, setFields] = useState({
     partyAName: info.partyAName ?? "",
     partyACreditCode: "",
-    partyALegalRep: "",
     partyAAddress: "",
     partyAContact: "",
     partyAPhone: "",
@@ -33,7 +32,6 @@ export function FillForm({ token, info }: { token: string; info: ContractInfo })
     const checks: [string, string][] = [
       [fields.partyAName, "甲方签约主体公司名称"],
       [fields.partyACreditCode, "统一社会信用代码"],
-      [fields.partyALegalRep, "法定代表人"],
       [fields.partyAAddress, "甲方地址"],
       [fields.partyAContact, "甲方指定联系人"],
       [fields.partyAPhone, "联系电话"],
@@ -89,11 +87,6 @@ export function FillForm({ token, info }: { token: string; info: ContractInfo })
       <Field label="统一社会信用代码（或其他对应信息）" required>
         <input className="input" required value={fields.partyACreditCode} onChange={set("partyACreditCode")}
           placeholder="18位统一社会信用代码" />
-      </Field>
-
-      <Field label="法定代表人" required>
-        <input className="input" required value={fields.partyALegalRep} onChange={set("partyALegalRep")}
-          placeholder="法定代表人姓名" />
       </Field>
 
       <Field label="甲方地址" required>

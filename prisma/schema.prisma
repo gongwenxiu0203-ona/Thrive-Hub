@@ -69,6 +69,7 @@ model User {
   // 合同模板与版本
   contractTemplatesUploaded ContractTemplate[] @relation("ContractTemplateUploader")
   contractVersionsCreated   ContractVersion[]  @relation("ContractVersionCreator")
+  contractReviews           ContractReview[]
 }
 
 // 角色级权限配置（每个角色 + 功能 = 一个等级）
@@ -246,6 +247,8 @@ model Contract {
   stampedDocUrl       String?
   stampStatus         String   @default("NONE") // NONE | STAMPED | FAILED
   pendingNewUpload    Boolean  @default(false)  // 审核选了"上传新版"等待重抽字段
+  // 创建方式：NEW 新建 | EXISTING 上传已有；null 视为 NEW（老数据兼容）
+  uploadType          String?
 
   startDate DateTime? // 合作期限-开始
   endDate   DateTime? // 合作期限-结束
@@ -265,6 +268,8 @@ model Contract {
   template     ContractTemplate?     @relation(fields: [templateId], references: [id])
   versions     ContractVersion[]
   fieldReviews ContractFieldReview[]
+  reviews      ContractReview[]
+  annotations  ContractAnnotation[]
   reconciliations CustomerReconciliation[]
   channelReconciliations ChannelReconciliation[] @relation("ContractChannelReconciliations")
   projects Project[]
@@ -1067,9 +1072,62 @@ model ContractVersion {
   createdById String
   createdAt   DateTime @default(now())
 
-  contract  Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
-  createdBy User     @relation("ContractVersionCreator", fields: [createdById], references: [id])
+  contract    Contract             @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  createdBy   User                 @relation("ContractVersionCreator", fields: [createdById], references: [id])
+  annotations ContractAnnotation[]
 
   @@index([contractId])
   @@unique([contractId, versionNo])
+}
+
+// 合同审核轮次（一次 PENDING/APPROVED/REJECTED 为一轮；退回后再提交累加 round）
+model ContractReview {
+  id         String   @id @default(cuid())
+  contractId String
+  round      Int                          // 从 1 开始
+  reviewerId String                       // 当前业务取 shallow.w@thraiveagency.com 对应 userId，由业务层决定
+  status     String   @default("PENDING") // PENDING | APPROVED | REJECTED
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  contract Contract                @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  reviewer User                    @relation(fields: [reviewerId], references: [id])
+  comments ContractReviewComment[]
+
+  @@unique([contractId, round])
+  @@index([contractId])
+  @@index([status])
+}
+
+// 合同字段意见（绑定到某一轮审核 + 某一字段；可选关联一条批注）
+model ContractReviewComment {
+  id            String  @id @default(cuid())
+  reviewId      String
+  fieldKey      String                       // 对齐 PLACEHOLDER_KEYS 的 key
+  comment       String                       // 文字意见
+  annotationId  String?                      // 关联 ContractAnnotation（可空）
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  review     ContractReview      @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  annotation ContractAnnotation? @relation(fields: [annotationId], references: [id], onDelete: SetNull)
+
+  @@index([reviewId])
+}
+
+// 合同批注（DOCX comment 或 PDF annotation）
+model ContractAnnotation {
+  id         String   @id @default(cuid())
+  contractId String
+  versionId  String
+  content    String                         // 批注正文（系统内直接展示，无需下载文件）
+  fileUrl    String?                        // 带批注的文件路径（可空：纯系统内批注时为空）
+  createdAt  DateTime @default(now())
+
+  contract Contract                @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  version  ContractVersion         @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  comments ContractReviewComment[]
+
+  @@index([contractId])
+  @@index([versionId])
 }

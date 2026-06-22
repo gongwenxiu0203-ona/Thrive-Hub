@@ -10,6 +10,8 @@ import {
   templateUrlToAbsPath,
 } from "@/lib/contractTemplateFill";
 import { buildPlaceholderMap } from "@/lib/contractPlaceholders";
+import { contractFileBaseName } from "@/lib/contractFileName";
+import { openReviewRound } from "@/actions/contractReview";
 
 type Result<T = void> = { ok: true; data?: T } | { ok: false; error: string };
 
@@ -28,7 +30,7 @@ async function nextVersionNo(contractId: string): Promise<number> {
 
 /** Internal: pick the template buffer for a contract. Falls back to error if
  *  no template is selected. */
-async function loadTemplateFor(contractId: string): Promise<{ buffer: Buffer; templateName: string } | { error: string }> {
+async function loadTemplateFor(contractId: string): Promise<{ buffer: Buffer; templateName: string; templateKey: string } | { error: string }> {
   const c = await prisma.contract.findUnique({
     where: { id: contractId },
     select: { templateId: true },
@@ -37,13 +39,13 @@ async function loadTemplateFor(contractId: string): Promise<{ buffer: Buffer; te
   if (!c.templateId) return { error: "请先在合同上选择适用的模板" };
   const tpl = await prisma.contractTemplate.findUnique({
     where: { id: c.templateId },
-    select: { fileUrl: true, name: true, deletedAt: true },
+    select: { fileUrl: true, name: true, templateKey: true, deletedAt: true },
   });
   if (!tpl || tpl.deletedAt) return { error: "所选模板不存在或已删除" };
   try {
     const abs = templateUrlToAbsPath(tpl.fileUrl);
     const buf = await fs.readFile(abs);
-    return { buffer: buf, templateName: tpl.name };
+    return { buffer: buf, templateName: tpl.name, templateKey: tpl.templateKey };
   } catch {
     return { error: "读取模板文件失败" };
   }
@@ -57,18 +59,21 @@ export async function generateContractFromTemplate(
 ): Promise<Result<{ versionNo: number; fileUrl: string }>> {
   const session = await requireSession();
 
-  const c = await prisma.contract.findUnique({ where: { id: contractId } });
+  const c = await prisma.contract.findUnique({
+    where: { id: contractId },
+    include: { customer: { select: { brandName: true } }, template: true },
+  });
   if (!c) return { ok: false, error: "合同不存在" };
 
   const tpl = await loadTemplateFor(contractId);
   if ("error" in tpl) return { ok: false, error: tpl.error };
 
-  const fields = buildPlaceholderMap(c);
+  const fields = { ...buildPlaceholderMap(c), templateKey: tpl.templateKey };
   const filled = await fillContractTemplate(tpl.buffer, fields);
 
   const versionNo = await nextVersionNo(contractId);
   await fs.mkdir(OUT_DIR_ABS, { recursive: true });
-  const fileName = `${contractId}-v${versionNo}.docx`;
+  const fileName = `${contractFileBaseName(c)}-v${versionNo}.docx`;
   await fs.writeFile(path.join(OUT_DIR_ABS, fileName), filled);
   const fileUrl = `${OUT_PREFIX}/${fileName}`;
 
@@ -100,8 +105,13 @@ export async function submitForReviewUseCurrent(contractId: string): Promise<Res
     select: { id: true, status: true, generatedDocUrl: true },
   });
   if (!c) return { ok: false, error: "合同不存在" };
-  if (c.status !== "IN_PROGRESS") return { ok: false, error: "仅「推进中」状态的合同可提交审核" };
+  if (c.status !== "IN_PROGRESS" && c.status !== "REJECTED") {
+    return { ok: false, error: "仅「推进中」或「审核退回」状态的合同可提交审核" };
+  }
   if (!c.generatedDocUrl) return { ok: false, error: "请先生成或上传一份合同文件" };
+
+  const round = await openReviewRound(contractId);
+  if (!round.ok) return { ok: false, error: round.error };
 
   await prisma.contract.update({
     where: { id: contractId },
@@ -109,6 +119,7 @@ export async function submitForReviewUseCurrent(contractId: string): Promise<Res
   });
   revalidatePath(`/contracts/${contractId}`);
   revalidatePath("/contracts");
+  revalidatePath("/contracts/reviews");
   return { ok: true };
 }
 
@@ -126,14 +137,16 @@ export async function submitForReviewUploadNew(fd: FormData): Promise<Result<{ v
 
   const c = await prisma.contract.findUnique({
     where: { id: contractId },
-    select: { id: true, status: true },
+    include: { customer: { select: { brandName: true } } },
   });
   if (!c) return { ok: false, error: "合同不存在" };
-  if (c.status !== "IN_PROGRESS") return { ok: false, error: "仅「推进中」状态的合同可上传新版" };
+  if (c.status !== "IN_PROGRESS" && c.status !== "REJECTED") {
+    return { ok: false, error: "仅「推进中」或「审核退回」状态的合同可上传新版" };
+  }
 
   const versionNo = await nextVersionNo(contractId);
   await fs.mkdir(OUT_DIR_ABS, { recursive: true });
-  const fileName = `${contractId}-v${versionNo}.docx`;
+  const fileName = `${contractFileBaseName(c)}-v${versionNo}.docx`;
   const buf = Buffer.from(await file.arrayBuffer());
   await fs.writeFile(path.join(OUT_DIR_ABS, fileName), buf);
   const fileUrl = `${OUT_PREFIX}/${fileName}`;
@@ -148,6 +161,9 @@ export async function submitForReviewUploadNew(fd: FormData): Promise<Result<{ v
       createdById: session.userId,
     },
   });
+  const round = await openReviewRound(contractId);
+  if (!round.ok) return { ok: false, error: round.error };
+
   await prisma.contract.update({
     where: { id: contractId },
     data: {
@@ -159,5 +175,6 @@ export async function submitForReviewUploadNew(fd: FormData): Promise<Result<{ v
 
   revalidatePath(`/contracts/${contractId}`);
   revalidatePath("/contracts");
+  revalidatePath("/contracts/reviews");
   return { ok: true, data: { versionNo } };
 }

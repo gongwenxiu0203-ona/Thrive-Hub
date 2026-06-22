@@ -7,7 +7,8 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { convertDocxToPdf } from "@/lib/docxToPdf";
 import { stampPdf } from "@/lib/contractStamp";
-import { stampDocx } from "@/lib/stampDocx";
+import { stampDocx, embedPartyBStampMarkers } from "@/lib/stampDocx";
+import { findPartyBStampPages } from "@/lib/contractPdfMarkerScan";
 import {
   COMPANY_SEALS,
   SEAL_DIR_ABS,
@@ -116,19 +117,30 @@ export async function stampContract(contractId: string, sealCompany?: SealCompan
       });
       await fs.writeFile(outAbs, stamped);
     } else {
+      // 先把「乙方（盖章）」标记位置的图章嵌进 DOCX，再走 LibreOffice→PDF→bottom-right
+      const origDocxBytes = await fs.readFile(latestAbs);
+      const { buffer: preStamped } = await embedPartyBStampMarkers(origDocxBytes, sealBytes);
       try {
-        const pdfAbs = await convertDocxToPdf(latestAbs);
+        // 用预处理后的 DOCX 写一个临时副本喂给 LibreOffice
+        const tmpDocxPath = path.join(STAMPED_DIR_ABS, `${contractId}-v${versionNo}-pre.docx`);
+        await fs.writeFile(tmpDocxPath, preStamped);
+        const pdfAbs = await convertDocxToPdf(tmpDocxPath);
         const pdfBytes = await fs.readFile(pdfAbs);
+        // 扫描 PDF 找到包含「乙方（盖章）」的签字页，跳过右下角再盖。
+        const skipPages = await findPartyBStampPages(pdfBytes);
         const stamped = await stampPdf(pdfBytes, sealBytes, {
           widthPt: 90,
           insetPt: 36,
           opacity: 0.85,
           corner: "br",
+          skipPages,
         });
         await fs.writeFile(outAbs, stamped);
+        // 清理临时 DOCX（失败忽略）
+        try { await fs.unlink(tmpDocxPath); } catch {}
       } catch (convertError) {
-        const docxBytes = await fs.readFile(latestAbs);
-        const stampedDocx = await stampDocx(docxBytes, sealBytes);
+        // LibreOffice 不可用时回退：直接对预处理过的 DOCX 加尾部封章
+        const stampedDocx = await stampDocx(preStamped, sealBytes);
         fileType = "docx";
         fileName = `${contractId}-v${versionNo}-stamped.docx`;
         outAbs = path.join(STAMPED_DIR_ABS, fileName);
@@ -154,6 +166,8 @@ export async function stampContract(contractId: string, sealCompany?: SealCompan
       data: {
         stampedDocUrl: fileUrl,
         stampStatus: "STAMPED",
+        // 首次盖章后推进到「签署完成」
+        ...(c.status === "SIGNING" ? { status: "COMPLETED" } : {}),
       },
     });
 
