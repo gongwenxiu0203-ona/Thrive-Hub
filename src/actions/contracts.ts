@@ -478,23 +478,32 @@ export async function createContractV4(
   const isExternalDraft = payload.fillMethod === "EXTERNAL_LINK";
   if (!partyAName && !isExternalDraft) return { ok: false, error: "甲方公司名称为必填项" };
 
+  // contractNo 并发冲突重试（P2002）：findMany + max + 1 不是原子的。
   const year = new Date().getFullYear();
-  const existing = await prisma.contract.findMany({
-    where: { contractNo: { startsWith: `THRAIVE-${year}-` } },
-    select: { contractNo: true },
-  });
-  let max = 0;
-  for (const { contractNo } of existing) {
-    const seq = parseInt(contractNo.split("-").pop() ?? "0", 10);
-    if (!isNaN(seq) && seq > max) max = seq;
-  }
-  const contractNo = `THRAIVE-${year}-${String(max + 1).padStart(3, "0")}`;
+  const computeNextNo = async () => {
+    const existing = await prisma.contract.findMany({
+      where: { contractNo: { startsWith: `THRAIVE-${year}-` } },
+      select: { contractNo: true },
+    });
+    let max = 0;
+    for (const { contractNo } of existing) {
+      const seq = parseInt(contractNo.split("-").pop() ?? "0", 10);
+      if (!isNaN(seq) && seq > max) max = seq;
+    }
+    return `THRAIVE-${year}-${String(max + 1).padStart(3, "0")}`;
+  };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const contract = await (prisma.contract.create as any)({
-    data: {
-      contractNo,
-      customerId,
+  let contract: any = null;
+  let lastNoConflictError: unknown = null;
+  for (let attempt = 0; attempt < 3 && !contract; attempt++) {
+    const contractNo = await computeNextNo();
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      contract = await (prisma.contract.create as any)({
+        data: {
+          contractNo,
+          customerId,
       type: "BRAND",
       type: payload.type || "BRAND",
       status: payload.saveAsDraft ? "DRAFT" : "IN_PROGRESS",
@@ -539,8 +548,18 @@ export async function createContractV4(
       ...resolvePartyB(payload.partyBCompany),
       partyBBankAccounts: payload.partyBBankAccounts ?? "[]",
       specialCommissionTerms: payload.specialCommissionTerms || null,
-    },
-  });
+        },
+      });
+    } catch (e) {
+      const code = (e as { code?: string }).code;
+      if (code === "P2002") { lastNoConflictError = e; continue; }
+      throw e;
+    }
+  }
+  if (!contract) {
+    console.warn("[createContractV4] contractNo conflict after 3 retries:", lastNoConflictError);
+    return { ok: false, error: "合同编号冲突，请稍后重试" };
+  }
 
   await bumpCustomerStatus(customerId, "CONTRACT_IN_PROGRESS");
   revalidatePath("/contracts");

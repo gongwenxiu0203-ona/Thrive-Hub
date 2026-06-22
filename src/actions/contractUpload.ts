@@ -121,44 +121,64 @@ export async function uploadExistingContract(
   });
   if (!customer) return { ok: false, error: "客户不存在" };
 
-  const contractNo = await nextContractNo(noPrefix);
   const ownerId = s(fd, "ownerId") || session.userId;
   const reviewerId = s(fd, "reviewerId") || null;
-
   const mapped = mapExtractedToContract(ai.fields as Record<string, unknown>);
 
-  // 4) Persist file
+  // 4) 先建合同（contractNo 并发冲突自动重试 3 次），再用 contract.id 和
+  //    contractNo 拼出唯一文件名，避免「同分钟同客户」覆盖。
+  let contract: { id: string; contractNo: string } | null = null;
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const contractNo = await nextContractNo(noPrefix);
+    try {
+      contract = await prisma.contract.create({
+        data: {
+          contractNo,
+          customerId,
+          type,
+          status: "IN_PROGRESS",
+          uploadType: "EXISTING",
+          fillMethod: "AI_EXTRACT",
+          extractedBy: "AI",
+          templateId,
+          partyBCompany,
+          ownerId,
+          reviewerId,
+          contractText: text,
+          createdById: session.userId,
+          ...mapped,
+        },
+        select: { id: true, contractNo: true },
+      });
+      break;
+    } catch (e) {
+      const code = (e as { code?: string }).code;
+      if (code === "P2002") { lastError = e; continue; }
+      throw e;
+    }
+  }
+  if (!contract) {
+    console.warn("[uploadExistingContract] contractNo conflict after 3 retries:", lastError);
+    return { ok: false, error: "合同编号冲突，请稍后重试" };
+  }
+
+  // 5) Persist file — 文件名加入 contract.id 后缀，杜绝任何场景下的文件覆盖
   await fs.mkdir(OUT_DIR_ABS, { recursive: true });
   const base = contractFileBaseName({
-    contractNo,
+    contractNo: contract.contractNo,
     createdAt: new Date(),
     partyA: typeof mapped.partyA === "string" ? mapped.partyA : null,
     customer,
   });
-  const savedName = `${base}-v1.docx`;
+  const savedName = `${base}-${contract.id}-v1.docx`;
   await fs.writeFile(path.join(OUT_DIR_ABS, savedName), buf);
   const fileUrl = `${OUT_PREFIX}/${savedName}`;
 
-  // 5) Create contract
-  const contract = await prisma.contract.create({
-    data: {
-      contractNo,
-      customerId,
-      type,
-      status: "IN_PROGRESS",
-      uploadType: "EXISTING",
-      fillMethod: "AI_EXTRACT",
-      extractedBy: "AI",
-      templateId,
-      partyBCompany,
-      ownerId,
-      reviewerId,
-      contractText: text,
-      generatedDocUrl: fileUrl,
-      createdById: session.userId,
-      ...mapped,
-    },
-    select: { id: true },
+  // 5b) 回填 generatedDocUrl（建合同时 fileUrl 还未确定）
+  await prisma.contract.update({
+    where: { id: contract.id },
+    data: { generatedDocUrl: fileUrl },
   });
 
   await prisma.contractVersion.create({

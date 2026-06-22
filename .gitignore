@@ -63,3 +63,6 @@ desktop.ini
 
 # ===== PM2 =====
 .pm2/
+
+# ===== Private runtime files (contract annotations, etc.) =====
+/private/

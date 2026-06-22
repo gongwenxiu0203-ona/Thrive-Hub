@@ -391,7 +391,7 @@ function AnnotationList({ annotations }: { annotations: ReviewAnnotationRow[] })
               </p>
               {a.fileUrl && (
                 <a
-                  href={a.fileUrl}
+                  href={`/api/contracts/annotation-download/${a.id}`}
                   target="_blank"
                   rel="noreferrer"
                   className="text-xs text-brand-700 hover:underline"

@@ -1112,6 +1112,7 @@ model ContractReviewComment {
   review     ContractReview      @relation(fields: [reviewId], references: [id], onDelete: Cascade)
   annotation ContractAnnotation? @relation(fields: [annotationId], references: [id], onDelete: SetNull)
 
+  @@unique([reviewId, fieldKey])
   @@index([reviewId])
 }
 

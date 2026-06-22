@@ -27,22 +27,49 @@ async function resolveReviewerId(contractId: string): Promise<string | null> {
 }
 
 /** Internal: open a new ContractReview round for a contract. Increments round
- *  number from the last review on that contract. Called by submit / resubmit. */
+ *  number from the last review on that contract. Called by submit / resubmit.
+ *
+ *  Concurrency: round 的"读 last + 写 (last+1)"不是原子的。两次并发提交可能
+ *  撞 @@unique([contractId, round])。这里捕获唯一冲突并重试最多 3 次，每次
+ *  重新读 last。如果仍然失败说明真的有持续冲突，返回错误让上层重试或提醒。 */
 export async function openReviewRound(contractId: string): Promise<Result<{ reviewId: string; round: number }>> {
   const reviewerId = await resolveReviewerId(contractId);
   if (!reviewerId) return { ok: false, error: `未找到审核人账号（${REVIEWER_EMAIL}）` };
 
-  const last = await prisma.contractReview.findFirst({
-    where: { contractId },
-    orderBy: { round: "desc" },
-    select: { round: true },
-  });
-  const round = (last?.round ?? 0) + 1;
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const last = await prisma.contractReview.findFirst({
+      where: { contractId },
+      orderBy: { round: "desc" },
+      select: { round: true },
+    });
+    const round = (last?.round ?? 0) + 1;
+    try {
+      const review = await prisma.contractReview.create({
+        data: { contractId, round, reviewerId, status: "PENDING" },
+        select: { id: true },
+      });
+      return await finishOpenRound(review.id, round, contractId);
+    } catch (e) {
+      // P2002 = Prisma unique constraint failure
+      const code = (e as { code?: string }).code;
+      if (code === "P2002") {
+        lastError = e;
+        continue;
+      }
+      throw e;
+    }
+  }
+  console.warn("[openReviewRound] gave up after 3 retries:", lastError);
+  return { ok: false, error: "提交审核失败（轮次号冲突，请稍后重试）" };
+}
 
-  const review = await prisma.contractReview.create({
-    data: { contractId, round, reviewerId, status: "PENDING" },
-    select: { id: true },
-  });
+/** 收尾：写快照 + 返回。抽出来给 openReviewRound 重试逻辑用。 */
+async function finishOpenRound(
+  reviewId: string,
+  round: number,
+  contractId: string,
+): Promise<Result<{ reviewId: string; round: number }>> {
 
   // 快照当前合同字段，存为该轮的特殊 comment（fieldKey=__SNAPSHOT__）。
   // 用于第二轮开始后的「本轮变动」对比，UI 渲染时会过滤掉这条。
@@ -50,7 +77,7 @@ export async function openReviewRound(contractId: string): Promise<Result<{ revi
     const snapshot = await collectContractFieldSnapshot(contractId);
     await prisma.contractReviewComment.create({
       data: {
-        reviewId: review.id,
+        reviewId,
         fieldKey: SNAPSHOT_FIELD_KEY,
         comment: JSON.stringify(snapshot),
       },
@@ -60,7 +87,7 @@ export async function openReviewRound(contractId: string): Promise<Result<{ revi
     console.warn("[openReviewRound] snapshot failed:", e);
   }
 
-  return { ok: true, data: { reviewId: review.id, round } };
+  return { ok: true, data: { reviewId, round } };
 }
 
 /** Approve the current PENDING review and move contract to SIGNING. */
@@ -142,21 +169,13 @@ export async function upsertFieldComment(
     return { ok: false, error: "无权填写审核意见" };
   }
 
-  const existing = await prisma.contractReviewComment.findFirst({
-    where: { reviewId, fieldKey },
+  // 借助 @@unique([reviewId, fieldKey]) 做原子 upsert，避免并发下双写。
+  const saved = await prisma.contractReviewComment.upsert({
+    where: { reviewId_fieldKey: { reviewId, fieldKey } },
+    create: { reviewId, fieldKey, comment, annotationId },
+    update: { comment, annotationId },
     select: { id: true },
   });
-
-  const saved = existing
-    ? await prisma.contractReviewComment.update({
-        where: { id: existing.id },
-        data: { comment, annotationId },
-        select: { id: true },
-      })
-    : await prisma.contractReviewComment.create({
-        data: { reviewId, fieldKey, comment, annotationId },
-        select: { id: true },
-      });
 
   return { ok: true, data: { id: saved.id } };
 }
@@ -205,7 +224,8 @@ export async function addAnnotation(
     return { ok: false, error: "无权添加批注" };
   }
 
-  // 仅当最新版本是 DOCX 时，把批注真实写入文件
+  // 仅当最新版本是 DOCX 时，把批注真实写入文件。文件存到 private/ 目录，
+  // 必须通过 /api/contracts/annotation-download/[id] 鉴权下载。
   let annotatedFileUrl: string | null = null;
   if (latestVersion.fileType === "docx") {
     try {
@@ -219,10 +239,11 @@ export async function addAnnotation(
         text: content.trim(),
       });
       const outName = `${contractId}-annotated-${Date.now()}.docx`;
-      const OUT_DIR = path.join(process.cwd(), "public", "contracts-generated");
+      const OUT_DIR = path.join(process.cwd(), "private", "contract-annotations");
       await fs.mkdir(OUT_DIR, { recursive: true });
       await fs.writeFile(path.join(OUT_DIR, outName), buffer);
-      annotatedFileUrl = `/contracts-generated/${outName}`;
+      // 存相对路径；UI 通过 /api/contracts/annotation-download/[id] 鉴权下载
+      annotatedFileUrl = `/contract-annotations/${outName}`;
     } catch (e) {
       // 写文件失败不阻塞 — UI 内仍会显示文本批注
       console.warn("[addAnnotation] DOCX comment write failed:", e);

@@ -155,6 +155,10 @@ export default async function ContractDetailPage({
     PLACEHOLDER_KEYS.map((p) => [p.key, p.desc]),
   );
 
+  // Field values keyed for compare view + review panel (v3 template fields).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const c = contract as any;
+
   // 「上传已有合同」的缺失字段：用 contract 表实际列回查（与 AI 抽取结果分离）
   const uploadValueByKey: Record<string, unknown> = {
     partyAName: contract.partyA,
@@ -178,10 +182,6 @@ export default async function ContractDetailPage({
           return false;
         })
       : [];
-
-  // Field values keyed for compare view + review panel (v3 template fields).
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const c = contract as any;
 
   // 阶梯规则展示
   let tieredText = "";
