@@ -6,7 +6,6 @@ import { useState } from "react";
 import {
   LayoutDashboard,
   Users,
-  KanbanSquare,
   FileText,
   BarChart3,
   Handshake,
@@ -18,7 +17,6 @@ import {
   Check,
   Trash2,
   FolderKanban,
-  BookOpen,
   TrendingUp,
   type LucideIcon,
 } from "lucide-react";
@@ -31,15 +29,14 @@ type NavItem = {
   icon: LucideIcon;
 };
 
+// /tasks 和 /worklogs 不再作为一级导航入口（页面和数据保留），收入工作台 tab。
 const NAV: NavItem[] = [
   { href: "/dashboard", label: "工作台", icon: LayoutDashboard },
   { href: "/customers", label: "客户管理", icon: Users },
-  { href: "/tasks", label: "任务管理", icon: KanbanSquare },
-  { href: "/projects", label: "项目管理", icon: FolderKanban },
-  { href: "/worklogs", label: "工作日志", icon: BookOpen },
   { href: "/contracts", label: "合同管理", icon: FileText },
   { href: "/finance", label: "财务对账", icon: Receipt },
   { href: "/operations", label: "经营管理", icon: TrendingUp },
+  { href: "/projects", label: "项目管理", icon: FolderKanban },
   { href: "/bi", label: "推广数据BI", icon: BarChart3 },
   { href: "/affiliates", label: "联盟资源库", icon: Handshake },
 ];

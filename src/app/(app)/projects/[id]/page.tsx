@@ -9,17 +9,24 @@ import { formatCurrency, formatNumber } from "@/lib/utils";
 import { ProjectHeaderActions } from "./ProjectHeaderActions";
 import { ProjectTimeline } from "./ProjectTimeline";
 import { OneOffFlow } from "./OneOffFlow";
+import { ProjectGmvTargetPanel, type CurrentTargetView } from "./ProjectGmvTargetPanel";
+import { computeBiGmv, computeReconciliationGmv, completionRate, isAchieved, currentMonthKey } from "@/lib/projectKpi";
+import type { Currency } from "@/lib/projectChannels";
 
 export const dynamic = "force-dynamic";
 
 export default async function ProjectDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const session = await requireSession();
   if (!isStaff(session.role)) redirect("/dashboard");
   const { id } = await params;
+  const sp = await searchParams;
+  const targetMonth = sp.targetMonth || currentMonthKey();
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const project = await (prisma.project.findUnique as any)({
@@ -96,6 +103,74 @@ export default async function ProjectDetailPage({
     fromWorkLog: !!e.fromWorkLogId,
     createdAt: e.createdAt.toISOString(),
   }));
+
+  // ── 项目 GMV 目标（仅 INTEGRATED）─────────────────────────────────────────────
+  let gmvCurrent: CurrentTargetView | null = null;
+  let gmvMonthOptions: string[] = [targetMonth];
+  let gmvDefaultAmOwner: string | null = null;
+  let gmvAllUsers: { id: string; name: string }[] = [];
+  if (!isOneOff) {
+    // 拉本项目所有 month + 当前 month 的目标
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const allTargets = await (prisma as any).projectGmvTarget.findMany({
+      where: { projectId: id, deletedAt: null },
+      orderBy: { month: "desc" },
+      include: {
+        amOwner: { select: { id: true, name: true } },
+        channelTargets: {
+          orderBy: { sortOrder: "asc" },
+          include: { owner: { select: { id: true, name: true } } },
+        },
+      },
+    });
+    gmvMonthOptions = Array.from(
+      new Set<string>([targetMonth, ...allTargets.map((t: { month: string }) => t.month)]),
+    ).sort((a, b) => (a < b ? 1 : -1));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const currentTarget = allTargets.find((t: any) => t.month === targetMonth) ?? null;
+    if (currentTarget) {
+      const [biGmv, reconciliationGmv] = await Promise.all([
+        computeBiGmv(brandName, targetMonth),
+        computeReconciliationGmv(project.customerId, project.contractId, targetMonth),
+      ]);
+      const rate = completionRate(currentTarget.monthlyTarget, reconciliationGmv);
+      const ach = isAchieved(currentTarget.monthlyTarget, reconciliationGmv);
+      gmvCurrent = {
+        targetId: currentTarget.id,
+        month: currentTarget.month,
+        amOwnerId: currentTarget.amOwnerId,
+        amOwnerName: currentTarget.amOwner?.name ?? "—",
+        currency: currentTarget.currency as Currency,
+        monthlyTarget: currentTarget.monthlyTarget,
+        thresholdAt80: currentTarget.monthlyTarget * 0.8,
+        biGmv,
+        reconciliationGmv,
+        completionRatePct: rate == null ? null : rate * 100,
+        achieved: ach,
+        remark: currentTarget.remark,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        channels: currentTarget.channelTargets.map((c: any) => ({
+          id: c.id,
+          channelName: c.channelName,
+          ownerId: c.ownerId,
+          ownerName: c.owner?.name ?? "—",
+          role: c.role,
+          currency: c.currency,
+          sharePercent: c.sharePercent,
+          channelGmv: currentTarget.monthlyTarget * (c.sharePercent || 0) / 100,
+        })),
+      };
+    }
+    gmvDefaultAmOwner = project.customer?.backendOwner ? (await prisma.customer.findUnique({
+      where: { id: project.customerId ?? "" },
+      select: { backendOwnerId: true },
+    }))?.backendOwnerId ?? null : null;
+    gmvAllUsers = await prisma.user.findMany({
+      where: { status: "APPROVED", role: { in: ["ADMIN", "USER", "LYNQ_STAFF"] } },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    });
+  }
 
   return (
     <div className="space-y-6">
@@ -214,6 +289,18 @@ export default async function ProjectDetailPage({
       {!isOneOff && (
       <>
       {/* INTEGRATED 内容 */}
+
+      {/* ── 项目 GMV 目标（员工 KPI 第一期）── */}
+      <ProjectGmvTargetPanel
+        projectId={project.id}
+        projectType={project.type}
+        current={gmvCurrent}
+        monthOptions={gmvMonthOptions}
+        selectedMonth={targetMonth}
+        defaultAmOwnerId={gmvDefaultAmOwner}
+        users={gmvAllUsers}
+        canEdit={isStaff(session.role)}
+      />
 
       {/* ── ① 数据维度：推广 BI 数据 ── */}
       <div>

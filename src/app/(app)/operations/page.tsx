@@ -4,6 +4,7 @@ import { requireSession } from "@/lib/session";
 import { isStaff } from "@/lib/permissions";
 import { currentMonthKey } from "@/lib/financeOperations";
 import { OperationsClient } from "./OperationsClient";
+import { getEmployeeKpiByMonth } from "@/actions/employeeKpi";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "经营管理 · Thraive联盟营销系统" };
@@ -18,7 +19,11 @@ export default async function FinanceOperationsPage({
   const sp = await searchParams;
 
   const month = sp.month || currentMonthKey();
-  const initialTab = (sp.tab as "revenue" | "count" | "ar" | "pipeline") || "revenue";
+  const initialTab = (sp.tab as "revenue" | "count" | "ar" | "pipeline" | "kpi") || "revenue";
+  const kpiAmOwnerId = sp.amOwnerId || "";
+  const kpiCustomerId = sp.customerId || "";
+  const kpiProjectId = sp.projectId || "";
+  const scopeView: "mine" | "all" = sp.scope === "all" ? "all" : "mine";
 
   const [snapshots, ars, pipelines, customers, users] = await Promise.all([
     prisma.clientRevenueSnapshot.findMany({
@@ -52,6 +57,26 @@ export default async function FinanceOperationsPage({
       orderBy: { name: "asc" },
     }),
   ]);
+
+  // KPI rows + KPI 项目下拉数据（仅当 tab=kpi 时拉取，节省查询）
+  const kpiRows = initialTab === "kpi"
+    ? await getEmployeeKpiByMonth(
+        {
+          month,
+          amOwnerId: kpiAmOwnerId || undefined,
+          customerId: kpiCustomerId || undefined,
+          projectId: kpiProjectId || undefined,
+        },
+        scopeView,
+      )
+    : [];
+  const kpiProjects = initialTab === "kpi"
+    ? await prisma.project.findMany({
+        where: { type: "INTEGRATED", deletedAt: null },
+        select: { id: true, name: true },
+        orderBy: { name: "asc" },
+      })
+    : [];
 
   // Client Count Summary: derived from the current month's snapshots
   const allMonthSnapshots = snapshots; // already scoped to the selected month above
@@ -134,6 +159,11 @@ export default async function FinanceOperationsPage({
       users={users}
       countSummary={countSummary}
       isAdmin={session.role === "ADMIN"}
+      kpiRows={kpiRows}
+      kpiAmOwnerId={kpiAmOwnerId}
+      kpiCustomerId={kpiCustomerId}
+      kpiProjectId={kpiProjectId}
+      kpiProjects={kpiProjects}
     />
   );
 }

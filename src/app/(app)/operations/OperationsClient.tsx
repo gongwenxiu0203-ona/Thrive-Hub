@@ -5,8 +5,10 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Plus, X, RefreshCw, TrendingUp, Users, FileText, Target, Pencil, Trash2,
-  CheckCircle2, AlertTriangle,
+  CheckCircle2, AlertTriangle, Award,
 } from "lucide-react";
+import { EmployeeKpiTab } from "./EmployeeKpiTab";
+import type { EmployeeKpiRow } from "@/actions/employeeKpi";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatCard } from "@/components/ui/StatCard";
 import { cn, formatDate } from "@/lib/utils";
@@ -94,7 +96,7 @@ type CountSummary = {
   gradeS: number; gradeA: number; gradeB: number; gradeC: number;
 };
 
-type Tab = "revenue" | "count" | "ar" | "pipeline";
+type Tab = "revenue" | "count" | "ar" | "pipeline" | "kpi";
 
 // =============================================================================
 // Main component
@@ -110,6 +112,11 @@ export function OperationsClient({
   users,
   countSummary,
   isAdmin,
+  kpiRows,
+  kpiAmOwnerId,
+  kpiCustomerId,
+  kpiProjectId,
+  kpiProjects,
 }: {
   initialTab: Tab;
   month: string;
@@ -120,6 +127,11 @@ export function OperationsClient({
   users: UserOption[];
   countSummary: CountSummary;
   isAdmin: boolean;
+  kpiRows: EmployeeKpiRow[];
+  kpiAmOwnerId: string;
+  kpiCustomerId: string;
+  kpiProjectId: string;
+  kpiProjects: { id: string; name: string }[];
 }) {
   const router = useRouter();
   const sp = useSearchParams();
@@ -154,6 +166,7 @@ export function OperationsClient({
           { key: "count", label: "客户数统计", icon: Users },
           { key: "ar", label: "应收账款", icon: FileText },
           { key: "pipeline", label: "销售漏斗", icon: Target },
+          { key: "kpi", label: "员工 KPI", icon: Award },
         ] as const).map((t) => (
           <button
             key={t.key}
@@ -181,6 +194,19 @@ export function OperationsClient({
       )}
       {tab === "pipeline" && (
         <PipelineTab pipelines={pipelines} users={users} isAdmin={isAdmin} />
+      )}
+      {tab === "kpi" && (
+        <EmployeeKpiTab
+          rows={kpiRows}
+          month={month}
+          amOwnerId={kpiAmOwnerId}
+          customerId={kpiCustomerId}
+          projectId={kpiProjectId}
+          isAdmin={isAdmin}
+          users={users}
+          customers={customers}
+          projects={kpiProjects}
+        />
       )}
     </div>
   );

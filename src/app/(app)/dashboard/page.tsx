@@ -24,6 +24,7 @@ import {
   parseViewScope,
 } from "@/lib/dataScope";
 import { ScopeToggle } from "@/components/ScopeToggle";
+import { MyKpiSummary } from "./MyKpiSummary";
 
 export const metadata = { title: "工作台 · Thraive联盟营销系统" };
 
@@ -273,6 +274,9 @@ export default async function DashboardPage({
           )}
         </section>
       </div>
+
+      {/* 我的 KPI 摘要（内部员工才有；BRAND/CHANNEL 由 server action 返回 null）*/}
+      {isStaff(session.role) && <MyKpiSummary />}
 
       {/* Client Count Summary: based on operations snapshots (staff only) */}
       {clientCountSummary && (

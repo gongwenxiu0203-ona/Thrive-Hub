@@ -70,6 +70,10 @@ model User {
   contractTemplatesUploaded ContractTemplate[] @relation("ContractTemplateUploader")
   contractVersionsCreated   ContractVersion[]  @relation("ContractVersionCreator")
   contractReviews           ContractReview[]
+  // 项目 GMV 目标（员工 KPI）
+  projectGmvTargetsAm        ProjectGmvTarget[]     @relation("ProjectGmvTargetAm")
+  projectGmvTargetsCreated   ProjectGmvTarget[]     @relation("ProjectGmvTargetCreator")
+  projectChannelTargetsOwned ProjectChannelTarget[]
 }
 
 // 角色级权限配置（每个角色 + 功能 = 一个等级）
@@ -594,10 +598,60 @@ model Project {
   createdBy User           @relation("ProjectCreator", fields: [createdById], references: [id])
   owner     User?          @relation("ProjectOwner", fields: [ownerId], references: [id])
   entries   ProjectEntry[]
+  gmvTargets ProjectGmvTarget[]
 
   @@index([customerId])
   @@index([type])
   @@index([status])
+}
+
+// 项目月度 GMV 目标（员工 KPI 第一期）
+// - 同一项目同一月份只能有一套（@@unique）
+// - amOwnerId 决定该月该项目落到哪位员工的 KPI 汇总
+// - monthlyTarget 是输入；80% 达标线 / 完成率 / 是否达标 均运行时派生，不入库
+model ProjectGmvTarget {
+  id            String   @id @default(cuid())
+  projectId     String
+  month         String   // "YYYY-MM"
+  amOwnerId     String?  // 默认 = Customer.backendOwnerId
+  amRole        String   @default("AM")
+  currency      String   @default("USD") // USD | GBP | EUR | RMB
+  monthlyTarget Float    @default(0)
+  remark        String?
+  createdById   String
+  deletedAt     DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  project        Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  amOwner        User?                  @relation("ProjectGmvTargetAm", fields: [amOwnerId], references: [id], onDelete: SetNull)
+  createdBy      User                   @relation("ProjectGmvTargetCreator", fields: [createdById], references: [id])
+  channelTargets ProjectChannelTarget[]
+
+  @@unique([projectId, month])
+  @@index([month])
+  @@index([amOwnerId])
+}
+
+// 项目渠道目标（Media Buyer / PR / Deal / Creator / ACC / 自定义）
+// - sharePercent 是占比 (0-100)；渠道 GMV 金额运行时派生
+// - 占比合计可 > 100%（UI 红色警告但允许保存）
+model ProjectChannelTarget {
+  id                 String   @id @default(cuid())
+  projectGmvTargetId String
+  channelName        String
+  ownerId            String?
+  role               String   @default("PGM")
+  currency           String   @default("USD") // 默认跟随父目标
+  sharePercent       Float    @default(0)
+  sortOrder          Int      @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  target ProjectGmvTarget @relation(fields: [projectGmvTargetId], references: [id], onDelete: Cascade)
+  owner  User?            @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+
+  @@index([projectGmvTargetId])
 }
 
 // 项目时间流条目（日常工作瀑布流 / 数据维度记录 / 流程节点）

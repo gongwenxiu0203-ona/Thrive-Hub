@@ -185,6 +185,52 @@ export function reminderScope(session: Session): Record<string, unknown> {
   return { targetId: session.userId };
 }
 
+/** Project 行级权限：BRAND/CHANNEL 完全禁入；内部员工 "mine" 匹配 owner/创建人/客户负责人。 */
+export function projectScope(
+  session: Session,
+  view: ViewScope = "mine",
+): Record<string, unknown> {
+  if (isExternalRole(session.role)) {
+    return { id: "__NO_ACCESS__" };
+  }
+  if (isStaff(session.role)) {
+    if (view === "all") return {};
+    return {
+      OR: [
+        { ownerId: session.userId },
+        { createdById: session.userId },
+        { customer: { backendOwnerId: session.userId } },
+        { customer: { businessOwnerId: session.userId } },
+      ],
+    };
+  }
+  return { id: "__NO_ACCESS__" };
+}
+
+/** 员工 KPI 行级权限（作用于 ProjectGmvTarget）。
+ *  ADMIN（all）：无过滤；
+ *  非 ADMIN 或 mine：仅自己作为 amOwner / 项目负责人 / 客户后端负责人的项目目标。
+ *  BRAND/CHANNEL：完全禁入（上层路由再加一道隐藏拦截）。 */
+export function kpiScope(
+  session: Session,
+  view: ViewScope = "mine",
+): Record<string, unknown> {
+  if (isExternalRole(session.role)) {
+    return { id: "__NO_ACCESS__" };
+  }
+  if (isStaff(session.role)) {
+    if (view === "all" && session.role === "ADMIN") return {};
+    return {
+      OR: [
+        { amOwnerId: session.userId },
+        { project: { ownerId: session.userId } },
+        { project: { customer: { backendOwnerId: session.userId } } },
+      ],
+    };
+  }
+  return { id: "__NO_ACCESS__" };
+}
+
 /** 校验外部角色对单条记录的访问权限（详情页用） */
 export function canExternalAccessCustomer(
   session: Session,
