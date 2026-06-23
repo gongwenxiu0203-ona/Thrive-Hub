@@ -25,6 +25,12 @@ import {
 } from "@/lib/dataScope";
 import { ScopeToggle } from "@/components/ScopeToggle";
 import { MyKpiSummary } from "./MyKpiSummary";
+import { DashboardTabs } from "./DashboardTabs";
+import { MyTodoSection } from "./MyTodoSection";
+import { MyTasksTab } from "./MyTasksTab";
+import { MyWorkLogsTab } from "./MyWorkLogsTab";
+import { RecentActivityFeed } from "./RecentActivityFeed";
+import { QuickActions } from "./QuickActions";
 
 export const metadata = { title: "工作台 · Thraive联盟营销系统" };
 
@@ -277,6 +283,21 @@ export default async function DashboardPage({
 
       {/* 我的 KPI 摘要（内部员工才有；BRAND/CHANNEL 由 server action 返回 null）*/}
       {isStaff(session.role) && <MyKpiSummary />}
+
+      {/* 工作台 tabs：我的待办 / 我的任务 / 工作日志（仅内部员工） */}
+      {isStaff(session.role) && (
+        <DashboardTabs
+          todosPanel={<MyTodoSection />}
+          tasksPanel={<MyTasksTab />}
+          logsPanel={<MyWorkLogsTab />}
+        />
+      )}
+
+      {/* 最近动态（仅内部员工） */}
+      {isStaff(session.role) && <RecentActivityFeed />}
+
+      {/* 快捷创建（所有角色都展示，链接走权限路由） */}
+      {isStaff(session.role) && <QuickActions />}
 
       {/* Client Count Summary: based on operations snapshots (staff only) */}
       {clientCountSummary && (
