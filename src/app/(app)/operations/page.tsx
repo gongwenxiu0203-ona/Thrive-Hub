@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { isStaff } from "@/lib/permissions";
+import { customerScope, projectScope } from "@/lib/dataScope";
 import { currentMonthKey } from "@/lib/financeOperations";
 import { OperationsClient } from "./OperationsClient";
 import { getEmployeeKpiByMonth } from "@/actions/employeeKpi";
@@ -58,7 +59,7 @@ export default async function FinanceOperationsPage({
     }),
   ]);
 
-  // KPI rows + KPI 项目下拉数据（仅当 tab=kpi 时拉取，节省查询）
+  // KPI rows + KPI 下拉数据（仅当 tab=kpi 时拉取，节省查询）
   const kpiRows = initialTab === "kpi"
     ? await getEmployeeKpiByMonth(
         {
@@ -70,11 +71,33 @@ export default async function FinanceOperationsPage({
         scopeView,
       )
     : [];
+  // 非 ADMIN 的下拉用 scope 过滤；ADMIN 看全部（codex review：防止泄漏全量名单）
+  const sessForScope = {
+    userId: session.userId,
+    role: session.role,
+    brandName: session.brandName,
+  };
+  const isAdmin = session.role === "ADMIN";
   const kpiProjects = initialTab === "kpi"
     ? await prisma.project.findMany({
-        where: { type: "INTEGRATED", deletedAt: null },
+        where: {
+          type: "INTEGRATED",
+          deletedAt: null,
+          ...(isAdmin ? {} : projectScope(sessForScope, "mine")),
+        },
         select: { id: true, name: true },
         orderBy: { name: "asc" },
+      })
+    : [];
+  const kpiCustomers = initialTab === "kpi"
+    ? await prisma.customer.findMany({
+        where: {
+          deletedAt: null,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          ...(isAdmin ? {} : (customerScope(sessForScope, "mine") as any)),
+        },
+        select: { id: true, brandName: true },
+        orderBy: { brandName: "asc" },
       })
     : [];
 
@@ -158,12 +181,13 @@ export default async function FinanceOperationsPage({
       customers={customers}
       users={users}
       countSummary={countSummary}
-      isAdmin={session.role === "ADMIN"}
+      isAdmin={isAdmin}
       kpiRows={kpiRows}
       kpiAmOwnerId={kpiAmOwnerId}
       kpiCustomerId={kpiCustomerId}
       kpiProjectId={kpiProjectId}
       kpiProjects={kpiProjects}
+      kpiCustomers={kpiCustomers}
     />
   );
 }

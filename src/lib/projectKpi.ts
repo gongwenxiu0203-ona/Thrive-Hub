@@ -49,12 +49,13 @@ export async function computeBiGmv(
   return agg._sum.revenue ?? 0;
 }
 
-/** 客户对账 GMV：仅 status=CONFIRMED 的对账，按 customerId（可选叠加 contractId）+ 月份区间相交。
- *  优先用 finalSalesAmount（CONFIRMED 锁定值），其次 actualSalesAmount。
+/** 客户对账 GMV：仅 status=CONFIRMED 的对账，按 customerId + 月份区间相交聚合。
+ *  之前曾叠加 contractId 严格匹配，但同一客户的不同合同也属于该客户口径，
+ *  叠加 contractId 反而会少算（codex review 反馈）。这里改为只按 customerId
+ *  聚合。优先用 finalSalesAmount（CONFIRMED 锁定值），其次 actualSalesAmount。
  *  整笔计入匹配月份（不按天数摊分）。 */
 export async function computeReconciliationGmv(
   customerId: string | null | undefined,
-  contractId: string | null | undefined,
   yyyyMM: string,
 ): Promise<number> {
   if (!customerId) return 0;
@@ -63,7 +64,6 @@ export async function computeReconciliationGmv(
   const rows = await prisma.customerReconciliation.findMany({
     where: {
       customerId,
-      ...(contractId ? { contractId } : {}),
       status: "CONFIRMED",
       deletedAt: null,
       AND: [

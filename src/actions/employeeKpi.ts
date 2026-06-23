@@ -79,8 +79,9 @@ export async function getEmployeeKpiByMonth(
     month: filters.month,
     deletedAt: null,
     ...scope,
-    // 仅 INTEGRATED 项目参与 KPI（按用户确认的规则）
-    project: { type: "INTEGRATED", deletedAt: null },
+    // 仅 INTEGRATED 且 status=ACTIVE 的项目参与 KPI
+    // （codex review：之前只过滤了 type/deletedAt，已暂停/完成项目会被误计入）
+    project: { type: "INTEGRATED", status: "ACTIVE", deletedAt: null },
   };
   if (filters.amOwnerId) where.amOwnerId = filters.amOwnerId;
   if (filters.projectId) where.projectId = filters.projectId;
@@ -114,7 +115,7 @@ export async function getEmployeeKpiByMonth(
     const customerId = t.project?.customer?.id ?? null;
     const [biGmv, reconciliationGmv] = await Promise.all([
       computeBiGmv(brandName, t.month),
-      computeReconciliationGmv(customerId, t.project?.contractId ?? null, t.month),
+      computeReconciliationGmv(customerId, t.month),
     ]);
     const rate = completionRate(t.monthlyTarget, reconciliationGmv);
     const ach = isAchieved(t.monthlyTarget, reconciliationGmv);

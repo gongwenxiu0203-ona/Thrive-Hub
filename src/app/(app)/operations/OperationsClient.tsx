@@ -117,6 +117,7 @@ export function OperationsClient({
   kpiCustomerId,
   kpiProjectId,
   kpiProjects,
+  kpiCustomers,
 }: {
   initialTab: Tab;
   month: string;
@@ -132,6 +133,7 @@ export function OperationsClient({
   kpiCustomerId: string;
   kpiProjectId: string;
   kpiProjects: { id: string; name: string }[];
+  kpiCustomers: Customer[];
 }) {
   const router = useRouter();
   const sp = useSearchParams();
@@ -204,7 +206,7 @@ export function OperationsClient({
           projectId={kpiProjectId}
           isAdmin={isAdmin}
           users={users}
-          customers={customers}
+          customers={kpiCustomers}
           projects={kpiProjects}
         />
       )}

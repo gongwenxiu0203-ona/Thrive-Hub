@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { isStaff } from "@/lib/dataScope";
+import { isStaff, projectScope } from "@/lib/dataScope";
+import type { SessionPayload } from "@/lib/auth";
 
 type Result<T = void> = { ok: true; data?: T } | { ok: false; error: string };
 
@@ -38,6 +39,32 @@ async function defaultAmOwner(projectId: string): Promise<string | null> {
   return p?.customer?.backendOwnerId ?? null;
 }
 
+/** 行级权限校验：ADMIN 通过；其他内部员工必须命中 projectScope("mine")。
+ *  外部角色已在调用前被 isStaff 拦截。 */
+async function canAccessProject(
+  session: SessionPayload,
+  projectId: string,
+): Promise<boolean> {
+  if (session.role === "ADMIN") {
+    const exists = await prisma.project.findFirst({
+      where: { id: projectId, deletedAt: null },
+      select: { id: true },
+    });
+    return !!exists;
+  }
+  const sessForScope = {
+    userId: session.userId,
+    role: session.role,
+    brandName: session.brandName,
+  };
+  const scope = projectScope(sessForScope, "mine");
+  const exists = await prisma.project.findFirst({
+    where: { id: projectId, deletedAt: null, ...scope },
+    select: { id: true },
+  });
+  return !!exists;
+}
+
 /** Upsert the (projectId, month) target row + replace its channel rows in one
  *  transaction. Idempotent: calling again with the same month replaces the
  *  whole set. */
@@ -51,6 +78,11 @@ export async function setProjectGmvTarget(
   if (!projectId) return { ok: false, error: "缺少项目 id" };
   if (!/^\d{4}-\d{2}$/.test(month)) return { ok: false, error: "月份格式必须是 YYYY-MM" };
   if (monthlyTarget < 0) return { ok: false, error: "月度 GMV 目标不能为负数" };
+
+  // 行级权限：USER 只能改自己范围内的项目目标
+  if (!(await canAccessProject(session, projectId))) {
+    return { ok: false, error: "无权访问该项目" };
+  }
 
   const amOwnerId =
     payload.amOwnerId === undefined ? await defaultAmOwner(projectId) : payload.amOwnerId;
@@ -118,6 +150,9 @@ export async function deleteProjectGmvTarget(targetId: string): Promise<Result> 
     select: { projectId: true },
   });
   if (!row) return { ok: false, error: "目标不存在" };
+  if (!(await canAccessProject(session, row.projectId))) {
+    return { ok: false, error: "无权访问该项目" };
+  }
   await prisma.projectGmvTarget.delete({ where: { id: targetId } });
   revalidatePath(`/projects/${row.projectId}`);
   revalidatePath("/operations");

@@ -4,6 +4,7 @@ import { Building2, Briefcase, Wrench, FileText, BarChart3, ExternalLink } from 
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { isStaff } from "@/lib/permissions";
+import { projectScope } from "@/lib/dataScope";
 import { BackButton } from "@/components/BackButton";
 import { formatCurrency, formatNumber } from "@/lib/utils";
 import { ProjectHeaderActions } from "./ProjectHeaderActions";
@@ -28,9 +29,16 @@ export default async function ProjectDetailPage({
   const sp = await searchParams;
   const targetMonth = sp.targetMonth || currentMonthKey();
 
+  // 行级权限：ADMIN 看全部；USER 仅 owner / 创建人 / 客户负责人匹配项目
+  const sessForScope = {
+    userId: session.userId,
+    role: session.role,
+    brandName: session.brandName,
+  };
+  const scope = session.role === "ADMIN" ? {} : projectScope(sessForScope, "mine");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const project = await (prisma.project.findUnique as any)({
-    where: { id },
+  const project = await (prisma.project.findFirst as any)({
+    where: { id, deletedAt: null, ...scope },
     include: {
       customer: {
         select: {
@@ -49,7 +57,7 @@ export default async function ProjectDetailPage({
       },
     },
   });
-  if (!project || project.deletedAt) notFound();
+  if (!project) notFound();
 
   const isOneOff = project.type === "ONE_OFF";
   const brandName: string = project.customer?.brandName ?? "";
@@ -131,7 +139,7 @@ export default async function ProjectDetailPage({
     if (currentTarget) {
       const [biGmv, reconciliationGmv] = await Promise.all([
         computeBiGmv(brandName, targetMonth),
-        computeReconciliationGmv(project.customerId, project.contractId, targetMonth),
+        computeReconciliationGmv(project.customerId, targetMonth),
       ]);
       const rate = completionRate(currentTarget.monthlyTarget, reconciliationGmv);
       const ach = isAchieved(currentTarget.monthlyTarget, reconciliationGmv);
