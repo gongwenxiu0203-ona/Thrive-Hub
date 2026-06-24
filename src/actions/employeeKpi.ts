@@ -5,60 +5,89 @@ import { requireSession } from "@/lib/session";
 import { isStaff, kpiScope, type ViewScope } from "@/lib/dataScope";
 import { computeBiGmv, computeReconciliationGmv, completionRate, isAchieved } from "@/lib/projectKpi";
 
+// 项目目标（作为 amOwner 的项目）
 export interface ProjectKpiRow {
   targetId: string;
   projectId: string;
   projectName: string;
   customerId: string | null;
   customerName: string;
-  amOwnerId: string | null;
-  amOwnerName: string;
   month: string;
   currency: string;
   monthlyTarget: number;
   thresholdAt80: number;          // 80% 达标线
   biGmv: number;                  // BI 实际 GMV
-  reconciliationGmv: number;      // 客户对账 GMV（KPI 完成率以此为准）
+  reconciliationGmv: number;      // 客户对账 GMV
   completionRatePct: number | null;
-  achieved: boolean | null;       // null = 未设置目标
-  channels: ChannelRow[];
+  achieved: boolean | null;
 }
 
-export interface ChannelRow {
-  id: string;
+// 渠道目标（作为 channelOwner 的渠道）
+export interface ChannelKpiRow {
+  channelTargetId: string;
+  projectId: string;
+  projectName: string;
+  customerName: string;
   channelName: string;
-  ownerId: string | null;
-  ownerName: string;
   role: string;
   currency: string;
   sharePercent: number;
-  channelGmv: number;
+  monthlyChannelTarget: number;          // 项目 monthlyTarget × share%
+  thresholdAt80: number;
+  channelBiGmv: number;                  // 项目 BI GMV × share%
+  channelReconciliationGmv: number;      // 项目对账 GMV × share%
+  completionRatePct: number | null;
+  achieved: boolean | null;
 }
 
+// 员工聚合行（项目 + 渠道 双段）
 export interface EmployeeKpiRow {
-  amOwnerId: string | null;
-  amOwnerName: string;
+  employeeId: string | null;
+  employeeName: string;
   month: string;
-  activeProjectCount: number;          // 进行中项目数（INTEGRATED 且 status=ACTIVE，且当月有目标）
-  totalMonthlyTarget: number;          // 月度 GMV 目标合计（按主货币 USD 简化合计；混币时给出注记）
-  mixedCurrency: boolean;              // 若员工的项目跨币种，置 true
-  totalBiGmv: number;
-  totalReconciliationGmv: number;
-  completionRatePct: number | null;
-  achievedCount: number;
-  notAchievedCount: number;
-  projects: ProjectKpiRow[];
+  primaryCurrency: string;
+  mixedCurrency: boolean;
+  // 项目 KPI（作为 AM）
+  project: {
+    count: number;
+    totalTarget: number;
+    totalBiGmv: number;
+    totalReconciliationGmv: number;
+    completionRatePct: number | null;
+    achieved: boolean | null;
+    items: ProjectKpiRow[];
+  };
+  // 渠道 KPI（作为渠道负责人）
+  channel: {
+    count: number;
+    totalTarget: number;
+    totalBiGmv: number;
+    totalReconciliationGmv: number;
+    completionRatePct: number | null;
+    achieved: boolean | null;
+    items: ChannelKpiRow[];
+  };
+  // 月度总评：项目目标优先 — 只要项目目标达标即整月达标（按产品规则）
+  // - 仅有项目目标：按项目达标
+  // - 仅有渠道目标：按渠道达标
+  // - 两者皆有：按项目达标（渠道结果作参考）
+  // - 都没有目标：null（未设置）
+  overallAchieved: boolean | null;
+  overallReason: "PROJECT" | "CHANNEL" | "NONE";
 }
 
 interface Filters {
   month: string;
-  amOwnerId?: string;          // 指定单个员工
+  amOwnerId?: string;
   projectId?: string;
   customerId?: string;
 }
 
-/** Fetch all ProjectGmvTarget rows for a month (filtered by view scope), then
- *  enrich each with BI/对账 GMV, completion rate, channel details. */
+/** Fetch all ProjectGmvTarget + their ProjectChannelTargets for the month,
+ *  then aggregate by employee (union of amOwner and channelOwner).
+ *  - INTEGRATED 且 status=ACTIVE 的项目才参与
+ *  - 渠道实际 GMV：按 share% 从项目对账 GMV / BI GMV 派生
+ *  - 总评按项目优先（产品规则） */
 export async function getEmployeeKpiByMonth(
   filters: Filters,
   view: ViewScope = "mine",
@@ -71,22 +100,34 @@ export async function getEmployeeKpiByMonth(
     role: session.role,
     brandName: session.brandName,
   };
-  // 普通员工强制 mine
   const effectiveView: ViewScope = session.role === "ADMIN" ? view : "mine";
-  const scope = kpiScope(sessForScope, effectiveView);
+  const targetScope = kpiScope(sessForScope, effectiveView);
+
+  // 普通员工：除了 amOwner 匹配，还要让 channelOwner 匹配能进入 scope
+  // 这里改用一个稍宽的 OR：作为 amOwner、作为渠道负责人、或项目 owner/customer.backendOwner 已被 kpiScope 覆盖
+  // 为了让普通员工看到自己作为 channelOwner 的项目，扩展 scope
+  const scopeForUser =
+    effectiveView === "all"
+      ? {}
+      : {
+          OR: [
+            { amOwnerId: session.userId },
+            { project: { ownerId: session.userId } },
+            { project: { customer: { backendOwnerId: session.userId } } },
+            // 关键：作为渠道负责人也能命中
+            { channelTargets: { some: { ownerId: session.userId } } },
+          ],
+        };
 
   const where: Record<string, unknown> = {
     month: filters.month,
     deletedAt: null,
-    ...scope,
-    // 仅 INTEGRATED 且 status=ACTIVE 的项目参与 KPI
-    // （codex review：之前只过滤了 type/deletedAt，已暂停/完成项目会被误计入）
+    ...(effectiveView === "all" ? targetScope : scopeForUser),
     project: { type: "INTEGRATED", status: "ACTIVE", deletedAt: null },
   };
   if (filters.amOwnerId) where.amOwnerId = filters.amOwnerId;
   if (filters.projectId) where.projectId = filters.projectId;
   if (filters.customerId) {
-    // 嵌套 customerId 在 project 关系下
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (where.project as any) = { ...(where.project as any), customerId: filters.customerId };
   }
@@ -95,9 +136,7 @@ export async function getEmployeeKpiByMonth(
     where,
     include: {
       project: {
-        include: {
-          customer: { select: { id: true, brandName: true } },
-        },
+        include: { customer: { select: { id: true, brandName: true } } },
       },
       amOwner: { select: { id: true, name: true } },
       channelTargets: {
@@ -105,139 +144,186 @@ export async function getEmployeeKpiByMonth(
         include: { owner: { select: { id: true, name: true } } },
       },
     },
-    orderBy: [{ amOwnerId: "asc" }, { projectId: "asc" }],
   });
 
-  // Per-project enrichment with BI / 对账 GMV
-  const projectRows: ProjectKpiRow[] = [];
-  for (const t of targets) {
-    const brandName = t.project?.customer?.brandName ?? "";
-    const customerId = t.project?.customer?.id ?? null;
-    const [biGmv, reconciliationGmv] = await Promise.all([
-      computeBiGmv(brandName, t.month),
-      computeReconciliationGmv(customerId, t.month),
-    ]);
-    const rate = completionRate(t.monthlyTarget, reconciliationGmv);
-    const ach = isAchieved(t.monthlyTarget, reconciliationGmv);
-    projectRows.push({
-      targetId: t.id,
-      projectId: t.projectId,
-      projectName: t.project?.name ?? "—",
-      customerId,
-      customerName: brandName || "—",
-      amOwnerId: t.amOwnerId,
-      amOwnerName: t.amOwner?.name ?? "—",
-      month: t.month,
-      currency: t.currency,
-      monthlyTarget: t.monthlyTarget,
-      thresholdAt80: t.monthlyTarget * 0.8,
-      biGmv,
-      reconciliationGmv,
-      completionRatePct: rate == null ? null : rate * 100,
-      achieved: ach,
-      channels: t.channelTargets.map((c) => ({
-        id: c.id,
-        channelName: c.channelName,
-        ownerId: c.ownerId,
-        ownerName: c.owner?.name ?? "—",
-        role: c.role,
-        currency: c.currency,
-        sharePercent: c.sharePercent,
-        channelGmv: t.monthlyTarget * (c.sharePercent || 0) / 100,
-      })),
-    });
+  // 先把每个 target 的 BI / 对账 GMV 算出来缓存，避免在两个聚合循环中重复查
+  const enriched = await Promise.all(
+    targets.map(async (t) => {
+      const brandName = t.project?.customer?.brandName ?? "";
+      const customerId = t.project?.customer?.id ?? null;
+      const [biGmv, reconciliationGmv] = await Promise.all([
+        computeBiGmv(brandName, t.month),
+        computeReconciliationGmv(customerId, t.month),
+      ]);
+      return { target: t, brandName, customerId, biGmv, reconciliationGmv };
+    }),
+  );
+
+  // 收集所有相关员工 id：amOwnerId ∪ 每个渠道的 ownerId
+  const employeeMeta = new Map<string, { id: string | null; name: string }>();
+  for (const e of enriched) {
+    if (e.target.amOwnerId) {
+      employeeMeta.set(e.target.amOwnerId, {
+        id: e.target.amOwnerId,
+        name: e.target.amOwner?.name ?? "—",
+      });
+    }
+    for (const ch of e.target.channelTargets) {
+      if (ch.ownerId) {
+        employeeMeta.set(ch.ownerId, {
+          id: ch.ownerId,
+          name: ch.owner?.name ?? "—",
+        });
+      }
+    }
   }
 
-  // Aggregate by amOwnerId
-  const map = new Map<string, EmployeeKpiRow>();
-  for (const p of projectRows) {
-    const key = p.amOwnerId ?? "__UNASSIGNED__";
-    let row = map.get(key);
-    if (!row) {
-      row = {
-        amOwnerId: p.amOwnerId,
-        amOwnerName: p.amOwnerName,
-        month: filters.month,
-        activeProjectCount: 0,
-        totalMonthlyTarget: 0,
-        mixedCurrency: false,
+  // 为每个员工聚合 project + channel
+  const rowsMap = new Map<string, EmployeeKpiRow>();
+  for (const [key, meta] of employeeMeta) {
+    rowsMap.set(key, {
+      employeeId: meta.id,
+      employeeName: meta.name,
+      month: filters.month,
+      primaryCurrency: "USD",
+      mixedCurrency: false,
+      project: {
+        count: 0,
+        totalTarget: 0,
         totalBiGmv: 0,
         totalReconciliationGmv: 0,
         completionRatePct: null,
-        achievedCount: 0,
-        notAchievedCount: 0,
-        projects: [],
-      };
-      map.set(key, row);
-    }
-    row.projects.push(p);
-    row.activeProjectCount += 1;
-    row.totalMonthlyTarget += p.monthlyTarget;
-    row.totalBiGmv += p.biGmv;
-    row.totalReconciliationGmv += p.reconciliationGmv;
-    if (p.achieved === true) row.achievedCount += 1;
-    if (p.achieved === false) row.notAchievedCount += 1;
-
-    // 货币混合检测：以第一个项目的货币为基准
-    if (row.projects.length > 1) {
-      const baseCurrency = row.projects[0].currency;
-      if (p.currency !== baseCurrency) row.mixedCurrency = true;
-    }
-  }
-  // 计算汇总完成率
-  for (const r of map.values()) {
-    r.completionRatePct = r.totalMonthlyTarget > 0
-      ? (r.totalReconciliationGmv / r.totalMonthlyTarget) * 100
-      : null;
+        achieved: null,
+        items: [],
+      },
+      channel: {
+        count: 0,
+        totalTarget: 0,
+        totalBiGmv: 0,
+        totalReconciliationGmv: 0,
+        completionRatePct: null,
+        achieved: null,
+        items: [],
+      },
+      overallAchieved: null,
+      overallReason: "NONE",
+    });
   }
 
-  return Array.from(map.values()).sort((a, b) => {
-    // 未达标多的员工排前面，便于发现风险
-    return b.notAchievedCount - a.notAchievedCount;
+  for (const e of enriched) {
+    const { target: t, brandName, biGmv, reconciliationGmv } = e;
+    const projectRate = completionRate(t.monthlyTarget, reconciliationGmv);
+    const projectAch = isAchieved(t.monthlyTarget, reconciliationGmv);
+
+    // 项目 KPI 归入 amOwner
+    if (t.amOwnerId && rowsMap.has(t.amOwnerId)) {
+      const row = rowsMap.get(t.amOwnerId)!;
+      row.project.items.push({
+        targetId: t.id,
+        projectId: t.projectId,
+        projectName: t.project?.name ?? "—",
+        customerId: e.customerId,
+        customerName: brandName || "—",
+        month: t.month,
+        currency: t.currency,
+        monthlyTarget: t.monthlyTarget,
+        thresholdAt80: t.monthlyTarget * 0.8,
+        biGmv,
+        reconciliationGmv,
+        completionRatePct: projectRate == null ? null : projectRate * 100,
+        achieved: projectAch,
+      });
+      row.project.count += 1;
+      row.project.totalTarget += t.monthlyTarget;
+      row.project.totalBiGmv += biGmv;
+      row.project.totalReconciliationGmv += reconciliationGmv;
+
+      // 主货币
+      if (row.project.count === 1 && row.channel.count === 0) {
+        row.primaryCurrency = t.currency;
+      } else if (t.currency !== row.primaryCurrency) {
+        row.mixedCurrency = true;
+      }
+    }
+
+    // 渠道 KPI 归入每个 channelOwner
+    for (const ch of t.channelTargets) {
+      if (!ch.ownerId || !rowsMap.has(ch.ownerId)) continue;
+      const row = rowsMap.get(ch.ownerId)!;
+      const channelTarget = t.monthlyTarget * (ch.sharePercent || 0) / 100;
+      const channelBi = biGmv * (ch.sharePercent || 0) / 100;
+      const channelRec = reconciliationGmv * (ch.sharePercent || 0) / 100;
+      const chRate = completionRate(channelTarget, channelRec);
+      const chAch = isAchieved(channelTarget, channelRec);
+      row.channel.items.push({
+        channelTargetId: ch.id,
+        projectId: t.projectId,
+        projectName: t.project?.name ?? "—",
+        customerName: brandName || "—",
+        channelName: ch.channelName,
+        role: ch.role,
+        currency: ch.currency,
+        sharePercent: ch.sharePercent,
+        monthlyChannelTarget: channelTarget,
+        thresholdAt80: channelTarget * 0.8,
+        channelBiGmv: channelBi,
+        channelReconciliationGmv: channelRec,
+        completionRatePct: chRate == null ? null : chRate * 100,
+        achieved: chAch,
+      });
+      row.channel.count += 1;
+      row.channel.totalTarget += channelTarget;
+      row.channel.totalBiGmv += channelBi;
+      row.channel.totalReconciliationGmv += channelRec;
+
+      if (row.project.count === 0 && row.channel.count === 1) {
+        row.primaryCurrency = ch.currency;
+      } else if (ch.currency !== row.primaryCurrency) {
+        row.mixedCurrency = true;
+      }
+    }
+  }
+
+  // 完成率 + 总评
+  for (const row of rowsMap.values()) {
+    if (row.project.totalTarget > 0) {
+      row.project.completionRatePct =
+        (row.project.totalReconciliationGmv / row.project.totalTarget) * 100;
+      row.project.achieved = row.project.completionRatePct >= 80;
+    }
+    if (row.channel.totalTarget > 0) {
+      row.channel.completionRatePct =
+        (row.channel.totalReconciliationGmv / row.channel.totalTarget) * 100;
+      row.channel.achieved = row.channel.completionRatePct >= 80;
+    }
+    // 总评：项目优先
+    if (row.project.count > 0) {
+      row.overallAchieved = row.project.achieved;
+      row.overallReason = "PROJECT";
+    } else if (row.channel.count > 0) {
+      row.overallAchieved = row.channel.achieved;
+      row.overallReason = "CHANNEL";
+    } else {
+      row.overallAchieved = null;
+      row.overallReason = "NONE";
+    }
+  }
+
+  return Array.from(rowsMap.values()).sort((a, b) => {
+    // 未达标排前
+    const aNotAch = (a.project.achieved === false ? 1 : 0) + (a.channel.achieved === false ? 1 : 0);
+    const bNotAch = (b.project.achieved === false ? 1 : 0) + (b.channel.achieved === false ? 1 : 0);
+    if (bNotAch !== aNotAch) return bNotAch - aNotAch;
+    return (b.project.count + b.channel.count) - (a.project.count + a.channel.count);
   });
 }
 
-/** Dashboard "我的 KPI 摘要"：只看当前用户当月，且强制 mine。 */
+/** Dashboard "我的 KPI 摘要"：当前用户当月汇总（项目 + 渠道）。 */
 export async function getMyKpiSummary(month: string): Promise<EmployeeKpiRow | null> {
   const session = await requireSession();
   if (!isStaff(session.role)) return null;
-  const rows = await getEmployeeKpiByMonth(
-    { month, amOwnerId: session.userId },
-    "mine",
-  );
-  // 取自己那条；若不存在但仍有其他匹配（项目负责人 / 客户负责人路径），合并
-  const mine = rows.find((r) => r.amOwnerId === session.userId);
-  if (mine) return mine;
-  // 兜底：合并所有命中的项目作为该员工的"汇总"
-  if (rows.length === 0) return null;
-  const merged: EmployeeKpiRow = {
-    amOwnerId: session.userId,
-    amOwnerName: session.name,
-    month,
-    activeProjectCount: 0,
-    totalMonthlyTarget: 0,
-    mixedCurrency: false,
-    totalBiGmv: 0,
-    totalReconciliationGmv: 0,
-    completionRatePct: null,
-    achievedCount: 0,
-    notAchievedCount: 0,
-    projects: [],
-  };
-  for (const r of rows) {
-    merged.activeProjectCount += r.activeProjectCount;
-    merged.totalMonthlyTarget += r.totalMonthlyTarget;
-    merged.totalBiGmv += r.totalBiGmv;
-    merged.totalReconciliationGmv += r.totalReconciliationGmv;
-    merged.achievedCount += r.achievedCount;
-    merged.notAchievedCount += r.notAchievedCount;
-    merged.projects.push(...r.projects);
-    if (r.mixedCurrency) merged.mixedCurrency = true;
-  }
-  merged.completionRatePct =
-    merged.totalMonthlyTarget > 0
-      ? (merged.totalReconciliationGmv / merged.totalMonthlyTarget) * 100
-      : null;
-  return merged;
+  // 强制 mine + 限定到自己
+  const rows = await getEmployeeKpiByMonth({ month }, "mine");
+  const mine = rows.find((r) => r.employeeId === session.userId);
+  return mine ?? null;
 }
-
