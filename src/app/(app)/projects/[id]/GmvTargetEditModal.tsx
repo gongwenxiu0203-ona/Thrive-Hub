@@ -150,8 +150,10 @@ export function GmvTargetEditModal({
               <input
                 type="number"
                 min={0}
-                value={monthlyTarget}
+                value={monthlyTarget === 0 ? "" : monthlyTarget}
                 onChange={(e) => setMonthlyTarget(Number(e.target.value) || 0)}
+                onFocus={(e) => e.target.select()}
+                placeholder="0"
                 className="input"
               />
             </div>
@@ -228,8 +230,10 @@ export function GmvTargetEditModal({
                         min={0}
                         max={1000}
                         step={0.1}
-                        value={c.sharePercent}
+                        value={c.sharePercent === 0 ? "" : c.sharePercent}
                         onChange={(e) => updateChannel(idx, { sharePercent: Number(e.target.value) || 0 })}
+                        onFocus={(e) => e.target.select()}
+                        placeholder="0"
                         className="w-20 rounded border border-slate-200 px-2 py-1 text-right text-sm"
                       />
                     </td>

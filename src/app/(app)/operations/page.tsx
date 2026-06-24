@@ -24,7 +24,10 @@ export default async function FinanceOperationsPage({
   const kpiAmOwnerId = sp.amOwnerId || "";
   const kpiCustomerId = sp.customerId || "";
   const kpiProjectId = sp.projectId || "";
-  const scopeView: "mine" | "all" = sp.scope === "all" ? "all" : "mine";
+  // ADMIN 在员工 KPI tab 默认看全部员工（除非显式 ?scope=mine）；其他 tab 仍走 mine 默认
+  const isAdmin = session.role === "ADMIN";
+  const kpiDefaultsAll = isAdmin && initialTab === "kpi" && sp.scope !== "mine";
+  const scopeView: "mine" | "all" = sp.scope === "all" || kpiDefaultsAll ? "all" : "mine";
 
   const [snapshots, ars, pipelines, customers, users] = await Promise.all([
     prisma.clientRevenueSnapshot.findMany({
@@ -77,7 +80,6 @@ export default async function FinanceOperationsPage({
     role: session.role,
     brandName: session.brandName,
   };
-  const isAdmin = session.role === "ADMIN";
   const kpiProjects = initialTab === "kpi"
     ? await prisma.project.findMany({
         where: {
