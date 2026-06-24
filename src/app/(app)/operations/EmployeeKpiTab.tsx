@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronRight, ChevronDown, ExternalLink, Target, Layers } from "lucide-react";
+import { ChevronDown, ChevronUp, ExternalLink, Target, Layers, User } from "lucide-react";
 import { CURRENCY_SYMBOLS, type Currency } from "@/lib/projectChannels";
 import type { EmployeeKpiRow, ProjectKpiRow, ChannelKpiRow } from "@/actions/employeeKpi";
 
@@ -32,18 +32,6 @@ export function EmployeeKpiTab({
   projects: { id: string; name: string }[];
 }) {
   const router = useRouter();
-  const [expanded, setExpanded] = useState<Set<string>>(
-    new Set(rows.slice(0, 2).map((r) => r.employeeId ?? "__UNASSIGNED__")),
-  );
-
-  function toggle(key: string) {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }
 
   function navigate(filterKey: string, value: string) {
     const usp = new URLSearchParams(window.location.search);
@@ -53,9 +41,8 @@ export function EmployeeKpiTab({
     router.push(`/operations?${usp.toString()}`);
   }
 
-  const totalEmployees = rows.length;
-  const totalProjects = rows.reduce((a, r) => a + r.project.count, 0);
-  const totalChannels = rows.reduce((a, r) => a + r.channel.count, 0);
+  const totalProjectTargets = rows.reduce((a, r) => a + r.project.count, 0);
+  const totalChannelTargets = rows.reduce((a, r) => a + r.channel.count, 0);
   const totalNotAchieved = rows.filter((r) => r.overallAchieved === false).length;
 
   return (
@@ -107,9 +94,9 @@ export function EmployeeKpiTab({
           ))}
         </select>
         <div className="ml-auto flex gap-3 text-xs text-slate-500">
-          <span>员工数 <strong className="text-slate-700">{totalEmployees}</strong></span>
-          <span>项目目标 <strong className="text-slate-700">{totalProjects}</strong></span>
-          <span>渠道目标 <strong className="text-slate-700">{totalChannels}</strong></span>
+          <span>员工数 <strong className="text-slate-700">{rows.length}</strong></span>
+          <span>项目目标 <strong className="text-slate-700">{totalProjectTargets}</strong></span>
+          <span>渠道目标 <strong className="text-slate-700">{totalChannelTargets}</strong></span>
           <span>整月未达标 <strong className={totalNotAchieved > 0 ? "text-rose-600" : "text-slate-700"}>{totalNotAchieved}</strong></span>
         </div>
       </div>
@@ -119,151 +106,189 @@ export function EmployeeKpiTab({
           本月（{month}）尚未有员工 KPI 数据。请在项目详情页设置月度 GMV 目标。
         </div>
       ) : (
-        <div className="card overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-xs text-slate-500">
-              <tr>
-                <th className="px-2 py-2 text-left w-6"></th>
-                <th className="px-2 py-2 text-left">员工</th>
-                <th className="px-2 py-2 text-center" colSpan={4}>
-                  <div className="flex items-center justify-center gap-1">
-                    <Target className="h-3.5 w-3.5" /> 项目目标（作为 AM）
-                  </div>
-                </th>
-                <th className="px-2 py-2 text-center" colSpan={4}>
-                  <div className="flex items-center justify-center gap-1">
-                    <Layers className="h-3.5 w-3.5" /> 渠道目标（作为负责人）
-                  </div>
-                </th>
-                <th className="px-2 py-2 text-right">月度总评</th>
-              </tr>
-              <tr className="text-[10px] text-slate-400">
-                <th></th>
-                <th></th>
-                <th className="px-2 py-1 text-right">数</th>
-                <th className="px-2 py-1 text-right">目标</th>
-                <th className="px-2 py-1 text-right">对账 GMV</th>
-                <th className="px-2 py-1 text-right">完成率</th>
-                <th className="px-2 py-1 text-right">数</th>
-                <th className="px-2 py-1 text-right">目标</th>
-                <th className="px-2 py-1 text-right">对账 GMV</th>
-                <th className="px-2 py-1 text-right">完成率</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => {
-                const key = r.employeeId ?? "__UNASSIGNED__";
-                const isOpen = expanded.has(key);
-                const sym = CURRENCY_SYMBOLS[r.primaryCurrency as Currency] ?? "$";
-                return (
-                  <>
-                    <tr
-                      key={key}
-                      className={`border-t border-slate-100 ${r.overallAchieved === false ? "bg-rose-50/30" : ""}`}
-                    >
-                      <td className="px-2 py-2">
-                        <button type="button" onClick={() => toggle(key)} className="text-slate-400 hover:text-slate-700">
-                          {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                        </button>
-                      </td>
-                      <td className="px-2 py-2 font-medium text-slate-800">
-                        {r.employeeName}
-                        {r.mixedCurrency && <span className="ml-1 text-[10px] text-amber-600" title="货币不一致">⚠</span>}
-                      </td>
-                      {/* 项目段 */}
-                      <td className="px-2 py-2 text-right">{r.project.count}</td>
-                      <td className="px-2 py-2 text-right">{r.project.count > 0 ? `${sym}${r.project.totalTarget.toLocaleString()}` : "—"}</td>
-                      <td className="px-2 py-2 text-right">{r.project.count > 0 ? `${sym}${r.project.totalReconciliationGmv.toLocaleString()}` : "—"}</td>
-                      <td className={`px-2 py-2 text-right font-semibold ${
-                        r.project.completionRatePct == null ? "text-slate-400"
-                          : r.project.completionRatePct >= 80 ? "text-emerald-600" : "text-rose-600"
-                      }`}>
-                        {r.project.completionRatePct == null ? "—" : `${r.project.completionRatePct.toFixed(1)}%`}
-                      </td>
-                      {/* 渠道段 */}
-                      <td className="px-2 py-2 text-right">{r.channel.count}</td>
-                      <td className="px-2 py-2 text-right">{r.channel.count > 0 ? `${sym}${r.channel.totalTarget.toLocaleString()}` : "—"}</td>
-                      <td className="px-2 py-2 text-right">{r.channel.count > 0 ? `${sym}${r.channel.totalReconciliationGmv.toLocaleString()}` : "—"}</td>
-                      <td className={`px-2 py-2 text-right font-semibold ${
-                        r.channel.completionRatePct == null ? "text-slate-400"
-                          : r.channel.completionRatePct >= 80 ? "text-emerald-600" : "text-rose-600"
-                      }`}>
-                        {r.channel.completionRatePct == null ? "—" : `${r.channel.completionRatePct.toFixed(1)}%`}
-                      </td>
-                      {/* 总评 */}
-                      <td className="px-2 py-2 text-right">
-                        <OverallBadge row={r} />
-                      </td>
-                    </tr>
-                    {isOpen && (
-                      <tr className="bg-slate-50/40">
-                        <td></td>
-                        <td colSpan={10} className="px-4 py-3">
-                          {r.project.items.length > 0 && (
-                            <div className="mb-3">
-                              <p className="mb-1 flex items-center gap-1 text-xs font-semibold text-slate-600">
-                                <Target className="h-3 w-3" /> 项目 KPI 明细
-                              </p>
-                              <ProjectSubTable items={r.project.items} />
-                            </div>
-                          )}
-                          {r.channel.items.length > 0 && (
-                            <div>
-                              <p className="mb-1 flex items-center gap-1 text-xs font-semibold text-slate-600">
-                                <Layers className="h-3 w-3" /> 渠道 KPI 明细
-                              </p>
-                              <ChannelSubTable items={r.channel.items} />
-                            </div>
-                          )}
-                          {r.project.items.length === 0 && r.channel.items.length === 0 && (
-                            <p className="text-xs text-slate-400">无明细</p>
-                          )}
-                        </td>
-                      </tr>
-                    )}
-                  </>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="grid gap-4 lg:grid-cols-2">
+          {rows.map((r) => (
+            <EmployeeCard key={r.employeeId ?? "__UNASSIGNED__"} row={r} />
+          ))}
         </div>
       )}
     </div>
   );
 }
 
-function OverallBadge({ row: r }: { row: EmployeeKpiRow }) {
-  if (r.overallAchieved == null) {
-    return <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] text-slate-500">未设置</span>;
-  }
-  if (r.overallAchieved) {
-    return (
-      <span className="inline-flex items-center gap-1 rounded bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
-        达标
-        <span className="text-[9px] opacity-70">{r.overallReason === "PROJECT" ? "(按项目)" : "(按渠道)"}</span>
-      </span>
-    );
-  }
+function EmployeeCard({ row: r }: { row: EmployeeKpiRow }) {
+  const [open, setOpen] = useState(false);
+  const sym = CURRENCY_SYMBOLS[r.primaryCurrency as Currency] ?? "$";
+  const hasProject = r.project.count > 0;
+  const hasChannel = r.channel.count > 0;
+
+  // 卡片描边按总评：未达标=红，达标=绿，未设置=灰
+  const borderColor =
+    r.overallAchieved == null
+      ? "border-slate-200"
+      : r.overallAchieved
+        ? "border-emerald-200"
+        : "border-rose-200";
+
   return (
-    <span className="inline-flex items-center gap-1 rounded bg-rose-100 px-2 py-0.5 text-[10px] font-semibold text-rose-700">
-      未达标
-      <span className="text-[9px] opacity-70">{r.overallReason === "PROJECT" ? "(按项目)" : "(按渠道)"}</span>
+    <div className={`card overflow-hidden p-0 ${borderColor}`}>
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/50 px-4 py-3">
+        <div className="flex items-center gap-2">
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-50 text-brand-700">
+            <User className="h-4 w-4" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-slate-800">
+              {r.employeeName}
+              {r.mixedCurrency && <span className="ml-1 text-[10px] text-amber-600" title="货币不一致">⚠</span>}
+            </p>
+            <p className="text-[10px] text-slate-400">{r.month}</p>
+          </div>
+        </div>
+        <OverallBadge ach={r.overallAchieved} reason={r.overallReason} />
+      </div>
+
+      {/* 双段 */}
+      <div className="grid gap-0 sm:grid-cols-2">
+        {/* 项目段 */}
+        <SectionPanel
+          icon={<Target className="h-3.5 w-3.5" />}
+          title="项目目标（作为 AM）"
+          accent="text-brand-600"
+          hasData={hasProject}
+          emptyText="本月无项目目标"
+          metrics={[
+            { label: "项目数", value: String(r.project.count) },
+            { label: "目标合计", value: `${sym}${r.project.totalTarget.toLocaleString()}` },
+            { label: "对账 GMV", value: `${sym}${r.project.totalReconciliationGmv.toLocaleString()}` },
+            {
+              label: "完成率",
+              value: r.project.completionRatePct == null ? "—" : `${r.project.completionRatePct.toFixed(1)}%`,
+              color: r.project.completionRatePct == null ? "text-slate-400"
+                : r.project.completionRatePct >= 80 ? "text-emerald-600" : "text-rose-600",
+            },
+          ]}
+        />
+
+        {/* 渠道段 */}
+        <SectionPanel
+          icon={<Layers className="h-3.5 w-3.5" />}
+          title="渠道目标（作为负责人）"
+          accent="text-indigo-600"
+          hasData={hasChannel}
+          emptyText="本月无渠道目标"
+          divider
+          metrics={[
+            { label: "渠道数", value: String(r.channel.count) },
+            { label: "目标合计", value: `${sym}${r.channel.totalTarget.toLocaleString()}` },
+            { label: "折算对账", value: `${sym}${r.channel.totalReconciliationGmv.toLocaleString()}`, hint: "按占比派生" },
+            {
+              label: "完成率",
+              value: r.channel.completionRatePct == null ? "—" : `${r.channel.completionRatePct.toFixed(1)}%`,
+              color: r.channel.completionRatePct == null ? "text-slate-400"
+                : r.channel.completionRatePct >= 80 ? "text-emerald-600" : "text-rose-600",
+            },
+          ]}
+        />
+      </div>
+
+      {/* 展开明细 */}
+      {(hasProject || hasChannel) && (
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className="flex w-full items-center justify-center gap-1 border-t border-slate-100 bg-slate-50/50 py-2 text-xs text-slate-500 hover:bg-slate-100"
+        >
+          {open ? <>收起明细 <ChevronUp className="h-3 w-3" /></> : <>查看明细 <ChevronDown className="h-3 w-3" /></>}
+        </button>
+      )}
+      {open && (
+        <div className="space-y-3 border-t border-slate-100 bg-white p-3">
+          {hasProject && (
+            <div>
+              <p className="mb-1.5 flex items-center gap-1 text-[11px] font-semibold text-brand-700">
+                <Target className="h-3 w-3" /> 项目 KPI 明细
+              </p>
+              <ProjectSubTable items={r.project.items} />
+            </div>
+          )}
+          {hasChannel && (
+            <div>
+              <p className="mb-1.5 flex items-center gap-1 text-[11px] font-semibold text-indigo-700">
+                <Layers className="h-3 w-3" /> 渠道 KPI 明细
+              </p>
+              <ChannelSubTable items={r.channel.items} />
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface SectionMetric {
+  label: string;
+  value: string;
+  color?: string;
+  hint?: string;
+}
+
+function SectionPanel({
+  icon, title, accent, hasData, emptyText, divider, metrics,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  accent: string;
+  hasData: boolean;
+  emptyText: string;
+  divider?: boolean;
+  metrics: SectionMetric[];
+}) {
+  return (
+    <div className={`p-3 ${divider ? "sm:border-l border-slate-100" : ""}`}>
+      <p className={`mb-2 flex items-center gap-1 text-[11px] font-semibold ${accent}`}>
+        {icon} {title}
+      </p>
+      {!hasData ? (
+        <p className="py-3 text-center text-xs text-slate-400">{emptyText}</p>
+      ) : (
+        <div className="grid grid-cols-2 gap-1.5">
+          {metrics.map((m) => (
+            <div key={m.label} className="rounded border border-slate-100 bg-white px-2 py-1.5">
+              <p className="text-[10px] text-slate-400">{m.label}</p>
+              <p className={`mt-0.5 text-sm font-semibold ${m.color ?? "text-slate-800"}`}>{m.value}</p>
+              {m.hint && <p className="mt-0.5 text-[9px] text-amber-600">{m.hint}</p>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OverallBadge({ ach, reason }: { ach: boolean | null; reason: "PROJECT" | "CHANNEL" | "NONE" }) {
+  if (ach == null) {
+    return <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">未设置</span>;
+  }
+  const color = ach ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700";
+  const reasonLabel = reason === "PROJECT" ? "按项目" : "按渠道";
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ${color}`}>
+      {ach ? "✓ 整月达标" : "✗ 整月未达标"}
+      <span className="text-[9px] opacity-70">({reasonLabel})</span>
     </span>
   );
 }
 
 function ProjectSubTable({ items }: { items: ProjectKpiRow[] }) {
   return (
-    <div className="overflow-x-auto rounded border border-slate-200 bg-white">
+    <div className="overflow-x-auto rounded border border-slate-200">
       <table className="w-full text-xs">
         <thead className="bg-slate-50 text-[10px] text-slate-500">
           <tr>
-            <th className="px-2 py-1 text-left">项目</th>
-            <th className="px-2 py-1 text-left">客户</th>
-            <th className="px-2 py-1 text-right">月度目标</th>
-            <th className="px-2 py-1 text-right">80% 线</th>
-            <th className="px-2 py-1 text-right">BI</th>
+            <th className="px-2 py-1 text-left">项目 / 客户</th>
+            <th className="px-2 py-1 text-right">目标</th>
             <th className="px-2 py-1 text-right">对账</th>
             <th className="px-2 py-1 text-right">完成率</th>
             <th className="px-2 py-1 text-center">达标</th>
@@ -278,11 +303,9 @@ function ProjectSubTable({ items }: { items: ProjectKpiRow[] }) {
                   <Link href={`/projects/${p.projectId}?targetMonth=${p.month}`} className="inline-flex items-center gap-0.5 font-medium text-brand-700 hover:underline">
                     {p.projectName} <ExternalLink className="h-2.5 w-2.5" />
                   </Link>
+                  <p className="text-[10px] text-slate-400">{p.customerName}</p>
                 </td>
-                <td className="px-2 py-1 text-slate-600">{p.customerName}</td>
                 <td className="px-2 py-1 text-right">{sym}{p.monthlyTarget.toLocaleString()}</td>
-                <td className="px-2 py-1 text-right text-slate-500">{sym}{p.thresholdAt80.toLocaleString()}</td>
-                <td className="px-2 py-1 text-right">{sym}{p.biGmv.toLocaleString()}</td>
                 <td className="px-2 py-1 text-right">{sym}{p.reconciliationGmv.toLocaleString()}</td>
                 <td className={`px-2 py-1 text-right font-semibold ${
                   p.completionRatePct == null ? "text-slate-400"
@@ -309,16 +332,14 @@ function ProjectSubTable({ items }: { items: ProjectKpiRow[] }) {
 
 function ChannelSubTable({ items }: { items: ChannelKpiRow[] }) {
   return (
-    <div className="overflow-x-auto rounded border border-slate-200 bg-white">
+    <div className="overflow-x-auto rounded border border-slate-200">
       <table className="w-full text-xs">
         <thead className="bg-slate-50 text-[10px] text-slate-500">
           <tr>
-            <th className="px-2 py-1 text-left">渠道</th>
-            <th className="px-2 py-1 text-left">所属项目</th>
-            <th className="px-2 py-1 text-left">客户</th>
-            <th className="px-2 py-1 text-right">占比 %</th>
-            <th className="px-2 py-1 text-right">渠道目标</th>
-            <th className="px-2 py-1 text-right">对账 GMV</th>
+            <th className="px-2 py-1 text-left">渠道 / 项目</th>
+            <th className="px-2 py-1 text-right">占比</th>
+            <th className="px-2 py-1 text-right">目标</th>
+            <th className="px-2 py-1 text-right">对账</th>
             <th className="px-2 py-1 text-right">完成率</th>
             <th className="px-2 py-1 text-center">达标</th>
           </tr>
@@ -328,13 +349,12 @@ function ChannelSubTable({ items }: { items: ChannelKpiRow[] }) {
             const sym = CURRENCY_SYMBOLS[c.currency as Currency] ?? "$";
             return (
               <tr key={c.channelTargetId} className={`border-t border-slate-100 ${c.achieved === false ? "bg-rose-50/40" : ""}`}>
-                <td className="px-2 py-1 font-medium">{c.channelName} <span className="text-[10px] text-slate-400">({c.role})</span></td>
                 <td className="px-2 py-1">
-                  <Link href={`/projects/${c.projectId}`} className="inline-flex items-center gap-0.5 text-brand-700 hover:underline">
+                  <p className="font-medium text-slate-700">{c.channelName} <span className="text-[10px] text-slate-400">({c.role})</span></p>
+                  <Link href={`/projects/${c.projectId}`} className="inline-flex items-center gap-0.5 text-[10px] text-brand-700 hover:underline">
                     {c.projectName} <ExternalLink className="h-2.5 w-2.5" />
                   </Link>
                 </td>
-                <td className="px-2 py-1 text-slate-600">{c.customerName}</td>
                 <td className="px-2 py-1 text-right">{c.sharePercent.toFixed(1)}%</td>
                 <td className="px-2 py-1 text-right">{sym}{c.monthlyChannelTarget.toLocaleString()}</td>
                 <td className="px-2 py-1 text-right">{sym}{c.channelReconciliationGmv.toLocaleString()}</td>
