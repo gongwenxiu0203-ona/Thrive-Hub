@@ -7,7 +7,6 @@ async function main() {
     contractNo: "THRAIVE-2026-099",
     partyAName: "测试甲方科技有限公司",
     partyACreditCode: "91440300TEST1234X9",
-    partyALegalRep: "张三",
     partyAAddress: "深圳市南山区科技园1栋",
     partyAContact: "李四",
     partyAPhone: "13800138000",

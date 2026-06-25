@@ -17,12 +17,12 @@ import {
   type ReviewAnnotationRow,
 } from "./ReviewerActionsPanel";
 import { REVIEWER_EMAIL } from "@/lib/contractReviewer";
-import { PLACEHOLDER_KEYS } from "@/lib/contractPlaceholders";
 import { UPLOAD_EXTRACT_REQUIRED } from "@/lib/contractAiExtract";
 import {
   SNAPSHOT_FIELD_KEY,
   collectContractFieldSnapshot,
   diffSnapshots,
+  getReviewDecisionFields,
 } from "@/lib/contractFieldSnapshot";
 import { AlertCircle } from "lucide-react";
 import {
@@ -117,6 +117,7 @@ export default async function ContractDetailPage({
         id: cm.id,
         fieldKey: cm.fieldKey,
         comment: cm.comment,
+        decision: cm.decision,
         annotationId: cm.annotationId,
         createdAt: cm.createdAt.toISOString(),
         updatedAt: cm.updatedAt.toISOString(),
@@ -152,7 +153,7 @@ export default async function ContractDetailPage({
     contract.status === "REVIEWING" &&
     !!currentReview;
   const placeholderLabelMap: Record<string, string> = Object.fromEntries(
-    PLACEHOLDER_KEYS.map((p) => [p.key, p.desc]),
+    getReviewDecisionFields(contract.commissionType).map((p) => [p.key, p.label]),
   );
 
   // Field values keyed for compare view + review panel (v3 template fields).
@@ -393,6 +394,7 @@ export default async function ContractDetailPage({
         hasTemplate={!!c.templateId}
         hasGeneratedDoc={!!contract.generatedDocUrl}
         pendingNewUpload={!!c.pendingNewUpload}
+        hasSourceAnnotations={!!c.hasSourceAnnotations}
         stampStatus={c.stampStatus ?? "NONE"}
         stampedDocUrl={c.stampedDocUrl ?? null}
         isAdmin={isAdmin}

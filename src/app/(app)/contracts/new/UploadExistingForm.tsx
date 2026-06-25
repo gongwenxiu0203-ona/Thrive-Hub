@@ -25,6 +25,7 @@ export function UploadExistingForm({
     contractId: string;
     missing: { key: string; label: string }[];
     autoSubmitted: boolean;
+    archived: boolean;
   } | null>(null);
 
   const [customerId, setCustomerId] = useState(presetCustomerId ?? "");
@@ -34,11 +35,12 @@ export function UploadExistingForm({
   const [partyBCompany, setPartyBCompany] = useState<"THRAIVE" | "LINGYUE" | "">("THRAIVE");
   const [ownerId, setOwnerId] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [uploadArchiveMode, setUploadArchiveMode] = useState<"REVIEW_AND_STAMP" | "SIGNED_ARCHIVE">("REVIEW_AND_STAMP");
 
   function submit() {
     setError(null);
     if (!customerId) { setError("请选择关联客户"); return; }
-    if (!file) { setError("请选择合同 .docx 文件"); return; }
+    if (!file) { setError("请选择合同 Word/PDF 文件"); return; }
     startTransition(async () => {
       const fd = new FormData();
       fd.append("customerId", customerId);
@@ -47,6 +49,7 @@ export function UploadExistingForm({
       if (templateId) fd.append("templateId", templateId);
       if (partyBCompany) fd.append("partyBCompany", partyBCompany);
       if (ownerId) fd.append("ownerId", ownerId);
+      fd.append("uploadArchiveMode", uploadArchiveMode);
       fd.append("file", file);
       const r = await uploadExistingContract(fd);
       if (!r.ok) { setError(r.error); return; }
@@ -60,6 +63,7 @@ export function UploadExistingForm({
         contractId={success.contractId}
         missing={success.missing}
         autoSubmitted={success.autoSubmitted}
+        archived={success.archived}
         onGoToContract={() => router.push(`/contracts/${success.contractId}`)}
       />
     );
@@ -67,48 +71,32 @@ export function UploadExistingForm({
 
   return (
     <div className="space-y-5">
-      <div className="card p-5 space-y-4">
+      <div className="card space-y-4 p-5">
         <Section title="基础信息">
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="关联客户" required>
-              <select
-                value={customerId}
-                onChange={(e) => setCustomerId(e.target.value)}
-                className="input"
-              >
-                <option value="">选择客户…</option>
+              <select value={customerId} onChange={(e) => setCustomerId(e.target.value)} className="input">
+                <option value="">选择客户</option>
                 {customers.map((c) => (
                   <option key={c.id} value={c.id}>{c.brandName}</option>
                 ))}
               </select>
             </Field>
             <Field label="合同类型" required>
-              <select
-                value={type}
-                onChange={(e) => setType(e.target.value as typeof type)}
-                className="input"
-              >
+              <select value={type} onChange={(e) => setType(e.target.value as typeof type)} className="input">
                 <option value="BRAND">品牌方合同</option>
                 <option value="CHANNEL">渠道商合同</option>
                 <option value="REBATE">返佣合同</option>
               </select>
             </Field>
             <Field label="合同编号前缀">
-              <select
-                value={contractNoPrefix}
-                onChange={(e) => setNoPrefix(e.target.value as typeof contractNoPrefix)}
-                className="input"
-              >
+              <select value={contractNoPrefix} onChange={(e) => setNoPrefix(e.target.value as typeof contractNoPrefix)} className="input">
                 <option value="THRAIVE">THRAIVE-</option>
                 <option value="LYNQ">LYNQ-</option>
               </select>
             </Field>
             <Field label="合同负责人（可选，默认本人）">
-              <select
-                value={ownerId}
-                onChange={(e) => setOwnerId(e.target.value)}
-                className="input"
-              >
+              <select value={ownerId} onChange={(e) => setOwnerId(e.target.value)} className="input">
                 <option value="">本人</option>
                 {users.map((u) => (
                   <option key={u.id} value={u.id}>{u.name}</option>
@@ -116,22 +104,14 @@ export function UploadExistingForm({
               </select>
             </Field>
             <Field label="乙方公司">
-              <select
-                value={partyBCompany}
-                onChange={(e) => setPartyBCompany(e.target.value as typeof partyBCompany)}
-                className="input"
-              >
+              <select value={partyBCompany} onChange={(e) => setPartyBCompany(e.target.value as typeof partyBCompany)} className="input">
                 <option value="THRAIVE">THRAIVE</option>
                 <option value="LINGYUE">灵跃</option>
               </select>
             </Field>
             <Field label="适用模板（可选）">
-              <select
-                value={templateId}
-                onChange={(e) => setTemplateId(e.target.value)}
-                className="input"
-              >
-                <option value="">不绑定模板</option>
+              <select value={templateId} onChange={(e) => setTemplateId(e.target.value)} className="input">
+                <option value="">不绑定模板，由合同内容识别</option>
                 {templates.map((t) => (
                   <option key={t.id} value={t.id}>{t.name}</option>
                 ))}
@@ -140,16 +120,33 @@ export function UploadExistingForm({
           </div>
         </Section>
 
-        <Section title="上传合同 .docx">
+        <Section title="上传用途">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <ModeCard
+              checked={uploadArchiveMode === "REVIEW_AND_STAMP"}
+              title="上传审核盖章"
+              description="识别字段后按审核、盖章流程推进。"
+              onChange={() => setUploadArchiveMode("REVIEW_AND_STAMP")}
+            />
+            <ModeCard
+              checked={uploadArchiveMode === "SIGNED_ARCHIVE"}
+              title="签署完成存档"
+              description="识别并补齐字段后直接归档入库，不走审核盖章。"
+              onChange={() => setUploadArchiveMode("SIGNED_ARCHIVE")}
+            />
+          </div>
+        </Section>
+
+        <Section title="上传合同 Word/PDF">
           <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 p-6 hover:border-brand-400 hover:bg-brand-50/30">
             <Upload className="h-5 w-5 text-slate-400" />
             <span className="text-sm text-slate-600">
-              {file ? file.name : "点击选择已签或待签的 .docx 合同"}
+              {file ? file.name : "点击选择已签或待签的 Word/PDF 合同"}
             </span>
-            <span className="text-[11px] text-slate-400">系统将自动识别甲方信息、费用、佣金等关键字段（最大 25MB）</span>
+            <span className="text-[11px] text-slate-400">系统会识别甲方、合作、推广、费用和佣金等字段（最大 25MB）</span>
             <input
               type="file"
-              accept=".docx"
+              accept=".docx,.pdf"
               className="hidden"
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             />
@@ -157,20 +154,15 @@ export function UploadExistingForm({
         </Section>
 
         {error && (
-          <div className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-sm text-rose-600">
+          <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600">
             {error}
           </div>
         )}
 
         <div className="flex justify-end">
-          <button
-            type="button"
-            onClick={submit}
-            disabled={pending}
-            className="btn-primary flex items-center gap-1.5 text-sm"
-          >
+          <button type="button" onClick={submit} disabled={pending} className="btn-primary flex items-center gap-1.5 text-sm">
             <Upload className="h-4 w-4" />
-            {pending ? "上传并识别中…" : "上传并识别字段"}
+            {pending ? "上传并识别中..." : "上传并识别字段"}
           </button>
         </div>
       </div>
@@ -182,15 +174,17 @@ function SuccessView({
   contractId,
   missing,
   autoSubmitted,
+  archived,
   onGoToContract,
 }: {
   contractId: string;
   missing: { key: string; label: string }[];
   autoSubmitted: boolean;
+  archived: boolean;
   onGoToContract: () => void;
 }) {
   return (
-    <div className="card p-6 space-y-4">
+    <div className="card space-y-4 p-6">
       {missing.length === 0 ? (
         <div className="flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
           <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
@@ -198,7 +192,7 @@ function SuccessView({
             <p className="text-sm font-semibold text-emerald-800">上传成功</p>
             <p className="mt-1 text-sm text-emerald-700">
               所有关键字段均已识别。
-              {autoSubmitted ? "合同已自动推送给审核人。" : "合同已保存为草稿，请到详情页手动提交审核。"}
+              {archived ? " 合同已作为签署完成件归档。" : autoSubmitted ? " 合同已自动推送给审核人。" : " 合同已保存，请在详情页手动提交审核。"}
             </p>
           </div>
         </div>
@@ -207,30 +201,44 @@ function SuccessView({
           <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
           <div className="flex-1">
             <p className="text-sm font-semibold text-amber-800">上传成功，但有 {missing.length} 个关键字段需要补填</p>
-            <p className="mt-1 text-sm text-amber-700">
-              请去合同详情页填写以下字段后再提交审核：
-            </p>
+            <p className="mt-1 text-sm text-amber-700">请到合同详情页补齐字段后再提交审核或确认归档。</p>
             <ul className="mt-2 grid grid-cols-2 gap-1 text-sm text-amber-700">
               {missing.map((m) => (
-                <li key={m.key} className="rounded bg-amber-100/60 px-2 py-1">
-                  · {m.label}
-                </li>
+                <li key={m.key} className="rounded bg-amber-100/60 px-2 py-1">· {m.label}</li>
               ))}
             </ul>
           </div>
         </div>
       )}
       <div className="flex justify-end">
-        <button
-          type="button"
-          onClick={onGoToContract}
-          className="btn-primary text-sm"
-        >
+        <button type="button" onClick={onGoToContract} className="btn-primary text-sm">
           {missing.length === 0 ? "查看合同" : "去补填字段"}
         </button>
       </div>
       <p className="text-[11px] text-slate-400">合同 ID：{contractId}</p>
     </div>
+  );
+}
+
+function ModeCard({
+  checked,
+  title,
+  description,
+  onChange,
+}: {
+  checked: boolean;
+  title: string;
+  description: string;
+  onChange: () => void;
+}) {
+  return (
+    <label className="flex cursor-pointer gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm">
+      <input type="radio" className="mt-1" checked={checked} onChange={onChange} />
+      <span>
+        <span className="block font-medium text-slate-700">{title}</span>
+        <span className="text-xs text-slate-500">{description}</span>
+      </span>
+    </label>
   );
 }
 

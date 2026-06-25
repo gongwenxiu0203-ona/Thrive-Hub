@@ -6,6 +6,7 @@ import path from "path";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { extractDocxText } from "@/lib/contractDocxExtract";
+import { extractPdfText } from "@/lib/contractPdfExtract";
 import {
   aiExtractContractFields,
   UPLOAD_EXTRACT_REQUIRED,
@@ -13,8 +14,17 @@ import {
 import { contractFileBaseName } from "@/lib/contractFileName";
 import { openReviewRound } from "@/actions/contractReview";
 import { bumpCustomerStatus } from "@/lib/customer";
+import { ensureReconciliationForContract } from "@/actions/channelSplit";
+import { syncContractProgressToProjects } from "@/actions/projects";
+import {
+  commissionConfigFromLegacy,
+  normalizeTemplateKey,
+  primaryRateFromCommissionConfig,
+  stringifyCommissionConfig,
+} from "@/lib/contractCommissionConfig";
 
 type Result<T = void> = { ok: true; data?: T } | { ok: false; error: string };
+type UploadArchiveMode = "SIGNED_ARCHIVE" | "REVIEW_AND_STAMP";
 
 const OUT_DIR_ABS = path.join(process.cwd(), "public", "contracts-generated");
 const OUT_PREFIX = "/contracts-generated";
@@ -23,7 +33,6 @@ function s(fd: FormData, k: string): string {
   return String(fd.get(k) ?? "").trim();
 }
 
-/** Generate the next contract number for a given prefix (mirrors contracts.ts). */
 async function nextContractNo(prefix: "LYNQ" | "THRAIVE"): Promise<string> {
   const year = new Date().getFullYear();
   const existing = await prisma.contract.findMany({
@@ -33,12 +42,11 @@ async function nextContractNo(prefix: "LYNQ" | "THRAIVE"): Promise<string> {
   let max = 0;
   for (const { contractNo } of existing) {
     const seq = parseInt(contractNo.split("-").pop() ?? "0", 10);
-    if (!isNaN(seq) && seq > max) max = seq;
+    if (!Number.isNaN(seq) && seq > max) max = seq;
   }
   return `${prefix}-${year}-${String(max + 1).padStart(3, "0")}`;
 }
 
-/** Map AI-extracted keys to Prisma Contract field names. */
 function mapExtractedToContract(fields: Record<string, unknown>): Record<string, unknown> {
   const get = (k: string) => {
     const v = fields[k];
@@ -50,7 +58,7 @@ function mapExtractedToContract(fields: Record<string, unknown>): Record<string,
     const v = get(k);
     if (typeof v !== "string") return null;
     const d = new Date(v);
-    return isNaN(d.getTime()) ? null : d;
+    return Number.isNaN(d.getTime()) ? null : d;
   };
   const coop = Array.isArray(fields.coopChannels)
     ? JSON.stringify(fields.coopChannels.filter((x) => typeof x === "string"))
@@ -68,19 +76,23 @@ function mapExtractedToContract(fields: Record<string, unknown>): Record<string,
     feeCurrency: get("feeCurrency"),
     feeCycle: get("feeCycle"),
     commissionRate: get("commissionRate"),
+    commissionType: get("commissionType"),
+    thresholdAmount: get("thresholdAmount"),
+    thresholdCurrency: get("thresholdCurrency"),
+    tieredRules: get("tieredRules"),
+    excessBaseMonths: get("excessBaseMonths"),
+    excessCommissionRate: get("excessCommissionRate"),
+    specialCommissionTerms: get("specialCommissionTerms"),
+    gmvSettlementCycle: get("gmvSettlementCycle"),
     promoPlatform: get("promoPlatform"),
     targetSite: get("targetSite"),
     coopChannels: coop,
   };
 }
 
-/** Upload an existing .docx contract → AI extract fields → create Contract +
- *  ContractVersion v1. Returns the new contract id + list of missing required
- *  fields so the UI can prompt the user to fill them in. The caller decides
- *  whether to also auto-submit for review. */
 export async function uploadExistingContract(
   fd: FormData,
-): Promise<Result<{ contractId: string; missing: { key: string; label: string }[]; autoSubmitted: boolean }>> {
+): Promise<Result<{ contractId: string; missing: { key: string; label: string }[]; autoSubmitted: boolean; archived: boolean }>> {
   const session = await requireSession();
   if (session.role === "BRAND" || session.role === "CHANNEL") {
     return { ok: false, error: "无权创建合同" };
@@ -92,29 +104,27 @@ export async function uploadExistingContract(
   const templateId = s(fd, "templateId") || null;
   const partyBCompany = s(fd, "partyBCompany") || null;
   const noPrefix = (s(fd, "contractNoPrefix") as "LYNQ" | "THRAIVE") || "THRAIVE";
+  const uploadArchiveMode = (s(fd, "uploadArchiveMode") as UploadArchiveMode) || "REVIEW_AND_STAMP";
 
   const file = fd.get("file");
-  if (!(file instanceof File)) return { ok: false, error: "请选择合同 .docx 文件" };
-  if (!file.name.toLowerCase().endsWith(".docx")) {
-    return { ok: false, error: "仅支持 .docx 文件" };
-  }
+  if (!(file instanceof File)) return { ok: false, error: "请选择合同文件" };
+  const lowerName = file.name.toLowerCase();
+  const ext = lowerName.endsWith(".pdf") ? "pdf" : lowerName.endsWith(".docx") ? "docx" : "";
+  if (!ext) return { ok: false, error: "仅支持 .docx 或 .pdf 文件" };
   if (file.size > 25 * 1024 * 1024) return { ok: false, error: "文件超过 25MB" };
 
-  // 1) Read + extract text
   const buf = Buffer.from(await file.arrayBuffer());
   let text = "";
   try {
-    text = await extractDocxText(buf);
+    text = ext === "pdf" ? await extractPdfText(buf) : await extractDocxText(buf);
   } catch {
-    return { ok: false, error: "解析 .docx 失败：文件可能已损坏" };
+    return { ok: false, error: "解析合同文件失败：文件可能已损坏或不可识别" };
   }
-  if (!text.trim()) return { ok: false, error: ".docx 中未识别到文字内容" };
+  if (!text.trim()) return { ok: false, error: "合同文件中未识别到文字内容" };
 
-  // 2) AI extract
   const ai = await aiExtractContractFields(text);
   if (!ai.ok) return { ok: false, error: ai.error };
 
-  // 3) Build contract data
   const customer = await prisma.customer.findUnique({
     where: { id: customerId },
     select: { id: true, brandName: true },
@@ -124,21 +134,39 @@ export async function uploadExistingContract(
   const ownerId = s(fd, "ownerId") || session.userId;
   const reviewerId = s(fd, "reviewerId") || null;
   const mapped = mapExtractedToContract(ai.fields as Record<string, unknown>);
+  const template = templateId
+    ? await prisma.contractTemplate.findUnique({ where: { id: templateId }, select: { templateKey: true } })
+    : null;
+  const templateKey = normalizeTemplateKey(
+    template?.templateKey
+      ?? (typeof mapped.commissionType === "string" ? mapped.commissionType : null)
+      ?? "FIXED",
+  );
+  const commissionConfig = commissionConfigFromLegacy({
+    templateKey,
+    commissionRate: typeof mapped.commissionRate === "string" ? mapped.commissionRate : null,
+    thresholdAmount: typeof mapped.thresholdAmount === "string" ? mapped.thresholdAmount : null,
+    thresholdCurrency: typeof mapped.thresholdCurrency === "string" ? mapped.thresholdCurrency : null,
+    tieredRules: typeof mapped.tieredRules === "string" ? mapped.tieredRules : null,
+    excessBaseMonths: typeof mapped.excessBaseMonths === "string" ? mapped.excessBaseMonths : null,
+    excessCommissionRate: typeof mapped.excessCommissionRate === "string" ? mapped.excessCommissionRate : null,
+    specialCommissionTerms: typeof mapped.specialCommissionTerms === "string" ? mapped.specialCommissionTerms : null,
+  });
+  const primaryRate = primaryRateFromCommissionConfig(commissionConfig);
 
-  // 4) 先建合同（contractNo 并发冲突自动重试 3 次），再用 contract.id 和
-  //    contractNo 拼出唯一文件名，避免「同分钟同客户」覆盖。
   let contract: { id: string; contractNo: string } | null = null;
   let lastError: unknown = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     const contractNo = await nextContractNo(noPrefix);
     try {
-      contract = await prisma.contract.create({
+      contract = await (prisma.contract.create as any)({
         data: {
           contractNo,
           customerId,
           type,
-          status: "IN_PROGRESS",
+          status: uploadArchiveMode === "SIGNED_ARCHIVE" && ai.missing.length === 0 ? "COMPLETED" : "IN_PROGRESS",
           uploadType: "EXISTING",
+          uploadArchiveMode,
           fillMethod: "AI_EXTRACT",
           extractedBy: "AI",
           templateId,
@@ -146,15 +174,20 @@ export async function uploadExistingContract(
           ownerId,
           reviewerId,
           contractText: text,
-          createdById: session.userId,
           ...mapped,
+          commissionType: templateKey,
+          commissionRate: primaryRate ?? (typeof mapped.commissionRate === "string" ? mapped.commissionRate : null),
+          commissionConfig: stringifyCommissionConfig(commissionConfig),
+          createdById: session.userId,
         },
         select: { id: true, contractNo: true },
       });
       break;
     } catch (e) {
-      const code = (e as { code?: string }).code;
-      if (code === "P2002") { lastError = e; continue; }
+      if ((e as { code?: string }).code === "P2002") {
+        lastError = e;
+        continue;
+      }
       throw e;
     }
   }
@@ -163,7 +196,6 @@ export async function uploadExistingContract(
     return { ok: false, error: "合同编号冲突，请稍后重试" };
   }
 
-  // 5) Persist file — 文件名加入 contract.id 后缀，杜绝任何场景下的文件覆盖
   await fs.mkdir(OUT_DIR_ABS, { recursive: true });
   const base = contractFileBaseName({
     contractNo: contract.contractNo,
@@ -171,11 +203,10 @@ export async function uploadExistingContract(
     partyA: typeof mapped.partyA === "string" ? mapped.partyA : null,
     customer,
   });
-  const savedName = `${base}-${contract.id}-v1.docx`;
+  const savedName = `${base}-${contract.id}-v1.${ext}`;
   await fs.writeFile(path.join(OUT_DIR_ABS, savedName), buf);
   const fileUrl = `${OUT_PREFIX}/${savedName}`;
 
-  // 5b) 回填 generatedDocUrl（建合同时 fileUrl 还未确定）
   await prisma.contract.update({
     where: { id: contract.id },
     data: { generatedDocUrl: fileUrl },
@@ -186,17 +217,34 @@ export async function uploadExistingContract(
       contractId: contract.id,
       versionNo: 1,
       fileUrl,
-      fileType: "docx",
-      reason: "上传已有合同（AI 抽字段）",
+      fileType: ext,
+      reason: "上传已有合同（字段识别）",
       createdById: session.userId,
     },
   });
 
-  await bumpCustomerStatus(customerId, "CONTRACT_IN_PROGRESS");
+  const archived = uploadArchiveMode === "SIGNED_ARCHIVE" && ai.missing.length === 0;
+  if (archived) {
+    await syncContractProgressToProjects(contract.id, "签署完成");
+    await bumpCustomerStatus(customerId, "CONTRACT_SIGNED");
+    const customer = await prisma.customer.findUnique({
+      where: { id: customerId },
+      select: { channelUserId: true },
+    });
+    if (customer?.channelUserId) {
+      await ensureReconciliationForContract({
+        contractId: contract.id,
+        customerId,
+        channelUserId: customer.channelUserId,
+        createdById: session.userId,
+      });
+    }
+  } else {
+    await bumpCustomerStatus(customerId, "CONTRACT_IN_PROGRESS");
+  }
 
-  // 6) If all required fields are present → auto-submit for review
   let autoSubmitted = false;
-  if (ai.missing.length === 0) {
+  if (uploadArchiveMode !== "SIGNED_ARCHIVE" && ai.missing.length === 0) {
     const round = await openReviewRound(contract.id);
     if (round.ok) {
       await prisma.contract.update({
@@ -205,7 +253,6 @@ export async function uploadExistingContract(
       });
       autoSubmitted = true;
     }
-    // 如果 openReviewRound 失败（没有审核人），合同仍保留 IN_PROGRESS，让用户手动提交
   }
 
   revalidatePath("/contracts");
@@ -218,11 +265,11 @@ export async function uploadExistingContract(
       contractId: contract.id,
       missing: ai.missing,
       autoSubmitted,
+      archived,
     },
   };
 }
 
-/** Public helper for UI to know which fields will be flagged as missing. */
 export async function getUploadRequiredFields() {
   await requireSession();
   return UPLOAD_EXTRACT_REQUIRED;

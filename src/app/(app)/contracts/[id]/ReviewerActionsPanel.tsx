@@ -1,13 +1,12 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, X, MessageSquarePlus, FileText, AlertCircle } from "lucide-react";
+import { Check, X, FileText, AlertCircle, ChevronDown, ChevronRight } from "lucide-react";
 import {
   approveCurrentReview,
   rejectCurrentReview,
   upsertFieldComment,
-  deleteFieldComment,
   addAnnotation,
 } from "@/actions/contractReview";
 import { formatDateTime } from "@/lib/utils";
@@ -16,6 +15,7 @@ export interface ReviewCommentRow {
   id: string;
   fieldKey: string;
   comment: string;
+  decision: string;
   annotationId: string | null;
   createdAt: string;
   updatedAt: string;
@@ -58,12 +58,12 @@ export function ReviewerActionsPanel({
 }: {
   contractId: string;
   contractStatus: string;
-  canAct: boolean;             // 当前用户是 reviewer/admin 且合同处于 REVIEWING
+  canAct: boolean;
   currentReview: ReviewRoundRow | null;
-  history: ReviewRoundRow[];   // 完整历史（含 currentReview）
+  history: ReviewRoundRow[];
   annotations: ReviewAnnotationRow[];
   fieldLabels: Record<string, string>;
-  roundDiff: RoundDiffEntry[]; // 第二轮起：本轮相对上一轮的字段变动；第一轮为空数组
+  roundDiff: RoundDiffEntry[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -77,6 +77,7 @@ export function ReviewerActionsPanel({
       router.refresh();
     });
   }
+
   function doReject() {
     setError(null);
     startTransition(async () => {
@@ -92,9 +93,7 @@ export function ReviewerActionsPanel({
         <div>
           <h2 className="font-semibold text-slate-900">合同审核</h2>
           <p className="mt-0.5 text-xs text-slate-400">
-            {history.length === 0
-              ? "本合同还没有提交过审核。"
-              : `共 ${history.length} 轮审核记录。`}
+            {history.length === 0 ? "本合同还没有提交过审核。" : `共 ${history.length} 轮审核记录。`}
           </p>
         </div>
         {canAct && currentReview && (
@@ -120,22 +119,25 @@ export function ReviewerActionsPanel({
       </div>
 
       {error && (
-        <div className="mb-3 rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-sm text-rose-600">
+        <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600">
           {error}
         </div>
       )}
 
       {contractStatus === "REJECTED" && (
-        <div className="mb-3 flex items-start gap-2 rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-xs text-rose-700">
+        <div className="mb-3 flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
           <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <p>合同被退回。请按以下意见修改后，在「合同流程」面板重新提交审核。</p>
+          <p>
+            合同已被退回，请按审核意见修改后重新提交。
+            {annotations.length > 0 ? " 合同有原文批注待查看。" : ""}
+          </p>
         </div>
       )}
 
       {currentReview && currentReview.round >= 2 && roundDiff.length > 0 && (
         <div className="mb-4 rounded-lg border border-sky-200 bg-sky-50 p-3">
           <p className="mb-2 text-xs font-semibold text-sky-700">
-            本轮（第 {currentReview.round} 轮）相比上一轮变动的字段（共 {roundDiff.length}）
+            本轮（第 {currentReview.round} 轮）相对上一轮变动的字段（共 {roundDiff.length}）
           </p>
           <ul className="space-y-1.5">
             {roundDiff.map((d) => (
@@ -147,9 +149,9 @@ export function ReviewerActionsPanel({
               </li>
             ))}
           </ul>
-          <p className="mt-2 text-[11px] text-sky-700">仅显示变动字段，未变动字段沿用上一轮提交版本。</p>
         </div>
       )}
+
       {currentReview && currentReview.round >= 2 && roundDiff.length === 0 && (
         <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
           本轮相比上一轮无字段变动。
@@ -157,7 +159,7 @@ export function ReviewerActionsPanel({
       )}
 
       {canAct && currentReview && (
-        <CommentEditor
+        <FieldDecisionEditor
           reviewId={currentReview.id}
           existing={currentReview.comments}
           fieldLabels={fieldLabels}
@@ -166,14 +168,15 @@ export function ReviewerActionsPanel({
       )}
 
       {canAct && currentReview && (
-        <AnnotationCreator
+        <SourceAnnotationBox
           contractId={contractId}
+          annotations={annotations}
           onAdded={() => router.refresh()}
         />
       )}
 
       {history.length > 0 && (
-        <ReviewHistory rounds={history} annotations={annotations} fieldLabels={fieldLabels} />
+        <ReviewHistory rounds={history} fieldLabels={fieldLabels} />
       )}
 
       {annotations.length > 0 && (
@@ -183,7 +186,7 @@ export function ReviewerActionsPanel({
   );
 }
 
-function CommentEditor({
+function FieldDecisionEditor({
   reviewId,
   existing,
   fieldLabels,
@@ -194,98 +197,96 @@ function CommentEditor({
   fieldLabels: Record<string, string>;
   onChange: () => void;
 }) {
-  const [fieldKey, setFieldKey] = useState<string>("");
-  const [comment, setComment] = useState("");
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const existingByKey = useMemo(() => new Map(existing.map((c) => [c.fieldKey, c])), [existing]);
+  const [drafts, setDrafts] = useState<Record<string, string>>(() =>
+    Object.fromEntries(existing.map((c) => [c.fieldKey, c.comment])),
+  );
+  const [decisions, setDecisions] = useState<Record<string, string>>(() =>
+    Object.fromEntries(existing.map((c) => [c.fieldKey, c.decision || "PENDING"])),
+  );
 
-  function add() {
+  function save(fieldKey: string, decision: "APPROVED" | "REJECTED") {
     setError(null);
-    if (!fieldKey) { setError("请选择字段"); return; }
-    if (!comment.trim()) { setError("请填写意见"); return; }
+    const comment = drafts[fieldKey]?.trim() ?? "";
+    if (decision === "REJECTED" && !comment) {
+      setError("驳回字段时需要填写审核意见");
+      return;
+    }
     startTransition(async () => {
-      const r = await upsertFieldComment(reviewId, fieldKey, comment.trim(), null);
+      const r = await upsertFieldComment(reviewId, fieldKey, comment, null, decision);
       if (!r.ok) { setError(r.error); return; }
-      setComment("");
+      setDecisions((prev) => ({ ...prev, [fieldKey]: decision }));
       onChange();
     });
   }
-  function remove(id: string) {
-    setError(null);
-    startTransition(async () => {
-      const r = await deleteFieldComment(id);
-      if (!r.ok) { setError(r.error); return; }
-      onChange();
-    });
-  }
-
-  const fieldOptions = Object.entries(fieldLabels);
 
   return (
     <div className="mt-4 rounded-lg border border-slate-200 p-3">
-      <p className="mb-2 text-xs font-semibold text-slate-600">为字段填写审核意见</p>
-      <div className="flex flex-col gap-2 sm:flex-row">
-        <select
-          value={fieldKey}
-          onChange={(e) => setFieldKey(e.target.value)}
-          className="rounded border border-slate-200 px-2 py-1.5 text-sm"
-        >
-          <option value="">选择字段…</option>
-          {fieldOptions.map(([k, label]) => (
-            <option key={k} value={k}>{label}</option>
-          ))}
-        </select>
-        <input
-          type="text"
-          value={comment}
-          onChange={(e) => setComment(e.target.value)}
-          placeholder="对该字段的修改意见"
-          className="flex-1 rounded border border-slate-200 px-2 py-1.5 text-sm"
-        />
-        <button
-          type="button"
-          disabled={pending}
-          onClick={add}
-          className="flex items-center justify-center gap-1 rounded bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-        >
-          <MessageSquarePlus className="h-4 w-4" /> 保存
-        </button>
-      </div>
-      {error && <p className="mt-1 text-xs text-rose-600">{error}</p>}
-
-      {existing.length > 0 && (
-        <ul className="mt-3 space-y-2">
-          {existing.map((c) => (
-            <li key={c.id} className="flex items-start justify-between gap-3 rounded bg-slate-50 px-2 py-1.5">
-              <div className="min-w-0 flex-1">
-                <p className="text-xs font-medium text-slate-700">
-                  {fieldLabels[c.fieldKey] ?? c.fieldKey}
-                </p>
-                <p className="mt-0.5 text-sm text-slate-700">{c.comment}</p>
+      <p className="mb-2 text-xs font-semibold text-slate-600">字段审核</p>
+      {error && <p className="mb-2 text-xs text-rose-600">{error}</p>}
+      <div className="space-y-2">
+        {Object.entries(fieldLabels).map(([fieldKey, label]) => {
+          const saved = existingByKey.get(fieldKey);
+          const decision = decisions[fieldKey] ?? saved?.decision ?? "PENDING";
+          return (
+            <div key={fieldKey} className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <div className="text-sm font-medium text-slate-700">{label}</div>
+                <span className={`rounded px-2 py-0.5 text-[11px] ${
+                  decision === "APPROVED"
+                    ? "bg-emerald-100 text-emerald-700"
+                    : decision === "REJECTED"
+                      ? "bg-rose-100 text-rose-700"
+                      : "bg-slate-200 text-slate-600"
+                }`}>
+                  {decision === "APPROVED" ? "已通过" : decision === "REJECTED" ? "已驳回" : "待审核"}
+                </span>
               </div>
-              <button
-                type="button"
-                disabled={pending}
-                onClick={() => remove(c.id)}
-                className="text-xs text-rose-600 hover:underline"
-              >
-                删除
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+              <textarea
+                rows={2}
+                value={drafts[fieldKey] ?? saved?.comment ?? ""}
+                onChange={(e) => setDrafts((prev) => ({ ...prev, [fieldKey]: e.target.value }))}
+                placeholder="该字段的审核意见（通过可不填，驳回必填）"
+                className="w-full rounded border border-slate-200 px-2 py-1.5 text-sm"
+              />
+              <div className="mt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={pending}
+                  onClick={() => save(fieldKey, "REJECTED")}
+                  className="rounded border border-rose-200 px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                >
+                  驳回
+                </button>
+                <button
+                  type="button"
+                  disabled={pending}
+                  onClick={() => save(fieldKey, "APPROVED")}
+                  className="rounded border border-emerald-200 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+                >
+                  通过
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
-function AnnotationCreator({
+function SourceAnnotationBox({
   contractId,
+  annotations,
   onAdded,
 }: {
   contractId: string;
+  annotations: ReviewAnnotationRow[];
   onAdded: () => void;
 }) {
+  const [open, setOpen] = useState(false);
   const [content, setContent] = useState("");
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -303,25 +304,36 @@ function AnnotationCreator({
 
   return (
     <div className="mt-4 rounded-lg border border-slate-200 p-3">
-      <p className="mb-2 text-xs font-semibold text-slate-600">合同源文件批注（系统内显示）</p>
-      <textarea
-        value={content}
-        onChange={(e) => setContent(e.target.value)}
-        rows={3}
-        className="w-full rounded border border-slate-200 px-2 py-1.5 text-sm"
-        placeholder="对合同源文件的批注；提交后会随审核记录退回给提交人。"
-      />
-      <div className="mt-2 flex items-center justify-between">
-        {error ? <p className="text-xs text-rose-600">{error}</p> : <span />}
-        <button
-          type="button"
-          disabled={pending}
-          onClick={add}
-          className="flex items-center gap-1 rounded bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-        >
-          <FileText className="h-4 w-4" /> 添加批注
-        </button>
-      </div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between text-left text-xs font-semibold text-slate-600"
+      >
+        <span>查看原文 / 在线批注{annotations.length ? `（已有 ${annotations.length} 条）` : ""}</span>
+        {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+      </button>
+      {open && (
+        <div className="mt-3">
+          <textarea
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            rows={3}
+            className="w-full rounded border border-slate-200 px-2 py-1.5 text-sm"
+            placeholder="在这里记录对合同原文的批注；退回时提交人会看到“合同有批注待查看”的提示。"
+          />
+          <div className="mt-2 flex items-center justify-between">
+            {error ? <p className="text-xs text-rose-600">{error}</p> : <span />}
+            <button
+              type="button"
+              disabled={pending}
+              onClick={add}
+              className="flex items-center gap-1 rounded bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+            >
+              <FileText className="h-4 w-4" /> 添加批注
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -331,7 +343,6 @@ function ReviewHistory({
   fieldLabels,
 }: {
   rounds: ReviewRoundRow[];
-  annotations: ReviewAnnotationRow[];
   fieldLabels: Record<string, string>;
 }) {
   return (
@@ -343,15 +354,13 @@ function ReviewHistory({
             <div className="flex items-center justify-between">
               <p className="text-sm font-medium text-slate-800">
                 第 {r.round} 轮
-                <span
-                  className={`ml-2 rounded px-2 py-0.5 text-[11px] ${
-                    r.status === "APPROVED"
-                      ? "bg-emerald-100 text-emerald-700"
-                      : r.status === "REJECTED"
-                        ? "bg-rose-100 text-rose-700"
-                        : "bg-amber-100 text-amber-700"
-                  }`}
-                >
+                <span className={`ml-2 rounded px-2 py-0.5 text-[11px] ${
+                  r.status === "APPROVED"
+                    ? "bg-emerald-100 text-emerald-700"
+                    : r.status === "REJECTED"
+                      ? "bg-rose-100 text-rose-700"
+                      : "bg-amber-100 text-amber-700"
+                }`}>
                   {r.status === "APPROVED" ? "通过" : r.status === "REJECTED" ? "退回" : "审核中"}
                 </span>
               </p>
@@ -366,7 +375,10 @@ function ReviewHistory({
                     <span className="mr-2 text-xs font-semibold text-slate-500">
                       {fieldLabels[c.fieldKey] ?? c.fieldKey}：
                     </span>
-                    {c.comment}
+                    <span className={c.decision === "REJECTED" ? "text-rose-700" : "text-emerald-700"}>
+                      {c.decision === "REJECTED" ? "驳回" : c.decision === "APPROVED" ? "通过" : "意见"}
+                    </span>
+                    {c.comment ? ` - ${c.comment}` : ""}
                   </li>
                 ))}
               </ul>
@@ -381,7 +393,7 @@ function ReviewHistory({
 function AnnotationList({ annotations }: { annotations: ReviewAnnotationRow[] }) {
   return (
     <div className="mt-5">
-      <p className="mb-2 text-xs text-slate-500">合同源文件批注（{annotations.length}）</p>
+      <p className="mb-2 text-xs text-slate-500">合同原文批注（{annotations.length}）</p>
       <ul className="space-y-2">
         {annotations.map((a) => (
           <li key={a.id} className="rounded-lg border border-slate-200 p-3">

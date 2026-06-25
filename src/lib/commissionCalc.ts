@@ -82,7 +82,8 @@ export function calcCommission(inp: CommissionInputs): CommissionResult {
       };
     }
 
-    case "EXCESS": {
+    case "EXCESS":
+    case "INCREMENTAL": {
       const baseline = inp.gmvBaseline ?? 0;
       const excess = sales - baseline;
       const amt = Math.max(0, excess * baseRate);
@@ -96,6 +97,15 @@ export function calcCommission(inp: CommissionInputs): CommissionResult {
             : excess < 0
               ? "实际销售额未超过基准值，抽佣金额为 0"
               : undefined,
+      };
+    }
+
+    case "SPECIAL": {
+      return {
+        actualCommissionRate: 0,
+        commissionAmount: 0,
+        formula: "—",
+        note: "特殊佣金需按合同条款人工结算，系统不自动套用固定比例",
       };
     }
 

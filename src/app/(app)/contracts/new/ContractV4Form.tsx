@@ -15,6 +15,14 @@ import {
   type PartyBCompanyKey,
   type PartyBBankKey,
 } from "@/lib/partyB";
+import {
+  COMMISSION_METHOD_LABELS,
+  CURRENCY_OPTIONS,
+  normalizeTemplateKey,
+  parseCommissionConfig,
+  stringifyCommissionConfig,
+  type TieredCommissionRule,
+} from "@/lib/contractCommissionConfig";
 
 type Customer = { id: string; brandName: string };
 type UserOption = { id: string; name: string };
@@ -35,12 +43,7 @@ const COOP_CHANNELS = [
 
 const TARGET_SITES = ["美国站", "英国站", "德国站", "法国", "西班牙", "加拿大", "澳洲", "日本"];
 
-const COMMISSION_TYPES = [
-  { value: "FIXED",     label: "固定点数佣金" },
-  { value: "THRESHOLD", label: "GMV门槛佣金" },
-  { value: "TIERED",   label: "阶梯式佣金" },
-  { value: "EXCESS",   label: "超额增长佣金" },
-];
+const COMMISSION_TYPES = Object.entries(COMMISSION_METHOD_LABELS).map(([value, label]) => ({ value, label }));
 
 type ProductRow = { name: string; asin: string; price: string; trackLink: string };
 
@@ -106,6 +109,8 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
 
   const selectedTemplate = templates.find((t) => t.id === templateId) ?? null;
   const isSpecialTemplate = selectedTemplate?.templateKey === "SPECIAL";
+  const existingCommissionConfig = parseCommissionConfig(existingContract?.commissionConfig);
+  const activeCommissionType = normalizeTemplateKey(selectedTemplate?.templateKey ?? existingCommissionConfig.templateKey ?? existingContract?.commissionType ?? "FIXED");
 
   function toggleBank(k: PartyBBankKey) {
     setPartyBBankAccounts((prev) =>
@@ -157,12 +162,26 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
 
   // GMV 佣金
   const [commissionType, setCommissionType] = useState(existingContract?.commissionType ?? "FIXED");
-  const [commissionRate, setCommissionRate] = useState(existingContract?.commissionRate ?? "");
+  const [commissionRate, setCommissionRate] = useState(existingCommissionConfig.fixed?.rate ?? existingContract?.commissionRate ?? "");
   const [thresholdAmount, setThresholdAmount] = useState(existingContract?.thresholdAmount ?? "");
   const [thresholdCurrency, setThresholdCurrency] = useState(existingContract?.thresholdCurrency ?? "人民币");
+  const [thresholdReachedRate, setThresholdReachedRate] = useState(existingCommissionConfig.threshold?.reachedRate ?? existingContract?.commissionRate ?? "");
+  const [thresholdUnreachedRate, setThresholdUnreachedRate] = useState(existingCommissionConfig.threshold?.unreachedRate ?? "");
+  const [tieredCurrency, setTieredCurrency] = useState(existingCommissionConfig.tiered?.currency ?? "USD");
+  const [tieredRows, setTieredRows] = useState<TieredCommissionRule[]>(
+    existingCommissionConfig.tiered?.tiers?.length
+      ? existingCommissionConfig.tiered.tiers
+      : [{ from: "0", to: "", rate: "" }]
+  );
   const [excessBaseMonths, setExcessBaseMonths] = useState(existingContract?.excessBaseMonths ?? "");
-  const [excessRate,     setExcessRate]     = useState(existingContract?.excessCommissionRate ?? "");
+  const [excessRate,     setExcessRate]     = useState(existingCommissionConfig.incremental?.excessRate ?? existingContract?.excessCommissionRate ?? "");
   const [gmvCycle,       setGmvCycle]       = useState(existingContract?.gmvSettlementCycle ?? "月度");
+  const [specialAttributionRate, setSpecialAttributionRate] = useState(existingCommissionConfig.special?.attributionRate ?? "");
+  const [specialCreatorRate, setSpecialCreatorRate] = useState(existingCommissionConfig.special?.creatorRate ?? "");
+  const [specialLowThreshold, setSpecialLowThreshold] = useState(existingCommissionConfig.special?.lowGmvThreshold ?? "");
+  const [specialLowBudgetRate, setSpecialLowBudgetRate] = useState(existingCommissionConfig.special?.lowGmvBudgetRate ?? "");
+  const [specialHighThreshold, setSpecialHighThreshold] = useState(existingCommissionConfig.special?.highGmvThreshold ?? "");
+  const [specialHighServiceRate, setSpecialHighServiceRate] = useState(existingCommissionConfig.special?.highGmvServiceRate ?? "");
 
   // 推广信息
   const [products, setProducts] = useState<ProductRow[]>(() => {
@@ -239,14 +258,16 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
   // ── 校验「合作信息」内部字段（链接模式 + 各模式共用）──────────────────────────
   function validateCoopFields(): string | null {
     if (!customerId) return "请选择关联客户";
+    if (!templateId) return "请选择适用的合同模板";
     if (platforms.length === 0 && !otherPlatform.trim()) return "请至少选择一个销售平台";
     if (targetSites.length === 0) return "请至少选择一个目标站点";
     if (!startDate) return "请填写合作开始日期";
     if (!endDate) return "请填写合作结束日期";
     if (!feeAmount.trim()) return "请填写月度服务费金额";
-    if (commissionType === "FIXED" && !commissionRate.trim()) return "请填写 GMV 抽佣比例";
-    if (commissionType === "THRESHOLD" && (!thresholdAmount.trim() || !commissionRate.trim())) return "请填写 GMV 门槛金额及抽佣比例";
-    if (commissionType === "EXCESS" && (!excessBaseMonths.trim() || !excessRate.trim())) return "请填写超额佣金的基准月数及比例";
+    if (activeCommissionType === "FIXED" && !commissionRate.trim()) return "请填写 GMV 抽佣比例";
+    if (activeCommissionType === "THRESHOLD" && (!thresholdAmount.trim() || !(thresholdReachedRate || commissionRate).trim() || !thresholdUnreachedRate.trim())) return "请填写 GMV 门槛金额、达标后比例和未达标比例";
+    if (activeCommissionType === "TIERED" && tieredRows.some((r) => !r.from.trim() || !r.rate.trim())) return "请填写完整的阶梯区间和佣金比例";
+    if (activeCommissionType === "INCREMENTAL" && (!excessBaseMonths.trim() || !excessRate.trim())) return "请填写增量佣金的基准月数及比例";
     if (channels.length === 0) return "请至少确认一个合作渠道";
     // 推广商品清单可为空（非必填）；填写或上传后会自动同步到合同文件
     return null;
@@ -310,8 +331,54 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
     setTimeout(() => setTokenCopied(false), 2000);
   };
 
+  function updateTierRow(index: number, key: keyof TieredCommissionRule, value: string) {
+    setTieredRows((rows) => rows.map((row, i) => (i === index ? { ...row, [key]: value } : row)));
+  }
+
+  function addTierRow() {
+    setTieredRows((rows) => {
+      const last = rows[rows.length - 1];
+      const nextStart = Number(last?.to);
+      return [...rows, { from: Number.isFinite(nextStart) ? String(nextStart + 1) : "", to: "", rate: "" }];
+    });
+  }
+
+  function removeTierRow(index: number) {
+    setTieredRows((rows) => rows.length <= 1 ? rows : rows.filter((_, i) => i !== index));
+  }
+
   // ── 构建 payload ───────────────────────────────────────────────────────────
   function buildPayload(): ContractV4Payload {
+    const commissionConfig = {
+      templateKey: activeCommissionType,
+      fixed: { rate: commissionRate },
+      threshold: {
+        currency: thresholdCurrency,
+        amount: thresholdAmount,
+        reachedRate: thresholdReachedRate || commissionRate,
+        unreachedRate: thresholdUnreachedRate,
+      },
+      tiered: {
+        currency: tieredCurrency,
+        tiers: tieredRows,
+      },
+      incremental: {
+        baseMonths: excessBaseMonths,
+        excessRate,
+      },
+      special: {
+        attributionRate: specialAttributionRate,
+        creatorRate: specialCreatorRate,
+        stockPublisherConfirmDays: "10",
+        lowGmvThresholdCurrency: "USD",
+        lowGmvThreshold: specialLowThreshold,
+        lowGmvBudgetRate: specialLowBudgetRate,
+        highGmvThresholdCurrency: "USD",
+        highGmvThreshold: specialHighThreshold,
+        highGmvServiceRate: specialHighServiceRate,
+        rawText: specialCommissionTerms,
+      },
+    };
     return {
       customerId,
       ownerId: ownerId || undefined,
@@ -333,13 +400,15 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
       feeAmount,
       firstPeriodFee: computedFirstPeriodFee ?? undefined,
       feeCycle,
-      commissionType,
-      commissionRate,
+      commissionType: activeCommissionType,
+      commissionRate: activeCommissionType === "THRESHOLD" ? (thresholdReachedRate || commissionRate) : commissionRate,
       thresholdAmount,
       thresholdCurrency,
+      tieredRules: stringifyCommissionConfig({ tiered: commissionConfig.tiered }),
       excessBaseMonths,
       excessCommissionRate: excessRate,
       gmvSettlementCycle: gmvCycle,
+      commissionConfig: stringifyCommissionConfig(commissionConfig),
       productList: JSON.stringify(products.filter(p => p.name || p.asin || p.price || p.trackLink)),
       coopChannels: JSON.stringify(channels),
       fillMethod: fillToken
@@ -719,14 +788,14 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
               <p className="text-xs font-semibold text-slate-600">联盟归因 GMV 佣金</p>
               <div>
                 <label className="label text-xs">佣金结算方式</label>
-                <select className="input" value={commissionType} onChange={e => setCommissionType(e.target.value)}>
+                <select className="input" value={activeCommissionType} disabled>
                   {COMMISSION_TYPES.map(ct => (
                     <option key={ct.value} value={ct.value}>{ct.label}</option>
                   ))}
                 </select>
               </div>
 
-              {commissionType === "FIXED" && (
+              {activeCommissionType === "FIXED" && (
                 <div>
                   <label className="label text-xs">GMV 抽佣比例</label>
                   <input className="input" value={commissionRate}
@@ -734,7 +803,7 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
                 </div>
               )}
 
-              {commissionType === "THRESHOLD" && (
+              {activeCommissionType === "THRESHOLD" && (
                 <div className="grid gap-3 sm:grid-cols-3">
                   <div>
                     <label className="label text-xs">门槛币种</label>
@@ -755,7 +824,83 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
                 </div>
               )}
 
-              {commissionType === "EXCESS" && (
+              {activeCommissionType === "THRESHOLD" && (
+                <div>
+                  <label className="label text-xs">未达标抽佣比例</label>
+                  <input className="input" value={thresholdUnreachedRate}
+                    onChange={e => setThresholdUnreachedRate(e.target.value)} placeholder="如：3%" />
+                </div>
+              )}
+
+              {activeCommissionType === "TIERED" && (
+                <div className="space-y-3">
+                  <div className="max-w-xs">
+                    <label className="label text-xs">阶梯币种</label>
+                    <select className="input" value={tieredCurrency} onChange={e => setTieredCurrency(e.target.value)}>
+                      {CURRENCY_OPTIONS.map((currency) => (
+                        <option key={currency.value} value={currency.value}>{currency.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    {tieredRows.map((row, index) => (
+                      <div key={index} className="grid gap-2 rounded-lg border border-amber-100 bg-white/70 p-3 sm:grid-cols-[1fr_1fr_1fr_auto]">
+                        <div>
+                          <label className="label text-xs">起始 GMV</label>
+                          <input className="input" value={row.from} onChange={e => updateTierRow(index, "from", e.target.value)} placeholder="0" />
+                        </div>
+                        <div>
+                          <label className="label text-xs">结束 GMV</label>
+                          <input className="input" value={row.to ?? ""} onChange={e => updateTierRow(index, "to", e.target.value)} placeholder="留空=以上" />
+                        </div>
+                        <div>
+                          <label className="label text-xs">佣金比例</label>
+                          <input className="input" value={row.rate} onChange={e => updateTierRow(index, "rate", e.target.value)} placeholder="如：8%" />
+                        </div>
+                        <div className="flex items-end">
+                          <button type="button" className="btn-secondary w-full text-xs" onClick={() => removeTierRow(index)} disabled={tieredRows.length <= 1}>
+                            删除
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <button type="button" className="btn-secondary text-xs" onClick={addTierRow}>
+                    + 新增阶梯
+                  </button>
+                </div>
+              )}
+
+              {activeCommissionType === "SPECIAL" && (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="label text-xs">Attribution 渠道佣金比例</label>
+                    <input className="input" value={specialAttributionRate} onChange={e => setSpecialAttributionRate(e.target.value)} placeholder="如：8%" />
+                  </div>
+                  <div>
+                    <label className="label text-xs">Creator Connections 佣金比例</label>
+                    <input className="input" value={specialCreatorRate} onChange={e => setSpecialCreatorRate(e.target.value)} placeholder="如：10%" />
+                  </div>
+                  <div>
+                    <label className="label text-xs">低 GMV 门槛 USD</label>
+                    <input className="input" value={specialLowThreshold} onChange={e => setSpecialLowThreshold(e.target.value)} placeholder="如：10000" />
+                  </div>
+                  <div>
+                    <label className="label text-xs">低 GMV 推广预算比例</label>
+                    <input className="input" value={specialLowBudgetRate} onChange={e => setSpecialLowBudgetRate(e.target.value)} placeholder="如：15%" />
+                  </div>
+                  <div>
+                    <label className="label text-xs">高 GMV 门槛 USD</label>
+                    <input className="input" value={specialHighThreshold} onChange={e => setSpecialHighThreshold(e.target.value)} placeholder="如：10000" />
+                  </div>
+                  <div>
+                    <label className="label text-xs">高 GMV 服务佣金比例</label>
+                    <input className="input" value={specialHighServiceRate} onChange={e => setSpecialHighServiceRate(e.target.value)} placeholder="如：8%" />
+                  </div>
+                </div>
+              )}
+
+              {activeCommissionType === "INCREMENTAL" && (
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div>
                     <label className="label text-xs">基准月数（取合作前N个月平均GMV）</label>

@@ -5,6 +5,11 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { bumpCustomerStatus } from "@/lib/customer";
+import {
+  commissionConfigFromLegacy,
+  normalizeTemplateKey,
+  primaryRateFromCommissionConfig,
+} from "@/lib/contractCommissionConfig";
 import { CONTRACT_REVIEW_FIELDS } from "@/lib/constants";
 import { syncContractProgressToProjects } from "@/actions/projects";
 import { ensureReconciliationForContract } from "@/actions/channelSplit";
@@ -415,6 +420,7 @@ export interface ContractV4Payload {
   excessBaseMonths?: string;
   excessCommissionRate?: string;
   gmvSettlementCycle?: string;
+  commissionConfig?: string;
   // 推广信息
   productList?: string;     // JSON string
   coopChannels?: string;    // JSON string
@@ -476,7 +482,22 @@ export async function createContractV4(
   if (!customerId) return { ok: false, error: "请选择关联客户" };
   // 链接模式草稿：甲方信息由客户填写，允许暂时为空
   const isExternalDraft = payload.fillMethod === "EXTERNAL_LINK";
+  const requiresTemplate = !payload.saveAsDraft && !isExternalDraft;
   if (!partyAName && !isExternalDraft) return { ok: false, error: "甲方公司名称为必填项" };
+  if (requiresTemplate && !payload.templateId) return { ok: false, error: "请选择适用的合同模板" };
+  const selectedTemplate = payload.templateId
+    ? await prisma.contractTemplate.findUnique({
+      where: { id: payload.templateId },
+      select: { templateKey: true },
+    })
+    : null;
+  if (payload.templateId && !selectedTemplate) return { ok: false, error: "合同模板不存在或已删除" };
+  const templateKey = normalizeTemplateKey(selectedTemplate?.templateKey ?? payload.commissionType ?? "FIXED");
+  const commissionConfig = commissionConfigFromLegacy({
+    ...payload,
+    templateKey,
+  });
+  const primaryCommissionRate = primaryRateFromCommissionConfig(commissionConfig);
 
   // contractNo 并发冲突重试（P2002）：findMany + max + 1 不是原子的。
   const year = new Date().getFullYear();
@@ -504,7 +525,6 @@ export async function createContractV4(
         data: {
           contractNo,
           customerId,
-      type: "BRAND",
       type: payload.type || "BRAND",
       status: payload.saveAsDraft ? "DRAFT" : "IN_PROGRESS",
       createdById: session.userId,
@@ -532,13 +552,14 @@ export async function createContractV4(
       firstPeriodFee: payload.firstPeriodFee ?? null,
       feeCycle: payload.feeCycle || "季度预付",
       // GMV 佣金
-      commissionType: payload.commissionType || "FIXED",
-      commissionRate: payload.commissionRate || null,
-      thresholdAmount: payload.thresholdAmount || null,
-      thresholdCurrency: payload.thresholdCurrency || "人民币",
-      tieredRules: payload.tieredRules || null,
-      excessBaseMonths: payload.excessBaseMonths || null,
-      excessCommissionRate: payload.excessCommissionRate || null,
+      commissionType: templateKey,
+      commissionRate: primaryCommissionRate || payload.commissionRate || null,
+      thresholdAmount: commissionConfig.threshold?.amount || payload.thresholdAmount || null,
+      thresholdCurrency: commissionConfig.threshold?.currency || payload.thresholdCurrency || "USD",
+      tieredRules: commissionConfig.tiered ? JSON.stringify(commissionConfig.tiered) : payload.tieredRules || null,
+      excessBaseMonths: commissionConfig.incremental?.baseMonths || payload.excessBaseMonths || null,
+      excessCommissionRate: commissionConfig.incremental?.excessRate || payload.excessCommissionRate || null,
+      commissionConfig: JSON.stringify(commissionConfig),
       gmvSettlementCycle: payload.gmvSettlementCycle || "月度",
       // 推广信息
       productList: payload.productList || null,
@@ -561,7 +582,9 @@ export async function createContractV4(
     return { ok: false, error: "合同编号冲突，请稍后重试" };
   }
 
-  await bumpCustomerStatus(customerId, "CONTRACT_IN_PROGRESS");
+  if (!payload.saveAsDraft) {
+    await bumpCustomerStatus(customerId, "CONTRACT_IN_PROGRESS");
+  }
   revalidatePath("/contracts");
   revalidatePath(`/customers/${customerId}`);
   return { ok: true, contractId: contract.id };
@@ -572,6 +595,20 @@ export async function updateContractV4(
   payload: Partial<ContractV4Payload>,
 ): Promise<ContractSaveResult> {
   await requireSession();
+  let templateKey = payload.commissionType;
+  if (payload.templateId) {
+    const selectedTemplate = await prisma.contractTemplate.findUnique({
+      where: { id: payload.templateId },
+      select: { templateKey: true },
+    });
+    if (!selectedTemplate) return { ok: false, error: "合同模板不存在或已删除" };
+    templateKey = selectedTemplate.templateKey;
+  }
+  const commissionConfig = commissionConfigFromLegacy({
+    ...payload,
+    templateKey,
+  });
+  const primaryCommissionRate = primaryRateFromCommissionConfig(commissionConfig);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (prisma.contract.update as any)({
     where: { id },
@@ -593,13 +630,14 @@ export async function updateContractV4(
       feeCurrency: payload.feeCurrency ?? undefined,
       firstPeriodFee: payload.firstPeriodFee ?? undefined,
       feeCycle: payload.feeCycle ?? undefined,
-      commissionType: payload.commissionType ?? undefined,
-      commissionRate: payload.commissionRate ?? undefined,
-      thresholdAmount: payload.thresholdAmount ?? undefined,
-      thresholdCurrency: payload.thresholdCurrency ?? undefined,
-      tieredRules: payload.tieredRules ?? undefined,
-      excessBaseMonths: payload.excessBaseMonths ?? undefined,
-      excessCommissionRate: payload.excessCommissionRate ?? undefined,
+      commissionType: payload.templateId ? normalizeTemplateKey(templateKey) : payload.commissionType ?? undefined,
+      commissionRate: (primaryCommissionRate || payload.commissionRate) ?? undefined,
+      thresholdAmount: commissionConfig.threshold?.amount ?? payload.thresholdAmount ?? undefined,
+      thresholdCurrency: commissionConfig.threshold?.currency ?? payload.thresholdCurrency ?? undefined,
+      tieredRules: commissionConfig.tiered ? JSON.stringify(commissionConfig.tiered) : payload.tieredRules ?? undefined,
+      excessBaseMonths: commissionConfig.incremental?.baseMonths ?? payload.excessBaseMonths ?? undefined,
+      excessCommissionRate: commissionConfig.incremental?.excessRate ?? payload.excessCommissionRate ?? undefined,
+      commissionConfig: JSON.stringify(commissionConfig),
       gmvSettlementCycle: payload.gmvSettlementCycle ?? undefined,
       productList: payload.productList ?? undefined,
       coopChannels: payload.coopChannels ?? undefined,

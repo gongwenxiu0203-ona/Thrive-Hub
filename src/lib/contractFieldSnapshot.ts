@@ -23,6 +23,7 @@ export const SNAPSHOT_FIELDS: { key: string; label: string }[] = [
   { key: "feeCycle", label: "费用周期" },
   { key: "commissionRate", label: "GMV 佣金比例" },
   { key: "commissionType", label: "佣金类型" },
+  { key: "gmvSettlementCycle", label: "GMV 结算周期" },
   { key: "thresholdAmount", label: "门槛金额" },
   { key: "thresholdCurrency", label: "门槛货币" },
   { key: "tieredRules", label: "阶梯规则" },
@@ -33,6 +34,43 @@ export const SNAPSHOT_FIELDS: { key: string; label: string }[] = [
   { key: "targetSite", label: "目标站点" },
   { key: "coopChannels", label: "合作渠道" },
 ];
+
+const BASE_REVIEW_FIELD_KEYS = new Set([
+  "partyAName",
+  "partyACreditCode",
+  "partyAAddress",
+  "partyAContact",
+  "partyAPhone",
+  "partyAEmail",
+  "startDate",
+  "endDate",
+  "feeAmount",
+  "feeCurrency",
+  "feeCycle",
+  "commissionType",
+  "gmvSettlementCycle",
+  "promoPlatform",
+  "targetSite",
+  "coopChannels",
+]);
+
+const COMMISSION_REVIEW_FIELD_KEYS: Record<string, string[]> = {
+  FIXED: ["commissionRate"],
+  THRESHOLD: ["thresholdCurrency", "thresholdAmount", "commissionRate"],
+  TIERED: ["tieredRules"],
+  SPECIAL: ["specialCommissionTerms"],
+  INCREMENTAL: ["excessBaseMonths", "excessCommissionRate"],
+  EXCESS: ["excessBaseMonths", "excessCommissionRate"],
+};
+
+export function getReviewDecisionFields(templateKey?: string | null): { key: string; label: string }[] {
+  const normalized = String(templateKey || "FIXED").toUpperCase();
+  const keys = new Set([
+    ...BASE_REVIEW_FIELD_KEYS,
+    ...(COMMISSION_REVIEW_FIELD_KEYS[normalized] ?? COMMISSION_REVIEW_FIELD_KEYS.FIXED),
+  ]);
+  return SNAPSHOT_FIELDS.filter((field) => keys.has(field.key));
+}
 
 export type FieldSnapshot = Record<string, string>;
 

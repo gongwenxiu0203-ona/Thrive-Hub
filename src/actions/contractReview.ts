@@ -6,7 +6,11 @@ import path from "path";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { REVIEWER_EMAIL } from "@/lib/contractReviewer";
-import { SNAPSHOT_FIELD_KEY, collectContractFieldSnapshot } from "@/lib/contractFieldSnapshot";
+import {
+  SNAPSHOT_FIELD_KEY,
+  collectContractFieldSnapshot,
+  getReviewDecisionFields,
+} from "@/lib/contractFieldSnapshot";
 import { appendDocxComment } from "@/lib/docxComment";
 
 type Result<T = void> = { ok: true; data?: T } | { ok: false; error: string };
@@ -96,11 +100,30 @@ export async function approveCurrentReview(contractId: string): Promise<Result> 
   const current = await prisma.contractReview.findFirst({
     where: { contractId, status: "PENDING" },
     orderBy: { round: "desc" },
-    select: { id: true, reviewerId: true },
+    select: {
+      id: true,
+      reviewerId: true,
+      contract: { select: { commissionType: true } },
+      comments: {
+        where: { fieldKey: { not: SNAPSHOT_FIELD_KEY } },
+        select: { fieldKey: true, decision: true },
+      },
+    },
   });
   if (!current) return { ok: false, error: "没有待审核的轮次" };
   if (current.reviewerId !== session.userId && session.role !== "ADMIN") {
     return { ok: false, error: "无权审核：仅指定审核人或管理员可操作" };
+  }
+
+  const decisions = new Map(current.comments.map((c) => [c.fieldKey, c.decision]));
+  const reviewFields = getReviewDecisionFields(current.contract.commissionType);
+  const rejectedField = reviewFields.find((f) => decisions.get(f.key) === "REJECTED");
+  if (rejectedField) {
+    return { ok: false, error: `字段「${rejectedField.label}」已驳回，不能整单通过` };
+  }
+  const pendingField = reviewFields.find((f) => decisions.get(f.key) !== "APPROVED");
+  if (pendingField) {
+    return { ok: false, error: `字段「${pendingField.label}」尚未通过，请先完成字段审核` };
   }
 
   await prisma.$transaction([
@@ -144,6 +167,26 @@ export async function rejectCurrentReview(contractId: string): Promise<Result> {
     }),
   ]);
 
+  const contract = await prisma.contract.findUnique({
+    where: { id: contractId },
+    select: { contractNo: true, ownerId: true, createdById: true, hasSourceAnnotations: true },
+  });
+  const targetId = contract?.ownerId ?? contract?.createdById ?? null;
+  if (targetId) {
+    await prisma.reminder.create({
+      data: {
+        title: `合同审核退回：${contract?.contractNo ?? contractId}`,
+        content: contract?.hasSourceAnnotations
+          ? "合同审核已退回，原文中有批注待查看，请根据字段意见和原文批注修改后重新提交。"
+          : "合同审核已退回，请根据字段意见修改后重新提交。",
+        remindDate: new Date(),
+        type: "REVIEW",
+        targetId,
+        createdById: session.userId,
+      },
+    });
+  }
+
   revalidatePath(`/contracts/${contractId}`);
   revalidatePath("/contracts/reviews");
   revalidatePath("/contracts");
@@ -157,6 +200,7 @@ export async function upsertFieldComment(
   fieldKey: string,
   comment: string,
   annotationId: string | null = null,
+  decision: "PENDING" | "APPROVED" | "REJECTED" = "PENDING",
 ): Promise<Result<{ id: string }>> {
   const session = await requireSession();
   const review = await prisma.contractReview.findUnique({
@@ -172,8 +216,8 @@ export async function upsertFieldComment(
   // 借助 @@unique([reviewId, fieldKey]) 做原子 upsert，避免并发下双写。
   const saved = await prisma.contractReviewComment.upsert({
     where: { reviewId_fieldKey: { reviewId, fieldKey } },
-    create: { reviewId, fieldKey, comment, annotationId },
-    update: { comment, annotationId },
+    create: { reviewId, fieldKey, comment, annotationId, decision },
+    update: { comment, annotationId, decision },
     select: { id: true },
   });
 
@@ -258,6 +302,10 @@ export async function addAnnotation(
       fileUrl: annotatedFileUrl,
     },
     select: { id: true },
+  });
+  await prisma.contract.update({
+    where: { id: contractId },
+    data: { hasSourceAnnotations: true },
   });
   revalidatePath(`/contracts/${contractId}`);
   return { ok: true, data: { id: ann.id } };

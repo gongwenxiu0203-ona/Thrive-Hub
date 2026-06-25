@@ -208,6 +208,7 @@ model Contract {
   excessBaseMonths      String? // EXCESS 机制：基准月数
   excessCommissionRate  String? // EXCESS 机制：增长服务佣金比例（带 %）
   gmvSettlementCycle    String? // 联盟归因 GMV 结算周期
+  commissionConfig      String  @default("{}") // 5 类佣金机制结构化配置 JSON
 
   // ── 合同表单填写字段（v4 甲方项目确认书）────────────────────────────────────
   // 甲方补充信息
@@ -253,6 +254,9 @@ model Contract {
   pendingNewUpload    Boolean  @default(false)  // 审核选了"上传新版"等待重抽字段
   // 创建方式：NEW 新建 | EXISTING 上传已有；null 视为 NEW（老数据兼容）
   uploadType          String?
+  // 上传已有合同模式：SIGNED_ARCHIVE 签署完成存档 | REVIEW_AND_STAMP 上传审核盖章
+  uploadArchiveMode   String?
+  hasSourceAnnotations Boolean @default(false) // 原文在线批注标记，退回时提示提交人查看
 
   startDate DateTime? // 合作期限-开始
   endDate   DateTime? // 合作期限-结束
@@ -1159,6 +1163,7 @@ model ContractReviewComment {
   reviewId      String
   fieldKey      String                       // 对齐 PLACEHOLDER_KEYS 的 key
   comment       String                       // 文字意见
+  decision      String  @default("PENDING")  // PENDING | APPROVED | REJECTED
   annotationId  String?                      // 关联 ContractAnnotation（可空）
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt

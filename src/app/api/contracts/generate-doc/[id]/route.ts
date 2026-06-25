@@ -43,7 +43,7 @@ export async function GET(
     );
 
     const filename = encodeURIComponent(`${contractFileBaseName(contract)}.docx`);
-    return new NextResponse(docxBuffer, {
+    return new NextResponse(new Uint8Array(docxBuffer), {
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "Content-Disposition": `attachment; filename*=UTF-8''${filename}`,

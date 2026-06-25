@@ -29,6 +29,7 @@ export function ContractWorkflowPanel({
   hasTemplate,
   hasGeneratedDoc,
   pendingNewUpload,
+  hasSourceAnnotations,
   stampStatus,
   stampedDocUrl,
   isAdmin,
@@ -39,6 +40,7 @@ export function ContractWorkflowPanel({
   hasTemplate: boolean;
   hasGeneratedDoc: boolean;
   pendingNewUpload: boolean;
+  hasSourceAnnotations: boolean;
   stampStatus: string;
   stampedDocUrl: string | null;
   isAdmin: boolean;
@@ -138,6 +140,12 @@ export function ContractWorkflowPanel({
         <div className="mb-3 flex items-start gap-2 rounded-lg bg-blue-50 border border-blue-200 px-3 py-2 text-xs text-blue-700">
           <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <p>本合同上传了新版本，等待审核人重新识别字段。</p>
+        </div>
+      )}
+      {status === "REJECTED" && hasSourceAnnotations && (
+        <div className="mb-3 flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-700">
+          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <p>合同已退回，原文中有审核批注待查看，请先查看原文批注和字段意见后再修改提交。</p>
         </div>
       )}
       {stampStatus === "FAILED" && (
