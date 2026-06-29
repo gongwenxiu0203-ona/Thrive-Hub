@@ -55,6 +55,28 @@ function fillAmount(xml: string, fields: FieldsMap): string {
   return next;
 }
 
+function fillServiceFeeAmount(xml: string, fields: FieldsMap): string {
+  const amount = field(fields, "feeAmount");
+  if (!amount) return xml;
+
+  return replaceParagraphs(xml, (inner) => {
+    const text = textMatches(inner).map((m) => m.text).join("");
+    const compact = normalizeText(text);
+    if (!compact.includes("每个月按照") || !compact.includes("元/月作为月度服务费")) {
+      return inner;
+    }
+
+    let filled = false;
+    return inner.replace(/<w:r\b(?:(?!<\/w:r>)[\s\S])*?<\/w:r>/g, (run) => {
+      if (filled) return run;
+      if (!run.includes('<w:u w:val="single"/>')) return run;
+      if (!/<w:t[^>]*>\s*<\/w:t>/.test(run)) return run;
+      filled = true;
+      return run.replace(/(<w:t[^>]*>)\s*(<\/w:t>)/, `$1${escXml(amount)}$2`);
+    });
+  });
+}
+
 function display(v: unknown): string {
   if (v === null || v === undefined) return "";
   return String(v);
@@ -290,26 +312,14 @@ function replacementForTemplateText(text: string, fields: FieldsMap, state: Plai
     return `电子邮箱：${state.emailCount % 2 === 1 ? field(fields, "partyAEmail") : field(fields, "partyBEmail")}`;
   }
 
-  // 项目确认书：4.1.1 月度服务费金额。新模板已去掉填色，不能再依赖高亮 run。
+  // 项目确认书：4.1.1 月度服务费金额由 fillServiceFeeAmount 处理，避免整段重写破坏复选框位置。
   if (compact.includes("每个月按照") && compact.includes("元/月作为月度服务费")) {
-    const amount = field(fields, "feeAmount");
-    if (!amount) return null;
-    if (/_+/.test(text)) return text.replace(/_+/, amount);
-    return text.replace(/(美金|美元|人民币)(\s*)(元\/月作为月度服务费)/, `$1${amount}$3`);
+    return null;
   }
 
-  // 项目确认书：4.3 GMV 结算周期。若模板用文本框而非 Wingdings 复选框，这里直接保留两项并勾选对应项。
+  // 项目确认书：4.3 GMV 结算周期由 tickCheckboxes 原地勾选，不能整段重写。
   if (compact.includes("联盟归因GMV佣金按") && compact.includes("季度结算")) {
-    const cycle = field(fields, "gmvSettlementCycle");
-    if (!cycle) return null;
-    const isQuarter = cycle.includes("季") || /quarter/i.test(cycle);
-    let t = text
-      .replace(/[□☑]?\s*月\s*\//, `${isQuarter ? "□" : "☑"}月 /`)
-      .replace(/[□☑]?\s*季度结算/, `${isQuarter ? "☑" : "□"}季度结算`);
-    if (t === text && text.includes("按月")) {
-      t = text.replace("按月", `按${isQuarter ? "□" : "☑"}月`).replace("季度结算", `${isQuarter ? "☑" : "□"}季度结算`);
-    }
-    return t;
+    return null;
   }
 
   // ── 项目确认书：佣金费率空位填写 ──────────────────────────────────────────────
@@ -586,6 +596,7 @@ export async function fillContractTemplate(templateBuffer: Buffer, fields: Field
   newXml = replaceKnownTemplateTextInDocxXml(newXml, fields);
   newXml = fillTieredTable(newXml, fields);
   newXml = tickCheckboxes(newXml, fields);
+  newXml = fillServiceFeeAmount(newXml, fields);
   newXml = fillAmount(newXml, fields);
   newXml = cleanupPercentSpacing(newXml);
   newXml = stripOutputBackgrounds(newXml);
