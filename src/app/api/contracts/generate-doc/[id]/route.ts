@@ -1,17 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
+import { promises as fs } from "fs";
+import os from "os";
+import path from "path";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { buildPlaceholderMap } from "@/lib/contractPlaceholders";
 import { fillContractTemplate } from "@/lib/contractTemplateFill";
 import { contractFileBaseName } from "@/lib/contractFileName";
 import { resolveContractTemplateBuffer } from "@/lib/contractTemplateResolve";
+import { convertDocxToPdf } from "@/lib/docxToPdf";
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   await requireSession();
   const { id } = await params;
+  const format = (req.nextUrl.searchParams.get("format") ?? "docx").toLowerCase();
 
   const contract = await prisma.contract.findUnique({
     where: { id },
@@ -41,7 +46,40 @@ export async function GET(
       },
     );
 
-    const filename = encodeURIComponent(`${contractFileBaseName(contract)}.docx`);
+    const baseName = contractFileBaseName(contract);
+    if (format === "pdf") {
+      const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "thraive-contract-download-"));
+      try {
+        const docxPath = path.join(tmpDir, `${baseName}.docx`);
+        await fs.writeFile(docxPath, docxBuffer);
+        let pdfPath: string;
+        try {
+          pdfPath = await convertDocxToPdf(docxPath, tmpDir);
+        } catch (convertError) {
+          console.error("[generate-doc] pdf conversion error:", convertError);
+          const detail = convertError instanceof Error ? convertError.message : "未知错误";
+          return NextResponse.json(
+            {
+              error: "PDF 生成失败：当前环境未正确配置 LibreOffice / SOFFICE_PATH。请先下载 Word，或在服务器/本机安装 LibreOffice 后重试。",
+              detail,
+            },
+            { status: 503 },
+          );
+        }
+        const pdfBuffer = await fs.readFile(pdfPath);
+        const filename = encodeURIComponent(`${baseName}.pdf`);
+        return new NextResponse(new Uint8Array(pdfBuffer), {
+          headers: {
+            "Content-Type": "application/pdf",
+            "Content-Disposition": `attachment; filename*=UTF-8''${filename}`,
+          },
+        });
+      } finally {
+        await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+      }
+    }
+
+    const filename = encodeURIComponent(`${baseName}.docx`);
     return new NextResponse(new Uint8Array(docxBuffer), {
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",

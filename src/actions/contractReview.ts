@@ -153,11 +153,34 @@ export async function rejectCurrentReview(contractId: string): Promise<Result> {
   const current = await prisma.contractReview.findFirst({
     where: { contractId, status: "PENDING" },
     orderBy: { round: "desc" },
-    select: { id: true, reviewerId: true },
+    select: {
+      id: true,
+      reviewerId: true,
+      contract: { select: { commissionType: true } },
+      comments: {
+        where: { fieldKey: { not: SNAPSHOT_FIELD_KEY } },
+        select: { fieldKey: true, comment: true, decision: true },
+      },
+    },
   });
   if (!current) return { ok: false, error: "没有待审核的轮次" };
   if (current.reviewerId !== session.userId && session.role !== "ADMIN") {
     return { ok: false, error: "无权审核：仅指定审核人或管理员可操作" };
+  }
+
+  const rejectedComments = current.comments.filter((comment) => comment.decision === "REJECTED");
+  if (rejectedComments.length === 0) {
+    return { ok: false, error: "请先选择至少一个驳回字段，并填写审核意见后再退回" };
+  }
+  const missingComment = rejectedComments.find((comment) => !comment.comment.trim());
+  if (missingComment) {
+    const labelMap = new Map(
+      getReviewDecisionFields(current.contract.commissionType).map((field) => [field.key, field.label]),
+    );
+    return {
+      ok: false,
+      error: `字段「${labelMap.get(missingComment.fieldKey) ?? missingComment.fieldKey}」已选择驳回，请填写审核意见`,
+    };
   }
 
   await prisma.$transaction([

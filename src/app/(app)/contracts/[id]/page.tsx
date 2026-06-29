@@ -201,6 +201,14 @@ export default async function ContractDetailPage({
     if (value instanceof Date) return formatDate(value);
     return String(value);
   };
+  const partyBCompanyLabels: Record<string, string> = {
+    THRAIVE: "佛山公司",
+    LINGYUE: "香港公司",
+  };
+  let partyBBankAccounts: string[] = [];
+  try {
+    partyBBankAccounts = JSON.parse(c.partyBBankAccounts ?? "[]");
+  } catch {}
   const fieldValues: Record<string, string> = {
     partyAName: contract.partyA ?? "",
     partyACreditCode: c.partyACreditCode ?? "",
@@ -208,6 +216,10 @@ export default async function ContractDetailPage({
     partyAContact: c.partyAContact ?? "",
     partyAPhone: c.partyAPhone ?? "",
     partyAEmail: c.partyAEmail ?? "",
+    partyBCompany: partyBCompanyLabels[c.partyBCompany] ?? c.partyBCompany ?? "",
+    partyBBankAccounts: partyBBankAccounts.length
+      ? partyBBankAccounts.map((account) => partyBCompanyLabels[account] ?? account).join(" / ")
+      : "",
     startDate: formatMaybeDate(contract.startDate),
     endDate: formatMaybeDate(contract.endDate),
     promoPlatform: c.promoPlatform ?? "",
@@ -242,22 +254,24 @@ export default async function ContractDetailPage({
     value: fieldValues[field.key] ?? "",
   }));
   const partyAReviewFields = reviewFieldRows.filter((field) => field.key.startsWith("partyA"));
-  const keyReviewFields = reviewFieldRows.filter((field) => !field.key.startsWith("partyA"));
+  const partyBReviewFields = reviewFieldRows.filter((field) => field.key.startsWith("partyB"));
+  const promotionKeys = new Set(["promoPlatform", "targetSite", "coopChannels"]);
+  const promotionReviewFields = reviewFieldRows.filter((field) => promotionKeys.has(field.key));
+  const cooperationReviewFields = reviewFieldRows.filter(
+    (field) => !field.key.startsWith("partyA") && !field.key.startsWith("partyB") && !promotionKeys.has(field.key),
+  );
+  const reviewFieldGroups = [
+    { title: "甲方信息", fields: partyAReviewFields },
+    { title: "乙方信息", fields: partyBReviewFields },
+    { title: "合作信息", fields: cooperationReviewFields },
+    { title: "推广信息", fields: promotionReviewFields },
+  ];
   const sourceVersion = contract.versions[0] ?? null;
   const sourceUrl = sourceVersion
     ? `/api/contracts/version-download/${sourceVersion.id}?inline=1`
     : contract.generatedDocUrl
       ? `/api/contracts/generate-doc/${contract.id}`
       : null;
-
-  const partyBCompanyLabels: Record<string, string> = {
-    THRAIVE: "佛山公司",
-    LINGYUE: "香港公司",
-  };
-  let partyBBankAccounts: string[] = [];
-  try {
-    partyBBankAccounts = JSON.parse(c.partyBBankAccounts ?? "[]");
-  } catch {}
 
   return (
     <div className="space-y-6">
@@ -274,7 +288,7 @@ export default async function ContractDetailPage({
           </div>
           <div className="flex items-center gap-2">
             {/* V4 合同：编辑 + 下载 */}
-            {c.fillMethod && contract.status === "IN_PROGRESS" && (
+            {c.fillMethod && (contract.status === "IN_PROGRESS" || contract.status === "REJECTED") && (
               <Link
                 href={`/contracts/new?contractId=${contract.id}`}
                 className="btn-secondary flex items-center gap-1.5 text-sm"
@@ -283,14 +297,22 @@ export default async function ContractDetailPage({
               </Link>
             )}
             {c.fillMethod && (
-              <a
-                href={`/api/contracts/generate-doc/${contract.id}`}
-                target="_blank"
-                rel="noreferrer"
-                className="btn-outline flex items-center gap-1.5 text-sm"
-              >
-                <FileDown className="h-4 w-4" /> 下载合同 DOCX
-              </a>
+              <>
+                <a
+                  href={`/api/contracts/generate-doc/${contract.id}`}
+                  download
+                  className="btn-outline flex items-center gap-1.5 text-sm"
+                >
+                  <FileDown className="h-4 w-4" /> 下载 Word
+                </a>
+                <a
+                  href={`/api/contracts/generate-doc/${contract.id}?format=pdf`}
+                  download
+                  className="btn-outline flex items-center gap-1.5 text-sm"
+                >
+                  <FileDown className="h-4 w-4" /> 下载 PDF
+                </a>
+              </>
             )}
             {/* 旧版合同：原有编辑弹窗 */}
             {!c.fillMethod && contract.status === "IN_PROGRESS" && (
@@ -383,6 +405,22 @@ export default async function ContractDetailPage({
         })}
       </div>
 
+      {/* 合同审核：提交审核后置顶展示；上传「签署完成存档」无需审核，不展示 */}
+      {c.uploadArchiveMode !== "SIGNED_ARCHIVE" && (reviewRounds.length > 0 || canActReview) && (
+        <ReviewerActionsPanel
+          contractId={contract.id}
+          contractStatus={contract.status}
+          canAct={canActReview}
+          currentReview={currentReview}
+          history={reviewRounds}
+          annotations={reviewAnnotations}
+          fields={reviewFieldRows}
+          fieldGroups={reviewFieldGroups}
+          roundDiff={roundDiff}
+          sourceUrl={sourceUrl}
+        />
+      )}
+
       {/* 合同流程：生成 + 提交审核（双路径）+ 盖章 + 版本历史 */}
       <ContractWorkflowPanel
         contractId={contract.id}
@@ -405,21 +443,6 @@ export default async function ContractDetailPage({
           createdAt: v.createdAt.toISOString(),
         }))}
       />
-
-      {/* 合同审核（轮次 / 字段意见 / 批注）—— 上传「签署完成存档」无需审核，不展示 */}
-      {c.uploadArchiveMode !== "SIGNED_ARCHIVE" && (reviewRounds.length > 0 || canActReview) && (
-        <ReviewerActionsPanel
-          contractId={contract.id}
-          contractStatus={contract.status}
-          canAct={canActReview}
-          currentReview={currentReview}
-          history={reviewRounds}
-          annotations={reviewAnnotations}
-          fields={reviewFieldRows}
-          roundDiff={roundDiff}
-          sourceUrl={sourceUrl}
-        />
-      )}
 
       {/* 合同基础信息 */}
       <section className="card p-5">
@@ -462,13 +485,14 @@ export default async function ContractDetailPage({
         </dl>
       </section>
 
-      {/* 合同审核字段：甲方信息 */}
-      <ReviewFieldDisplaySection title="甲方信息" fields={partyAReviewFields} />
+      {/* 合同字段展示：与创建合同一致分为四个业务板块 */}
+      {reviewFieldGroups
+        .filter((group) => group.fields.some((field) => !field.key.startsWith("partyB")))
+        .map((group) => (
+        <ReviewFieldDisplaySection key={group.title} title={group.title} fields={group.fields} />
+      ))}
 
-      {/* 合同审核字段：关键字段 */}
-      <ReviewFieldDisplaySection title="合同关键字段" fields={keyReviewFields} />
-
-      {/* 合同中的乙方信息 */}
+      {/* 合同中的乙方详细信息 */}
       <section className="card p-5">
         <h2 className="mb-4 font-semibold text-slate-900">乙方信息</h2>
         <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -488,85 +512,6 @@ export default async function ContractDetailPage({
           />
         </dl>
       </section>
-
-      {/* V4 补充展示：商品清单、渠道、外部填写链接 */}
-      {c.fillMethod && (
-        <section className="card p-5">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="font-semibold text-slate-900">推广信息</h2>
-            <span className="rounded-full bg-brand-50 px-2.5 py-0.5 text-xs text-brand-600">
-              {c.fillMethod === "AI_EXTRACT" ? "AI识别填写" : c.fillMethod === "EXTERNAL_LINK" ? "客户外部填写" : "手动填写"}
-            </span>
-          </div>
-          {/* 推广商品清单 */}
-          {(() => {
-            let products: Array<{name:string;asin:string;price:string;trackLink:string}> = [];
-            try { products = JSON.parse(c.productList ?? "[]"); } catch {}
-            if (!products.length) return null;
-            return (
-              <div className="mt-4">
-                <p className="mb-2 text-sm font-medium text-slate-600">推广商品清单</p>
-                <div className="overflow-x-auto rounded-lg border border-slate-200">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-slate-100 bg-slate-50 text-xs text-slate-500">
-                        <th className="px-3 py-2 text-left">商品名称</th>
-                        <th className="px-3 py-2 text-left">ASIN</th>
-                        <th className="px-3 py-2 text-left">零售价</th>
-                        <th className="px-3 py-2 text-left">追踪链接/优惠码</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {products.map((p, i) => (
-                        <tr key={i} className="border-b border-slate-50 last:border-0">
-                          <td className="px-3 py-2">{p.name || "—"}</td>
-                          <td className="px-3 py-2 font-mono text-xs">{p.asin || "—"}</td>
-                          <td className="px-3 py-2">{p.price || "—"}</td>
-                          <td className="px-3 py-2 max-w-[200px] truncate text-xs text-slate-500">{p.trackLink || "—"}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* 合作渠道 */}
-          {(() => {
-            let channels: string[] = [];
-            try { channels = JSON.parse(c.coopChannels ?? "[]"); } catch {}
-            if (!channels.length) return null;
-            const labelMap: Record<string,string> = {
-              ACC: "Amazon Creator Connections（ACC）", Attribution: "Amazon Attribution",
-              Associates: "Amazon Affiliate Associates", AmazonLive: "Amazon Live",
-              Levanta: "Levanta", Impact: "Impact", Wayward: "Wayward",
-              ArcherAffiliates: "Archer Affiliates", PrivateSocial: "私域/社媒/流量渠道",
-            };
-            return (
-              <div className="mt-4">
-                <p className="mb-2 text-sm font-medium text-slate-600">确认合作渠道</p>
-                <div className="flex flex-wrap gap-2">
-                  {channels.map(k => (
-                    <span key={k} className="rounded-full bg-brand-50 px-3 py-1 text-xs text-brand-700">
-                      ☑ {labelMap[k] ?? k}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* 外部填写链接 */}
-          {c.externalFillToken && (
-            <div className="mt-4 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-              <p className="text-xs text-slate-500">
-                外部填写链接有效至：{c.externalFillExpiry ? new Date(c.externalFillExpiry).toLocaleDateString("zh-CN") : "—"}
-              </p>
-            </div>
-          )}
-        </section>
-      )}
 
       {/* 旧版合同兜底：保留原文对照 */}
       {!c.fillMethod && (

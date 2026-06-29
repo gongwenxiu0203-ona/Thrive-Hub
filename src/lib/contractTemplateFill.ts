@@ -42,13 +42,17 @@ function parseCommissionConfigSafe(raw: string): CommissionConfigShape {
 function fillAmount(xml: string, fields: FieldsMap): string {
   const amount = field(fields, "feeAmount");
   if (!amount) return xml;
-  return xml.replace(/<w:r\b(?:(?!<\/w:r>)[\s\S])*?<\/w:r>/g, (run) => {
+  let filled = false;
+  const next = xml.replace(/<w:r\b(?:(?!<\/w:r>)[\s\S])*?<\/w:r>/g, (run) => {
+    if (filled) return run;
     if (!run.includes('<w:highlight w:val="green"/>')) return run;
     if (!run.includes('<w:u w:val="single"/>')) return run;
     // 仅填内容为空白的 <w:t>（避免误改已有文字的下划线绿字）
     if (!/<w:t[^>]*>\s*<\/w:t>/.test(run)) return run;
+    filled = true;
     return run.replace(/(<w:t[^>]*>)\s*(<\/w:t>)/, `$1${escXml(amount)}$2`);
   });
+  return next;
 }
 
 function display(v: unknown): string {
@@ -159,6 +163,41 @@ function stripTags(s: string): string {
   return s.replace(/<[^>]+>/g, "");
 }
 
+function xmlText(s: string): string {
+  return stripTags(s)
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"');
+}
+
+function withPct(v: string): string {
+  const n = pct(v);
+  if (!n) return "";
+  return `${n}%`;
+}
+
+function cleanupPercentSpacing(xml: string): string {
+  return xml.replace(/(\d)\s+([%％])/g, "$1$2");
+}
+
+function currencyLabel(v: string): string {
+  const cur = v.trim();
+  if (!cur) return "USD";
+  if (/usd|美金|美元/i.test(cur)) return "USD";
+  if (/eur|欧元/i.test(cur)) return "EUR";
+  if (/gbp|英镑/i.test(cur)) return "GBP";
+  if (/rmb|人民币|cny/i.test(cur)) return "RMB";
+  return cur;
+}
+
+function nextAmount(prev: string | undefined): string {
+  if (!prev) return "";
+  const n = Number(String(prev).replace(/,/g, ""));
+  if (!Number.isFinite(n)) return "";
+  return String(n + 1);
+}
+
 /** 取 index 所在段落的可见文字（去空格），用于复选框上下文判定。 */
 function paragraphTextAt(xml: string, index: number): string {
   let start = xml.lastIndexOf("<w:p>", index);
@@ -251,9 +290,31 @@ function replacementForTemplateText(text: string, fields: FieldsMap, state: Plai
     return `电子邮箱：${state.emailCount % 2 === 1 ? field(fields, "partyAEmail") : field(fields, "partyBEmail")}`;
   }
 
+  // 项目确认书：4.1.1 月度服务费金额。新模板已去掉填色，不能再依赖高亮 run。
+  if (compact.includes("每个月按照") && compact.includes("元/月作为月度服务费")) {
+    const amount = field(fields, "feeAmount");
+    if (!amount) return null;
+    if (/_+/.test(text)) return text.replace(/_+/, amount);
+    return text.replace(/(美金|美元|人民币)(\s*)(元\/月作为月度服务费)/, `$1${amount}$3`);
+  }
+
+  // 项目确认书：4.3 GMV 结算周期。若模板用文本框而非 Wingdings 复选框，这里直接保留两项并勾选对应项。
+  if (compact.includes("联盟归因GMV佣金按") && compact.includes("季度结算")) {
+    const cycle = field(fields, "gmvSettlementCycle");
+    if (!cycle) return null;
+    const isQuarter = cycle.includes("季") || /quarter/i.test(cycle);
+    let t = text
+      .replace(/[□☑]?\s*月\s*\//, `${isQuarter ? "□" : "☑"}月 /`)
+      .replace(/[□☑]?\s*季度结算/, `${isQuarter ? "☑" : "□"}季度结算`);
+    if (t === text && text.includes("按月")) {
+      t = text.replace("按月", `按${isQuarter ? "□" : "☑"}月`).replace("季度结算", `${isQuarter ? "☑" : "□"}季度结算`);
+    }
+    return t;
+  }
+
   // ── 项目确认书：佣金费率空位填写 ──────────────────────────────────────────────
   // 仅把段落里的 _____ 空位替换为费率/门槛/月数，其余措辞保持模板原文不变。
-  // 各模板对应不同佣金机制，空位顺序见模板。SPECIAL / TIERED 暂未处理。
+  // 各模板对应不同佣金机制，空位顺序见模板。
   if (compact.includes("固定点数联盟归因GMV")) {
     const rate = pct(field(fields, "commissionRate"));
     return rate ? text.replace(/_+/, rate) : null;
@@ -265,8 +326,8 @@ function replacementForTemplateText(text: string, fields: FieldsMap, state: Plai
   }
   if (compact.includes("未达到上述联盟归因GMV门槛")) {
     const cfg = parseCommissionConfigSafe(field(fields, "commissionConfig"));
-    const thr = (cfg.threshold ?? {}) as { reachedRate?: string; unreachedRate?: string };
-    const amount = [field(fields, "thresholdCurrency"), field(fields, "thresholdAmount")].filter(Boolean).join(" ");
+    const thr = (cfg.threshold ?? {}) as { currency?: string; amount?: string; reachedRate?: string; unreachedRate?: string };
+    const amount = [currencyLabel(thr.currency || field(fields, "thresholdCurrency")), thr.amount || field(fields, "thresholdAmount")].filter(Boolean).join(" ");
     const vals = [amount, pct(thr.reachedRate || field(fields, "commissionRate")), pct(thr.unreachedRate || "")];
     let i = 0;
     return text.replace(/_+/g, () => vals[i++] || "_____");
@@ -386,6 +447,127 @@ function replaceParagraphs(xml: string, rewrite: (inner: string) => string): str
   return out.join("");
 }
 
+type TierRule = { from: string; to: string; rate: string };
+
+function getTieredRules(fields: FieldsMap): { currency: string; tiers: TierRule[] } {
+  const cfg = parseCommissionConfigSafe(field(fields, "commissionConfig"));
+  let currency = currencyLabel(cfg.tiered?.currency || field(fields, "thresholdCurrency") || "USD");
+  let tiers = (cfg.tiered?.tiers ?? []).map((t) => ({
+    from: display(t.from).trim(),
+    to: display(t.to).trim(),
+    rate: display(t.rate).trim(),
+  }));
+
+  if (!tiers.length) {
+    try {
+      const legacy = JSON.parse(field(fields, "tieredRules") || "{}") as {
+        currency?: string;
+        tiers?: TierRule[];
+      };
+      currency = currencyLabel(legacy.currency || currency);
+      tiers = (legacy.tiers ?? []).map((t) => ({
+        from: display(t.from).trim(),
+        to: display(t.to).trim(),
+        rate: display(t.rate).trim(),
+      }));
+    } catch {
+      // ignore legacy parse failure
+    }
+  }
+
+  return { currency, tiers: tiers.filter((t) => t.to || t.from || t.rate) };
+}
+
+function cellMatches(row: string): { start: number; end: number; text: string }[] {
+  const re = /<w:tc\b[\s\S]*?<\/w:tc>/g;
+  const cells: { start: number; end: number; text: string }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(row)) !== null) {
+    cells.push({ start: m.index, end: m.index + m[0].length, text: m[0] });
+  }
+  return cells;
+}
+
+function setFirstCellText(row: string, cellIndex: number, text: string): string {
+  const cells = cellMatches(row);
+  const cell = cells[cellIndex];
+  if (!cell) return row;
+  const replacedCell = cell.text.replace(/(<w:p(\s[^>]*)?>)([\s\S]*?)(<\/w:p>)/, (_all, open, _attr, inner, close) => {
+    if (textMatches(inner).length) return `${open}${rewriteParagraphText(inner, text)}${close}`;
+    const run = `<w:r><w:t xml:space="preserve">${escXmlMultiline(text)}</w:t></w:r>`;
+    const withRun = /<w:pPr\b[\s\S]*?<\/w:pPr>/.test(inner)
+      ? inner.replace(/(<w:pPr\b[\s\S]*?<\/w:pPr>)/, `$1${run}`)
+      : `${run}${inner}`;
+    return `${open}${withRun}${close}`;
+  });
+  return `${row.slice(0, cell.start)}${replacedCell}${row.slice(cell.end)}`;
+}
+
+function formatTierRange(tier: TierRule, index: number, tiers: TierRule[]): string {
+  const from = tier.from || (index === 0 ? "0" : nextAmount(tiers[index - 1]?.to));
+  const to = tier.to;
+  if (to) return `${from || "0"}-【${to}】元`;
+  return `【${from || "0"}】元及以上`;
+}
+
+function fillTieredTable(xml: string, fields: FieldsMap): string {
+  const { currency, tiers } = getTieredRules(fields);
+  if (!tiers.length) return xml;
+
+  return xml.replace(/<w:tbl\b[\s\S]*?<\/w:tbl>/g, (table) => {
+    const tableText = normalizeText(xmlText(table));
+    if (!tableText.includes("联盟归因GMV区间") || !tableText.includes("佣金比例")) return table;
+
+    let nextTable = table.replace(/(币种：)\s*[^）)]*(）|\))/g, `$1${currency}$2`);
+    const rows: { start: number; end: number; text: string }[] = [];
+    const rowRe = /<w:tr\b[\s\S]*?<\/w:tr>/g;
+    let m: RegExpExecArray | null;
+    while ((m = rowRe.exec(nextTable)) !== null) {
+      rows.push({ start: m.index, end: m.index + m[0].length, text: m[0] });
+    }
+    if (rows.length < 2) return nextTable;
+
+    const headerIndex = rows.findIndex((row) => normalizeText(xmlText(row.text)).includes("佣金比例"));
+    const startIndex = headerIndex >= 0 ? headerIndex + 1 : 1;
+    const fillRows = rows.slice(startIndex).filter((row) => cellMatches(row.text).length >= 2);
+    if (!fillRows.length) return nextTable;
+
+    const rebuiltRows = new Map<number, string>();
+    const baseRows = fillRows;
+    tiers.forEach((tier, index) => {
+      const sourceRow = baseRows[Math.min(index, baseRows.length - 1)];
+      let row = sourceRow.text;
+      row = setFirstCellText(row, 0, formatTierRange(tier, index, tiers));
+      row = setFirstCellText(row, 1, withPct(tier.rate));
+      rebuiltRows.set(index, row);
+    });
+
+    const out: string[] = [];
+    let cursor = 0;
+    let tierCursor = 0;
+    for (const row of rows) {
+      out.push(nextTable.slice(cursor, row.start));
+      const targetPos = fillRows.findIndex((r) => r.start === row.start);
+      if (targetPos >= 0) {
+        if (tierCursor < tiers.length) {
+          out.push(rebuiltRows.get(tierCursor) ?? row.text);
+          tierCursor += 1;
+        }
+        // Drop unused template tier rows when fewer tiers are configured.
+      } else {
+        out.push(row.text);
+      }
+      cursor = row.end;
+    }
+    while (tierCursor < tiers.length) {
+      out.push(rebuiltRows.get(tierCursor) ?? "");
+      tierCursor += 1;
+    }
+    out.push(nextTable.slice(cursor));
+    return out.join("");
+  });
+}
+
 export function replaceMustacheInDocxXml(xml: string, fields: FieldsMap): string {
   return replaceParagraphs(xml, (inner) => rewriteParagraphInner(inner, fields));
 }
@@ -402,8 +584,10 @@ export async function fillContractTemplate(templateBuffer: Buffer, fields: Field
   const xml = await docFile.async("string");
   let newXml = replaceMustacheInDocxXml(xml, fields);
   newXml = replaceKnownTemplateTextInDocxXml(newXml, fields);
+  newXml = fillTieredTable(newXml, fields);
   newXml = tickCheckboxes(newXml, fields);
   newXml = fillAmount(newXml, fields);
+  newXml = cleanupPercentSpacing(newXml);
   newXml = stripOutputBackgrounds(newXml);
   zip.file("word/document.xml", newXml);
 

@@ -52,6 +52,11 @@ export interface ReviewFieldRow {
   value: string;
 }
 
+export interface ReviewFieldGroup {
+  title: string;
+  fields: ReviewFieldRow[];
+}
+
 export function ReviewerActionsPanel({
   contractId,
   contractStatus,
@@ -60,6 +65,7 @@ export function ReviewerActionsPanel({
   history,
   annotations,
   fields,
+  fieldGroups,
   roundDiff,
   sourceUrl,
 }: {
@@ -70,6 +76,7 @@ export function ReviewerActionsPanel({
   history: ReviewRoundRow[];
   annotations: ReviewAnnotationRow[];
   fields: ReviewFieldRow[];
+  fieldGroups?: ReviewFieldGroup[];
   roundDiff: RoundDiffEntry[];
   sourceUrl: string | null;
 }) {
@@ -93,6 +100,18 @@ export function ReviewerActionsPanel({
 
   function doReject() {
     setError(null);
+    if (currentReview) {
+      const rejected = currentReview.comments.filter((comment) => comment.decision === "REJECTED");
+      if (rejected.length === 0) {
+        setError("请先在字段审核中选择至少一个驳回字段，并填写审核意见后再退回");
+        return;
+      }
+      const missingComment = rejected.find((comment) => !comment.comment.trim());
+      if (missingComment) {
+        setError(`字段「${fieldLabels[missingComment.fieldKey] ?? missingComment.fieldKey}」已驳回，请填写审核意见`);
+        return;
+      }
+    }
     startTransition(async () => {
       const r = await rejectCurrentReview(contractId);
       if (!r.ok) { setError(r.error); return; }
@@ -197,6 +216,7 @@ export function ReviewerActionsPanel({
           reviewId={currentReview.id}
           existing={currentReview.comments}
           fields={fields}
+          fieldGroups={fieldGroups}
           onChange={() => router.refresh()}
         />
       )}
@@ -226,11 +246,13 @@ function FieldDecisionEditor({
   reviewId,
   existing,
   fields,
+  fieldGroups,
   onChange,
 }: {
   reviewId: string;
   existing: ReviewCommentRow[];
   fields: ReviewFieldRow[];
+  fieldGroups?: ReviewFieldGroup[];
   onChange: () => void;
 }) {
   const [pending, startTransition] = useTransition();
@@ -242,12 +264,17 @@ function FieldDecisionEditor({
   const [decisions, setDecisions] = useState<Record<string, string>>(() =>
     Object.fromEntries(existing.map((c) => [c.fieldKey, c.decision || "PENDING"])),
   );
+  const groups = useMemo<ReviewFieldGroup[]>(() => {
+    if (fieldGroups?.length) return fieldGroups.filter((g) => g.fields.length > 0);
+    return [{ title: "合同审核字段", fields }];
+  }, [fieldGroups, fields]);
 
   function save(fieldKey: string, decision: "APPROVED" | "REJECTED") {
     setError(null);
     const comment = drafts[fieldKey]?.trim() ?? "";
     if (decision === "REJECTED" && !comment) {
-      setError("驳回字段时需要填写审核意见");
+      const label = fields.find((field) => field.key === fieldKey)?.label ?? fieldKey;
+      setError(`字段「${label}」选择驳回时必须填写审核意见`);
       return;
     }
     startTransition(async () => {
@@ -258,20 +285,48 @@ function FieldDecisionEditor({
     });
   }
 
+  function approveGroup(group: ReviewFieldGroup) {
+    setError(null);
+    startTransition(async () => {
+      for (const field of group.fields) {
+        const r = await upsertFieldComment(reviewId, field.key, drafts[field.key]?.trim() ?? "", null, "APPROVED");
+        if (!r.ok) { setError(r.error); return; }
+      }
+      setDecisions((prev) => ({
+        ...prev,
+        ...Object.fromEntries(group.fields.map((field) => [field.key, "APPROVED"])),
+      }));
+      onChange();
+    });
+  }
+
   return (
-    <div className="mt-4 overflow-hidden rounded-lg border border-slate-200">
-      <div className="grid grid-cols-[minmax(0,1.5fr)_160px_minmax(220px,1fr)] border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500">
-        <div>字段及填写内容</div>
-        <div>审核结果</div>
-        <div>审核意见</div>
-      </div>
+    <div className="mt-4 space-y-4">
       {error && <p className="mb-2 text-xs text-rose-600">{error}</p>}
-      <div className="divide-y divide-slate-100">
-        {fields.map((field) => {
+      {groups.map((group) => (
+        <div key={group.title} className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+          <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-3">
+            <p className="text-sm font-semibold text-slate-800">{group.title}</p>
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => approveGroup(group)}
+              className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
+            >
+              本组一键通过
+            </button>
+          </div>
+          <div className="grid grid-cols-[minmax(0,1.5fr)_160px_minmax(220px,1fr)] border-b border-slate-100 px-4 py-2 text-xs font-semibold text-slate-500">
+            <div>字段及审核内容</div>
+            <div>审核结果</div>
+            <div>审核意见</div>
+          </div>
+          <div className="divide-y divide-slate-100">
+        {group.fields.map((field) => {
           const saved = existingByKey.get(field.key);
           const decision = decisions[field.key] ?? saved?.decision ?? "APPROVED";
           return (
-            <div key={field.key} className="grid grid-cols-[minmax(0,1.5fr)_160px_minmax(220px,1fr)] gap-3 px-3 py-3">
+            <div key={field.key} className="grid grid-cols-[minmax(0,1.5fr)_160px_minmax(220px,1fr)] gap-3 px-4 py-4">
               <div>
                 <p className="text-sm font-medium text-slate-800">{field.label}</p>
                 <p className="mt-1 whitespace-pre-wrap rounded bg-slate-50 px-2 py-1.5 text-sm text-slate-600">
@@ -318,7 +373,9 @@ function FieldDecisionEditor({
             </div>
           );
         })}
+          </div>
       </div>
+      ))}
     </div>
   );
 }

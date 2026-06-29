@@ -206,8 +206,6 @@ export function ContractWorkflowPanel({
                       </a>
                       <a
                         href={`/api/contracts/version-download/${v.id}`}
-                        target="_blank"
-                        rel="noreferrer"
                         download
                         className="flex items-center gap-1 rounded bg-brand-50 px-2 py-1 text-[11px] text-brand-700 hover:bg-brand-100"
                       >
