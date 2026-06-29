@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, X, FileText, AlertCircle, ChevronDown, ChevronRight } from "lucide-react";
+import { Check, X, FileText, AlertCircle, ChevronDown, ChevronRight, ExternalLink } from "lucide-react";
 import {
   approveCurrentReview,
   rejectCurrentReview,
@@ -46,6 +46,12 @@ export interface RoundDiffEntry {
   to: string;
 }
 
+export interface ReviewFieldRow {
+  key: string;
+  label: string;
+  value: string;
+}
+
 export function ReviewerActionsPanel({
   contractId,
   contractStatus,
@@ -53,8 +59,9 @@ export function ReviewerActionsPanel({
   currentReview,
   history,
   annotations,
-  fieldLabels,
+  fields,
   roundDiff,
+  sourceUrl,
 }: {
   contractId: string;
   contractStatus: string;
@@ -62,12 +69,18 @@ export function ReviewerActionsPanel({
   currentReview: ReviewRoundRow | null;
   history: ReviewRoundRow[];
   annotations: ReviewAnnotationRow[];
-  fieldLabels: Record<string, string>;
+  fields: ReviewFieldRow[];
   roundDiff: RoundDiffEntry[];
+  sourceUrl: string | null;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState(!currentReview && history.length > 0);
+  const fieldLabels = useMemo(
+    () => Object.fromEntries(fields.map((field) => [field.key, field.label])),
+    [fields],
+  );
 
   function doApprove() {
     setError(null);
@@ -90,14 +103,32 @@ export function ReviewerActionsPanel({
   return (
     <section className="card p-5">
       <div className="mb-4 flex items-center justify-between">
-        <div>
-          <h2 className="font-semibold text-slate-900">合同审核</h2>
+        <button
+          type="button"
+          onClick={() => setCollapsed((value) => !value)}
+          className="flex items-start gap-2 text-left"
+        >
+          {collapsed ? <ChevronRight className="mt-0.5 h-4 w-4 text-slate-400" /> : <ChevronDown className="mt-0.5 h-4 w-4 text-slate-400" />}
+          <span>
+          <h2 className="font-semibold text-slate-900">合同审核{collapsed ? "（已完成，点击展开）" : ""}</h2>
           <p className="mt-0.5 text-xs text-slate-400">
             {history.length === 0 ? "本合同还没有提交过审核。" : `共 ${history.length} 轮审核记录。`}
           </p>
-        </div>
-        {canAct && currentReview && (
-          <div className="flex gap-2">
+          </span>
+        </button>
+        <div className="flex items-center gap-2">
+          {sourceUrl && (
+            <a
+              href={sourceUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50"
+            >
+              <ExternalLink className="h-4 w-4" /> 查看原文/在线查看
+            </a>
+          )}
+          {canAct && currentReview && (
+            <>
             <button
               type="button"
               onClick={doReject}
@@ -114,10 +145,13 @@ export function ReviewerActionsPanel({
             >
               <Check className="h-4 w-4" /> 通过
             </button>
-          </div>
-        )}
+            </>
+          )}
+        </div>
       </div>
 
+      {!collapsed && (
+        <>
       {error && (
         <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600">
           {error}
@@ -162,7 +196,7 @@ export function ReviewerActionsPanel({
         <FieldDecisionEditor
           reviewId={currentReview.id}
           existing={currentReview.comments}
-          fieldLabels={fieldLabels}
+          fields={fields}
           onChange={() => router.refresh()}
         />
       )}
@@ -182,6 +216,8 @@ export function ReviewerActionsPanel({
       {annotations.length > 0 && (
         <AnnotationList annotations={annotations} />
       )}
+        </>
+      )}
     </section>
   );
 }
@@ -189,12 +225,12 @@ export function ReviewerActionsPanel({
 function FieldDecisionEditor({
   reviewId,
   existing,
-  fieldLabels,
+  fields,
   onChange,
 }: {
   reviewId: string;
   existing: ReviewCommentRow[];
-  fieldLabels: Record<string, string>;
+  fields: ReviewFieldRow[];
   onChange: () => void;
 }) {
   const [pending, startTransition] = useTransition();
@@ -223,52 +259,62 @@ function FieldDecisionEditor({
   }
 
   return (
-    <div className="mt-4 rounded-lg border border-slate-200 p-3">
-      <p className="mb-2 text-xs font-semibold text-slate-600">字段审核</p>
+    <div className="mt-4 overflow-hidden rounded-lg border border-slate-200">
+      <div className="grid grid-cols-[minmax(0,1.5fr)_160px_minmax(220px,1fr)] border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500">
+        <div>字段及填写内容</div>
+        <div>审核结果</div>
+        <div>审核意见</div>
+      </div>
       {error && <p className="mb-2 text-xs text-rose-600">{error}</p>}
-      <div className="space-y-2">
-        {Object.entries(fieldLabels).map(([fieldKey, label]) => {
-          const saved = existingByKey.get(fieldKey);
-          const decision = decisions[fieldKey] ?? saved?.decision ?? "PENDING";
+      <div className="divide-y divide-slate-100">
+        {fields.map((field) => {
+          const saved = existingByKey.get(field.key);
+          const decision = decisions[field.key] ?? saved?.decision ?? "APPROVED";
           return (
-            <div key={fieldKey} className="rounded-lg border border-slate-100 bg-slate-50 p-3">
-              <div className="mb-2 flex items-center justify-between gap-3">
-                <div className="text-sm font-medium text-slate-700">{label}</div>
-                <span className={`rounded px-2 py-0.5 text-[11px] ${
-                  decision === "APPROVED"
-                    ? "bg-emerald-100 text-emerald-700"
-                    : decision === "REJECTED"
-                      ? "bg-rose-100 text-rose-700"
-                      : "bg-slate-200 text-slate-600"
-                }`}>
-                  {decision === "APPROVED" ? "已通过" : decision === "REJECTED" ? "已驳回" : "待审核"}
-                </span>
+            <div key={field.key} className="grid grid-cols-[minmax(0,1.5fr)_160px_minmax(220px,1fr)] gap-3 px-3 py-3">
+              <div>
+                <p className="text-sm font-medium text-slate-800">{field.label}</p>
+                <p className="mt-1 whitespace-pre-wrap rounded bg-slate-50 px-2 py-1.5 text-sm text-slate-600">
+                  {field.value || "（空）"}
+                </p>
               </div>
-              <textarea
-                rows={2}
-                value={drafts[fieldKey] ?? saved?.comment ?? ""}
-                onChange={(e) => setDrafts((prev) => ({ ...prev, [fieldKey]: e.target.value }))}
-                placeholder="该字段的审核意见（通过可不填，驳回必填）"
-                className="w-full rounded border border-slate-200 px-2 py-1.5 text-sm"
-              />
-              <div className="mt-2 flex justify-end gap-2">
+              <div className="flex items-start gap-2">
                 <button
                   type="button"
                   disabled={pending}
-                  onClick={() => save(fieldKey, "REJECTED")}
-                  className="rounded border border-rose-200 px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50"
-                >
-                  驳回
-                </button>
-                <button
-                  type="button"
-                  disabled={pending}
-                  onClick={() => save(fieldKey, "APPROVED")}
-                  className="rounded border border-emerald-200 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+                  onClick={() => save(field.key, "APPROVED")}
+                  className={`rounded border px-3 py-1.5 text-xs font-medium disabled:opacity-50 ${
+                    decision === "APPROVED"
+                      ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                      : "border-slate-200 text-slate-500 hover:bg-slate-50"
+                  }`}
                 >
                   通过
                 </button>
+                <button
+                  type="button"
+                  disabled={pending}
+                  onClick={() => save(field.key, "REJECTED")}
+                  className={`rounded border px-3 py-1.5 text-xs font-medium disabled:opacity-50 ${
+                    decision === "REJECTED"
+                      ? "border-rose-500 bg-rose-50 text-rose-700"
+                      : "border-slate-200 text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  驳回
+                </button>
               </div>
+              <textarea
+                rows={2}
+                value={drafts[field.key] ?? saved?.comment ?? ""}
+                onChange={(e) => setDrafts((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                onBlur={() => {
+                  const nextDecision = (decisions[field.key] ?? saved?.decision ?? "APPROVED") as "APPROVED" | "REJECTED";
+                  if ((drafts[field.key] ?? "") !== (saved?.comment ?? "")) save(field.key, nextDecision);
+                }}
+                placeholder="审核意见（一键通过可不填，驳回必填）"
+                className="w-full rounded border border-slate-200 px-2 py-1.5 text-sm"
+              />
             </div>
           );
         })}

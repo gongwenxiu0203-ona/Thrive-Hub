@@ -5,23 +5,90 @@
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const MODEL = "claude-3-5-haiku-20241022";
 
+// 上传「签署完成存档」必填校验集（甲方公司名称 + 销售/推广 + 合作期限 + 费用
+// + 佣金）。未识别到的这些字段必须手动补填后才能归档为「签署完成」；其余字段
+// （甲方信用代码/地址/联系人等）未识别可忽略、选择性补足。
 export const UPLOAD_EXTRACT_REQUIRED: { key: string; label: string }[] = [
   { key: "partyAName", label: "甲方公司名称" },
-  { key: "partyACreditCode", label: "甲方统一社会信用代码/商业登记号" },
+  { key: "promoPlatform", label: "销售平台 / 推广平台" },
+  { key: "targetSite", label: "目标站点" },
+  { key: "startDate", label: "合作开始日期" },
+  { key: "endDate", label: "合作结束日期" },
+  { key: "feeCurrency", label: "固定服务费货币" },
+  { key: "feeAmount", label: "月度服务费金额" },
+  { key: "feeCycle", label: "固费支付周期" },
+  { key: "commissionType", label: "GMV佣金结算方式" },
+  { key: "commissionRate", label: "GMV抽佣比例" },
+  { key: "gmvSettlementCycle", label: "GMV结算周期" },
+];
+
+// 「上传审核盖章」模式：需识别创建合同时的全部字段（含甲方完整信息），缺失必须补填。
+export const UPLOAD_REVIEW_REQUIRED: { key: string; label: string }[] = [
+  { key: "partyAName", label: "甲方公司名称" },
+  { key: "partyACreditCode", label: "甲方统一社会信用代码" },
   { key: "partyAAddress", label: "甲方地址" },
   { key: "partyAContact", label: "甲方指定联系人" },
   { key: "partyAPhone", label: "甲方电话" },
   { key: "partyAEmail", label: "甲方邮箱" },
+  { key: "promoPlatform", label: "销售平台 / 推广平台" },
+  { key: "targetSite", label: "目标站点" },
   { key: "startDate", label: "合作开始日期" },
   { key: "endDate", label: "合作结束日期" },
+  { key: "feeCurrency", label: "固定服务费货币" },
   { key: "feeAmount", label: "月度服务费金额" },
-  { key: "feeCurrency", label: "费用货币" },
+  { key: "feeCycle", label: "固费支付周期" },
   { key: "commissionType", label: "GMV佣金结算方式" },
-  { key: "commissionRate", label: "GMV佣金比例" },
+  { key: "commissionRate", label: "GMV抽佣比例" },
   { key: "gmvSettlementCycle", label: "GMV结算周期" },
-  { key: "promoPlatform", label: "推广平台" },
-  { key: "targetSite", label: "目标站点" },
 ];
+
+const COMMISSION_REQUIRED_FIELDS: Record<string, { key: string; label: string }[]> = {
+  FIXED: [
+    { key: "commissionRate", label: "GMV抽佣比例" },
+  ],
+  THRESHOLD: [
+    { key: "thresholdCurrency", label: "门槛佣金币种" },
+    { key: "thresholdAmount", label: "GMV门槛金额" },
+    { key: "thresholdReachedRate", label: "达标后抽佣比例" },
+    { key: "thresholdUnreachedRate", label: "未达标抽佣比例" },
+  ],
+  TIERED: [
+    { key: "tieredRules", label: "阶梯佣金规则" },
+  ],
+  SPECIAL: [
+    { key: "specialCommissionTerms", label: "特殊佣金条款" },
+  ],
+  INCREMENTAL: [
+    { key: "excessBaseMonths", label: "基准月数" },
+    { key: "excessCommissionRate", label: "超额增长部分佣金比例" },
+  ],
+  EXCESS: [
+    { key: "excessBaseMonths", label: "基准月数" },
+    { key: "excessCommissionRate", label: "超额增长部分佣金比例" },
+  ],
+};
+
+function uniqueFields(fields: { key: string; label: string }[]) {
+  const seen = new Set<string>();
+  return fields.filter((field) => {
+    if (seen.has(field.key)) return false;
+    seen.add(field.key);
+    return true;
+  });
+}
+
+/** 按上传用途和佣金模板选择必填校验集。 */
+export function uploadRequiredFields(
+  mode: string,
+  commissionType = "FIXED",
+): { key: string; label: string }[] {
+  const base = mode === "SIGNED_ARCHIVE" ? UPLOAD_EXTRACT_REQUIRED : UPLOAD_REVIEW_REQUIRED;
+  const normalized = String(commissionType || "FIXED").toUpperCase();
+  return uniqueFields([
+    ...base.filter((field) => field.key !== "commissionRate"),
+    ...(COMMISSION_REQUIRED_FIELDS[normalized] ?? COMMISSION_REQUIRED_FIELDS.FIXED),
+  ]);
+}
 
 export type ExtractedFields = Record<string, string | string[] | null>;
 

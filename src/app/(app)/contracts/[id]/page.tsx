@@ -10,11 +10,11 @@ import { ContractFormModal } from "../ContractFormModal";
 import { ContractActions } from "./ContractActions";
 import { ContractCompare } from "./ContractCompare";
 import { ContractWorkflowPanel, type ContractVersionRow } from "./ContractWorkflowPanel";
-import { ReviewPanel, type ReviewFieldState } from "./ReviewPanel";
 import {
   ReviewerActionsPanel,
   type ReviewRoundRow,
   type ReviewAnnotationRow,
+  type ReviewFieldRow,
 } from "./ReviewerActionsPanel";
 import { REVIEWER_EMAIL } from "@/lib/contractReviewer";
 import { UPLOAD_EXTRACT_REQUIRED } from "@/lib/contractAiExtract";
@@ -30,7 +30,6 @@ import {
   CONTRACT_STATUS_COLORS,
   CONTRACT_STATUS_ORDER,
   CONTRACT_TYPE_LABELS,
-  CONTRACT_REVIEW_FIELDS,
   COMMISSION_TYPE_LABELS,
   labelOf,
 } from "@/lib/constants";
@@ -152,9 +151,6 @@ export default async function ContractDetailPage({
     (isReviewer || isAdmin) &&
     contract.status === "REVIEWING" &&
     !!currentReview;
-  const placeholderLabelMap: Record<string, string> = Object.fromEntries(
-    getReviewDecisionFields(contract.commissionType).map((p) => [p.key, p.label]),
-  );
 
   // Field values keyed for compare view + review panel (v3 template fields).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -200,16 +196,25 @@ export default async function ContractDetailPage({
     }
   } catch {}
 
+  const formatMaybeDate = (value: unknown) => {
+    if (!value) return "";
+    if (value instanceof Date) return formatDate(value);
+    return String(value);
+  };
   const fieldValues: Record<string, string> = {
-    partyA: contract.partyA ?? "",
-    contractPeriod: `${formatDate(contract.startDate)} ~ ${formatDate(
-      contract.endDate,
-    )}`,
+    partyAName: contract.partyA ?? "",
+    partyACreditCode: c.partyACreditCode ?? "",
+    partyAAddress: c.partyAAddress ?? "",
+    partyAContact: c.partyAContact ?? "",
+    partyAPhone: c.partyAPhone ?? "",
+    partyAEmail: c.partyAEmail ?? "",
+    startDate: formatMaybeDate(contract.startDate),
+    endDate: formatMaybeDate(contract.endDate),
     promoPlatform: c.promoPlatform ?? "",
     targetSite: c.targetSite ?? "",
     feeAmount: contract.feeAmount ?? "",
     feeCurrency: c.feeCurrency ?? "",
-    paymentMethod: c.paymentMethod ?? "",
+    feeCycle: c.feeCycle ?? "",
     commissionType: c.commissionType
       ? labelOf(COMMISSION_TYPE_LABELS, c.commissionType)
       : "",
@@ -220,48 +225,39 @@ export default async function ContractDetailPage({
     excessBaseMonths: c.excessBaseMonths ?? "",
     excessCommissionRate: c.excessCommissionRate ?? "",
     gmvSettlementCycle: c.gmvSettlementCycle ?? "",
+    specialCommissionTerms: c.specialCommissionTerms ?? "",
+    coopChannels: (() => {
+      try {
+        const channels = JSON.parse(c.coopChannels ?? "[]") as string[];
+        return channels.join(" / ");
+      } catch {
+        return "";
+      }
+    })(),
   };
 
-  // 根据 GMV 佣金结算方式，过滤掉无关字段（v3 模板）
-  const ct = c.commissionType ?? "FIXED";
-  const conditionalKeys: Record<string, string[]> = {
-    FIXED: [],
-    THRESHOLD: ["thresholdAmount", "thresholdCurrency"],
-    TIERED: ["tieredRules"],
-    EXCESS: ["excessBaseMonths", "excessCommissionRate"],
+  const reviewFieldRows: ReviewFieldRow[] = getReviewDecisionFields(contract.commissionType).map((field) => ({
+    key: field.key,
+    label: field.label,
+    value: fieldValues[field.key] ?? "",
+  }));
+  const partyAReviewFields = reviewFieldRows.filter((field) => field.key.startsWith("partyA"));
+  const keyReviewFields = reviewFieldRows.filter((field) => !field.key.startsWith("partyA"));
+  const sourceVersion = contract.versions[0] ?? null;
+  const sourceUrl = sourceVersion
+    ? `/api/contracts/version-download/${sourceVersion.id}?inline=1`
+    : contract.generatedDocUrl
+      ? `/api/contracts/generate-doc/${contract.id}`
+      : null;
+
+  const partyBCompanyLabels: Record<string, string> = {
+    THRAIVE: "佛山公司",
+    LINGYUE: "香港公司",
   };
-  // 所有可能出现的条件字段，用于"非当前类型则隐藏"
-  const allConditionalKeys = new Set([
-    "thresholdAmount",
-    "thresholdCurrency",
-    "tieredRules",
-    "excessBaseMonths",
-    "excessCommissionRate",
-  ]);
-  const activeConditional = new Set(conditionalKeys[ct] ?? []);
-
-  const visibleFields = CONTRACT_REVIEW_FIELDS.filter((f) => {
-    // 条件字段：只在匹配当前 commissionType 时显示
-    if (allConditionalKeys.has(f.key)) return activeConditional.has(f.key);
-    // 其他字段：只在有值时显示（避免空字段一直占位）
-    const v = fieldValues[f.key];
-    return v != null && v !== "" && v !== "—" && !/^\s*~\s*$/.test(v);
-  });
-
-  const reviewByField = new Map(
-    contract.fieldReviews.map((r) => [r.fieldName, r]),
-  );
-  const reviewStates: Record<string, ReviewFieldState> = {};
-  for (const f of visibleFields) {
-    const r = reviewByField.get(f.key);
-    reviewStates[f.key] = {
-      key: f.key,
-      label: f.label,
-      value: fieldValues[f.key] ?? "",
-      decision: r?.decision ?? "APPROVED",
-      modification: r?.modification ?? "",
-    };
-  }
+  let partyBBankAccounts: string[] = [];
+  try {
+    partyBBankAccounts = JSON.parse(c.partyBBankAccounts ?? "[]");
+  } catch {}
 
   return (
     <div className="space-y-6">
@@ -391,6 +387,7 @@ export default async function ContractDetailPage({
       <ContractWorkflowPanel
         contractId={contract.id}
         status={contract.status}
+        archived={c.uploadArchiveMode === "SIGNED_ARCHIVE"}
         hasTemplate={!!c.templateId}
         hasGeneratedDoc={!!contract.generatedDocUrl}
         pendingNewUpload={!!c.pendingNewUpload}
@@ -409,8 +406,8 @@ export default async function ContractDetailPage({
         }))}
       />
 
-      {/* 合同审核（轮次 / 字段意见 / 批注） */}
-      {(reviewRounds.length > 0 || canActReview) && (
+      {/* 合同审核（轮次 / 字段意见 / 批注）—— 上传「签署完成存档」无需审核，不展示 */}
+      {c.uploadArchiveMode !== "SIGNED_ARCHIVE" && (reviewRounds.length > 0 || canActReview) && (
         <ReviewerActionsPanel
           contractId={contract.id}
           contractStatus={contract.status}
@@ -418,15 +415,17 @@ export default async function ContractDetailPage({
           currentReview={currentReview}
           history={reviewRounds}
           annotations={reviewAnnotations}
-          fieldLabels={placeholderLabelMap}
+          fields={reviewFieldRows}
           roundDiff={roundDiff}
+          sourceUrl={sourceUrl}
         />
       )}
 
-      {/* 基本信息 */}
+      {/* 合同基础信息 */}
       <section className="card p-5">
-        <h2 className="mb-4 font-semibold text-slate-900">合同信息</h2>
+        <h2 className="mb-4 font-semibold text-slate-900">合同基础信息</h2>
         <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-4">
+          <Field label="合同编号" value={contract.contractNo} />
           <Field
             label="关联客户"
             value={
@@ -442,18 +441,13 @@ export default async function ContractDetailPage({
             label="合同类型"
             value={labelOf(CONTRACT_TYPE_LABELS, contract.type)}
           />
+          <Field label="合同状态" value={labelOf(CONTRACT_STATUS_LABELS, contract.status)} />
           <Field label="合同负责人" value={contract.owner?.name ?? "—"} />
           <Field label="审核人" value={contract.reviewer?.name ?? "—"} />
           <Field label="创建人" value={contract.createdBy.name} />
           <Field
             label="创建时间"
             value={formatDateTime(contract.createdAt)}
-          />
-          <Field
-            label="合作期限"
-            value={`${formatDate(contract.startDate)} ~ ${formatDate(
-              contract.endDate,
-            )}`}
           />
           <Field
             label="字段提取方式"
@@ -468,29 +462,42 @@ export default async function ContractDetailPage({
         </dl>
       </section>
 
-      {/* V4 甲方信息卡片 */}
+      {/* 合同审核字段：甲方信息 */}
+      <ReviewFieldDisplaySection title="甲方信息" fields={partyAReviewFields} />
+
+      {/* 合同审核字段：关键字段 */}
+      <ReviewFieldDisplaySection title="合同关键字段" fields={keyReviewFields} />
+
+      {/* 合同中的乙方信息 */}
+      <section className="card p-5">
+        <h2 className="mb-4 font-semibold text-slate-900">乙方信息</h2>
+        <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
+          <Field label="乙方公司" value={partyBCompanyLabels[c.partyBCompany] ?? c.partyBCompany ?? "—"} />
+          <Field label="统一社会信用代码/商业登记号" value={c.partyBCreditCode ?? "—"} />
+          <Field label="乙方地址" value={c.partyBAddress ?? "—"} />
+          <Field label="乙方指定联系人" value={c.partyBContact ?? "—"} />
+          <Field label="电话" value={c.partyBPhone ?? "—"} />
+          <Field label="电子邮箱" value={c.partyBEmail ?? "—"} />
+          <Field
+            label="收款账户"
+            value={
+              partyBBankAccounts.length
+                ? partyBBankAccounts.map((account) => partyBCompanyLabels[account] ?? account).join(" / ")
+                : "—"
+            }
+          />
+        </dl>
+      </section>
+
+      {/* V4 补充展示：商品清单、渠道、外部填写链接 */}
       {c.fillMethod && (
         <section className="card p-5">
           <div className="mb-4 flex items-center justify-between">
-            <h2 className="font-semibold text-slate-900">甲方信息</h2>
+            <h2 className="font-semibold text-slate-900">推广信息</h2>
             <span className="rounded-full bg-brand-50 px-2.5 py-0.5 text-xs text-brand-600">
               {c.fillMethod === "AI_EXTRACT" ? "AI识别填写" : c.fillMethod === "EXTERNAL_LINK" ? "客户外部填写" : "手动填写"}
             </span>
           </div>
-          <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
-            <Field label="甲方签约主体" value={contract.partyA ?? "—"} />
-            <Field label="统一社会信用代码" value={c.partyACreditCode ?? "—"} />
-            <Field label="甲方地址" value={c.partyAAddress ?? "—"} />
-            <Field label="甲方指定联系人" value={c.partyAContact ?? "—"} />
-            <Field label="联系电话" value={c.partyAPhone ?? "—"} />
-            <Field label="联系邮箱" value={c.partyAEmail ?? "—"} />
-            <Field label="税费" value={`${c.taxType ?? "不含税"}；${c.taxBearer ?? "甲方"}承担`} />
-            <Field label="固费金额" value={c.feeAmount ? `${c.feeCurrency} ${c.feeAmount} / 月` : "—"} />
-            <Field label="首期服务费" value={c.firstPeriodFee != null ? `${c.feeCurrency === "美金" ? "$" : "¥"}${c.firstPeriodFee}` : "—"} />
-            <Field label="固费支付周期" value={c.feeCycle ?? "—"} />
-            <Field label="GMV结算周期" value={c.gmvSettlementCycle ?? "—"} />
-          </dl>
-
           {/* 推广商品清单 */}
           {(() => {
             let products: Array<{name:string;asin:string;price:string;trackLink:string}> = [];
@@ -561,33 +568,17 @@ export default async function ContractDetailPage({
         </section>
       )}
 
-      {/* 关键字段 + 原文对照 */}
-      <ContractCompare
-        contractText={contract.contractText ?? ""}
-        fields={visibleFields.map((f) => ({
-          key: f.key,
-          label: f.label,
-          value: fieldValues[f.key] ?? "",
-        }))}
-      />
-
-      {/* 字段级审核 */}
-      <section>
-        <h2 className="mb-3 font-semibold text-slate-900">字段级审核</h2>
-        <p className="mb-3 text-sm text-slate-400">
-          左侧为审核内容，中间为审核意见（默认通过，可改为驳回），右侧为修改意见 — 一一对应。
-        </p>
-        <ReviewPanel
-          contractId={contract.id}
-          contractStatus={contract.status}
-          isAdmin={isAdmin}
-          fields={reviewStates}
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          lockedFieldKeys={(() => { try { return JSON.parse((contract as any).lockedFields ?? "[]"); } catch { return []; } })()}
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          reviewComment={(contract as any).reviewComment ?? ""}
+      {/* 旧版合同兜底：保留原文对照 */}
+      {!c.fillMethod && (
+        <ContractCompare
+          contractText={contract.contractText ?? ""}
+          fields={reviewFieldRows.map((field) => ({
+            key: field.key,
+            label: field.label,
+            value: field.value,
+          }))}
         />
-      </section>
+      )}
 
       {/* 合同文件 */}
       <section className="card p-5">
@@ -623,5 +614,32 @@ function Field({
       <dt className="text-xs text-slate-400">{label}</dt>
       <dd className="mt-1 text-sm text-slate-700">{value}</dd>
     </div>
+  );
+}
+
+function ReviewFieldDisplaySection({
+  title,
+  fields,
+}: {
+  title: string;
+  fields: ReviewFieldRow[];
+}) {
+  return (
+    <section className="card p-5">
+      <h2 className="mb-4 font-semibold text-slate-900">{title}</h2>
+      {fields.length === 0 ? (
+        <p className="text-sm text-slate-400">暂无字段信息</p>
+      ) : (
+        <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
+          {fields.map((field) => (
+            <Field
+              key={field.key}
+              label={field.label}
+              value={field.value || "—"}
+            />
+          ))}
+        </dl>
+      )}
+    </section>
   );
 }

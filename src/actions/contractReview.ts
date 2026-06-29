@@ -121,12 +121,16 @@ export async function approveCurrentReview(contractId: string): Promise<Result> 
   if (rejectedField) {
     return { ok: false, error: `字段「${rejectedField.label}」已驳回，不能整单通过` };
   }
-  const pendingField = reviewFields.find((f) => decisions.get(f.key) !== "APPROVED");
-  if (pendingField) {
-    return { ok: false, error: `字段「${pendingField.label}」尚未通过，请先完成字段审核` };
-  }
+  const missingApprovedFields = reviewFields.filter((f) => decisions.get(f.key) !== "APPROVED");
 
   await prisma.$transaction([
+    ...missingApprovedFields.map((field) =>
+      prisma.contractReviewComment.upsert({
+        where: { reviewId_fieldKey: { reviewId: current.id, fieldKey: field.key } },
+        create: { reviewId: current.id, fieldKey: field.key, comment: "", decision: "APPROVED" },
+        update: { decision: "APPROVED" },
+      }),
+    ),
     prisma.contractReview.update({
       where: { id: current.id },
       data: { status: "APPROVED" },

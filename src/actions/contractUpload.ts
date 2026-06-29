@@ -9,7 +9,7 @@ import { extractDocxText } from "@/lib/contractDocxExtract";
 import { extractPdfText } from "@/lib/contractPdfExtract";
 import {
   aiExtractContractFields,
-  UPLOAD_EXTRACT_REQUIRED,
+  uploadRequiredFields,
 } from "@/lib/contractAiExtract";
 import { contractFileBaseName } from "@/lib/contractFileName";
 import { openReviewRound } from "@/actions/contractReview";
@@ -25,6 +25,17 @@ import {
 
 type Result<T = void> = { ok: true; data?: T } | { ok: false; error: string };
 type UploadArchiveMode = "SIGNED_ARCHIVE" | "REVIEW_AND_STAMP";
+type UploadExistingContractData = {
+  contractId: string | null;
+  missing: { key: string; label: string }[];
+  autoSubmitted: boolean;
+  archived: boolean;
+  needsTemplate: boolean;
+  needsSupplement: boolean;
+  fields: Record<string, unknown>;
+  sourceTextPreview: string;
+  detectedTemplateKey: string;
+};
 
 const OUT_DIR_ABS = path.join(process.cwd(), "public", "contracts-generated");
 const OUT_PREFIX = "/contracts-generated";
@@ -79,6 +90,8 @@ function mapExtractedToContract(fields: Record<string, unknown>): Record<string,
     commissionType: get("commissionType"),
     thresholdAmount: get("thresholdAmount"),
     thresholdCurrency: get("thresholdCurrency"),
+    thresholdReachedRate: get("thresholdReachedRate"),
+    thresholdUnreachedRate: get("thresholdUnreachedRate"),
     tieredRules: get("tieredRules"),
     excessBaseMonths: get("excessBaseMonths"),
     excessCommissionRate: get("excessCommissionRate"),
@@ -90,9 +103,25 @@ function mapExtractedToContract(fields: Record<string, unknown>): Record<string,
   };
 }
 
+function applyOverrides(mapped: Record<string, unknown>, fd: FormData): Record<string, unknown> {
+  const next = { ...mapped };
+  for (const key of Object.keys(next)) {
+    const override = s(fd, `override:${key}`);
+    if (override) next[key] = override;
+  }
+  return next;
+}
+
+function valueMissing(value: unknown): boolean {
+  if (value == null) return true;
+  if (typeof value === "string") return !value.trim();
+  if (Array.isArray(value)) return value.length === 0;
+  return false;
+}
+
 export async function uploadExistingContract(
   fd: FormData,
-): Promise<Result<{ contractId: string; missing: { key: string; label: string }[]; autoSubmitted: boolean; archived: boolean }>> {
+): Promise<Result<UploadExistingContractData>> {
   const session = await requireSession();
   if (session.role === "BRAND" || session.role === "CHANNEL") {
     return { ok: false, error: "无权创建合同" };
@@ -105,6 +134,7 @@ export async function uploadExistingContract(
   const partyBCompany = s(fd, "partyBCompany") || null;
   const noPrefix = (s(fd, "contractNoPrefix") as "LYNQ" | "THRAIVE") || "THRAIVE";
   const uploadArchiveMode = (s(fd, "uploadArchiveMode") as UploadArchiveMode) || "REVIEW_AND_STAMP";
+  const finalizeUpload = s(fd, "finalizeUpload") === "1";
 
   const file = fd.get("file");
   if (!(file instanceof File)) return { ok: false, error: "请选择合同文件" };
@@ -133,12 +163,23 @@ export async function uploadExistingContract(
 
   const ownerId = s(fd, "ownerId") || session.userId;
   const reviewerId = s(fd, "reviewerId") || null;
-  const mapped = mapExtractedToContract(ai.fields as Record<string, unknown>);
-  const template = templateId
-    ? await prisma.contractTemplate.findUnique({ where: { id: templateId }, select: { templateKey: true } })
+  const mapped = applyOverrides(mapExtractedToContract(ai.fields as Record<string, unknown>), fd);
+
+  // 适用模板：① 用户手选优先；② 否则按 AI 识别出的佣金结算方式自动匹配同类型
+  // 模板（命中则自动选用）；③ 仍无则 templateId 为 null，需在补填环节手动选择。
+  let resolvedTemplate = templateId
+    ? await prisma.contractTemplate.findUnique({ where: { id: templateId }, select: { id: true, templateKey: true } })
     : null;
+  if (!resolvedTemplate && typeof mapped.commissionType === "string" && mapped.commissionType.trim()) {
+    resolvedTemplate = await prisma.contractTemplate.findFirst({
+      where: { templateKey: normalizeTemplateKey(mapped.commissionType), deletedAt: null },
+      orderBy: { createdAt: "asc" },
+      select: { id: true, templateKey: true },
+    });
+  }
+  const resolvedTemplateId = resolvedTemplate?.id ?? null;
   const templateKey = normalizeTemplateKey(
-    template?.templateKey
+    resolvedTemplate?.templateKey
       ?? (typeof mapped.commissionType === "string" ? mapped.commissionType : null)
       ?? "FIXED",
   );
@@ -152,7 +193,50 @@ export async function uploadExistingContract(
     excessCommissionRate: typeof mapped.excessCommissionRate === "string" ? mapped.excessCommissionRate : null,
     specialCommissionTerms: typeof mapped.specialCommissionTerms === "string" ? mapped.specialCommissionTerms : null,
   });
+  if (templateKey === "THRESHOLD") {
+    commissionConfig.threshold = {
+      ...commissionConfig.threshold,
+      reachedRate: String(mapped.thresholdReachedRate ?? commissionConfig.threshold?.reachedRate ?? ""),
+      unreachedRate: String(mapped.thresholdUnreachedRate ?? commissionConfig.threshold?.unreachedRate ?? ""),
+    };
+  }
   const primaryRate = primaryRateFromCommissionConfig(commissionConfig);
+
+  // 重算缺失的必填字段：以最终落库值为准（模板派生的 commissionType、AI 识别的
+  // feeCycle 等已算作已填）。仅这些缺失才强制补填，其余字段未识别可忽略。
+  const finalForMissing: Record<string, unknown> = {
+    ...mapped,
+    commissionType: templateKey,
+    commissionRate: primaryRate ?? mapped.commissionRate,
+  };
+  const requiredFields = uploadRequiredFields(uploadArchiveMode, templateKey);
+  const missing = requiredFields.filter((f) => {
+    const v = finalForMissing[f.key];
+    return valueMissing(v);
+  });
+  const needsTemplate = !resolvedTemplateId;
+
+  if ((missing.length > 0 || needsTemplate) && !finalizeUpload) {
+    return {
+      ok: true,
+      data: {
+        contractId: null,
+        missing,
+        autoSubmitted: false,
+        archived: false,
+        needsTemplate,
+        needsSupplement: true,
+        fields: finalForMissing,
+        sourceTextPreview: text.slice(0, 6000),
+        detectedTemplateKey: templateKey,
+      },
+    };
+  }
+
+  if (needsTemplate) return { ok: false, error: "请选择适用的合同模板后再确认" };
+  if (missing.length > 0) {
+    return { ok: false, error: `仍有 ${missing.length} 个关键字段未补齐，请先补齐后再确认` };
+  }
 
   let contract: { id: string; contractNo: string } | null = null;
   let lastError: unknown = null;
@@ -164,12 +248,12 @@ export async function uploadExistingContract(
           contractNo,
           customerId,
           type,
-          status: uploadArchiveMode === "SIGNED_ARCHIVE" && ai.missing.length === 0 ? "COMPLETED" : "IN_PROGRESS",
+          status: uploadArchiveMode === "SIGNED_ARCHIVE" && missing.length === 0 ? "COMPLETED" : "IN_PROGRESS",
           uploadType: "EXISTING",
           uploadArchiveMode,
           fillMethod: "AI_EXTRACT",
           extractedBy: "AI",
-          templateId,
+          templateId: resolvedTemplateId,
           partyBCompany,
           ownerId,
           reviewerId,
@@ -223,7 +307,7 @@ export async function uploadExistingContract(
     },
   });
 
-  const archived = uploadArchiveMode === "SIGNED_ARCHIVE" && ai.missing.length === 0;
+  const archived = uploadArchiveMode === "SIGNED_ARCHIVE" && missing.length === 0;
   if (archived) {
     await syncContractProgressToProjects(contract.id, "签署完成");
     await bumpCustomerStatus(customerId, "CONTRACT_SIGNED");
@@ -244,7 +328,7 @@ export async function uploadExistingContract(
   }
 
   let autoSubmitted = false;
-  if (uploadArchiveMode !== "SIGNED_ARCHIVE" && ai.missing.length === 0) {
+  if (uploadArchiveMode !== "SIGNED_ARCHIVE" && missing.length === 0) {
     const round = await openReviewRound(contract.id);
     if (round.ok) {
       await prisma.contract.update({
@@ -263,14 +347,19 @@ export async function uploadExistingContract(
     ok: true,
     data: {
       contractId: contract.id,
-      missing: ai.missing,
+      missing,
       autoSubmitted,
       archived,
+      needsTemplate,
+      needsSupplement: false,
+      fields: finalForMissing,
+      sourceTextPreview: text.slice(0, 6000),
+      detectedTemplateKey: templateKey,
     },
   };
 }
 
 export async function getUploadRequiredFields() {
   await requireSession();
-  return UPLOAD_EXTRACT_REQUIRED;
+  return uploadRequiredFields("SIGNED_ARCHIVE");
 }

@@ -26,6 +26,7 @@ export interface ContractVersionRow {
 export function ContractWorkflowPanel({
   contractId,
   status,
+  archived = false,
   hasTemplate,
   hasGeneratedDoc,
   pendingNewUpload,
@@ -37,6 +38,7 @@ export function ContractWorkflowPanel({
 }: {
   contractId: string;
   status: string;
+  archived?: boolean;
   hasTemplate: boolean;
   hasGeneratedDoc: boolean;
   pendingNewUpload: boolean;
@@ -70,7 +72,7 @@ export function ContractWorkflowPanel({
       router.refresh();
     });
   }
-  const canStamp = isAdmin && (status === "SIGNING" || status === "COMPLETED");
+  const canStamp = isAdmin && !archived && (status === "SIGNING" || status === "COMPLETED");
 
   return (
     <section className="card p-5">
@@ -78,11 +80,13 @@ export function ContractWorkflowPanel({
         <div>
           <h2 className="font-semibold text-slate-900">合同流程</h2>
           <p className="mt-0.5 text-xs text-slate-400">
-            生成合同 → 提交审核（沿用当前 / 上传新版） → 审核通过 → 盖章归档
+            {archived
+              ? "签署完成存档：合同已直接归档，无需生成 / 审核 / 盖章。"
+              : "生成合同 → 提交审核（沿用当前 / 上传新版） → 审核通过 → 盖章归档"}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {(status === "IN_PROGRESS" || status === "REJECTED") && hasTemplate && (
+          {!archived && (status === "IN_PROGRESS" || status === "REJECTED") && hasTemplate && (
             <button
               type="button"
               onClick={regenerate}
@@ -93,7 +97,7 @@ export function ContractWorkflowPanel({
               {hasGeneratedDoc ? "重新生成" : "生成合同 DOCX"}
             </button>
           )}
-          {(status === "IN_PROGRESS" || status === "REJECTED") && (
+          {!archived && (status === "IN_PROGRESS" || status === "REJECTED") && (
             <button
               type="button"
               onClick={() => setShowSubmit(true)}
@@ -251,20 +255,13 @@ function SubmitReviewModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [fieldChanged, setFieldChanged] = useState<"no" | "yes" | null>(null);
   const [termsChanged, setTermsChanged] = useState<"no" | "yes" | null>(null);
   const [file, setFile] = useState<File | null>(null);
 
   function submit() {
     setError(null);
-    if (!fieldChanged) { setError("请先确认合同字段细项是否有修改"); return; }
-    if (fieldChanged === "yes") {
-      router.push(`/contracts/new?contractId=${contractId}`);
-      return;
-    }
     if (!termsChanged) { setError("请先确认合同条款是否有修改"); return; }
     if (termsChanged === "no") {
       if (!hasGeneratedDoc) { setError("请先生成一份合同文件"); return; }
@@ -298,37 +295,24 @@ function SubmitReviewModal({
 
         <div className="space-y-4">
           <ChoiceGroup
-            title="合同字段细项是否有修改？"
-            description="例如甲方信息、费用、佣金比例、合作期限、渠道等结构化字段。"
-            value={fieldChanged}
-            onChange={setFieldChanged}
+            title="合同条款是否有修改？"
+            description="例如正文条款、补充条款、项目确认书文字有人工调整。字段修改请先在合同编辑页保存后再提交。"
+            value={termsChanged}
+            onChange={setTermsChanged}
           />
-          {fieldChanged === "yes" && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-              请先跳转字段页面修改并保存。保存后回到合同详情页重新生成合同，再提交审核。
-            </div>
-          )}
-          {fieldChanged === "no" && (
-            <ChoiceGroup
-              title="合同条款是否有修改？"
-              description="例如正文条款、补充条款、项目确认书文字有人工调整。"
-              value={termsChanged}
-              onChange={setTermsChanged}
-            />
-          )}
-          {fieldChanged === "no" && termsChanged === "yes" && (
+          {termsChanged === "yes" && (
             <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
               条款已修改，必须上传新版 DOCX。提交后审核人会看到“合同条款有修改，请重点查看”的提示。
             </div>
           )}
-          {fieldChanged === "no" && termsChanged === "no" && !hasGeneratedDoc && (
+          {termsChanged === "no" && !hasGeneratedDoc && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
               当前还没有生成合同文件，请先关闭弹窗并生成合同 DOCX。
             </div>
           )}
         </div>
 
-        {fieldChanged === "no" && termsChanged === "yes" && (
+        {termsChanged === "yes" && (
           <div className="mt-3">
             <label className="flex items-center justify-center gap-2 rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 p-6 cursor-pointer hover:border-brand-400 hover:bg-brand-50/30">
               <Upload className="h-4 w-4 text-slate-400" />
@@ -361,7 +345,7 @@ function SubmitReviewModal({
             disabled={pending}
             className="btn-primary flex items-center gap-1 text-sm"
           >
-            <Send className="h-4 w-4" /> {pending ? "提交中…" : fieldChanged === "yes" ? "去修改字段" : "确认提交"}
+            <Send className="h-4 w-4" /> {pending ? "提交中…" : "确认提交"}
           </button>
         </div>
       </div>

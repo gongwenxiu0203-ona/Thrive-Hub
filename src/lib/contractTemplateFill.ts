@@ -1,12 +1,6 @@
 import fs from "fs";
 import path from "path";
 import JSZip from "jszip";
-import {
-  currencySymbol,
-  parseCommissionConfig,
-  percentText,
-  type TieredCommissionRule,
-} from "@/lib/contractCommissionConfig";
 
 export type FieldsMap = Record<string, string | number | null | undefined>;
 
@@ -16,6 +10,45 @@ function escXml(raw: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+/** 转义并把换行 \n 渲染成 docx 软换行 <w:br/>，使多账户「一个字段一行」。 */
+function escXmlMultiline(raw: string): string {
+  return raw.split("\n").map(escXml).join('</w:t><w:br/><w:t xml:space="preserve">');
+}
+
+/** 去掉百分号（模板里 % 已写在空位之后，只需填数字）。 */
+function pct(v: string): string {
+  return v.replace(/[%％\s]/g, "").trim();
+}
+
+/** 解析 commissionConfig JSON（读取门槛/特殊/阶梯等嵌套值）。 */
+interface CommissionConfigShape {
+  threshold?: Record<string, string>;
+  special?: Record<string, string>;
+  tiered?: { currency?: string; tiers?: { from?: string; to?: string; rate?: string }[] };
+}
+function parseCommissionConfigSafe(raw: string): CommissionConfigShape {
+  try {
+    const o = JSON.parse(raw || "{}");
+    return o && typeof o === "object" ? o : {};
+  } catch {
+    return {};
+  }
+}
+
+/** 填入月度服务费金额：金额位是同时带「绿色高亮 + 单下划线」的空白 run
+ *  （rPr 内两标签顺序不限），只填空白位、不动其它内容。 */
+function fillAmount(xml: string, fields: FieldsMap): string {
+  const amount = field(fields, "feeAmount");
+  if (!amount) return xml;
+  return xml.replace(/<w:r\b(?:(?!<\/w:r>)[\s\S])*?<\/w:r>/g, (run) => {
+    if (!run.includes('<w:highlight w:val="green"/>')) return run;
+    if (!run.includes('<w:u w:val="single"/>')) return run;
+    // 仅填内容为空白的 <w:t>（避免误改已有文字的下划线绿字）
+    if (!/<w:t[^>]*>\s*<\/w:t>/.test(run)) return run;
+    return run.replace(/(<w:t[^>]*>)\s*(<\/w:t>)/, `$1${escXml(amount)}$2`);
+  });
 }
 
 function display(v: unknown): string {
@@ -37,95 +70,148 @@ function stripOutputBackgrounds(xml: string): string {
     .replace(/<w:shd\b[^>]*\/>/g, "");
 }
 
-function cycleText(raw: string): string {
-  const v = raw.trim();
-  if (!v) return "";
-  if (v.includes("季")) return "季度";
-  return "月度";
+// ─── 复选框就地勾选 ───────────────────────────────────────────────────────────
+// 模板里的复选框是 Wingdings 2 字体的空框符号 <w:sym w:font="Wingdings 2" .../>。
+// 勾选 = 把被选中项前面的那个空框符号 run 原地替换成 Unicode ☑（不新增框、不删
+// 未选项、不动正文文字）。正文叙述里出现的同名词（如「目标站点」「Amazon
+// Attribution」）前面没有复选框符号，因此天然不受影响。
+
+const CHANNEL_TOKENS: Record<string, string> = {
+  ACC: "Amazon Creator Connections",
+  Attribution: "Amazon Attribution",
+  Associates: "Amazon Associates",
+  AmazonLive: "Amazon Live",
+  Levanta: "Levanta",
+  Impact: "Impact",
+  Wayward: "Wayward",
+  ArcherAffiliates: "Archer Affiliates",
+  PartnerBoost: "PartnerBoost",
+  PrivateSocial: "私域",
+};
+
+const PLATFORM_TOKENS = ["亚马逊", "沃尔玛", "独立站"];
+const SITE_TOKENS = ["美国站", "加拿大", "德国站", "英国站", "法国", "西班牙", "意大利", "澳洲", "日本"];
+
+function splitList(raw: string): string[] {
+  return raw.split(/[,，、;；]/).map((v) => v.trim()).filter(Boolean);
 }
 
-function productText(raw: string): string {
-  return raw.trim() || "详见双方确认清单";
+interface Selections {
+  platforms: Set<string>;
+  sites: Set<string>;
+  channels: Set<string>; // 渠道标签（含空格的原文，如 "Amazon Attribution"）
+  currency: "RMB" | "USD" | null;
+  payCycle: "month" | "quarter" | null;
+  gmvCycle: "month" | "quarter" | null;
 }
 
-function selectedChannelKeys(fields: FieldsMap): Set<string> {
-  const raw = field(fields, "coopChannelKeys") || field(fields, "coopChannels");
-  return new Set(raw.split(/[,，、]/).map((v) => v.trim()).filter(Boolean));
+function computeSelections(fields: FieldsMap): Selections {
+  const promo = field(fields, "promoPlatform");
+  const sitesF = field(fields, "targetSite");
+  const chKeys = new Set(splitList(field(fields, "coopChannelKeys") || field(fields, "coopChannels")));
+  const cur = field(fields, "feeCurrency");
+  const fee = field(fields, "feeCycle");
+  const gmv = field(fields, "gmvSettlementCycle");
+  return {
+    platforms: new Set(PLATFORM_TOKENS.filter((t) => promo.includes(t))),
+    sites: new Set(SITE_TOKENS.filter((t) => sitesF.includes(t))),
+    channels: new Set(
+      Object.entries(CHANNEL_TOKENS).filter(([k]) => chKeys.has(k)).map(([, v]) => v),
+    ),
+    currency: cur ? (cur.includes("美") || /usd/i.test(cur) ? "USD" : "RMB") : null,
+    payCycle: fee ? (fee.includes("季") ? "quarter" : "month") : null,
+    gmvCycle: gmv ? (gmv.includes("季") ? "quarter" : "month") : null,
+  };
 }
 
-function channelLine(fields: FieldsMap, key: string, label: string): string {
-  return `${selectedChannelKeys(fields).has(key) ? "☑" : "□"} ${label}`;
-}
+/** 判断某个复选框（由其后标签 label + 所在段落上下文 para 决定）是否应勾选。
+ *  label / para 均已去空格。固费周期与 GMV 结算周期两行的框标签都是「月 / 季度」，
+ *  必须靠段落上下文（「服务费按」 vs 「联盟归因GMV佣金按」）区分。 */
+function decideTick(label: string, para: string, sel: Selections): boolean {
+  for (const t of PLATFORM_TOKENS) if (label.startsWith(t)) return sel.platforms.has(t);
+  for (const t of SITE_TOKENS) if (label.startsWith(t)) return sel.sites.has(t);
+  for (const t of sel.channels) if (label.startsWith(normalizeText(t))) return true;
+  for (const t of Object.values(CHANNEL_TOKENS)) if (label.startsWith(normalizeText(t))) return false;
+  if (label.startsWith("人民币")) return sel.currency === "RMB";
+  if (label.startsWith("美金") || label.startsWith("美元")) return sel.currency === "USD";
 
-function tierLines(tiers: TieredCommissionRule[], currency: string): string {
-  const symbol = currencySymbol(currency);
-  if (!tiers.length) return `0-${symbol}____：____%`;
-  return tiers
-    .map((tier) => {
-      const from = tier.from?.trim() || "0";
-      const to = tier.to?.trim();
-      const rate = percentText(tier.rate);
-      return to
-        ? `${symbol}${from}-${symbol}${to}：${rate}`
-        : `${symbol}${from}及以上：${rate}`;
-    })
-    .join("\n");
-}
-
-function specialCommissionText(fields: FieldsMap): string {
-  const config = parseCommissionConfig(field(fields, "commissionConfig"));
-  const special = config.special;
-  const attributionRate = percentText(special?.attributionRate || field(fields, "commissionRate"));
-  const creatorRate = percentText(special?.creatorRate);
-  const lowThreshold = special?.lowGmvThreshold || "______";
-  const lowBudgetRate = percentText(special?.lowGmvBudgetRate || "15");
-  const highThreshold = special?.highGmvThreshold || lowThreshold;
-  const highServiceRate = percentText(special?.highGmvServiceRate);
-  const confirmDays = special?.stockPublisherConfirmDays || "10";
-  return [
-    "除月度服务费外，甲方应按照本协议约定的【特殊佣金机制】，以乙方服务期间产生的联盟归因GMV为计算基础，向乙方支付相应服务佣金。",
-    "（1）Amazon Attribution（归因链接）渠道佣金",
-    `甲方应按照该渠道有效归因GMV的 ${attributionRate || "______%"} 向乙方支付服务佣金。`,
-    "（2）Amazon Creator Connections（创作者计划）渠道佣金",
-    `由乙方创建、管理或运营的 Campaign 所产生的有效归因销售额，甲方应按照 ${creatorRate || "______%"} 向乙方支付服务佣金。`,
-    "（3）历史资源确认",
-    `双方应于项目启动后【${confirmDays}】个工作日内，共同确认《存量Publisher资源表》。`,
-    "（4）历史资源移交",
-    "自移交日期起，由乙方实际创建、管理或运营的Campaign所产生的有效归因销售额，按照本项目确认书约定的创作者计划佣金规则进行结算。",
-    "（5）新增Publisher佣金规则",
-    `A. 单个Publisher在单个Campaign项下当月有效归因GMV低于 USD ${lowThreshold} 的：甲方同意将该Publisher对应有效归因GMV的 ${lowBudgetRate || "______%"} 作为渠道推广预算。`,
-    `B. 单个Publisher在单个Campaign项下当月有效归因GMV达到或超过 USD ${highThreshold} 的：甲方应按照该Publisher对应有效归因GMV的 ${highServiceRate || "______%"} 向乙方支付服务佣金。`,
-  ].join("\n");
-}
-
-function commissionLine(fields: FieldsMap): string {
-  const config = parseCommissionConfig(field(fields, "commissionConfig"));
-  const templateKey = config.templateKey || field(fields, "templateKey") || field(fields, "commissionType");
-  if (templateKey === "THRESHOLD") {
-    const threshold = config.threshold;
-    const currency = threshold?.currency || field(fields, "thresholdCurrency") || "USD";
-    const amount = threshold?.amount || field(fields, "thresholdAmount") || "_____";
-    const reached = percentText(threshold?.reachedRate || field(fields, "commissionRate"));
-    const unreached = percentText(threshold?.unreachedRate);
-    return `除月度服务费外，甲方应按照本协议约定的【联盟归因GMV门槛佣金机制】，以乙方服务期间产生的联盟归因GMV为计算基础，向乙方支付相应服务佣金。当联盟归因GMV达到 ${currencySymbol(currency)}${amount} 后，甲方应按照全部已产生的联盟归因GMV向乙方支付联盟归因GMV的 ${reached || "______%"} 作为服务佣金。未达到上述联盟归因GMV门槛时，甲方应按照全部已产生的联盟归因GMV向乙方支付联盟归因GMV的 ${unreached || "______%"} 作为服务佣金。`;
+  const isPay = para.includes("服务费按");
+  const isGmv = para.includes("GMV佣金按") || para.includes("联盟归因GMV");
+  if (label.startsWith("季度预付")) return isPay && sel.payCycle === "quarter";
+  if (label.startsWith("季度")) {
+    if (isPay) return sel.payCycle === "quarter";
+    if (isGmv) return sel.gmvCycle === "quarter";
+    return false;
   }
-  if (templateKey === "TIERED") {
-    const tiered = config.tiered;
-    const currency = tiered?.currency || "USD";
-    return `除月度服务费外，甲方应按照本协议约定的【阶梯式联盟归因GMV佣金机制】，以乙方服务期间产生的联盟归因GMV为计算基础，向乙方支付相应服务佣金。\n联盟归因GMV佣金按照以下阶梯式区间的方式支付：\n联盟归因GMV区间（币种：${currency}）        佣金比例\n${tierLines(tiered?.tiers ?? [], currency)}`;
+  if (label.startsWith("月")) {
+    if (isPay) return sel.payCycle === "month";
+    if (isGmv) return sel.gmvCycle === "month";
+    return false;
   }
-  if (templateKey === "INCREMENTAL") {
-    const incremental = config.incremental;
-    const baseMonths = incremental?.baseMonths || field(fields, "excessBaseMonths") || "_____";
-    const rate = percentText(incremental?.excessRate || field(fields, "excessCommissionRate") || field(fields, "commissionRate"));
-    return `除月度服务费外，甲方应按照本协议约定的【超额联盟归因GMV佣金机制】，以乙方服务期间产生的联盟归因GMV为计算基础，向乙方支付相应服务佣金。以合作开始前最近 ${baseMonths} 个月平均联盟GMV作为基准值。对于合作开始后，月度联盟归因GMV超出基准值部分，甲方向乙方支付 ${rate || "______%"} 作为增长服务佣金。`;
-  }
-  if (templateKey === "SPECIAL") {
-    return specialCommissionText(fields);
-  }
-  const rate = percentText(config.fixed?.rate || field(fields, "commissionRate"));
-  return `除月度服务费外，甲方应向乙方支付联盟归因GMV佣金，甲方向乙方按照固定点数联盟归因GMV的 ${rate || "_____%"} 作为服务佣金。`;
+  return false;
 }
+
+// 匹配「包住一个 Wingdings 2 空框符号」的单个 run（不跨 run 边界）。
+const BOX_RUN_RE = /<w:r(?:\s[^>]*)?>(?:(?!<\/?w:r\b)[\s\S])*?<w:sym w:font="Wingdings 2" w:char="(?:00A3|0052)"\/>(?:(?!<\/?w:r\b)[\s\S])*?<\/w:r>/g;
+const BOX_SYM_RE = /<w:sym w:font="Wingdings 2" w:char="(?:00A3|0052)"\/>/;
+
+function stripTags(s: string): string {
+  return s.replace(/<[^>]+>/g, "");
+}
+
+/** 取 index 所在段落的可见文字（去空格），用于复选框上下文判定。 */
+function paragraphTextAt(xml: string, index: number): string {
+  let start = xml.lastIndexOf("<w:p>", index);
+  const startAttr = xml.lastIndexOf("<w:p ", index);
+  start = Math.max(start, startAttr);
+  if (start < 0) start = 0;
+  const end = xml.indexOf("</w:p>", index);
+  return normalizeText(stripTags(xml.slice(start, end === -1 ? xml.length : end)));
+}
+
+function tickCheckboxes(xml: string, fields: FieldsMap): string {
+  const sel = computeSelections(fields);
+
+  // 模板里复选框有两种编码：① Wingdings 2 空框符号 run；② 文字字符 □。两种都收集。
+  type Box = { start: number; end: number; checked: string };
+  const boxes: Box[] = [];
+  BOX_RUN_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = BOX_RUN_RE.exec(xml)) !== null) {
+    boxes.push({ start: m.index, end: m.index + m[0].length, checked: m[0].replace(BOX_SYM_RE, "<w:t>☑</w:t>") });
+  }
+  const LIT_RE = /□/g;
+  let lm: RegExpExecArray | null;
+  while ((lm = LIT_RE.exec(xml)) !== null) {
+    boxes.push({ start: lm.index, end: lm.index + lm[0].length, checked: "☑" });
+  }
+  if (!boxes.length) return xml;
+  boxes.sort((a, b) => a.start - b.start);
+
+  const out: string[] = [];
+  let cursor = 0;
+  for (let i = 0; i < boxes.length; i++) {
+    const box = boxes[i];
+    // 该框的标签 = 本框之后、到下一个框（或本段落结束）之间的可见文字。
+    const nextStart = i + 1 < boxes.length ? boxes[i + 1].start : xml.length;
+    const paraEnd = xml.indexOf("</w:p>", box.end);
+    const bound = Math.min(nextStart, paraEnd === -1 ? xml.length : paraEnd);
+    const label = normalizeText(stripTags(xml.slice(box.end, bound)));
+    const para = paragraphTextAt(xml, box.start);
+    const tick = decideTick(label, para, sel);
+
+    out.push(xml.slice(cursor, box.start));
+    out.push(tick ? box.checked : xml.slice(box.start, box.end));
+    cursor = box.end;
+  }
+  out.push(xml.slice(cursor));
+  return out.join("");
+}
+
+// ─── 正文允许填写的字段（仅合同编号 / 甲乙方信息 / 合作起止时间）─────────────────
+// 注意：平台 / 站点 / 渠道 / 货币 / 支付周期 / GMV 结算周期 / 佣金条款等一律不在
+// 此处改写——平台·站点·渠道·货币·周期改为「复选框就地勾选」，佣金条款属于模板
+// 自带固定正文，不可改动。
 
 interface PlainState {
   creditCodeCount: number;
@@ -165,37 +251,61 @@ function replacementForTemplateText(text: string, fields: FieldsMap, state: Plai
     return `电子邮箱：${state.emailCount % 2 === 1 ? field(fields, "partyAEmail") : field(fields, "partyBEmail")}`;
   }
 
-  if (trimmed.startsWith("推广平台：")) return `推广平台：${field(fields, "promoPlatform") || "亚马逊（Amazon）"}`;
-  if (trimmed.startsWith("目标站点：")) return `目标站点：${field(fields, "targetSite")}`;
-  if (trimmed.startsWith("推广商品清单：")) return `推广商品清单：${productText(field(fields, "productListText"))}`;
-  if (compact.includes("甲方每个月按照") && compact.includes("作为月度服务费")) {
-    return `甲方每个月按照${field(fields, "feeCurrency")} ${field(fields, "feeAmount")} 元/月作为月度服务费。`;
+  // ── 项目确认书：佣金费率空位填写 ──────────────────────────────────────────────
+  // 仅把段落里的 _____ 空位替换为费率/门槛/月数，其余措辞保持模板原文不变。
+  // 各模板对应不同佣金机制，空位顺序见模板。SPECIAL / TIERED 暂未处理。
+  if (compact.includes("固定点数联盟归因GMV")) {
+    const rate = pct(field(fields, "commissionRate"));
+    return rate ? text.replace(/_+/, rate) : null;
   }
-  if (trimmed.startsWith("服务费按")) {
-    return `服务费按 ${cycleText(field(fields, "feeCycle")) || "月度"} 预付。`;
+  if (compact.includes("个月平均联盟GMV作为基准值")) {
+    const vals = [field(fields, "excessBaseMonths"), pct(field(fields, "excessCommissionRate"))];
+    let i = 0;
+    return text.replace(/_+/g, () => vals[i++] || "_____");
   }
-  if (compact.includes("联盟归因GMV佣金按") && compact.includes("结算")) {
-    return `联盟归因GMV佣金按${cycleText(field(fields, "gmvSettlementCycle")) || "月度"}结算。`;
-  }
-  if (
-    compact.includes("固定点数联盟归因GMV")
-    || compact.includes("阶梯式联盟归因GMV佣金机制")
-    || compact.includes("联盟归因GMV门槛佣金机制")
-    || compact.includes("超额联盟归因GMV佣金机制")
-    || compact.includes("特殊佣金机制")
-  ) {
-    return commissionLine(fields);
+  if (compact.includes("未达到上述联盟归因GMV门槛")) {
+    const cfg = parseCommissionConfigSafe(field(fields, "commissionConfig"));
+    const thr = (cfg.threshold ?? {}) as { reachedRate?: string; unreachedRate?: string };
+    const amount = [field(fields, "thresholdCurrency"), field(fields, "thresholdAmount")].filter(Boolean).join(" ");
+    const vals = [amount, pct(thr.reachedRate || field(fields, "commissionRate")), pct(thr.unreachedRate || "")];
+    let i = 0;
+    return text.replace(/_+/g, () => vals[i++] || "_____");
   }
 
-  if (trimmed.includes("Amazon Creator Connections")) return channelLine(fields, "ACC", "Amazon Creator Connections（创作者计划）");
-  if (trimmed.includes("Amazon Attribution")) return channelLine(fields, "Attribution", "Amazon Attribution（归因链接）");
-  if (trimmed.includes("Amazon Associates")) return channelLine(fields, "Associates", "Amazon Associates（亚马逊官方Affiliate联盟）");
-  if (trimmed.includes("Amazon Live")) return channelLine(fields, "AmazonLive", "Amazon Live");
-  if (trimmed.includes("Levanta")) return channelLine(fields, "Levanta", "Levanta");
-  if (trimmed.includes("Impact")) return channelLine(fields, "Impact", "Impact");
-  if (trimmed.includes("Wayward")) return channelLine(fields, "Wayward", "Wayward");
-  if (trimmed.includes("Archer Affiliates")) return channelLine(fields, "ArcherAffiliates", "Archer Affiliates");
-  if (trimmed.includes("PartnerBoost")) return channelLine(fields, "PartnerBoost", "PartnerBoost");
+  // ── SPECIAL（特殊佣金机制）各空位 ──
+  const sp = parseCommissionConfigSafe(field(fields, "commissionConfig")).special ?? {};
+  if (compact.includes("该渠道有效归因GMV的") && compact.includes("向乙方支付服务佣金")) {
+    const r = pct(sp.attributionRate || field(fields, "commissionRate"));
+    return r ? text.replace(/_+/, r) : null;
+  }
+  if (compact.includes("单个Campaign项下当月有效归因GMV低于")) {
+    const cur = sp.lowGmvThresholdCurrency || "USD";
+    let t = text.replace(/USD/, cur);
+    if (sp.lowGmvThreshold) t = t.replace(/_+/, sp.lowGmvThreshold);
+    return t;
+  }
+  if (compact.includes("作为渠道推广预算")) {
+    const r = pct(sp.lowGmvBudgetRate || "");
+    return r ? text.replace(/_+/, r) : null;
+  }
+  if (compact.includes("单个Campaign项下当月有效归因GMV达到或超过")) {
+    const cur = sp.highGmvThresholdCurrency || sp.lowGmvThresholdCurrency || "USD";
+    let t = text.replace(/USD/, cur);
+    if (sp.highGmvThreshold) t = t.replace(/_+/, sp.highGmvThreshold);
+    return t;
+  }
+  if (compact.includes("该Publisher对应有效归因GMV的") && compact.includes("向乙方支付服务佣金")) {
+    const r = pct(sp.highGmvServiceRate || "");
+    return r ? text.replace(/_+/, r) : null;
+  }
+
+  // ── TIERED：阶梯币种（区间与比例为表格，单独由 fillTieredTable 处理）──
+  if (compact.includes("联盟归因GMV区间") && compact.includes("币种")) {
+    const cur = parseCommissionConfigSafe(field(fields, "commissionConfig")).tiered?.currency
+      || field(fields, "thresholdCurrency") || "USD";
+    return text.replace(/(币种：)\s*(）|\))/, `$1${cur}$2`);
+  }
+
   return null;
 }
 
@@ -220,7 +330,7 @@ function rewriteParagraphText(inner: string, replacement: string): string {
   const preservedOpen = openTag.includes("xml:space=")
     ? openTag
     : openTag.replace(/^<w:t/, `<w:t xml:space="preserve"`);
-  result.push(`${preservedOpen}${escXml(replacement)}</w:t>`);
+  result.push(`${preservedOpen}${escXmlMultiline(replacement)}</w:t>`);
   let lastEnd = firstMatch.end;
   for (let i = 1; i < matches.length; i++) {
     const ti = matches[i];
@@ -290,12 +400,11 @@ export async function fillContractTemplate(templateBuffer: Buffer, fields: Field
   const docFile = zip.file("word/document.xml");
   if (!docFile) throw new Error("模板文件结构异常：找不到 word/document.xml");
   const xml = await docFile.async("string");
-  const newXml = stripOutputBackgrounds(
-    replaceKnownTemplateTextInDocxXml(
-      replaceMustacheInDocxXml(xml, fields),
-      fields,
-    ),
-  );
+  let newXml = replaceMustacheInDocxXml(xml, fields);
+  newXml = replaceKnownTemplateTextInDocxXml(newXml, fields);
+  newXml = tickCheckboxes(newXml, fields);
+  newXml = fillAmount(newXml, fields);
+  newXml = stripOutputBackgrounds(newXml);
   zip.file("word/document.xml", newXml);
 
   const headerFooterPaths = Object.keys(zip.files).filter((p) =>

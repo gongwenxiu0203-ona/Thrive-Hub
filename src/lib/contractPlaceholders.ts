@@ -185,6 +185,7 @@ export function buildPlaceholderMap(c: Loose): Record<string, string> {
     excessBaseMonths: s(c.excessBaseMonths),
     excessCommissionRate: s(c.excessCommissionRate),
     specialCommissionTerms: s(c.specialCommissionTerms),
+    commissionConfig: s(c.commissionConfig),
     // promo
     promoPlatform: s(c.promoPlatform),
     targetSite: s(c.targetSite),

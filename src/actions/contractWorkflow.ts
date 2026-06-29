@@ -5,13 +5,11 @@ import { promises as fs } from "fs";
 import path from "path";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import {
-  fillContractTemplate,
-  templateUrlToAbsPath,
-} from "@/lib/contractTemplateFill";
+import { fillContractTemplate } from "@/lib/contractTemplateFill";
 import { buildPlaceholderMap } from "@/lib/contractPlaceholders";
 import { contractFileBaseName } from "@/lib/contractFileName";
 import { openReviewRound } from "@/actions/contractReview";
+import { resolveContractTemplateBuffer } from "@/lib/contractTemplateResolve";
 
 type Result<T = void> = { ok: true; data?: T } | { ok: false; error: string };
 
@@ -33,22 +31,13 @@ async function nextVersionNo(contractId: string): Promise<number> {
 async function loadTemplateFor(contractId: string): Promise<{ buffer: Buffer; templateName: string; templateKey: string } | { error: string }> {
   const c = await prisma.contract.findUnique({
     where: { id: contractId },
-    select: { templateId: true },
+    select: { templateId: true, template: true },
   });
   if (!c) return { error: "合同不存在" };
   if (!c.templateId) return { error: "请先在合同上选择适用的模板" };
-  const tpl = await prisma.contractTemplate.findUnique({
-    where: { id: c.templateId },
-    select: { fileUrl: true, name: true, templateKey: true, deletedAt: true },
-  });
-  if (!tpl || tpl.deletedAt) return { error: "所选模板不存在或已删除" };
-  try {
-    const abs = templateUrlToAbsPath(tpl.fileUrl);
-    const buf = await fs.readFile(abs);
-    return { buffer: buf, templateName: tpl.name, templateKey: tpl.templateKey };
-  } catch {
-    return { error: "读取模板文件失败" };
-  }
+  const tpl = await resolveContractTemplateBuffer(c.template);
+  if ("error" in tpl) return tpl;
+  return { buffer: tpl.buffer, templateName: tpl.templateName, templateKey: tpl.templateKey };
 }
 
 /** Fill the contract's selected template with current field values, write the

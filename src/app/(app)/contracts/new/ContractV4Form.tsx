@@ -51,6 +51,27 @@ function emptyProduct(): ProductRow {
   return { name: "", asin: "", price: "", trackLink: "" };
 }
 
+// 百分比输入：用户只输数字，输入框固定显示 % 后缀
+function PercentInput({ value, onChange, placeholder }: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  const shown = String(value ?? "").replace(/%/g, "");
+  return (
+    <div className="relative">
+      <input
+        className="input pr-7"
+        inputMode="decimal"
+        value={shown}
+        onChange={(e) => onChange(e.target.value.replace(/[^0-9.]/g, ""))}
+        placeholder={placeholder}
+      />
+      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">%</span>
+    </div>
+  );
+}
+
 interface Props {
   customers: Customer[];
   users: UserOption[];
@@ -151,7 +172,7 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
   const [feeCurrency,    setFeeCurrency]    = useState(existingContract?.feeCurrency ?? "美金");
   const [contractType,   setContractType]   = useState(existingContract?.type ?? "BRAND");
   const [feeAmount,      setFeeAmount]      = useState(existingContract?.feeAmount ?? "");
-  const [feeCycle,       setFeeCycle]       = useState(existingContract?.feeCycle ?? "季度预付");
+  const [feeCycle,       setFeeCycle]       = useState(existingContract?.feeCycle ?? "月付");
 
   // 首期服务费：自动计算，不需要手动输入
   const computedFirstPeriodFee = (() => {
@@ -182,6 +203,7 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
   const [specialLowBudgetRate, setSpecialLowBudgetRate] = useState(existingCommissionConfig.special?.lowGmvBudgetRate ?? "");
   const [specialHighThreshold, setSpecialHighThreshold] = useState(existingCommissionConfig.special?.highGmvThreshold ?? "");
   const [specialHighServiceRate, setSpecialHighServiceRate] = useState(existingCommissionConfig.special?.highGmvServiceRate ?? "");
+  const [specialGmvCurrency, setSpecialGmvCurrency] = useState(existingCommissionConfig.special?.lowGmvThresholdCurrency ?? "USD");
 
   // 推广信息
   const [products, setProducts] = useState<ProductRow[]>(() => {
@@ -370,10 +392,10 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
         attributionRate: specialAttributionRate,
         creatorRate: specialCreatorRate,
         stockPublisherConfirmDays: "10",
-        lowGmvThresholdCurrency: "USD",
+        lowGmvThresholdCurrency: specialGmvCurrency,
         lowGmvThreshold: specialLowThreshold,
         lowGmvBudgetRate: specialLowBudgetRate,
-        highGmvThresholdCurrency: "USD",
+        highGmvThresholdCurrency: specialGmvCurrency,
         highGmvThreshold: specialHighThreshold,
         highGmvServiceRate: specialHighServiceRate,
         rawText: specialCommissionTerms,
@@ -798,8 +820,7 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
               {activeCommissionType === "FIXED" && (
                 <div>
                   <label className="label text-xs">GMV 抽佣比例</label>
-                  <input className="input" value={commissionRate}
-                    onChange={e => setCommissionRate(e.target.value)} placeholder="如：8%" />
+                  <PercentInput value={commissionRate} onChange={setCommissionRate} placeholder="如：8" />
                 </div>
               )}
 
@@ -818,8 +839,7 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
                   </div>
                   <div>
                     <label className="label text-xs">达标后抽佣比例</label>
-                    <input className="input" value={commissionRate}
-                      onChange={e => setCommissionRate(e.target.value)} placeholder="如：8%" />
+                    <PercentInput value={commissionRate} onChange={setCommissionRate} placeholder="如：8" />
                   </div>
                 </div>
               )}
@@ -827,8 +847,7 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
               {activeCommissionType === "THRESHOLD" && (
                 <div>
                   <label className="label text-xs">未达标抽佣比例</label>
-                  <input className="input" value={thresholdUnreachedRate}
-                    onChange={e => setThresholdUnreachedRate(e.target.value)} placeholder="如：3%" />
+                  <PercentInput value={thresholdUnreachedRate} onChange={setThresholdUnreachedRate} placeholder="如：3" />
                 </div>
               )}
 
@@ -855,7 +874,7 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
                         </div>
                         <div>
                           <label className="label text-xs">佣金比例</label>
-                          <input className="input" value={row.rate} onChange={e => updateTierRow(index, "rate", e.target.value)} placeholder="如：8%" />
+                          <PercentInput value={row.rate} onChange={(v) => updateTierRow(index, "rate", v)} placeholder="如：8" />
                         </div>
                         <div className="flex items-end">
                           <button type="button" className="btn-secondary w-full text-xs" onClick={() => removeTierRow(index)} disabled={tieredRows.length <= 1}>
@@ -873,29 +892,37 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
 
               {activeCommissionType === "SPECIAL" && (
                 <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="sm:col-span-2">
+                    <label className="label text-xs">GMV 门槛货币</label>
+                    <select className="input" value={specialGmvCurrency} onChange={e => setSpecialGmvCurrency(e.target.value)}>
+                      {CURRENCY_OPTIONS.map((c) => (
+                        <option key={c.value} value={c.value}>{c.label}</option>
+                      ))}
+                    </select>
+                  </div>
                   <div>
                     <label className="label text-xs">Attribution 渠道佣金比例</label>
-                    <input className="input" value={specialAttributionRate} onChange={e => setSpecialAttributionRate(e.target.value)} placeholder="如：8%" />
+                    <PercentInput value={specialAttributionRate} onChange={setSpecialAttributionRate} placeholder="如：8" />
                   </div>
                   <div>
                     <label className="label text-xs">Creator Connections 佣金比例</label>
-                    <input className="input" value={specialCreatorRate} onChange={e => setSpecialCreatorRate(e.target.value)} placeholder="如：10%" />
+                    <PercentInput value={specialCreatorRate} onChange={setSpecialCreatorRate} placeholder="如：10" />
                   </div>
                   <div>
-                    <label className="label text-xs">低 GMV 门槛 USD</label>
+                    <label className="label text-xs">低 GMV 门槛</label>
                     <input className="input" value={specialLowThreshold} onChange={e => setSpecialLowThreshold(e.target.value)} placeholder="如：10000" />
                   </div>
                   <div>
                     <label className="label text-xs">低 GMV 推广预算比例</label>
-                    <input className="input" value={specialLowBudgetRate} onChange={e => setSpecialLowBudgetRate(e.target.value)} placeholder="如：15%" />
+                    <PercentInput value={specialLowBudgetRate} onChange={setSpecialLowBudgetRate} placeholder="如：15" />
                   </div>
                   <div>
-                    <label className="label text-xs">高 GMV 门槛 USD</label>
+                    <label className="label text-xs">高 GMV 门槛</label>
                     <input className="input" value={specialHighThreshold} onChange={e => setSpecialHighThreshold(e.target.value)} placeholder="如：10000" />
                   </div>
                   <div>
                     <label className="label text-xs">高 GMV 服务佣金比例</label>
-                    <input className="input" value={specialHighServiceRate} onChange={e => setSpecialHighServiceRate(e.target.value)} placeholder="如：8%" />
+                    <PercentInput value={specialHighServiceRate} onChange={setSpecialHighServiceRate} placeholder="如：8" />
                   </div>
                 </div>
               )}
@@ -909,8 +936,7 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
                   </div>
                   <div>
                     <label className="label text-xs">超额增长部分佣金比例</label>
-                    <input className="input" value={excessRate}
-                      onChange={e => setExcessRate(e.target.value)} placeholder="如：10%" />
+                    <PercentInput value={excessRate} onChange={setExcessRate} placeholder="如：10" />
                   </div>
                 </div>
               )}
@@ -1078,9 +1104,9 @@ function TemplatePicker({
 }) {
   return (
     <div>
-      <label className="label">选择适用的合同模板</label>
-      <select className="input" value={value} onChange={(e) => onChange(e.target.value)}>
-        <option value="">未选择（暂不绑定模板）</option>
+      <label className="label">选择适用的合同模板 <span className="text-rose-500">*</span></label>
+      <select className="input" value={value} onChange={(e) => onChange(e.target.value)} required>
+        <option value="">请选择适用的合同模板</option>
         {Object.entries(TEMPLATE_KEY_LABELS_INLINE).map(([key, label]) => {
           const items = templates.filter((t) => t.templateKey === key);
           if (items.length === 0) return null;

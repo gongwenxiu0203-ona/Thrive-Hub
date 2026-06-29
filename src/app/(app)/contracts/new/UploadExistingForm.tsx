@@ -5,6 +5,19 @@ import { useRouter } from "next/navigation";
 import { Upload, AlertCircle, CheckCircle2 } from "lucide-react";
 import { uploadExistingContract } from "@/actions/contractUpload";
 
+const CURRENCY_CHOICES = ["美金", "人民币", "欧元", "英镑"];
+const CYCLE_CHOICES = ["月度", "季度"];
+const FEE_CYCLE_CHOICES = ["月付", "季度预付"];
+
+const PERCENT_KEYS = new Set([
+  "commissionRate",
+  "thresholdReachedRate",
+  "thresholdUnreachedRate",
+  "excessCommissionRate",
+]);
+
+const LONG_TEXT_KEYS = new Set(["tieredRules", "specialCommissionTerms"]);
+
 export interface UploadExistingFormProps {
   customers: { id: string; brandName: string }[];
   users: { id: string; name: string }[];
@@ -22,10 +35,15 @@ export function UploadExistingForm({
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<{
-    contractId: string;
+    contractId: string | null;
     missing: { key: string; label: string }[];
     autoSubmitted: boolean;
     archived: boolean;
+    needsTemplate: boolean;
+    needsSupplement: boolean;
+    fields: Record<string, unknown>;
+    sourceTextPreview: string;
+    detectedTemplateKey: string;
   } | null>(null);
 
   const [customerId, setCustomerId] = useState(presetCustomerId ?? "");
@@ -57,6 +75,30 @@ export function UploadExistingForm({
     });
   }
 
+  function confirmSupplement(overrides: Record<string, string>, nextTemplateId: string) {
+    setError(null);
+    if (!file) { setError("原始文件已丢失，请重新选择合同文件"); return; }
+    startTransition(async () => {
+      const fd = new FormData();
+      fd.append("customerId", customerId);
+      fd.append("contractNoPrefix", contractNoPrefix);
+      fd.append("type", type);
+      if (nextTemplateId) fd.append("templateId", nextTemplateId);
+      if (partyBCompany) fd.append("partyBCompany", partyBCompany);
+      if (ownerId) fd.append("ownerId", ownerId);
+      fd.append("uploadArchiveMode", uploadArchiveMode);
+      fd.append("finalizeUpload", "1");
+      for (const [key, value] of Object.entries(overrides)) {
+        fd.append(`override:${key}`, value);
+      }
+      fd.append("file", file);
+      const r = await uploadExistingContract(fd);
+      if (!r.ok) { setError(r.error); return; }
+      setTemplateId(nextTemplateId);
+      setSuccess(r.data!);
+    });
+  }
+
   if (success) {
     return (
       <SuccessView
@@ -64,7 +106,19 @@ export function UploadExistingForm({
         missing={success.missing}
         autoSubmitted={success.autoSubmitted}
         archived={success.archived}
-        onGoToContract={() => router.push(`/contracts/${success.contractId}`)}
+        needsTemplate={success.needsTemplate}
+        needsSupplement={success.needsSupplement}
+        fields={success.fields}
+        sourceTextPreview={success.sourceTextPreview}
+        detectedTemplateKey={success.detectedTemplateKey}
+        templates={templates}
+        templateId={templateId}
+        pending={pending}
+        error={error}
+        onConfirmSupplement={confirmSupplement}
+        onGoToContract={() => {
+          if (success.contractId) router.push(`/contracts/${success.contractId}`);
+        }}
       />
     );
   }
@@ -175,16 +229,138 @@ function SuccessView({
   missing,
   autoSubmitted,
   archived,
+  needsTemplate,
+  needsSupplement,
+  fields,
+  sourceTextPreview,
+  detectedTemplateKey,
+  templates,
+  templateId,
+  pending,
+  error,
+  onConfirmSupplement,
   onGoToContract,
 }: {
-  contractId: string;
+  contractId: string | null;
   missing: { key: string; label: string }[];
   autoSubmitted: boolean;
   archived: boolean;
+  needsTemplate: boolean;
+  needsSupplement: boolean;
+  fields: Record<string, unknown>;
+  sourceTextPreview: string;
+  detectedTemplateKey: string;
+  templates: { id: string; name: string; templateKey: string }[];
+  templateId: string;
+  pending: boolean;
+  error: string | null;
+  onConfirmSupplement: (overrides: Record<string, string>, nextTemplateId: string) => void;
   onGoToContract: () => void;
 }) {
+  const [selectedTemplateId, setSelectedTemplateId] = useState(templateId);
+  const [overrides, setOverrides] = useState<Record<string, string>>(() => {
+    const initial: Record<string, string> = {};
+    for (const field of missing) {
+      const value = fields[field.key];
+      initial[field.key] = Array.isArray(value) ? value.join(",") : String(value ?? "");
+    }
+    return initial;
+  });
+
+  if (needsSupplement) {
+    return (
+      <div className="card space-y-5 p-6">
+        <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
+          <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-amber-800">识别完成，需要先补齐字段</p>
+            <p className="mt-1 text-sm text-amber-700">
+              系统尚未创建合同记录。请对照原文补齐缺失字段，确认后才会创建合同并按所选用途归档或送审。
+            </p>
+          </div>
+        </div>
+
+        <div className="grid gap-5 lg:grid-cols-[1.1fr_1fr]">
+          <div className="min-w-0">
+            <p className="mb-2 text-xs font-semibold text-slate-600">原文对照</p>
+            <pre className="max-h-[620px] overflow-auto whitespace-pre-wrap rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-700">
+              {sourceTextPreview || "未识别到可展示的原文内容"}
+            </pre>
+          </div>
+
+          <div className="space-y-3">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">
+                适用模板 <span className="text-rose-500">*</span>
+              </label>
+              <select
+                value={selectedTemplateId}
+                onChange={(e) => setSelectedTemplateId(e.target.value)}
+                className="input"
+              >
+                <option value="">请选择适用的合同模板</option>
+                {templates.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                    {t.templateKey === detectedTemplateKey ? "（识别匹配）" : ""}
+                  </option>
+                ))}
+              </select>
+              {needsTemplate && (
+                <p className="mt-1 text-[11px] text-sky-600">
+                  AI 识别到佣金方式：{detectedTemplateKey}，但未匹配到模板，请手动选择。
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-3">
+              <p className="text-xs font-semibold text-slate-600">待补填字段</p>
+              {missing.map((field) => (
+                <SupplementFieldInput
+                  key={field.key}
+                  field={field}
+                  value={overrides[field.key] ?? ""}
+                  onChange={(value) => setOverrides((prev) => ({ ...prev, [field.key]: value }))}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {error && (
+          <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600">
+            {error}
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={() => window.location.reload()} className="btn-secondary text-sm">
+            重新上传
+          </button>
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => onConfirmSupplement(overrides, selectedTemplateId)}
+            className="btn-primary text-sm"
+          >
+            {pending ? "确认中..." : "补齐并创建合同"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="card space-y-4 p-6">
+      {needsTemplate && (
+        <div className="flex items-start gap-3 rounded-lg border border-sky-200 bg-sky-50 p-4">
+          <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-sky-600" />
+          <div>
+            <p className="text-sm font-semibold text-sky-800">未能自动识别适用模板</p>
+            <p className="mt-1 text-sm text-sky-700">系统未能按佣金结算方式自动匹配到模板，请到合同详情页手动选择适用模板（必填）。</p>
+          </div>
+        </div>
+      )}
       {missing.length === 0 ? (
         <div className="flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
           <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
@@ -215,7 +391,122 @@ function SuccessView({
           {missing.length === 0 ? "查看合同" : "去补填字段"}
         </button>
       </div>
-      <p className="text-[11px] text-slate-400">合同 ID：{contractId}</p>
+      {contractId && <p className="text-[11px] text-slate-400">合同 ID：{contractId}</p>}
+    </div>
+  );
+}
+
+function SupplementFieldInput({
+  field,
+  value,
+  onChange,
+}: {
+  field: { key: string; label: string };
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const key = field.key;
+  const commonLabel = (
+    <label className="mb-1 block text-xs font-medium text-slate-600">{field.label}</label>
+  );
+
+  if (key === "startDate" || key === "endDate") {
+    return (
+      <div>
+        {commonLabel}
+        <input
+          type="date"
+          className="input"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      </div>
+    );
+  }
+
+  if (key === "feeCurrency" || key === "thresholdCurrency") {
+    return (
+      <div>
+        {commonLabel}
+        <select className="input" value={value} onChange={(e) => onChange(e.target.value)}>
+          <option value="">请选择币种</option>
+          {CURRENCY_CHOICES.map((currency) => (
+            <option key={currency} value={currency}>{currency}</option>
+          ))}
+        </select>
+      </div>
+    );
+  }
+
+  if (key === "feeCycle") {
+    return (
+      <div>
+        {commonLabel}
+        <select className="input" value={value} onChange={(e) => onChange(e.target.value)}>
+          <option value="">请选择固费支付周期</option>
+          {FEE_CYCLE_CHOICES.map((cycle) => (
+            <option key={cycle} value={cycle}>{cycle}</option>
+          ))}
+        </select>
+      </div>
+    );
+  }
+
+  if (key === "gmvSettlementCycle") {
+    return (
+      <div>
+        {commonLabel}
+        <select className="input" value={value} onChange={(e) => onChange(e.target.value)}>
+          <option value="">请选择 GMV 结算周期</option>
+          {CYCLE_CHOICES.map((cycle) => (
+            <option key={cycle} value={cycle}>{cycle}</option>
+          ))}
+        </select>
+      </div>
+    );
+  }
+
+  if (PERCENT_KEYS.has(key)) {
+    return (
+      <div>
+        {commonLabel}
+        <div className="relative">
+          <input
+            className="input pr-7"
+            inputMode="decimal"
+            value={value.replace(/%/g, "")}
+            onChange={(e) => onChange(e.target.value.replace(/[^0-9.]/g, ""))}
+            placeholder={`请输入${field.label}`}
+          />
+          <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">%</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (LONG_TEXT_KEYS.has(key)) {
+    return (
+      <div>
+        {commonLabel}
+        <textarea
+          className="input min-h-[110px]"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={`请输入${field.label}`}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {commonLabel}
+      <input
+        className="input"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={`请输入${field.label}`}
+      />
     </div>
   );
 }

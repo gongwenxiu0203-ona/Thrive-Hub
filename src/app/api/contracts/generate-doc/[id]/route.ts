@@ -1,13 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { promises as fs } from "fs";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { buildPlaceholderMap } from "@/lib/contractPlaceholders";
-import {
-  fillContractTemplate,
-  templateUrlToAbsPath,
-} from "@/lib/contractTemplateFill";
+import { fillContractTemplate } from "@/lib/contractTemplateFill";
 import { contractFileBaseName } from "@/lib/contractFileName";
+import { resolveContractTemplateBuffer } from "@/lib/contractTemplateResolve";
 
 export async function GET(
   _req: NextRequest,
@@ -24,7 +21,7 @@ export async function GET(
   if (!contract) {
     return NextResponse.json({ error: "合同不存在" }, { status: 404 });
   }
-  if (!contract.templateId || !contract.template || contract.template.deletedAt) {
+  if (!contract.templateId || !contract.template) {
     return NextResponse.json(
       { error: "请先在合同信息中选择有效合同模板" },
       { status: 400 },
@@ -32,13 +29,15 @@ export async function GET(
   }
 
   try {
-    const templateAbs = templateUrlToAbsPath(contract.template.fileUrl);
-    const templateBuffer = await fs.readFile(templateAbs);
+    const resolvedTemplate = await resolveContractTemplateBuffer(contract.template);
+    if ("error" in resolvedTemplate) {
+      return NextResponse.json({ error: resolvedTemplate.error }, { status: 400 });
+    }
     const docxBuffer = await fillContractTemplate(
-      templateBuffer,
+      resolvedTemplate.buffer,
       {
         ...buildPlaceholderMap(contract),
-        templateKey: contract.template.templateKey,
+        templateKey: resolvedTemplate.templateKey,
       },
     );
 
