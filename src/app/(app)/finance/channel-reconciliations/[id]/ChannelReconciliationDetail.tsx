@@ -135,11 +135,13 @@ export function ChannelReconciliationDetail({
   derivedPeriods,
   isAdmin: _isAdmin,
   isStaff,
+  canEdit,
 }: {
   record: DetailRecord;
   derivedPeriods: PeriodDerived[];
   isAdmin: boolean;
   isStaff: boolean;
+  canEdit: boolean;
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
@@ -197,7 +199,7 @@ export function ChannelReconciliationDetail({
             </p>
           </div>
         </div>
-        {isStaff && (
+        {canEdit && (
           <button onClick={() => setEditing(true)} className="btn-primary flex items-center gap-1.5 text-sm">
             <Settings className="h-4 w-4" /> 编辑/管理分账
           </button>
@@ -362,7 +364,7 @@ export function ChannelReconciliationDetail({
         )}
       </div>
 
-      {editing && (
+      {editing && canEdit && (
         <ChannelReconciliationDetailModal
           record={editRecord}
           derivedPeriods={derivedPeriods}

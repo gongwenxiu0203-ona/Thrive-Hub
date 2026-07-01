@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
+import { isStaff } from "@/lib/permissions";
 
 // POST /api/finance/reconciliations/[id]/submit
 // 提交对账，状态变为 PENDING_REVIEW，通知指定审核人（或客户负责人）
@@ -10,6 +11,9 @@ export async function POST(
 ) {
   try {
     const session = await requireSession();
+    if (!isStaff(session.role)) {
+      return NextResponse.json({ error: "无权限" }, { status: 403 });
+    }
     const { id } = await params;
     const body = await req.json().catch(() => ({}));
     const note = body.note ?? "";

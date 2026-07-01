@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
+import { isStaff } from "@/lib/permissions";
 
 // POST /api/finance/channel-reconciliations/[id]/push
 // body: { side: "FIXED_FEE" | "COMMISSION" }
@@ -11,6 +12,9 @@ export async function POST(
 ) {
   try {
     const session = await requireSession();
+    if (!isStaff(session.role)) {
+      return NextResponse.json({ error: "无权限" }, { status: 403 });
+    }
     const { id } = await params;
     const { side } = await req.json();
     if (side !== "FIXED_FEE" && side !== "COMMISSION") {

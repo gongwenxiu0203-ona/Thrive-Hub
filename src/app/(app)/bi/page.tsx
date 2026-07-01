@@ -1,4 +1,5 @@
 ﻿import Link from "next/link";
+import { redirect } from "next/navigation";
 import { Package, Download } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
@@ -156,6 +157,20 @@ export default async function BIPage({
 
   const role = session.role;
   const brandName = session.brandName ?? null;
+  if (role === "CHANNEL" && !sp.from && !sp.to) {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const lastDay = String(new Date(year, now.getMonth() + 1, 0).getDate()).padStart(2, "0");
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(sp)) {
+      if (value) params.set(key, value);
+    }
+    params.set("from", `${year}-${month}-01`);
+    params.set("to", `${year}-${month}-${lastDay}`);
+    if (!params.get("tab")) params.set("tab", "dashboard");
+    redirect(`/bi?${params.toString()}`);
+  }
 
   // Determine accessible tabs
   const TABS = isStaff(role)
@@ -979,3 +994,4 @@ async function AsinTab() {
     />
   );
 }
+

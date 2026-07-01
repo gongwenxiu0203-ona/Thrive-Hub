@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
+import { isStaff } from "@/lib/permissions";
 
 // PATCH /api/finance/channel-reconciliations/[id] — 编辑分账记录
 // v2: 支持固费/抽佣两侧的金额、比例、日期、截图、推送状态更新
@@ -9,7 +10,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    await requireSession();
+    const session = await requireSession();
     const { id } = await params;
     const body = await req.json();
 
@@ -18,6 +19,9 @@ export async function PATCH(
     });
     if (!existing) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+    if (!isStaff(session.role) && !(session.role === "CHANNEL" && existing.channelUserId === session.userId)) {
+      return NextResponse.json({ error: "无权限" }, { status: 403 });
     }
 
     const data: Record<string, unknown> = { updatedAt: new Date() };
@@ -129,7 +133,10 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    await requireSession();
+    const session = await requireSession();
+    if (!isStaff(session.role)) {
+      return NextResponse.json({ error: "无权限" }, { status: 403 });
+    }
     const { id } = await params;
     await prisma.channelReconciliation.delete({ where: { id } });
     return NextResponse.json({ success: true });

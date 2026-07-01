@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { MAIN_SITES, PROMO_PLATFORMS } from "@/lib/constants";
 import { sendOwnerAssignmentNotification } from "@/lib/notify";
-import { canDeleteCustomer } from "@/lib/permissions";
+import { canDeleteCustomer, isStaff } from "@/lib/permissions";
 import { capitalizeBrandName } from "@/lib/customer";
 
 const LEO_EMAIL = "leo.g@thraiveagency.com";
@@ -202,7 +202,7 @@ export async function updateCustomer(
   id: string,
   fd: FormData,
 ): Promise<SaveResult> {
-  await requireSession();
+  const session = await requireSession();
   const data = collectCustomerData(fd);
   if (!data.brandName) {
     return {
@@ -210,7 +210,24 @@ export async function updateCustomer(
       fieldErrors: { brandName: "品牌/店铺名称为必填项" },
     };
   }
-  await prisma.customer.update({ where: { id }, data });
+  const updateData: Partial<typeof data> = { ...data };
+  if (!isStaff(session.role)) {
+    const customer = await prisma.customer.findUnique({
+      where: { id },
+      select: { channelUserId: true, createdById: true },
+    });
+    if (
+      session.role !== "CHANNEL" ||
+      !customer ||
+      (customer.channelUserId !== session.userId &&
+        customer.createdById !== session.userId)
+    ) {
+      return { ok: false, error: "无权编辑该客户" };
+    }
+    delete updateData.category;
+    delete updateData.rating;
+  }
+  await prisma.customer.update({ where: { id }, data: updateData });
   revalidatePath("/customers");
   revalidatePath(`/customers/${id}`);
   return { ok: true, customerId: id };

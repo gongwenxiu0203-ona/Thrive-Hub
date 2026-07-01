@@ -157,6 +157,7 @@ export default async function ChannelReconciliationDetailPage({
         })),
       }}
       derivedPeriods={derivedPeriods}
+      canEdit={isStaff(session.role) || session.role === "CHANNEL"}
     />
   );
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
+import { isStaff } from "@/lib/permissions";
 import { calcBetAndCommission } from "../route";
 
 // POST /api/finance/reconciliations/[id]/pull-bi
@@ -10,7 +11,10 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    await requireSession();
+    const session = await requireSession();
+    if (!isStaff(session.role)) {
+      return NextResponse.json({ error: "无权限" }, { status: 403 });
+    }
     const { id } = await params;
 
     const rec = await prisma.customerReconciliation.findUnique({ where: { id } });

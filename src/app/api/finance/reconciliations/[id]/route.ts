@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
+import { isStaff } from "@/lib/permissions";
 import { calcCommission } from "@/lib/commissionCalc";
 
 // GET /api/finance/reconciliations/[id]
@@ -9,7 +10,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    await requireSession();
+    const session = await requireSession();
     const { id } = await params;
 
     const rec = await prisma.customerReconciliation.findUnique({
@@ -39,6 +40,9 @@ export async function GET(
     });
 
     if (!rec) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    if (session.role === "CHANNEL" && rec.customer.channelUserId !== session.userId) {
+      return NextResponse.json({ error: "无权限" }, { status: 403 });
+    }
     return NextResponse.json(rec);
   } catch {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -53,7 +57,10 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    await requireSession();
+    const session = await requireSession();
+    if (!isStaff(session.role)) {
+      return NextResponse.json({ error: "无权限" }, { status: 403 });
+    }
     const { id } = await params;
     const body = await req.json();
 
@@ -112,7 +119,10 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    await requireSession();
+    const session = await requireSession();
+    if (!isStaff(session.role)) {
+      return NextResponse.json({ error: "无权限" }, { status: 403 });
+    }
     const { id } = await params;
     const existing = await prisma.customerReconciliation.findUnique({
       where: { id },

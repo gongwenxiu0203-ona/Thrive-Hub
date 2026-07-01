@@ -26,10 +26,12 @@ export function CustomerFormModal({
   users,
   customer,
   trigger = "button",
+  includeInternal = true,
 }: {
   users: UserOption[];
   customer?: CustomerEditData;
   trigger?: "button" | "link";
+  includeInternal?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -93,6 +95,7 @@ export function CustomerFormModal({
           <CustomerSectionFields defaults={customer} errors={fieldErrors} />
 
           {/* 内部管理字段 */}
+          {includeInternal && (
           <section className="rounded-xl border border-slate-200 bg-slate-50 p-4">
             <h3 className="mb-3 text-sm font-bold text-slate-800">
               内部管理信息
@@ -185,6 +188,7 @@ export function CustomerFormModal({
               </p>
             )}
           </section>
+          )}
 
           {error && (
             <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">

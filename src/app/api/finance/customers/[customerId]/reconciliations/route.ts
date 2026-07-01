@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
+import { isStaff } from "@/lib/permissions";
 
 // DELETE /api/finance/customers/[customerId]/reconciliations
 // 删除该客户的全部月度对账记录（含级联的 settlements/reviews）
@@ -9,7 +10,10 @@ export async function DELETE(
   { params }: { params: Promise<{ customerId: string }> },
 ) {
   try {
-    await requireSession();
+    const session = await requireSession();
+    if (!isStaff(session.role)) {
+      return NextResponse.json({ error: "无权限" }, { status: 403 });
+    }
     const { customerId } = await params;
 
     const customer = await prisma.customer.findUnique({

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
+import { isStaff } from "@/lib/permissions";
 
 // PATCH /api/finance/settlements/[id]
 // 更新结算记录（预计结算时间、实际结算时间、备注）
@@ -10,6 +11,9 @@ export async function PATCH(
 ) {
   try {
     const session = await requireSession();
+    if (!isStaff(session.role)) {
+      return NextResponse.json({ error: "无权限" }, { status: 403 });
+    }
     const { id } = await params;
     const body = await req.json();
 

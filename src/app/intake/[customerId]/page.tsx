@@ -6,6 +6,7 @@ import {
   parseSiteLinks,
   parseRecord,
 } from "@/lib/customer";
+import { resolveIntakeReferrer } from "@/lib/intakeReferrer";
 
 export const metadata = {
   title: "品牌信息收集表 · 联盟营销服务",
@@ -21,8 +22,7 @@ export default async function CustomerIntakePage({
 }) {
   const { customerId } = await params;
   const sp = await searchParams;
-  const channelId = sp.channel ?? "";
-  const staffId = sp.staff ?? "";
+  const referrer = await resolveIntakeReferrer(sp.channel, sp.staff);
   const customer = await prisma.customer.findUnique({
     where: { id: customerId },
   });
@@ -64,7 +64,13 @@ export default async function CustomerIntakePage({
           </p>
         </div>
         <div className="card p-6 sm:p-8">
-          <IntakeForm customerId={customer.id} channelId={channelId} staffId={staffId} defaults={defaults} />
+          <IntakeForm
+            customerId={customer.id}
+            channelId={referrer.channelId}
+            staffId={referrer.staffId}
+            referrerLabel={referrer.label}
+            defaults={defaults}
+          />
         </div>
         <p className="mt-6 text-center text-xs text-slate-400">
           您提交的信息将仅用于联盟营销服务对接

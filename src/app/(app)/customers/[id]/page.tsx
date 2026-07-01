@@ -79,6 +79,11 @@ export default async function CustomerDetailPage({
   const users = await prisma.user.findMany({ orderBy: { name: "asc" } });
 
   const userOptions = users.map((u) => ({ id: u.id, name: u.name }));
+  const channelOptions = users
+    .filter((u) => u.role === "CHANNEL")
+    .map((u) => ({ id: u.id, name: u.name, email: u.email }));
+  const canEditCustomerInfo = isStaff(session.role) || session.role === "CHANNEL";
+  const canViewCustomerInfo = canEditCustomerInfo;
 
   const sectionData = {
     mainSites: parseStringArray(customer.mainSites),
@@ -169,10 +174,21 @@ export default async function CustomerDetailPage({
                 customerId={customer.id}
                 brandName={customer.brandName}
                 size="md"
-                channelUserId={session.role === "CHANNEL" ? session.userId : undefined}
+                channelUserId={
+                  session.role === "CHANNEL"
+                    ? session.userId
+                    : customer.channelUserId ?? undefined
+                }
                 staffUserId={isStaff(session.role) ? session.userId : undefined}
+                channelOptions={channelOptions}
               />
-              <CustomerFormModal users={userOptions} customer={editData} />
+              {canEditCustomerInfo && (
+                <CustomerFormModal
+                  users={userOptions}
+                  customer={editData}
+                  includeInternal={isStaff(session.role)}
+                />
+              )}
               {isStaff(session.role) && <DeleteCustomerButton id={customer.id} />}
             </div>
           </div>
@@ -212,6 +228,7 @@ export default async function CustomerDetailPage({
       </div>
 
       {/* ── 客户信息 ── */}
+      {canViewCustomerInfo && (
       <div>
         <div className="mb-4 flex items-center gap-3">
           <div className="flex h-6 w-6 items-center justify-center rounded-md bg-brand-100 text-xs font-bold text-brand-700">①</div>
@@ -220,8 +237,10 @@ export default async function CustomerDetailPage({
         </div>
         <CustomerSectionsView data={sectionData} />
       </div>
+      )}
 
       {/* ── 内部管理 ── */}
+      {isStaff(session.role) && (
       <div>
         <div className="mb-4 flex items-center gap-3">
           <div className="flex h-6 w-6 items-center justify-center rounded-md bg-slate-700 text-xs font-bold text-white">②</div>
@@ -270,6 +289,7 @@ export default async function CustomerDetailPage({
           )}
         </div>
       </div>
+      )}
 
       <p className="text-xs text-slate-400">
         {customer.source === "INTAKE" ? "客户门户录入" : "内部录入"}

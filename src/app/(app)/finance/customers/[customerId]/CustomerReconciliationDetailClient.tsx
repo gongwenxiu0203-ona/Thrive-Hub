@@ -141,6 +141,7 @@ type Props = {
   reconciliations: Rec[];
   currentUserId: string;
   users: User[];
+  readOnly?: boolean;
 };
 
 // ── currency symbol ───────────────────────────────────────────────────────────
@@ -185,6 +186,7 @@ export function CustomerReconciliationDetailClient({
   reconciliations,
   currentUserId,
   users,
+  readOnly = false,
 }: Props) {
   const [showNewModal, setShowNewModal] = useState(false);
   const router = useRouter();
@@ -199,7 +201,7 @@ export function CustomerReconciliationDetailClient({
       <section className="card p-5">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="font-semibold text-slate-900">月度对账</h2>
-          {contract && (
+          {contract && !readOnly && (
             <button
               className="btn-primary text-sm"
               onClick={() => setShowNewModal(true)}
@@ -223,6 +225,7 @@ export function CustomerReconciliationDetailClient({
                 defaultOpen={idx === 0}
                 currentUserId={currentUserId}
                 users={users}
+                readOnly={readOnly}
                 onRefresh={() => startTransition(() => router.refresh())}
               />
             ))}
@@ -231,7 +234,7 @@ export function CustomerReconciliationDetailClient({
       </section>
 
       {/* 新建月度对账 Modal */}
-      {showNewModal && contract && (
+      {showNewModal && contract && !readOnly && (
         <NewMonthlyModal
           customerId={customer.id}
           contractId={contract.id}
@@ -424,12 +427,14 @@ function MonthlyRecordRow({
   defaultOpen,
   currentUserId,
   users,
+  readOnly,
   onRefresh,
 }: {
   rec: Rec;
   defaultOpen: boolean;
   currentUserId: string;
   users: User[];
+  readOnly: boolean;
   onRefresh: () => void;
 }) {
   const [expanded, setExpanded] = useState(defaultOpen);
@@ -469,6 +474,7 @@ function MonthlyRecordRow({
   const liveAmount = liveCalc.commissionAmount;
 
   async function pullBiData() {
+    if (readOnly) return;
     setPulling(true);
     try {
       const res = await fetch(
@@ -486,6 +492,7 @@ function MonthlyRecordRow({
   }
 
   async function updateCurrency(field: "fixedFeeCurrency" | "commissionCurrency", value: string) {
+    if (readOnly) return;
     setUpdatingCurrency(true);
     try {
       await fetch(`/api/finance/reconciliations/${rec.id}`, {
@@ -500,6 +507,7 @@ function MonthlyRecordRow({
   }
 
   async function deleteRecord() {
+    if (readOnly) return;
     setDeleting(true);
     try {
       const res = await fetch(`/api/finance/reconciliations/${rec.id}`, {
@@ -554,14 +562,16 @@ function MonthlyRecordRow({
             </span>
           )}
         </button>
-        <button
-          type="button"
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-600"
-          title="删除该月度对账"
-          onClick={() => setShowDeleteModal(true)}
-        >
-          <Trash2 className="h-4 w-4" />
-        </button>
+        {!readOnly && (
+          <button
+            type="button"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+            title="删除该月度对账"
+            onClick={() => setShowDeleteModal(true)}
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        )}
         <button
           type="button"
           className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100"
@@ -598,7 +608,7 @@ function MonthlyRecordRow({
                       ? `${fixedSym}${rec.feeAmount.toLocaleString()}`
                       : "—"}
                   </span>
-                  {!isConfirmed && (
+                  {!isConfirmed && !readOnly && (
                     <select
                       className="h-6 rounded border border-slate-200 px-1 text-xs text-slate-600"
                       value={rec.fixedFeeCurrency || "人民币"}
@@ -624,7 +634,7 @@ function MonthlyRecordRow({
                       minimumFractionDigits: 2,
                     })}
                   </span>
-                  {!isConfirmed && (
+                  {!isConfirmed && !readOnly && (
                     <select
                       className="h-6 rounded border border-slate-200 px-1 text-xs text-slate-600"
                       value={rec.commissionCurrency || "人民币"}
@@ -744,7 +754,7 @@ function MonthlyRecordRow({
                           ? `${commSym}${rec.finalSalesAmount?.toLocaleString("zh-CN", { minimumFractionDigits: 2 }) ?? "—"}`
                           : `${commSym}${rec.actualSalesAmount.toLocaleString("zh-CN", { minimumFractionDigits: 2 })}`}
                       </span>
-                      {!isConfirmed && (
+                      {!isConfirmed && !readOnly && (
                         <select
                           className="h-6 rounded border border-slate-200 px-1 text-xs text-slate-600"
                           value={rec.commissionCurrency || "人民币"}
@@ -762,10 +772,10 @@ function MonthlyRecordRow({
                 />
                 {/* EXCESS 模式：GMV 基准值手动填写 */}
                 {rec.contract.commissionType === "EXCESS" && (
-                  <GmvBaselineField rec={rec} onRefresh={onRefresh} />
+                  <GmvBaselineField rec={rec} readOnly={readOnly} onRefresh={onRefresh} />
                 )}
                 {/* 从 BI 拉取按钮（仅 DRAFT 可点） */}
-                {isDraft && (
+                {isDraft && !readOnly && (
                   <button
                     onClick={pullBiData}
                     disabled={pulling}
@@ -837,7 +847,7 @@ function MonthlyRecordRow({
           </div>
 
           {/* ── 工作流按钮 ── */}
-          {!isConfirmed && (
+          {!isConfirmed && !readOnly && (
             <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-4">
               {isDraft && (
                 <>
@@ -959,7 +969,7 @@ function MonthlyRecordRow({
       )}
 
       {/* Modals */}
-      {showSubmitModal && (
+      {showSubmitModal && !readOnly && (
         <SubmitModal
           recId={rec.id}
           users={users}
@@ -971,7 +981,7 @@ function MonthlyRecordRow({
           }}
         />
       )}
-      {showReviewModal && (
+      {showReviewModal && !readOnly && (
         <ReviewModal
           recId={rec.id}
           action={reviewAction}
@@ -983,7 +993,7 @@ function MonthlyRecordRow({
           }}
         />
       )}
-      {showConfirmModal && (
+      {showConfirmModal && !readOnly && (
         <ConfirmModal
           recId={rec.id}
           onClose={() => setShowConfirmModal(false)}
@@ -995,7 +1005,7 @@ function MonthlyRecordRow({
       )}
 
       {/* 删除月度对账确认 */}
-      {showDeleteModal && (
+      {showDeleteModal && !readOnly && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-xl bg-white shadow-2xl">
             <div className="border-b border-slate-200 px-6 py-4">
@@ -1577,18 +1587,21 @@ function FieldItem({
 // ── GMV 基准值字段（EXCESS 模式手动填写）─────────────────────────────────────
 function GmvBaselineField({
   rec,
+  readOnly,
   onRefresh,
 }: {
   rec: Rec;
+  readOnly: boolean;
   onRefresh: () => void;
 }) {
   const [value, setValue] = useState(
     rec.gmvBaseline != null ? String(rec.gmvBaseline) : "",
   );
   const [saving, setSaving] = useState(false);
-  const editable = rec.status === "DRAFT";
+  const editable = !readOnly && rec.status === "DRAFT";
 
   async function save() {
+    if (readOnly) return;
     const num = Number(value.replace(/,/g, ""));
     if (!Number.isFinite(num)) {
       alert("请输入有效数字");

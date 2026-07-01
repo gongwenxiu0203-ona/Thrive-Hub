@@ -81,11 +81,17 @@ export async function POST(req: Request) {
   const channelIdRaw = get("channelId");
   let channelUserId: string | null = null;
   if (channelIdRaw) {
-    const channelUser = await prisma.user.findUnique({
+    const channelUser = await prisma.user.findFirst({
       where: { id: channelIdRaw, role: "CHANNEL" },
       select: { id: true },
     });
     channelUserId = channelUser?.id ?? null;
+  }
+  if (!channelUserId) {
+    return NextResponse.json(
+      { error: "推荐人信息缺失，请使用有效的分享链接提交" },
+      { status: 400 },
+    );
   }
 
   // Resolve staff sharer — used as createdById + default businessOwnerId

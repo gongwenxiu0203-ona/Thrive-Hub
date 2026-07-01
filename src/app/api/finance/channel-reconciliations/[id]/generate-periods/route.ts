@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
+import { isStaff } from "@/lib/permissions";
 
 function periodLabel(index: number, type: string, contractStart?: Date | null): string {
   if (!contractStart) return `第${index}期`;
@@ -23,7 +24,10 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    await requireSession();
+    const session = await requireSession();
+    if (!isStaff(session.role)) {
+      return NextResponse.json({ error: "无权限" }, { status: 403 });
+    }
     const { id } = await params;
     const body = await req.json();
     const { totalPeriods, periodType, fixedFeeTotal, commissionTotal } = body;

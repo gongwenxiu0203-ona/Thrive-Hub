@@ -135,6 +135,7 @@ export default async function CustomerReconciliationPage({
         reconciliations={reconciliations}
         currentUserId={session.userId}
         users={users}
+        readOnly={session.role === "CHANNEL"}
       />
     </div>
   );

@@ -100,16 +100,20 @@ export default async function ContractsPage({
         actions={
           <div className="flex items-center gap-2">
             {isStaff(session.role) && <ScopeToggle />}
-            <Link
-              href="/contracts/templates"
-              className="btn-secondary flex items-center gap-1.5 text-sm"
-            >
-              <FolderOpen className="h-4 w-4" />
-              合同模板库
-            </Link>
-            <Link href="/contracts/new" className="btn-primary flex items-center gap-1.5 text-sm">
-              <FilePlus className="h-4 w-4" /> 新建合同
-            </Link>
+            {isStaff(session.role) && (
+              <>
+                <Link
+                  href="/contracts/templates"
+                  className="btn-secondary flex items-center gap-1.5 text-sm"
+                >
+                  <FolderOpen className="h-4 w-4" />
+                  合同模板库
+                </Link>
+                <Link href="/contracts/new" className="btn-primary flex items-center gap-1.5 text-sm">
+                  <FilePlus className="h-4 w-4" /> 新建合同
+                </Link>
+              </>
+            )}
           </div>
         }
       />

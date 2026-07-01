@@ -60,11 +60,13 @@ export function IntakeForm({
   customerId,
   channelId,
   staffId,
+  referrerLabel,
   defaults,
 }: {
   customerId?: string;
   channelId?: string;
   staffId?: string;
+  referrerLabel?: string | null;
   defaults?: CustomerSectionDefaults;
 }) {
   const router = useRouter();
@@ -76,6 +78,11 @@ export function IntakeForm({
     setError(null);
     setPending(true);
     const payload = buildPayload(e.currentTarget, customerId, channelId, staffId);
+    if (!channelId || !referrerLabel) {
+      setError("推荐人信息缺失，请使用有效的分享链接提交");
+      setPending(false);
+      return;
+    }
     if (!payload.brandName) {
       setError("请填写品牌/店铺名称");
       setPending(false);
@@ -102,6 +109,18 @@ export function IntakeForm({
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
+      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+        <label className="block text-sm">
+          <span className="mb-1 block font-medium text-slate-700">
+            推荐人 *
+          </span>
+          <input
+            className="input w-full bg-white text-sm"
+            value={referrerLabel ?? "推荐人信息缺失，请使用有效分享链接"}
+            readOnly
+          />
+        </label>
+      </div>
       <CustomerSectionFields defaults={defaults} includeContacts />
 
       {error && (

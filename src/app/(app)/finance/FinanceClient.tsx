@@ -100,6 +100,10 @@ type Props = {
   affiliateReconciliations: AffiliateRec[];
   canToggleScope?: boolean;
   currentView?: "mine" | "all";
+  isChannel?: boolean;
+  canManageCustomerReconciliations?: boolean;
+  canCreateChannelReconciliations?: boolean;
+  canViewAffiliateReconciliations?: boolean;
 };
 
 type Tab = "customers" | "trash" | "channels" | "affiliates";
@@ -285,6 +289,10 @@ export function FinanceClient({
   affiliateReconciliations,
   canToggleScope = false,
   currentView = "mine",
+  isChannel: _isChannel = false,
+  canManageCustomerReconciliations = true,
+  canCreateChannelReconciliations = true,
+  canViewAffiliateReconciliations = true,
 }: Props) {
   const [tab, setTab] = useState<Tab>("customers");
   const router = useRouter();
@@ -292,12 +300,18 @@ export function FinanceClient({
   const tabs: { key: Tab; label: string; count?: number }[] = [
     { key: "customers", label: "客户对账及结算" },
     { key: "channels", label: "渠道商对账及结算" },
-    { key: "affiliates", label: "联盟商对账及结算" },
-    {
-      key: "trash",
-      label: "已删除",
-      count: trashedReconciliations.length,
-    },
+    ...(canViewAffiliateReconciliations
+      ? [{ key: "affiliates" as Tab, label: "联盟商对账及结算" }]
+      : []),
+    ...(canManageCustomerReconciliations
+      ? [
+          {
+            key: "trash" as Tab,
+            label: "已删除",
+            count: trashedReconciliations.length,
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -315,7 +329,7 @@ export function FinanceClient({
         </div>
         <div className="flex items-center gap-2">
           {canToggleScope && <ScopeToggle />}
-          {tab === "customers" && (
+          {tab === "customers" && canManageCustomerReconciliations && (
             <NewReconciliationModal
               customers={customers}
               users={allUsers}
@@ -323,7 +337,7 @@ export function FinanceClient({
               onCreated={() => router.refresh()}
             />
           )}
-          {tab === "channels" && (
+          {tab === "channels" && canCreateChannelReconciliations && (
             <NewChannelReconciliationModal
               confirmedRecs={confirmedCustomerReconciliations}
               channelUsers={channelUsers}
@@ -364,9 +378,12 @@ export function FinanceClient({
       </div>
 
       {tab === "customers" && (
-        <CustomerReconciliationTab reconciliations={reconciliations} />
+        <CustomerReconciliationTab
+          reconciliations={reconciliations}
+          canManage={canManageCustomerReconciliations}
+        />
       )}
-      {tab === "trash" && (
+      {tab === "trash" && canManageCustomerReconciliations && (
         <TrashTab trashed={trashedReconciliations} />
       )}
       {tab === "channels" && (
@@ -375,7 +392,7 @@ export function FinanceClient({
           channelUsers={channelUsers}
         />
       )}
-      {tab === "affiliates" && (
+      {tab === "affiliates" && canViewAffiliateReconciliations && (
         <AffiliateReconciliationTab records={affiliateReconciliations} />
       )}
     </div>
@@ -520,8 +537,10 @@ function TrashTab({ trashed }: { trashed: TrashedReconciliation[] }) {
 // ── CustomerReconciliationTab ─────────────────────────────────────────────────
 function CustomerReconciliationTab({
   reconciliations,
+  canManage = true,
 }: {
   reconciliations: Reconciliation[];
+  canManage?: boolean;
 }) {
   const router = useRouter();
   // Filter state
@@ -657,16 +676,18 @@ function CustomerReconciliationTab({
               <th className="px-4 py-3 text-left font-medium text-slate-600">
                 详情
               </th>
-              <th className="px-4 py-3 text-left font-medium text-slate-600">
-                操作
-              </th>
+              {canManage && (
+                <th className="px-4 py-3 text-left font-medium text-slate-600">
+                  操作
+                </th>
+              )}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {filtered.length === 0 ? (
               <tr>
                 <td
-                  colSpan={8}
+                  colSpan={canManage ? 8 : 7}
                   className="px-4 py-8 text-center text-slate-400"
                 >
                   没有匹配的记录
@@ -717,24 +738,26 @@ function CustomerReconciliationTab({
                         详情
                       </Link>
                     </td>
-                    <td className="px-4 py-3">
-                      <button
-                        type="button"
-                        className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-40"
-                        title="删除该客户全部对账"
-                        disabled={deletingId === row.customerId}
-                        onClick={() =>
-                          setConfirmTarget({
-                            customerId: row.customerId,
-                            customerName: row.customerName,
-                            count:
-                              recCountByCustomer.get(row.customerId) ?? 0,
-                          })
-                        }
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </td>
+                    {canManage && (
+                      <td className="px-4 py-3">
+                        <button
+                          type="button"
+                          className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-40"
+                          title="删除该客户全部对账"
+                          disabled={deletingId === row.customerId}
+                          onClick={() =>
+                            setConfirmTarget({
+                              customerId: row.customerId,
+                              customerName: row.customerName,
+                              count:
+                                recCountByCustomer.get(row.customerId) ?? 0,
+                            })
+                          }
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 );
               })
@@ -744,7 +767,7 @@ function CustomerReconciliationTab({
       </div>
 
       {/* 删除确认 Modal */}
-      {confirmTarget && (
+      {canManage && confirmTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-xl bg-white shadow-2xl">
             <div className="border-b border-slate-200 px-6 py-4">

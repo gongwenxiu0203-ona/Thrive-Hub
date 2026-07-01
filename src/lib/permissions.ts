@@ -14,7 +14,7 @@ export function canDeleteCustomer(role: string): boolean {
 // Page routes a role is NOT allowed to view. Middleware redirects to landing.
 export const ROLE_BLOCKED_ROUTES: Record<string, string[]> = {
   BRAND: ["/dashboard", "/customers", "/contracts", "/affiliates", "/tasks", "/finance", "/operations", "/projects", "/worklogs"],
-  CHANNEL: ["/dashboard", "/contracts", "/affiliates", "/tasks", "/finance", "/operations", "/projects", "/worklogs"],
+  CHANNEL: ["/dashboard", "/affiliates", "/tasks", "/operations", "/projects", "/worklogs"],
 };
 
 // Where to send a role on login or when they hit a blocked page.
@@ -35,7 +35,7 @@ export function getRoleLanding(role: string): string {
 // Sidebar nav hrefs each restricted role can see. Returns null = show all.
 const ROLE_NAV_VISIBLE: Record<string, string[]> = {
   BRAND: ["/reminders", "/bi"],
-  CHANNEL: ["/customers", "/reminders", "/bi"],
+  CHANNEL: ["/customers", "/contracts", "/finance", "/reminders", "/bi"],
   // Internal staff see all nav items (null = show all)
 };
 

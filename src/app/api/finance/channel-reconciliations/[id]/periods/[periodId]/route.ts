@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
+import { isStaff } from "@/lib/permissions";
 
 // PATCH /api/finance/channel-reconciliations/[id]/periods/[periodId]
 export async function PATCH(
@@ -8,9 +9,27 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string; periodId: string }> },
 ) {
   try {
-    await requireSession();
-    const { periodId } = await params;
+    const session = await requireSession();
+    const { id, periodId } = await params;
     const body = await req.json();
+
+    const period = await prisma.channelReconciliationPeriod.findUnique({
+      where: { id: periodId },
+      select: {
+        id: true,
+        channelReconciliationId: true,
+        channelReconciliation: { select: { channelUserId: true } },
+      },
+    });
+    if (!period || period.channelReconciliationId !== id) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+    if (
+      !isStaff(session.role) &&
+      !(session.role === "CHANNEL" && period.channelReconciliation.channelUserId === session.userId)
+    ) {
+      return NextResponse.json({ error: "无权限" }, { status: 403 });
+    }
 
     const data: Record<string, unknown> = { updatedAt: new Date() };
     if ("fixedFeeAmount" in body) data.fixedFeeAmount = body.fixedFeeAmount != null ? Number(body.fixedFeeAmount) : null;

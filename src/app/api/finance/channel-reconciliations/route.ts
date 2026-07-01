@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
+import { isStaff } from "@/lib/permissions";
 
 // GET /api/finance/channel-reconciliations
 export async function GET(_req: Request) {
   try {
-    await requireSession();
+    const session = await requireSession();
     const list = await prisma.channelReconciliation.findMany({
+      where: session.role === "CHANNEL" ? { channelUserId: session.userId } : undefined,
       include: {
         customer: { select: { id: true, brandName: true } },
         contract: { select: { id: true, contractNo: true } },
@@ -42,6 +44,9 @@ export async function GET(_req: Request) {
 export async function POST(req: Request) {
   try {
     const session = await requireSession();
+    if (!isStaff(session.role)) {
+      return NextResponse.json({ error: "无权限" }, { status: 403 });
+    }
     const body = await req.json();
     const {
       customerId,

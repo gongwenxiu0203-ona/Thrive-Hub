@@ -196,6 +196,10 @@ export default async function FinancePage({
       affiliateReconciliations={affiliateReconciliations}
       canToggleScope={isStaff(session.role)}
       currentView={view}
+      isChannel={session.role === "CHANNEL"}
+      canManageCustomerReconciliations={isStaff(session.role)}
+      canCreateChannelReconciliations={isStaff(session.role)}
+      canViewAffiliateReconciliations={isStaff(session.role)}
     />
   );
 }
