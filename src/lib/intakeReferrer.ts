@@ -21,6 +21,8 @@ export async function resolveIntakeReferrer(channelId?: string, staffId?: string
     staffId: staff?.id ?? "",
     label: channel
       ? `${channel.name}${channel.email ? ` (${channel.email})` : ""}`
-      : null,
+      : staff
+        ? `${staff.name}${staff.email ? ` (${staff.email})` : ""}`
+        : null,
   };
 }

@@ -77,7 +77,9 @@ export async function POST(req: Request) {
     );
   }
 
-  // Resolve channel user — validate the ID actually exists
+  // Resolve channel user — validate the ID actually exists.
+  // CHANNEL referrers are written to Customer.channelUserId. Staff referrers
+  // only become createdBy/business owner and do not fill the channel field.
   const channelIdRaw = get("channelId");
   let channelUserId: string | null = null;
   if (channelIdRaw) {
@@ -86,12 +88,6 @@ export async function POST(req: Request) {
       select: { id: true },
     });
     channelUserId = channelUser?.id ?? null;
-  }
-  if (!channelUserId) {
-    return NextResponse.json(
-      { error: "推荐人信息缺失，请使用有效的分享链接提交" },
-      { status: 400 },
-    );
   }
 
   // Resolve staff sharer — used as createdById + default businessOwnerId
@@ -103,6 +99,12 @@ export async function POST(req: Request) {
       select: { id: true },
     });
     sharerStaffId = staffUser?.id ?? null;
+  }
+  if (!channelUserId && !sharerStaffId) {
+    return NextResponse.json(
+      { error: "推荐人信息缺失，请使用有效的分享链接提交" },
+      { status: 400 },
+    );
   }
 
   const mainSites = getArr("mainSites").filter((s) => MAIN_SITES.includes(s));

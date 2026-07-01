@@ -78,7 +78,7 @@ export function IntakeForm({
     setError(null);
     setPending(true);
     const payload = buildPayload(e.currentTarget, customerId, channelId, staffId);
-    if (!channelId || !referrerLabel) {
+    if ((!channelId && !staffId) || !referrerLabel) {
       setError("推荐人信息缺失，请使用有效的分享链接提交");
       setPending(false);
       return;
