@@ -30,6 +30,7 @@ export default async function CustomerIntakePage({
 
   const defaults = {
     brandName: customer.brandName,
+    referrerName: customer.referrerName,
     mainSites: parseStringArray(customer.mainSites),
     siteLinks: parseSiteLinks(customer.siteLinks),
     competitor: customer.competitor,
@@ -68,7 +69,6 @@ export default async function CustomerIntakePage({
             customerId={customer.id}
             channelId={referrer.channelId}
             staffId={referrer.staffId}
-            referrerLabel={referrer.label}
             defaults={defaults}
           />
         </div>

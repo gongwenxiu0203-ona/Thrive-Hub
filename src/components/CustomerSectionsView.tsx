@@ -1,6 +1,7 @@
 import type { SiteLinks } from "@/lib/customer";
 
 type ViewData = {
+  referrerName: string | null;
   mainSites: string[];
   siteLinks: SiteLinks;
   competitor: string | null;
@@ -64,6 +65,7 @@ export function CustomerSectionsView({ data }: { data: ViewData }) {
         title="基础信息"
         accent="border-sky-200 bg-sky-50/60"
       >
+        <Row label="推荐人" value={data.referrerName} />
         <Row
           label="主营站点"
           value={data.mainSites.join(" / ")}

@@ -32,7 +32,6 @@ export default async function IntakePage({
           <IntakeForm
             channelId={referrer.channelId}
             staffId={referrer.staffId}
-            referrerLabel={referrer.label}
           />
         </div>
         <p className="mt-6 text-center text-xs text-slate-400">

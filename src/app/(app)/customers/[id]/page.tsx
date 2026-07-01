@@ -86,6 +86,7 @@ export default async function CustomerDetailPage({
   const canViewCustomerInfo = canEditCustomerInfo;
 
   const sectionData = {
+    referrerName: customerAny.referrerName ?? null,
     mainSites: parseStringArray(customer.mainSites),
     siteLinks: parseSiteLinks(customer.siteLinks),
     competitor: customer.competitor,

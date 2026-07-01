@@ -93,6 +93,7 @@ function collectCustomerData(fd: FormData) {
 
   return {
     brandName: capitalizeBrandName(str(fd, "brandName")),
+    referrerName: str(fd, "referrerName") || null,
     mainSites: JSON.stringify(mainSites),
     siteLinks: JSON.stringify(siteLinks),
     competitor: str(fd, "competitor") || null,

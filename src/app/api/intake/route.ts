@@ -70,9 +70,16 @@ export async function POST(req: Request) {
   };
 
   const brandName = capitalizeBrandName(get("brandName"));
+  const referrerName = get("referrerName");
   if (!brandName) {
     return NextResponse.json(
       { error: "请填写品牌/店铺名称" },
+      { status: 400 },
+    );
+  }
+  if (!referrerName) {
+    return NextResponse.json(
+      { error: "请填写推荐人" },
       { status: 400 },
     );
   }
@@ -100,13 +107,6 @@ export async function POST(req: Request) {
     });
     sharerStaffId = staffUser?.id ?? null;
   }
-  if (!channelUserId && !sharerStaffId) {
-    return NextResponse.json(
-      { error: "推荐人信息缺失，请使用有效的分享链接提交" },
-      { status: 400 },
-    );
-  }
-
   const mainSites = getArr("mainSites").filter((s) => MAIN_SITES.includes(s));
   const targetPlatforms = getArr("targetPlatforms").filter((p) =>
     PROMO_PLATFORMS.includes(p),
@@ -117,6 +117,7 @@ export async function POST(req: Request) {
 
   const data = {
     brandName,
+    referrerName,
     mainSites: JSON.stringify(mainSites),
     siteLinks: JSON.stringify(getObj("siteLinks")),
     competitor: get("competitor") || null,

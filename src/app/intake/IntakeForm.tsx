@@ -35,6 +35,7 @@ function buildPayload(form: HTMLFormElement, customerId?: string, channelId?: st
     customerId: customerId ?? "",
     channelId: channelId ?? "",
     staffId: staffId ?? "",
+    referrerName: str("referrerName"),
     brandName: str("brandName"),
     mainSites,
     siteLinks,
@@ -60,13 +61,11 @@ export function IntakeForm({
   customerId,
   channelId,
   staffId,
-  referrerLabel,
   defaults,
 }: {
   customerId?: string;
   channelId?: string;
   staffId?: string;
-  referrerLabel?: string | null;
   defaults?: CustomerSectionDefaults;
 }) {
   const router = useRouter();
@@ -78,8 +77,8 @@ export function IntakeForm({
     setError(null);
     setPending(true);
     const payload = buildPayload(e.currentTarget, customerId, channelId, staffId);
-    if ((!channelId && !staffId) || !referrerLabel) {
-      setError("推荐人信息缺失，请使用有效的分享链接提交");
+    if (!payload.referrerName) {
+      setError("请填写推荐人");
       setPending(false);
       return;
     }
@@ -115,13 +114,15 @@ export function IntakeForm({
             推荐人 *
           </span>
           <input
+            name="referrerName"
             className="input w-full bg-white text-sm"
-            value={referrerLabel ?? "推荐人信息缺失，请使用有效分享链接"}
-            readOnly
+            required
+            defaultValue={defaults?.referrerName ?? ""}
+            placeholder="请填写推荐人姓名或联系方式"
           />
         </label>
       </div>
-      <CustomerSectionFields defaults={defaults} includeContacts />
+      <CustomerSectionFields defaults={defaults} includeContacts includeReferrer={false} />
 
       {error && (
         <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">

@@ -6,6 +6,7 @@ import type { SiteLinks } from "@/lib/customer";
 
 export type CustomerSectionDefaults = {
   brandName?: string;
+  referrerName?: string | null;
   mainSites?: string[];
   siteLinks?: SiteLinks;
   competitor?: string | null;
@@ -52,10 +53,12 @@ function SectionCard({
 export function CustomerSectionFields({
   defaults,
   includeContacts = true,
+  includeReferrer = true,
   errors = {},
 }: {
   defaults?: CustomerSectionDefaults;
   includeContacts?: boolean;
+  includeReferrer?: boolean;
   errors?: Record<string, string>;
 }) {
   const [sites, setSites] = useState<string[]>(defaults?.mainSites ?? []);
@@ -104,6 +107,18 @@ export function CustomerSectionFields({
               <p className="mt-1 text-xs text-rose-600">{errors.brandName}</p>
             )}
           </div>
+
+          {includeReferrer && (
+            <div>
+              <label className="label">推荐人</label>
+              <input
+                name="referrerName"
+                className="input"
+                placeholder="推荐人姓名或联系方式"
+                defaultValue={defaults?.referrerName ?? ""}
+              />
+            </div>
+          )}
 
           <div>
             <label className="label">主营站点（可多选）</label>

@@ -138,6 +138,7 @@ model Customer {
   backendOwnerId  String?
   demoDueDate     DateTime? // Demo 方案截止日期（独立存储，不依赖是否分配后端负责人）
   channelUserId   String? // 渠道商 userId（关联渠道商用户）
+  referrerName    String? // 推荐人（客户表单手动填写）
   createdById     String? // 创建者 userId
 
   // 联系人（非必填）
