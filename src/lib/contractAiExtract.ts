@@ -2,6 +2,8 @@
 // If ANTHROPIC_API_KEY is not configured, the upload flow still creates a
 // draft-like contract and asks the user to supplement the required fields.
 
+import { extractContractFieldsByRules, mergeRuleAndAiFields } from "@/lib/contractUploadRules";
+
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const MODEL = "claude-3-5-haiku-20241022";
 
@@ -77,6 +79,10 @@ function uniqueFields(fields: { key: string; label: string }[]) {
   });
 }
 
+function toContractField(field: { key: string; label: string }) {
+  return field.key === "partyAName" ? { ...field, key: "partyA" } : field;
+}
+
 /** 按上传用途和佣金模板选择必填校验集。 */
 export function uploadRequiredFields(
   mode: string,
@@ -87,10 +93,10 @@ export function uploadRequiredFields(
   return uniqueFields([
     ...base.filter((field) => field.key !== "commissionRate"),
     ...(COMMISSION_REQUIRED_FIELDS[normalized] ?? COMMISSION_REQUIRED_FIELDS.FIXED),
-  ]);
+  ].map(toContractField));
 }
 
-export type ExtractedFields = Record<string, string | string[] | null>;
+export type ExtractedFields = Record<string, unknown>;
 
 const PROMPT_HEADER = `你是合同信息抽取助手。请从合同正文中抽取创建合同表单需要的字段，并只返回 JSON。
 找不到的字段填 null。合作信息和推广信息也要识别。
@@ -143,9 +149,11 @@ export async function aiExtractContractFields(text: string): Promise<{
   fields: ExtractedFields;
   missing: { key: string; label: string }[];
 } | { ok: false; error: string }> {
+  const rule = extractContractFieldsByRules(text);
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    return { ok: true, fields: {}, missing: UPLOAD_EXTRACT_REQUIRED };
+    const fields = mergeRuleAndAiFields(rule, {});
+    return { ok: true, fields, missing: missingFields(fields) };
   }
 
   const prompt = PROMPT_HEADER + text.slice(0, 16000);
@@ -171,7 +179,8 @@ export async function aiExtractContractFields(text: string): Promise<{
     const match = raw.match(/\{[\s\S]*\}/);
     if (!match) return { ok: false, error: "AI 返回格式异常" };
     const parsed = JSON.parse(match[0]) as ExtractedFields;
-    return { ok: true, fields: parsed, missing: missingFields(parsed) };
+    const fields = mergeRuleAndAiFields(rule, parsed);
+    return { ok: true, fields, missing: missingFields(fields) };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "AI 抽字段失败" };
   }

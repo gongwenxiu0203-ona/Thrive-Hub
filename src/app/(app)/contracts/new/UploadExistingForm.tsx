@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Upload, AlertCircle, CheckCircle2 } from "lucide-react";
 import { uploadExistingContract } from "@/actions/contractUpload";
@@ -43,6 +43,8 @@ export function UploadExistingForm({
     needsSupplement: boolean;
     fields: Record<string, unknown>;
     sourceTextPreview: string;
+    sourcePreviewHtml: string;
+    sourceFileType: "docx" | "pdf";
     detectedTemplateKey: string;
   } | null>(null);
 
@@ -110,6 +112,9 @@ export function UploadExistingForm({
         needsSupplement={success.needsSupplement}
         fields={success.fields}
         sourceTextPreview={success.sourceTextPreview}
+        sourcePreviewHtml={success.sourcePreviewHtml}
+        sourceFileType={success.sourceFileType}
+        sourceFile={file}
         detectedTemplateKey={success.detectedTemplateKey}
         templates={templates}
         templateId={templateId}
@@ -233,6 +238,9 @@ function SuccessView({
   needsSupplement,
   fields,
   sourceTextPreview,
+  sourcePreviewHtml,
+  sourceFileType,
+  sourceFile,
   detectedTemplateKey,
   templates,
   templateId,
@@ -249,6 +257,9 @@ function SuccessView({
   needsSupplement: boolean;
   fields: Record<string, unknown>;
   sourceTextPreview: string;
+  sourcePreviewHtml: string;
+  sourceFileType: "docx" | "pdf";
+  sourceFile: File | null;
   detectedTemplateKey: string;
   templates: { id: string; name: string; templateKey: string }[];
   templateId: string;
@@ -266,6 +277,8 @@ function SuccessView({
     }
     return initial;
   });
+  const partyBComparison = readRecord(fields.__partyBComparison);
+  const paymentAccounts = readRecordArray(fields.__paymentAccounts);
 
   if (needsSupplement) {
     return (
@@ -283,12 +296,28 @@ function SuccessView({
         <div className="grid gap-5 lg:grid-cols-[1.1fr_1fr]">
           <div className="min-w-0">
             <p className="mb-2 text-xs font-semibold text-slate-600">原文对照</p>
-            <pre className="max-h-[620px] overflow-auto whitespace-pre-wrap rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-700">
-              {sourceTextPreview || "未识别到可展示的原文内容"}
-            </pre>
+            <SourcePreview
+              file={sourceFile}
+              fileType={sourceFileType}
+              html={sourcePreviewHtml}
+              text={sourceTextPreview}
+            />
           </div>
 
           <div className="space-y-3">
+            <ReadonlyComparisonCard
+              title="乙方信息原文对照（只读）"
+              description="仅用于核对上传合同原文，不会覆盖系统内乙方公司与账户配置。"
+              rows={[
+                ["乙方公司", partyBComparison.company],
+                ["统一社会信用代码/商业登记号", partyBComparison.creditCode],
+                ["乙方地址", partyBComparison.address],
+                ["乙方指定联系人", partyBComparison.contact],
+                ["电话", partyBComparison.phone],
+                ["电子邮箱", partyBComparison.email],
+              ]}
+            />
+            <PaymentAccountsCard accounts={paymentAccounts} />
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-600">
                 适用模板 <span className="text-rose-500">*</span>
@@ -394,6 +423,163 @@ function SuccessView({
       {contractId && <p className="text-[11px] text-slate-400">合同 ID：{contractId}</p>}
     </div>
   );
+}
+
+function ReadonlyComparisonCard({
+  title,
+  description,
+  rows,
+}: {
+  title: string;
+  description: string;
+  rows: Array<[string, unknown]>;
+}) {
+  const visibleRows = rows.filter(([, value]) => String(value ?? "").trim());
+  if (visibleRows.length === 0) return null;
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+      <div className="mb-2">
+        <p className="text-xs font-semibold text-slate-700">{title}</p>
+        <p className="mt-0.5 text-[11px] text-slate-500">{description}</p>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {visibleRows.map(([label, value]) => (
+          <div key={label} className="rounded-md bg-white px-2 py-1.5">
+            <p className="text-[11px] text-slate-400">{label}</p>
+            <p className="break-words text-xs text-slate-700">{String(value)}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SourcePreview({
+  file,
+  fileType,
+  html,
+  text,
+}: {
+  file: File | null;
+  fileType: "docx" | "pdf";
+  html: string;
+  text: string;
+}) {
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (fileType !== "pdf" || !file) {
+      setPdfUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    setPdfUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file, fileType]);
+
+  if (fileType === "pdf" && pdfUrl) {
+    return (
+      <div className="space-y-2">
+        <iframe
+          src={pdfUrl}
+          title="PDF 原文对照"
+          className="h-[620px] w-full rounded-lg border border-slate-200 bg-white"
+        />
+        <details className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <summary className="cursor-pointer text-xs font-medium text-slate-600">
+            查看系统抽取文本
+          </summary>
+          <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap text-xs leading-5 text-slate-600">
+            {text || "未识别到可展示的原文内容"}
+          </pre>
+        </details>
+      </div>
+    );
+  }
+
+  if (html) {
+    return (
+      <iframe
+        srcDoc={html}
+        title="Word 原文对照"
+        sandbox=""
+        className="h-[620px] w-full rounded-lg border border-slate-200 bg-white"
+      />
+    );
+  }
+
+  return (
+    <pre className="max-h-[620px] overflow-auto whitespace-pre-wrap rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-700">
+      {text || "未识别到可展示的原文内容"}
+    </pre>
+  );
+}
+
+function PaymentAccountsCard({ accounts }: { accounts: Record<string, unknown>[] }) {
+  if (accounts.length === 0) return null;
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+      <div className="mb-2">
+        <p className="text-xs font-semibold text-slate-700">乙方收款账户原文识别（只读）</p>
+        <p className="mt-0.5 text-[11px] text-slate-500">
+          系统会识别一个或两个收款账户；不完整账户标记为待确认，不会自动覆盖系统账户。
+        </p>
+      </div>
+      <div className="space-y-2">
+        {accounts.map((account, index) => (
+          <div key={index} className="rounded-md bg-white p-2 text-xs text-slate-700">
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <span className="font-medium">
+                {accountLabel(account.companyType)}{account.usage ? ` · ${account.usage}` : ""}
+              </span>
+              <span className={account.status === "COMPLETE" ? "text-emerald-600" : "text-amber-600"}>
+                {account.status === "COMPLETE" ? "完整" : "待确认"}
+              </span>
+            </div>
+            <div className="grid gap-1 sm:grid-cols-2">
+              <AccountCell label="账户名称" value={account.accountName} />
+              <AccountCell label="开户银行" value={account.bankName} />
+              <AccountCell label="银行账号" value={account.bankAccountNo} />
+              <AccountCell label="SWIFT CODE" value={account.swiftCode} />
+            </div>
+            {account.rawText ? (
+              <details className="mt-2">
+                <summary className="cursor-pointer text-[11px] text-slate-400">查看账户上下文</summary>
+                <pre className="mt-1 max-h-28 overflow-auto whitespace-pre-wrap rounded bg-slate-50 p-2 text-[11px] leading-4 text-slate-500">
+                  {String(account.rawText)}
+                </pre>
+              </details>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AccountCell({ label, value }: { label: string; value: unknown }) {
+  return (
+    <div>
+      <span className="text-slate-400">{label}：</span>
+      <span>{String(value ?? "未识别")}</span>
+    </div>
+  );
+}
+
+function accountLabel(value: unknown): string {
+  if (value === "FOSHAN") return "佛山公司账户";
+  if (value === "HONGKONG") return "香港公司账户";
+  return "收款账户";
+}
+
+function readRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function readRecordArray(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item)))
+    : [];
 }
 
 function SupplementFieldInput({

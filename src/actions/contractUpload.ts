@@ -5,7 +5,7 @@ import { promises as fs } from "fs";
 import path from "path";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { extractDocxText } from "@/lib/contractDocxExtract";
+import { extractDocxContent } from "@/lib/contractDocxExtract";
 import { extractPdfText } from "@/lib/contractPdfExtract";
 import {
   aiExtractContractFields,
@@ -34,6 +34,8 @@ type UploadExistingContractData = {
   needsSupplement: boolean;
   fields: Record<string, unknown>;
   sourceTextPreview: string;
+  sourcePreviewHtml: string;
+  sourceFileType: "docx" | "pdf";
   detectedTemplateKey: string;
 };
 
@@ -119,6 +121,41 @@ function valueMissing(value: unknown): boolean {
   return false;
 }
 
+function contractCreateFields(mapped: Record<string, unknown>): Record<string, unknown> {
+  const { thresholdReachedRate: _reached, thresholdUnreachedRate: _unreached, ...persisted } = mapped;
+  return persisted;
+}
+
+function textPreviewHtml(text: string): string {
+  const escaped = text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  body {
+    margin: 0;
+    padding: 18px;
+    color: #334155;
+    font-family: Arial, "Microsoft YaHei", sans-serif;
+    font-size: 13px;
+    line-height: 1.65;
+    background: #f8fafc;
+  }
+  pre {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+</style>
+</head>
+<body><pre>${escaped || "未识别到可展示的原文内容"}</pre></body>
+</html>`;
+}
+
 export async function uploadExistingContract(
   fd: FormData,
 ): Promise<Result<UploadExistingContractData>> {
@@ -145,10 +182,23 @@ export async function uploadExistingContract(
 
   const buf = Buffer.from(await file.arrayBuffer());
   let text = "";
+  let sourcePreviewHtml = "";
   try {
-    text = ext === "pdf" ? await extractPdfText(buf) : await extractDocxText(buf);
-  } catch {
-    return { ok: false, error: "解析合同文件失败：文件可能已损坏或不可识别" };
+    if (ext === "pdf") {
+      text = await extractPdfText(buf);
+      sourcePreviewHtml = textPreviewHtml(text);
+    } else {
+      const docx = await extractDocxContent(buf);
+      text = docx.text;
+      sourcePreviewHtml = docx.html;
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error
+        ? error.message
+        : "解析合同文件失败：文件可能已损坏或不可识别",
+    };
   }
   if (!text.trim()) return { ok: false, error: "合同文件中未识别到文字内容" };
 
@@ -201,6 +251,7 @@ export async function uploadExistingContract(
     };
   }
   const primaryRate = primaryRateFromCommissionConfig(commissionConfig);
+  const persistedMapped = contractCreateFields(mapped);
 
   // 重算缺失的必填字段：以最终落库值为准（模板派生的 commissionType、AI 识别的
   // feeCycle 等已算作已填）。仅这些缺失才强制补填，其余字段未识别可忽略。
@@ -227,7 +278,9 @@ export async function uploadExistingContract(
         needsTemplate,
         needsSupplement: true,
         fields: finalForMissing,
-        sourceTextPreview: text.slice(0, 6000),
+        sourceTextPreview: text,
+        sourcePreviewHtml,
+        sourceFileType: ext,
         detectedTemplateKey: templateKey,
       },
     };
@@ -258,7 +311,7 @@ export async function uploadExistingContract(
           ownerId,
           reviewerId,
           contractText: text,
-          ...mapped,
+          ...persistedMapped,
           commissionType: templateKey,
           commissionRate: primaryRate ?? (typeof mapped.commissionRate === "string" ? mapped.commissionRate : null),
           commissionConfig: stringifyCommissionConfig(commissionConfig),
@@ -353,7 +406,9 @@ export async function uploadExistingContract(
       needsTemplate,
       needsSupplement: false,
       fields: finalForMissing,
-      sourceTextPreview: text.slice(0, 6000),
+      sourceTextPreview: text,
+      sourcePreviewHtml,
+      sourceFileType: ext,
       detectedTemplateKey: templateKey,
     },
   };
