@@ -23,6 +23,69 @@ function csv(sp: Record<string, string | undefined>, key: string): string[] {
   return (sp[key] ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 }
 
+function isMissing(value: unknown): boolean {
+  if (value == null) return true;
+  if (typeof value === "string") return !value.trim();
+  return false;
+}
+
+function readJsonRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "string") return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function commissionConfigValue(ct: Record<string, unknown>, path: string[]): unknown {
+  let current: unknown = readJsonRecord(ct.commissionConfig);
+  for (const key of path) {
+    if (!current || typeof current !== "object" || Array.isArray(current)) return null;
+    current = (current as Record<string, unknown>)[key];
+  }
+  return current;
+}
+
+function missingContractFields(ct: Record<string, unknown>): string[] {
+  const required: Array<[string, unknown]> = [
+    ["甲方公司名称", ct.partyA],
+    ["销售平台 / 推广平台", ct.promoPlatform],
+    ["目标站点", ct.targetSite],
+    ["合作开始日期", ct.startDate],
+    ["合作结束日期", ct.endDate],
+    ["固定服务费货币", ct.feeCurrency],
+    ["月度服务费金额", ct.feeAmount],
+    ["固费支付周期", ct.feeCycle],
+    ["GMV佣金结算方式", ct.commissionType],
+    ["GMV结算周期", ct.gmvSettlementCycle],
+  ];
+  const commissionType = String(ct.commissionType || "FIXED").toUpperCase();
+  if (commissionType === "THRESHOLD") {
+    required.push(
+      ["门槛佣金币种", ct.thresholdCurrency],
+      ["GMV门槛金额", ct.thresholdAmount],
+      ["达标后抽佣比例", commissionConfigValue(ct, ["threshold", "reachedRate"])],
+      ["未达标抽佣比例", commissionConfigValue(ct, ["threshold", "unreachedRate"])],
+    );
+  } else if (commissionType === "TIERED") {
+    required.push(["阶梯佣金规则", ct.tieredRules]);
+  } else if (commissionType === "SPECIAL") {
+    required.push(["特殊佣金条款", ct.specialCommissionTerms]);
+  } else if (commissionType === "INCREMENTAL" || commissionType === "EXCESS") {
+    required.push(
+      ["基准月数", ct.excessBaseMonths],
+      ["超额增长部分佣金比例", ct.excessCommissionRate],
+    );
+  } else {
+    required.push(["GMV抽佣比例", ct.commissionRate]);
+  }
+  return required.filter(([, value]) => isMissing(value)).map(([label]) => label);
+}
+
 export default async function ContractsPage({
   searchParams,
 }: {
@@ -140,11 +203,14 @@ export default async function ContractsPage({
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">固费</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">抽佣</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">状态</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">字段状态</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">创建时间</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
-              {contracts.map((ct) => (
+              {contracts.map((ct) => {
+                const missingFields = missingContractFields(ct as unknown as Record<string, unknown>);
+                return (
                 <tr key={ct.id} className="group hover:bg-slate-50/60 transition-colors">
                   <td className="px-4 py-3">
                     <Link
@@ -176,9 +242,21 @@ export default async function ContractsPage({
                       {labelOf(CONTRACT_STATUS_LABELS, ct.status)}
                     </Badge>
                   </td>
+                  <td className="px-4 py-3">
+                    {missingFields.length > 0 ? (
+                      <Badge className="border border-rose-200 bg-rose-50 text-rose-700">
+                        字段不全（{missingFields.length}）
+                      </Badge>
+                    ) : (
+                      <Badge className="border border-emerald-200 bg-emerald-50 text-emerald-700">
+                        完整
+                      </Badge>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-xs text-slate-400">{formatDate(ct.createdAt)}</td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

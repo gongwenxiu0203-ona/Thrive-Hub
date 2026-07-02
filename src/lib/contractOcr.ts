@@ -8,12 +8,26 @@ import { promisify } from "util";
 const execFileAsync = promisify(execFile);
 const OCR_DPI = Number(process.env.CONTRACT_OCR_DPI || 150);
 const OCR_MAX_PAGES = Number(process.env.CONTRACT_OCR_MAX_PAGES || 25);
+const OCR_TOTAL_TIMEOUT_MS = Number(process.env.CONTRACT_OCR_TOTAL_TIMEOUT_MS || 60_000);
 const OCR_RENDER_TIMEOUT_MS = Number(process.env.CONTRACT_OCR_RENDER_TIMEOUT_MS || 60_000);
 const OCR_PAGE_TIMEOUT_MS = Number(process.env.CONTRACT_OCR_PAGE_TIMEOUT_MS || 45_000);
+
+export class ContractOcrTimeoutError extends Error {
+  constructor(message = "扫描版 PDF OCR 超过 60 秒未完成") {
+    super(message);
+    this.name = "ContractOcrTimeoutError";
+  }
+}
+
+export function isContractOcrTimeoutError(error: unknown): error is ContractOcrTimeoutError {
+  return error instanceof ContractOcrTimeoutError
+    || (error instanceof Error && error.name === "ContractOcrTimeoutError");
+}
 
 export async function extractScannedPdfTextWithOcr(buffer: Buffer): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "contract-ocr-"));
   const pdfPath = path.join(dir, "input.pdf");
+  const deadline = Date.now() + OCR_TOTAL_TIMEOUT_MS;
   try {
     await fs.writeFile(pdfPath, buffer);
     const prefix = path.join(dir, "page");
@@ -27,7 +41,7 @@ export async function extractScannedPdfTextWithOcr(buffer: Buffer): Promise<stri
       String(OCR_MAX_PAGES),
       pdfPath,
       prefix,
-    ], OCR_RENDER_TIMEOUT_MS);
+    ], remainingTimeout(deadline, OCR_RENDER_TIMEOUT_MS));
 
     const files = (await fs.readdir(dir))
       .filter((name) => name.startsWith("page-") && name.endsWith(".png"))
@@ -36,6 +50,7 @@ export async function extractScannedPdfTextWithOcr(buffer: Buffer): Promise<stri
 
     const chunks: string[] = [];
     for (let index = 0; index < files.length; index += 1) {
+      const timeout = remainingTimeout(deadline, OCR_PAGE_TIMEOUT_MS);
       const file = files[index];
       const imagePath = path.join(dir, file);
       const outBase = imagePath.replace(/\.png$/i, "");
@@ -49,12 +64,13 @@ export async function extractScannedPdfTextWithOcr(buffer: Buffer): Promise<stri
         resolveTesseractLang(tessdataDir),
         "--psm",
         "6",
-      ], OCR_PAGE_TIMEOUT_MS);
+      ], timeout);
       const textPath = `${outBase}.txt`;
       chunks.push(await fs.readFile(textPath, "utf8"));
     }
     return chunks.join("\n\n").trim();
   } catch (error) {
+    if (isContractOcrTimeoutError(error)) throw error;
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(
       `扫描版 PDF 需要安装 OCR 组件后才能识别：poppler-utils(pdftoppm) + tesseract-ocr(含中文语言包)。当前 OCR 调用失败：${message}`,
@@ -90,6 +106,12 @@ function resolveTesseractLang(tessdataDir: string | null): string {
     return "chi_sim";
   }
   return "chi_sim+eng";
+}
+
+function remainingTimeout(deadline: number, cap: number): number {
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) throw new ContractOcrTimeoutError();
+  return Math.max(1, Math.min(cap, remaining));
 }
 
 function command(envKey: string, fallback: string): string {
@@ -129,8 +151,18 @@ function command(envKey: string, fallback: string): string {
 }
 
 function runCommand(commandPath: string, args: string[], timeout: number) {
-  if (process.platform === "win32" && /\.(cmd|bat)$/i.test(commandPath)) {
-    return execFileAsync("cmd.exe", ["/d", "/s", "/c", commandPath, ...args], { timeout });
-  }
-  return execFileAsync(commandPath, args, { timeout });
+  const commandPromise = process.platform === "win32" && /\.(cmd|bat)$/i.test(commandPath)
+    ? execFileAsync("cmd.exe", ["/d", "/s", "/c", commandPath, ...args], { timeout })
+    : execFileAsync(commandPath, args, { timeout });
+  return commandPromise.catch((error: unknown) => {
+    if (
+      error &&
+      typeof error === "object" &&
+      ("killed" in error || "signal" in error) &&
+      ((error as { killed?: boolean }).killed || (error as { signal?: string }).signal === "SIGTERM")
+    ) {
+      throw new ContractOcrTimeoutError();
+    }
+    throw error;
+  });
 }

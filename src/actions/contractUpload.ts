@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { extractDocxContent } from "@/lib/contractDocxExtract";
 import { extractPdfText } from "@/lib/contractPdfExtract";
+import { isContractOcrTimeoutError } from "@/lib/contractOcr";
 import {
   aiExtractContractFields,
   uploadRequiredFields,
@@ -156,6 +157,14 @@ function textPreviewHtml(text: string): string {
 </html>`;
 }
 
+function createAiResult(fields: Record<string, unknown>) {
+  return {
+    ok: true as const,
+    fields,
+    missing: [] as { key: string; label: string }[],
+  };
+}
+
 export async function uploadExistingContract(
   fd: FormData,
 ): Promise<Result<UploadExistingContractData>> {
@@ -183,6 +192,7 @@ export async function uploadExistingContract(
   const buf = Buffer.from(await file.arrayBuffer());
   let text = "";
   let sourcePreviewHtml = "";
+  let ocrTimedOut = false;
   try {
     if (ext === "pdf") {
       text = await extractPdfText(buf);
@@ -193,16 +203,22 @@ export async function uploadExistingContract(
       sourcePreviewHtml = docx.html;
     }
   } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error
-        ? error.message
-        : "解析合同文件失败：文件可能已损坏或不可识别",
-    };
+    if (ext === "pdf" && isContractOcrTimeoutError(error)) {
+      ocrTimedOut = true;
+      text = "";
+      sourcePreviewHtml = textPreviewHtml("扫描 PDF OCR 超过 60 秒未完成，系统已先创建合同草稿，请在合同详情页手动补齐字段。");
+    } else {
+      return {
+        ok: false,
+        error: error instanceof Error
+          ? error.message
+          : "解析合同文件失败：文件可能已损坏或不可识别",
+      };
+    }
   }
-  if (!text.trim()) return { ok: false, error: "合同文件中未识别到文字内容" };
+  if (!text.trim() && !ocrTimedOut) return { ok: false, error: "合同文件中未识别到文字内容" };
 
-  const ai = await aiExtractContractFields(text);
+  const ai = text.trim() ? await aiExtractContractFields(text) : createAiResult({});
   if (!ai.ok) return { ok: false, error: ai.error };
 
   const customer = await prisma.customer.findUnique({
@@ -266,8 +282,9 @@ export async function uploadExistingContract(
     return valueMissing(v);
   });
   const needsTemplate = !resolvedTemplateId;
+  const createDraftImmediately = ocrTimedOut;
 
-  if ((missing.length > 0 || needsTemplate) && !finalizeUpload) {
+  if ((missing.length > 0 || needsTemplate) && !finalizeUpload && !createDraftImmediately) {
     return {
       ok: true,
       data: {
@@ -286,8 +303,8 @@ export async function uploadExistingContract(
     };
   }
 
-  if (needsTemplate) return { ok: false, error: "请选择适用的合同模板后再确认" };
-  if (missing.length > 0) {
+  if (needsTemplate && !createDraftImmediately) return { ok: false, error: "请选择适用的合同模板后再确认" };
+  if (missing.length > 0 && !createDraftImmediately) {
     return { ok: false, error: `仍有 ${missing.length} 个关键字段未补齐，请先补齐后再确认` };
   }
 
@@ -304,13 +321,13 @@ export async function uploadExistingContract(
           status: uploadArchiveMode === "SIGNED_ARCHIVE" && missing.length === 0 ? "COMPLETED" : "IN_PROGRESS",
           uploadType: "EXISTING",
           uploadArchiveMode,
-          fillMethod: "AI_EXTRACT",
-          extractedBy: "AI",
+          fillMethod: ocrTimedOut ? "OCR_TIMEOUT" : "AI_EXTRACT",
+          extractedBy: ocrTimedOut ? "OCR_TIMEOUT" : "AI",
           templateId: resolvedTemplateId,
           partyBCompany,
           ownerId,
           reviewerId,
-          contractText: text,
+          contractText: text || "扫描 PDF OCR 超过 60 秒未完成，系统已先创建合同草稿，请手动补齐字段。",
           ...persistedMapped,
           commissionType: templateKey,
           commissionRate: primaryRate ?? (typeof mapped.commissionRate === "string" ? mapped.commissionRate : null),
