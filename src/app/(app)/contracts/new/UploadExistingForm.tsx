@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Upload, AlertCircle, CheckCircle2 } from "lucide-react";
 import { uploadExistingContract } from "@/actions/contractUpload";
@@ -34,6 +34,7 @@ export function UploadExistingForm({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const submittingRef = useRef(false);
   const [success, setSuccess] = useState<{
     contractId: string | null;
     missing: { key: string; label: string }[];
@@ -56,24 +57,31 @@ export function UploadExistingForm({
   const [ownerId, setOwnerId] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [uploadArchiveMode, setUploadArchiveMode] = useState<"REVIEW_AND_STAMP" | "SIGNED_ARCHIVE">("REVIEW_AND_STAMP");
+  const isPdfUpload = file?.name.toLowerCase().endsWith(".pdf") ?? false;
 
   function submit() {
+    if (submittingRef.current) return;
     setError(null);
     if (!customerId) { setError("请选择关联客户"); return; }
     if (!file) { setError("请选择合同 Word/PDF 文件"); return; }
+    submittingRef.current = true;
     startTransition(async () => {
-      const fd = new FormData();
-      fd.append("customerId", customerId);
-      fd.append("contractNoPrefix", contractNoPrefix);
-      fd.append("type", type);
-      if (templateId) fd.append("templateId", templateId);
-      if (partyBCompany) fd.append("partyBCompany", partyBCompany);
-      if (ownerId) fd.append("ownerId", ownerId);
-      fd.append("uploadArchiveMode", uploadArchiveMode);
-      fd.append("file", file);
-      const r = await uploadExistingContract(fd);
-      if (!r.ok) { setError(r.error); return; }
-      setSuccess(r.data!);
+      try {
+        const fd = new FormData();
+        fd.append("customerId", customerId);
+        fd.append("contractNoPrefix", contractNoPrefix);
+        fd.append("type", type);
+        if (templateId) fd.append("templateId", templateId);
+        if (partyBCompany) fd.append("partyBCompany", partyBCompany);
+        if (ownerId) fd.append("ownerId", ownerId);
+        fd.append("uploadArchiveMode", uploadArchiveMode);
+        fd.append("file", file);
+        const r = await uploadExistingContract(fd);
+        if (!r.ok) { setError(r.error); return; }
+        setSuccess(r.data!);
+      } finally {
+        submittingRef.current = false;
+      }
     });
   }
 
@@ -218,10 +226,20 @@ export function UploadExistingForm({
           </div>
         )}
 
+        {pending && isPdfUpload && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+            正在识别扫描 PDF。系统需要逐页 OCR，可能需要 1-5 分钟，请不要重复点击或刷新页面。
+          </div>
+        )}
+
         <div className="flex justify-end">
-          <button type="button" onClick={submit} disabled={pending} className="btn-primary flex items-center gap-1.5 text-sm">
+          <button type="button" onClick={submit} disabled={pending || submittingRef.current} className="btn-primary flex items-center gap-1.5 text-sm">
             <Upload className="h-4 w-4" />
-            {pending ? "上传并识别中..." : "上传并识别字段"}
+            {pending
+              ? isPdfUpload
+                ? "扫描 PDF OCR 中，请勿重复点击..."
+                : "上传并识别中..."
+              : "上传并识别字段"}
           </button>
         </div>
       </div>
