@@ -53,6 +53,7 @@ export async function createWorkLog(payload: WorkLogPayload): Promise<WorkLogSav
       bdProgress: payload.workTypes.includes("BD") ? JSON.stringify(bd) : null,
     },
   });
+  await syncWorkLogToProjects(log.id, session.userId, payload, bd);
   revalidatePath("/worklogs");
   return { ok: true, workLogId: log.id };
 }
@@ -81,8 +82,61 @@ export async function updateWorkLog(id: string, payload: WorkLogPayload): Promis
       bdProgress: payload.workTypes.includes("BD") ? JSON.stringify(bd) : null,
     },
   });
+  await syncWorkLogToProjects(id, log.authorId, payload, bd);
   revalidatePath("/worklogs");
   return { ok: true, workLogId: id };
+}
+
+async function syncWorkLogToProjects(
+  workLogId: string,
+  authorId: string,
+  payload: WorkLogPayload,
+  bd: BdProgressItem[],
+) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (prisma.projectEntry.deleteMany as any)({ where: { fromWorkLogId: workLogId } });
+  const projectIds = [...new Set(payload.projectIds.filter(Boolean))];
+  if (!projectIds.length) return;
+
+  const entries: {
+    projectId: string;
+    kind: "DAILY" | "BD";
+    content: string;
+    authorId: string;
+    fromWorkLogId: string;
+  }[] = [];
+
+  if (payload.workTypes.includes("项目管理") && payload.content.trim()) {
+    for (const projectId of projectIds) {
+      entries.push({
+        projectId,
+        kind: "DAILY",
+        content: payload.content.trim(),
+        authorId,
+        fromWorkLogId: workLogId,
+      });
+    }
+  }
+
+  if (payload.workTypes.includes("BD")) {
+    for (const item of bd) {
+      for (const projectId of projectIds) {
+        entries.push({
+          projectId,
+          kind: "BD",
+          content: `${item.affiliateName}：${item.progress.trim()}`,
+          authorId,
+          fromWorkLogId: workLogId,
+        });
+      }
+    }
+  }
+
+  if (entries.length > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (prisma.projectEntry.createMany as any)({ data: entries });
+  }
+  for (const projectId of projectIds) revalidatePath(`/projects/${projectId}`);
 }
 
 /** 软删除（回收站 7 天可恢复；仅作者或管理员）*/

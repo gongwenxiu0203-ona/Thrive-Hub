@@ -40,7 +40,7 @@ export default async function AffiliateDetailPage({
 
   // Sales data linked by platformAffiliateName
   const rawSalesRecords = await prisma.salesRecord.findMany({
-    where: { affiliateName: affiliate.platformAffiliateName },
+    where: { affiliateName: affiliate.platformAffiliateName, deletedAt: null },
     orderBy: { orderDate: "desc" },
     take: 2000,
     select: {

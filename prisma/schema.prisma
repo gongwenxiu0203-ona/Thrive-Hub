@@ -74,6 +74,7 @@ model User {
   projectGmvTargetsAm        ProjectGmvTarget[]     @relation("ProjectGmvTargetAm")
   projectGmvTargetsCreated   ProjectGmvTarget[]     @relation("ProjectGmvTargetCreator")
   projectChannelTargetsOwned ProjectChannelTarget[]
+  customerAuthorizationInfosCreated CustomerAuthorizationInfo[] @relation("CustomerAuthorizationInfoCreator")
 }
 
 // 角色级权限配置（每个角色 + 功能 = 一个等级）
@@ -165,6 +166,23 @@ model Customer {
   revenueSnapshots       ClientRevenueSnapshot[]
   accountsReceivable     AccountsReceivable[]
   splitRule              ChannelSplitRule?
+  authorizationInfos     CustomerAuthorizationInfo[]
+}
+
+model CustomerAuthorizationInfo {
+  id          String   @id @default(cuid())
+  customerId  String
+  platform    String
+  accountInfo String
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  customer  Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  createdBy User     @relation("CustomerAuthorizationInfoCreator", fields: [createdById], references: [id])
+
+  @@index([customerId])
+  @@index([createdById])
 }
 
 model Contract {
@@ -540,6 +558,7 @@ model SalesRecord {
 
   promotionLink String? // 推广链接 promotion link
   customerId    String? // 关联客户
+  deletedAt     DateTime?
 
   createdAt DateTime @default(now()) // 上传时间
 
@@ -550,6 +569,7 @@ model SalesRecord {
   @@index([brand])
   @@index([region])
   @@index([orderDate])
+  @@index([deletedAt])
 }
 
 // Parent Asin / 链接标签匹配表 —— 品牌+店铺+地区+ASIN 唯一

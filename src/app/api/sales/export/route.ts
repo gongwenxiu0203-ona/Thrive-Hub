@@ -19,7 +19,7 @@ export async function GET(req: Request) {
       .map((s) => s.trim())
       .filter(Boolean);
 
-  const where: Prisma.SalesRecordWhereInput = {};
+  const where: Prisma.SalesRecordWhereInput = { deletedAt: null };
   const platforms = csv("platforms");
   if (platforms.length) where.affiliatePlatform = { in: platforms };
   const programs = csv("programs");

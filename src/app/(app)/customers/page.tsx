@@ -6,7 +6,6 @@ import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { FilterBar, SearchFilter } from "@/components/ui/Filters";
 import { MultiSelectFilter } from "@/components/ui/MultiSelectFilter";
-import { ShareIntakeButton } from "@/components/ShareIntakeButton";
 import { IntakeLinkButton } from "@/components/IntakeLinkButton";
 import {
   CUSTOMER_STATUS_LABELS,
@@ -16,6 +15,7 @@ import {
   AMAZON_CATEGORIES,
   PROMO_PLATFORMS,
   PROMOTION_GOALS,
+  CONTRACT_STATUS_LABELS,
   labelOf,
 } from "@/lib/constants";
 import { formatDate } from "@/lib/utils";
@@ -25,6 +25,7 @@ import { CustomerImportModal } from "./CustomerImportModal";
 import { requireSession } from "@/lib/session";
 import { customerScope, isStaff, parseViewScope } from "@/lib/dataScope";
 import { ScopeToggle } from "@/components/ScopeToggle";
+import { CustomerTableClient, type CustomerTableRow } from "./CustomerTableClient";
 
 export const metadata = { title: "客户管理 · Thraive联盟营销系统" };
 
@@ -35,7 +36,12 @@ async function loadCustomers(where: Record<string, unknown>) {
   return (prisma.customer.findMany as any)({
     where,
     orderBy: { createdAt: "desc" },
-    include: { businessOwner: true, backendOwner: true },
+    include: {
+      businessOwner: true,
+      backendOwner: true,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      contracts: { where: { deletedAt: null } as any, orderBy: { createdAt: "desc" }, take: 1 },
+    },
   });
 }
 
@@ -124,8 +130,9 @@ export default async function CustomersPage({
 
   const isChannel = session.role === "CHANNEL";
   const sp = await searchParams;
-  // 默认"我的"；?scope=all 切换到"全部"（与 ScopeToggle 默认行为一致，避免回切丢失）
-  const view = parseViewScope(sp);
+  const view = session.role === "ADMIN"
+    ? sp.scope === "mine" ? "mine" : "all"
+    : parseViewScope(sp);
   const scope = customerScope(
     {
       userId: session.userId,
@@ -188,6 +195,32 @@ export default async function CustomersPage({
   const categoryOptions = AMAZON_CATEGORIES.map((cat) => ({ value: cat, label: cat }));
 
   const userOptions = users.map((u) => ({ id: u.id, name: u.name }));
+  const tableRows: CustomerTableRow[] = filtered.map((c) => {
+    const latestContract = c.contracts?.[0] ?? null;
+    const latestContractLabel = latestContract
+      ? labelOf(CONTRACT_STATUS_LABELS, latestContract.status)
+      : "-";
+    return {
+      id: c.id,
+      brandName: c.brandName,
+      category: c.category,
+      mainSites: parseStringArray(c.mainSites),
+      targetPlatforms: parseStringArray(c.targetPlatforms),
+      status: c.status,
+      rating: c.rating,
+      businessOwnerId: c.businessOwnerId,
+      businessOwnerName: c.businessOwner?.name ?? null,
+      backendOwnerId: c.backendOwnerId,
+      backendOwnerName: c.backendOwner?.name ?? null,
+      source: c.source,
+      createdAt: c.createdAt.toISOString(),
+      updatedAt: c.updatedAt.toISOString(),
+      latestContractId: latestContract?.id ?? null,
+      latestContractNo: latestContract?.contractNo ?? null,
+      latestContractStatus: latestContract?.status ?? null,
+      latestContractLabel,
+    };
+  });
 
   return (
     <div>
@@ -202,7 +235,7 @@ export default async function CustomersPage({
         }
         actions={
           <>
-            {isStaff(session.role) && <ScopeToggle />}
+            {isStaff(session.role) && <ScopeToggle defaultView={session.role === "ADMIN" ? "all" : "mine"} />}
             <IntakeLinkButton
               channelUserId={isChannel ? session.userId : undefined}
               staffUserId={isStaff(session.role) ? session.userId : undefined}
@@ -259,81 +292,14 @@ export default async function CustomersPage({
           description="调整筛选条件，或新建 / 导入客户"
         />
       ) : (
-        <div className="table-wrap">
-          <table className="data">
-            <thead>
-              <tr>
-                <th>品牌/店铺名称</th>
-                <th>品类</th>
-                <th>主营站点</th>
-                <th>目标推广平台</th>
-                <th>当前进度</th>
-                <th>评级</th>
-                <th>商务负责人</th>
-                <th>后端负责人</th>
-                <th>来源</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((c) => (
-                <tr key={c.id}>
-                  <td>
-                    <Link
-                      href={`/customers/${c.id}`}
-                      className="font-medium text-brand-700 hover:underline capitalize-first"
-                    >
-                      {c.brandName}
-                    </Link>
-                  </td>
-                  <td>{c.category ?? "—"}</td>
-                  <td>
-                    <span className="text-xs text-slate-500">
-                      {parseStringArray(c.mainSites).join(" / ") || "—"}
-                    </span>
-                  </td>
-                  <td>
-                    <div className="flex flex-wrap gap-1">
-                      {parseStringArray(c.targetPlatforms).map((p) => (
-                        <Badge key={p} className="bg-slate-100 text-slate-600">
-                          {p}
-                        </Badge>
-                      ))}
-                      {parseStringArray(c.targetPlatforms).length === 0 && "—"}
-                    </div>
-                  </td>
-                  <td>
-                    <Badge className={CUSTOMER_STATUS_COLORS[c.status]}>
-                      {labelOf(CUSTOMER_STATUS_LABELS, c.status)}
-                    </Badge>
-                  </td>
-                  <td>
-                    <Badge className={RATING_COLORS[c.rating]}>
-                      {labelOf(RATING_LABELS, c.rating)}
-                    </Badge>
-                  </td>
-                  <td>{c.businessOwner?.name ?? "—"}</td>
-                  <td>{c.backendOwner?.name ?? "—"}</td>
-                  <td>
-                    <span className="text-xs text-slate-500">
-                      {c.source === "INTAKE" ? "客户门户" : "内部录入"}
-                    </span>
-                  </td>
-                  <td>
-                    <div className="flex items-center gap-1">
-                      <ShareIntakeButton
-                        customerId={c.id}
-                        brandName={c.brandName}
-                        channelUserId={isChannel ? session.userId : undefined}
-                        staffUserId={isStaff(session.role) ? session.userId : undefined}
-                      />
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <CustomerTableClient
+          rows={tableRows}
+          users={userOptions}
+          isStaff={isStaff(session.role)}
+          isChannel={isChannel}
+          staffUserId={isStaff(session.role) ? session.userId : undefined}
+          channelUserId={isChannel ? session.userId : undefined}
+        />
       )}
 
       <p className="mt-3 text-xs text-slate-400">

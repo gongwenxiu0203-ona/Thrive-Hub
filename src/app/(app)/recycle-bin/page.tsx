@@ -36,13 +36,14 @@ export default async function RecycleBinPage() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const q = (m: any, args: any) => m.findMany({ ...args, where: sel, orderBy: { deletedAt: "desc" } });
 
-  const [customers, contracts, affiliates, tasks, reminders, batches, projects, workLogs] = await Promise.all([
+  const [customers, contracts, affiliates, tasks, reminders, batches, salesRecords, projects, workLogs] = await Promise.all([
     q(prisma.customer, { select: { id: true, brandName: true, category: true, deletedAt: true } }),
     q(prisma.contract, { select: { id: true, contractNo: true, partyA: true, deletedAt: true } }),
     q(prisma.affiliate, { select: { id: true, platformAffiliateName: true, source: true, deletedAt: true } }),
     q(prisma.task, { select: { id: true, title: true, category: true, deletedAt: true } }),
     q(prisma.reminder, { select: { id: true, title: true, type: true, deletedAt: true } }),
     q(prisma.salesBatch, { select: { id: true, fileName: true, recordCount: true, deletedAt: true } }),
+    q(prisma.salesRecord, { select: { id: true, brand: true, affiliateName: true, orderDate: true, revenue: true, deletedAt: true } }),
     q(prisma.project, { select: { id: true, name: true, type: true, deletedAt: true } }),
     q(prisma.workLog, { select: { id: true, content: true, period: true, deletedAt: true, author: { select: { name: true } } } }),
   ]);
@@ -61,13 +62,15 @@ export default async function RecycleBinPage() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ...batches.map((b: any) => ({ type: "salesBatch" as const, id: b.id, title: b.fileName, subtitle: `${b.recordCount} 条记录`, deletedAt: b.deletedAt, daysLeft: daysRemaining(b.deletedAt) })),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ...salesRecords.map((r: any) => ({ type: "salesRecord" as const, id: r.id, title: `${r.brand} · ${r.affiliateName}`, subtitle: `${new Date(r.orderDate).toISOString().slice(0, 10)} · ${Number(r.revenue || 0).toLocaleString()}`, deletedAt: r.deletedAt, daysLeft: daysRemaining(r.deletedAt) })),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ...projects.map((p: any) => ({ type: "project" as const, id: p.id, title: p.name, subtitle: p.type === "INTEGRATED" ? "整合合作" : "单次合作", deletedAt: p.deletedAt, daysLeft: daysRemaining(p.deletedAt) })),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ...workLogs.map((w: any) => ({ type: "workLog" as const, id: w.id, title: `${w.author?.name ?? "—"} 的${w.period === "MONTHLY" ? "月报" : "周报"}`, subtitle: String(w.content ?? "").slice(0, 40), deletedAt: w.deletedAt, daysLeft: daysRemaining(w.deletedAt) })),
   ];
 
   // 按类型分组
-  const groups = (["customer", "contract", "affiliate", "task", "reminder", "salesBatch", "project", "workLog"] as RecycleType[])
+  const groups = (["customer", "contract", "affiliate", "task", "reminder", "salesBatch", "salesRecord", "project", "workLog"] as RecycleType[])
     .map((type) => ({ type, items: items.filter((i) => i.type === type) }))
     .filter((g) => g.items.length > 0);
 

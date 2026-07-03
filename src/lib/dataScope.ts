@@ -16,7 +16,7 @@ type Session = {
 export type ViewScope = "mine" | "all";
 
 export function isStaff(role: string): boolean {
-  return role === "ADMIN" || role === "USER";
+  return role === "ADMIN" || role === "USER" || role === "LYNQ_STAFF";
 }
 
 export function isExternalRole(role: string): boolean {

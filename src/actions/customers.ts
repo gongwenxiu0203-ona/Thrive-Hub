@@ -62,6 +62,11 @@ export type SaveResult = {
   customerId?: string;
 };
 
+export type CustomerDeleteImpact = {
+  customerName: string;
+  groups: { key: string; label: string; count: number }[];
+};
+
 function str(fd: FormData, key: string): string {
   return String(fd.get(key) ?? "").trim();
 }
@@ -248,6 +253,125 @@ export async function deleteCustomer(id: string) {
 }
 
 /** Manual status change — also resets the timer clock. */
+export async function getCustomerDeleteImpact(id: string): Promise<CustomerDeleteImpact> {
+  const session = await requireSession();
+  if (!canDeleteCustomer(session.role)) throw new Error("无权删除客户");
+
+  const customer = await prisma.customer.findUnique({
+    where: { id },
+    select: { brandName: true },
+  });
+  if (!customer) throw new Error("客户不存在");
+
+  const [
+    contracts,
+    tasks,
+    projects,
+    reconciliations,
+    accountsReceivable,
+    salesBatches,
+    salesRecords,
+  ] = await Promise.all([
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (prisma.contract.count as any)({ where: { customerId: id, deletedAt: null } }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (prisma.task.count as any)({ where: { customerId: id, deletedAt: null } }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (prisma.project.count as any)({ where: { customerId: id, deletedAt: null } }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (prisma.customerReconciliation.count as any)({ where: { customerId: id, deletedAt: null } }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (prisma.accountsReceivable.count as any)({ where: { customerId: id, deletedAt: null } }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (prisma.salesBatch.count as any)({ where: { customerId: id, deletedAt: null } }),
+    prisma.salesRecord.count({ where: { customerId: id, deletedAt: null } }),
+  ]);
+
+  return {
+    customerName: customer.brandName,
+    groups: [
+      { key: "contracts", label: "关联合同", count: contracts },
+      { key: "tasks", label: "关联任务", count: tasks },
+      { key: "projects", label: "关联项目", count: projects },
+      { key: "reconciliations", label: "客户收入对账", count: reconciliations },
+      { key: "accountsReceivable", label: "应收账款", count: accountsReceivable },
+      { key: "salesBatches", label: "推广数据批次", count: salesBatches },
+      { key: "salesRecords", label: "推广数据明细关联", count: salesRecords },
+    ],
+  };
+}
+
+export async function deleteCustomerWithRelations(id: string) {
+  const session = await requireSession();
+  if (!canDeleteCustomer(session.role)) throw new Error("无权删除客户");
+  const now = new Date();
+
+  await prisma.$transaction(async (tx) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (tx.contract.updateMany as any)({ where: { customerId: id, deletedAt: null }, data: { deletedAt: now } });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (tx.task.updateMany as any)({ where: { customerId: id, deletedAt: null }, data: { deletedAt: now } });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (tx.project.updateMany as any)({ where: { customerId: id, deletedAt: null }, data: { deletedAt: now } });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (tx.customerReconciliation.updateMany as any)({ where: { customerId: id, deletedAt: null }, data: { deletedAt: now } });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (tx.accountsReceivable.updateMany as any)({ where: { customerId: id, deletedAt: null }, data: { deletedAt: now } });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (tx.salesBatch.updateMany as any)({ where: { customerId: id, deletedAt: null }, data: { deletedAt: now } });
+    await tx.salesRecord.updateMany({ where: { customerId: id, deletedAt: null }, data: { deletedAt: now } });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (tx.customer.update as any)({ where: { id }, data: { deletedAt: now } });
+  });
+
+  revalidatePath("/customers");
+  revalidatePath("/contracts");
+  revalidatePath("/finance");
+  revalidatePath("/operations");
+  revalidatePath("/projects");
+  revalidatePath("/tasks");
+  revalidatePath("/bi");
+  revalidatePath("/recycle-bin");
+  redirect("/customers");
+}
+
+export async function bulkUpdateCustomers(
+  ids: string[],
+  patch: {
+    status?: string;
+    rating?: string;
+    targetPlatforms?: string[];
+    businessOwnerId?: string | null;
+    backendOwnerId?: string | null;
+  },
+): Promise<SaveResult> {
+  const session = await requireSession();
+  if (!isStaff(session.role)) return { ok: false, error: "无权批量修改客户" };
+  const cleanIds = [...new Set(ids.filter(Boolean))];
+  if (!cleanIds.length) return { ok: false, error: "请选择要修改的客户" };
+
+  const data: Record<string, unknown> = {};
+  if (patch.status !== undefined) {
+    data.status = patch.status;
+    data.statusChangedAt = new Date();
+  }
+  if (patch.rating !== undefined) data.rating = patch.rating;
+  if (patch.targetPlatforms !== undefined) {
+    const platforms = PROMO_PLATFORMS.filter((p) => patch.targetPlatforms?.includes(p));
+    data.targetPlatforms = JSON.stringify(platforms);
+  }
+  if (patch.businessOwnerId !== undefined) data.businessOwnerId = patch.businessOwnerId || null;
+  if (patch.backendOwnerId !== undefined) data.backendOwnerId = patch.backendOwnerId || null;
+  if (Object.keys(data).length === 0) return { ok: false, error: "请选择要批量修改的字段" };
+
+  await prisma.customer.updateMany({
+    where: { id: { in: cleanIds }, deletedAt: null },
+    data,
+  });
+  revalidatePath("/customers");
+  return { ok: true };
+}
+
 export async function updateCustomerStatus(id: string, status: string) {
   await requireSession();
   await prisma.customer.update({

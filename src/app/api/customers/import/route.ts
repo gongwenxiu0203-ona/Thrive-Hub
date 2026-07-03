@@ -8,6 +8,7 @@ import {
   RATING_LABELS,
 } from "@/lib/constants";
 import { CUSTOMER_IMPORT_FIELDS } from "@/lib/customerImport";
+import { capitalizeBrandName } from "@/lib/customer";
 
 type Row = Record<string, unknown>;
 
@@ -65,7 +66,7 @@ export async function POST(req: Request) {
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
-    const brandName = cell(row, mapping.brandName);
+    const brandName = capitalizeBrandName(cell(row, mapping.brandName));
     if (!brandName) {
       skipped.push(i + 2); // +2: header row + 1-based
       continue;

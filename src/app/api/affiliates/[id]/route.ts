@@ -33,7 +33,7 @@ export async function GET(
 
   // Linked sales data
   const salesRecords = await prisma.salesRecord.findMany({
-    where: { affiliateName: affiliate.platformAffiliateName },
+    where: { affiliateName: affiliate.platformAffiliateName, deletedAt: null },
     orderBy: { orderDate: "desc" },
     take: 500,
   });

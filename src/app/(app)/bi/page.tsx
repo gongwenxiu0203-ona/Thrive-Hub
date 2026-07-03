@@ -11,6 +11,7 @@ import { SalesDashboard } from "./SalesCharts";
 import { UploadPanel } from "./UploadPanel";
 import { CleanupPanel } from "./CleanupPanel";
 import { AsinMappingPanel } from "./AsinMappingPanel";
+import { SalesDetailTable, type SalesDetailRecord } from "./SalesDetailTable";
 import { formatCurrencyWith, formatCurrency, getCurrencyCode, currencySymbol, formatNumber, formatDateTime, cn } from "@/lib/utils";
 import { requireSession } from "@/lib/session";
 
@@ -181,7 +182,7 @@ export default async function BIPage({
 
   // Build base where clause — restrict by role
   // 同时排除已软删除（回收站）批次的销售记录
-  const baseWhere: Prisma.SalesRecordWhereInput = { batch: { deletedAt: null } };
+  const baseWhere: Prisma.SalesRecordWhereInput = { deletedAt: null, batch: { deletedAt: null } };
   if (role === "BRAND" && brandName) {
     baseWhere.brand = brandName;
   }
@@ -765,7 +766,7 @@ async function DetailTab({
   sp: Record<string, string | undefined>;
 }) {
   const page = Math.max(1, Number(sp.page) || 1);
-  const [records, total, affLibrary] = await Promise.all([
+  const [records, total, affLibrary, customers] = await Promise.all([
     prisma.salesRecord.findMany({
       where,
       orderBy: { orderDate: "desc" },
@@ -776,73 +777,38 @@ async function DetailTab({
     prisma.affiliate.findMany({
       select: { platformAffiliateName: true, affiliateType: true },
     }),
+    prisma.customer.findMany({
+      where: { deletedAt: null },
+      orderBy: { brandName: "asc" },
+      select: { id: true, brandName: true },
+    }),
   ]);
   const resolveType = buildAffTypeResolver(affLibrary);
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const detailRows: SalesDetailRecord[] = records.map((r) => ({
+    id: r.id,
+    orderDate: r.orderDate.toISOString().slice(0, 10),
+    affiliatePlatform: r.affiliatePlatform,
+    affiliateProgram: r.affiliateProgram,
+    store: r.store,
+    brand: r.brand,
+    affiliateName: r.affiliateName,
+    affiliateTypeLabel: resolveType(r.affiliateName, r.affiliateType),
+    region: r.region,
+    asin: r.asin,
+    parentAsin: r.parentAsin,
+    storeProductLabel: r.storeProductLabel,
+    revenue: r.revenue,
+    unitsSold: r.unitsSold,
+    commission: r.commission,
+    commissionRate: r.commissionRate,
+    customerId: r.customerId,
+  }));
 
   return (
     <>
       <BIFilters options={filterOptions} />
-      <div className="card overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="data w-full text-xs">
-            <thead>
-              <tr>
-                <th>订单日期</th>
-                <th>联盟平台</th>
-                <th>联盟类型</th>
-                <th>店铺</th>
-                <th>品牌</th>
-                <th>联盟商</th>
-                <th>类型</th>
-                <th>地区</th>
-                <th>ASIN</th>
-                <th>Parent</th>
-                <th>链接标签</th>
-                <th className="text-right">销售金额</th>
-                <th className="text-right">销售数量</th>
-                <th className="text-right">佣金</th>
-                <th className="text-right">佣金率</th>
-              </tr>
-            </thead>
-            <tbody>
-              {records.length === 0 ? (
-                <tr>
-                  <td colSpan={15} className="py-8 text-center text-slate-400">
-                    无符合条件的数据
-                  </td>
-                </tr>
-              ) : (
-                records.map((r) => (
-                  <tr key={r.id}>
-                    <td>{r.orderDate.toISOString().slice(0, 10)}</td>
-                    <td>{r.affiliatePlatform}</td>
-                    <td>{r.affiliateProgram ?? "—"}</td>
-                    <td>{r.store ?? "—"}</td>
-                    <td>{r.brand}</td>
-                    <td>{r.affiliateName}</td>
-                    <td>{resolveType(r.affiliateName, r.affiliateType) || "—"}</td>
-                    <td>{r.region ?? "—"}</td>
-                    <td>{r.asin ?? "—"}</td>
-                    <td>{r.parentAsin ?? "—"}</td>
-                    <td>{r.storeProductLabel ?? "—"}</td>
-                    <td className="text-right">
-                      {formatCurrency(r.revenue)}
-                    </td>
-                    <td className="text-right">{r.unitsSold}</td>
-                    <td className="text-right">
-                      {formatCurrency(r.commission)}
-                    </td>
-                    <td className="text-right">
-                      {(r.commissionRate * 100).toFixed(2)}%
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <SalesDetailTable records={detailRows} customers={customers} />
       <div className="flex items-center justify-between text-sm">
         <span className="text-slate-500">共 {formatNumber(total)} 条</span>
         {pages > 1 && (

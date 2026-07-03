@@ -66,7 +66,7 @@ export async function POST(req: Request) {
 
     // Back-fill matching SalesRecords (case-insensitive trim).
     const updated = await prisma.salesRecord.updateMany({
-      where: { brand, store, region, asin },
+      where: { brand, store, region, asin, deletedAt: null },
       data: { parentAsin, storeProductLabel },
     });
     backfilled += updated.count;

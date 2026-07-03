@@ -92,7 +92,7 @@ export async function GET(req: NextRequest) {
   let nameFilter: string[] | undefined;
   if (salesBrands.length || salesTypes.length) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const srWhere: any = {};
+    const srWhere: any = { deletedAt: null };
     if (salesBrands.length) srWhere.brand = { in: salesBrands };
     if (salesTypes.length) srWhere.affiliateType = { in: salesTypes };
     const matches = await prisma.salesRecord.findMany({
@@ -133,7 +133,7 @@ export async function GET(req: NextRequest) {
   if (pageNames.length) {
     const grouped = await prisma.salesRecord.groupBy({
       by: ["affiliateName"],
-      where: { affiliateName: { in: pageNames } },
+      where: { affiliateName: { in: pageNames }, deletedAt: null },
       _sum: { revenue: true, unitsSold: true },
     });
     for (const g of grouped) {

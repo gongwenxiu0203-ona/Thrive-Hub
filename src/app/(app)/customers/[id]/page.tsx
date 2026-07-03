@@ -17,6 +17,7 @@ import { DeleteCustomerButton } from "./DeleteCustomerButton";
 import { ChannelSplitRuleModal, type ExistingRule } from "./ChannelSplitRuleModal";
 import { InternalManagement } from "./InternalManagement";
 import { EvaluationModule, type EvaluationData } from "./EvaluationModule";
+import { CustomerAuthorizationPanel } from "./CustomerAuthorizationPanel";
 import {
   CUSTOMER_STATUS_LABELS,
   CUSTOMER_STATUS_COLORS,
@@ -45,6 +46,10 @@ export default async function CustomerDetailPage({
         contracts: { where: { deletedAt: null } as any, orderBy: { createdAt: "desc" } },
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         tasks: { where: { deletedAt: null } as any, orderBy: { createdAt: "desc" } },
+        authorizationInfos: {
+          orderBy: { updatedAt: "desc" },
+          include: { createdBy: { select: { name: true } } },
+        },
       },
     }),
     prisma.channelReconciliation.findFirst({
@@ -84,6 +89,14 @@ export default async function CustomerDetailPage({
     .map((u) => ({ id: u.id, name: u.name, email: u.email }));
   const canEditCustomerInfo = isStaff(session.role) || session.role === "CHANNEL";
   const canViewCustomerInfo = canEditCustomerInfo;
+  const canAccessAuthorizationInfo =
+    session.role === "ADMIN" ||
+    [
+      customer.businessOwnerId,
+      customer.backendOwnerId,
+      customerAny.channelUserId,
+      customer.createdById,
+    ].includes(session.userId);
 
   const sectionData = {
     referrerName: customerAny.referrerName ?? null,
@@ -190,7 +203,7 @@ export default async function CustomerDetailPage({
                   includeInternal={isStaff(session.role)}
                 />
               )}
-              {isStaff(session.role) && <DeleteCustomerButton id={customer.id} />}
+              {session.role === "ADMIN" && <DeleteCustomerButton id={customer.id} />}
             </div>
           </div>
         </div>
@@ -241,6 +254,20 @@ export default async function CustomerDetailPage({
       )}
 
       {/* ── 内部管理 ── */}
+      {canAccessAuthorizationInfo && (
+        <CustomerAuthorizationPanel
+          customerId={customer.id}
+          canEdit={canAccessAuthorizationInfo}
+          items={(customerAny.authorizationInfos ?? []).map((item: any) => ({
+            id: item.id,
+            platform: item.platform,
+            accountInfo: item.accountInfo,
+            createdByName: item.createdBy?.name ?? null,
+            updatedAt: formatDate(item.updatedAt),
+          }))}
+        />
+      )}
+
       {isStaff(session.role) && (
       <div>
         <div className="mb-4 flex items-center gap-3">

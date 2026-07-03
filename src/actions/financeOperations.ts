@@ -83,7 +83,7 @@ export async function generateMonthlySnapshot(
 
     // Monthly GMV from BI sales records.
     const salesAgg = await prisma.salesRecord.aggregate({
-      where: { customerId: c.id, orderDate: { gte: start, lte: end } },
+      where: { customerId: c.id, deletedAt: null, orderDate: { gte: start, lte: end } },
       _sum: { revenue: true },
     });
     const monthlyGmv = salesAgg._sum.revenue ?? 0;

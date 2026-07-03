@@ -77,7 +77,7 @@ export default async function ProjectDetailPage({
     }
     if (brandName) {
       const asinRows = await prisma.salesRecord.findMany({
-        where: { brand: brandName, parentAsin: { not: null } },
+        where: { brand: brandName, deletedAt: null, parentAsin: { not: null } },
         select: { parentAsin: true },
         distinct: ["parentAsin"],
         take: 200,
@@ -91,12 +91,12 @@ export default async function ProjectDetailPage({
   const [allAgg, recentAgg] = brandName
     ? await Promise.all([
         prisma.salesRecord.aggregate({
-          where: { brand: brandName },
+          where: { brand: brandName, deletedAt: null },
           _sum: { revenue: true, commission: true, unitsSold: true },
           _count: true,
         }),
         prisma.salesRecord.aggregate({
-          where: { brand: brandName, orderDate: { gte: thirtyDaysAgo } },
+          where: { brand: brandName, deletedAt: null, orderDate: { gte: thirtyDaysAgo } },
           _sum: { revenue: true, unitsSold: true },
         }),
       ])

@@ -3,6 +3,7 @@
 import type { Prisma } from "@prisma/client";
 import { SALES_FIELDS, SALES_FIELDS_BY_KEY } from "./salesFields";
 import { suggestPlatformMapping, getPlatform } from "./platformMappings";
+import { capitalizeBrandName } from "./customer";
 
 export { SALES_FIELDS, UPLOAD_FIELDS } from "./salesFields";
 
@@ -143,10 +144,11 @@ export function convertRow(
       null,
     store: (pick(row, mapping.store) as string | undefined) || null,
     asin: (pick(row, mapping.asin) as string | undefined) || null,
-    brand:
+    brand: capitalizeBrandName(
       ((pick(row, mapping.brand) as string | undefined) || "").toString() ||
       customerBrandName ||
       "",
+    ),
     affiliateName:
       ((pick(row, mapping.affiliateName) as string | undefined) || "")
         .toString()

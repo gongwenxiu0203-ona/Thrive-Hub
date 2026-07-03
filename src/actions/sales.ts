@@ -20,3 +20,41 @@ export async function deleteBatch(batchId: string) {
   await (prisma.salesBatch.update as any)({ where: { id: batchId }, data: { deletedAt: new Date() } });
   revalidatePath("/bi");
 }
+
+export async function bulkUpdateSalesRecordsCustomer(recordIds: string[], customerId: string | null) {
+  const session = await requireSession();
+  if (!isStaff(session.role)) throw new Error("仅内部员工可批量修改推广数据关联客户");
+  const ids = [...new Set(recordIds.filter(Boolean))];
+  if (!ids.length) throw new Error("请选择要修改的数据记录");
+  const nextCustomerId = customerId || null;
+  let brandName: string | null = null;
+  if (nextCustomerId) {
+    const customer = await prisma.customer.findFirst({
+      where: { id: nextCustomerId, deletedAt: null },
+      select: { brandName: true },
+    });
+    if (!customer) throw new Error("客户不存在或已删除");
+    brandName = customer.brandName;
+  }
+  await prisma.salesRecord.updateMany({
+    where: { id: { in: ids }, deletedAt: null },
+    data: {
+      customerId: nextCustomerId,
+      ...(brandName ? { brand: brandName } : {}),
+    },
+  });
+  revalidatePath("/bi");
+}
+
+export async function bulkDeleteSalesRecords(recordIds: string[]) {
+  const session = await requireSession();
+  if (!isStaff(session.role)) throw new Error("仅内部员工可删除推广数据明细");
+  const ids = [...new Set(recordIds.filter(Boolean))];
+  if (!ids.length) throw new Error("请选择要删除的数据记录");
+  await prisma.salesRecord.updateMany({
+    where: { id: { in: ids }, deletedAt: null },
+    data: { deletedAt: new Date() },
+  });
+  revalidatePath("/bi");
+  revalidatePath("/recycle-bin");
+}

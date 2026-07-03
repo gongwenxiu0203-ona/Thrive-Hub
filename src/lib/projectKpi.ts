@@ -42,6 +42,7 @@ export async function computeBiGmv(
   const agg = await prisma.salesRecord.aggregate({
     where: {
       brand: brandName,
+      deletedAt: null,
       orderDate: { gte: start, lt: endExclusive },
     },
     _sum: { revenue: true },

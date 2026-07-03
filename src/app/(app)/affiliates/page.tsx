@@ -29,7 +29,7 @@ async function loadOptions() {
     prisma.user.findMany({ select: { id: true, name: true } }),
     prisma.customer.findMany({ select: { id: true, brandName: true }, orderBy: { brandName: "asc" } }),
     // 往期合作数据里的品牌（销售记录 distinct brand）
-    prisma.salesRecord.findMany({ select: { brand: true }, distinct: ["brand"] }),
+    prisma.salesRecord.findMany({ where: { deletedAt: null }, select: { brand: true }, distinct: ["brand"] }),
   ]);
 
   const distinct = <T,>(arr: (T | null | undefined)[]) =>

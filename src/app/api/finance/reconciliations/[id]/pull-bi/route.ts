@@ -27,6 +27,7 @@ export async function POST(
     const agg = await prisma.salesRecord.aggregate({
       where: {
         customerId: rec.customerId,
+        deletedAt: null,
         orderDate: {
           gte: rec.periodStart,
           lte: rec.periodEnd,

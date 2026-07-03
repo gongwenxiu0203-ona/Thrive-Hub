@@ -1,14 +1,14 @@
 // Centralized role-based access policy.
 // Roles: ADMIN | USER | BRAND | CHANNEL | GUEST
 
-export const STAFF_ROLES = ["ADMIN", "USER"] as const;
+export const STAFF_ROLES = ["ADMIN", "USER", "LYNQ_STAFF"] as const;
 
 export function isStaff(role: string): boolean {
   return (STAFF_ROLES as readonly string[]).includes(role);
 }
 
 export function canDeleteCustomer(role: string): boolean {
-  return isStaff(role);
+  return role === "ADMIN";
 }
 
 // Page routes a role is NOT allowed to view. Middleware redirects to landing.
