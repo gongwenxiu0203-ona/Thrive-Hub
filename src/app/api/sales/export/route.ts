@@ -20,7 +20,7 @@ export async function GET(req: Request) {
       .map((s) => s.trim())
       .filter(Boolean);
 
-  const where: Prisma.SalesRecordWhereInput = { deletedAt: null };
+  const where: Prisma.SalesRecordWhereInput = { deletedAt: null, batch: { deletedAt: null } };
   const platforms = csv("platforms");
   if (platforms.length) where.affiliatePlatform = { in: platforms };
   const programs = csv("programs");
@@ -34,7 +34,22 @@ export async function GET(req: Request) {
   const affiliateNames = csv("affiliateNames");
   if (affiliateNames.length) where.affiliateName = { in: affiliateNames };
   const types = csv("types");
-  if (types.length) where.affiliateType = { in: types };
+  if (types.length) {
+    const affLibrary = await prisma.affiliate.findMany({
+      where: { affiliateType: { in: types } },
+      select: { platformAffiliateName: true },
+    });
+    const typeAffNames = affLibrary.map((a) => a.platformAffiliateName.trim()).filter(Boolean);
+    const orClauses: Prisma.SalesRecordWhereInput[] = [{ affiliateType: { in: types } }];
+    if (typeAffNames.length > 0) orClauses.push({ affiliateName: { in: typeAffNames } });
+    where.OR = orClauses;
+  }
+  const asins = csv("asins");
+  if (asins.length) where.asin = { in: asins };
+  const parentAsins = csv("parentAsins");
+  if (parentAsins.length) where.parentAsin = { in: parentAsins };
+  const labels = csv("labels");
+  if (labels.length) where.storeProductLabel = { in: labels };
 
   const from = url.searchParams.get("from");
   const to = url.searchParams.get("to");

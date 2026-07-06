@@ -44,7 +44,7 @@ export async function POST(req: Request) {
   }
 
   const f = body.filter ?? {};
-  const where: Prisma.SalesRecordWhereInput = { deletedAt: null };
+  const where: Prisma.SalesRecordWhereInput = { deletedAt: null, batch: { deletedAt: null } };
   let hasUserFilter = false;
   if (f.platforms?.length)
     where.affiliatePlatform = { in: f.platforms };
