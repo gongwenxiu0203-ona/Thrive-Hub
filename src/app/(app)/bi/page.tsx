@@ -14,6 +14,7 @@ import { AsinMappingPanel } from "./AsinMappingPanel";
 import { SalesDetailTable, type SalesDetailRecord } from "./SalesDetailTable";
 import { formatCurrencyWith, formatCurrency, getCurrencyCode, currencySymbol, formatNumber, formatDateTime, cn } from "@/lib/utils";
 import { requireSession } from "@/lib/session";
+import { parseDateOnlyEnd, parseDateOnlyStart } from "@/lib/dateRange";
 
 export const metadata = { title: "推广数据BI · Thraive联盟营销系统" };
 
@@ -81,11 +82,13 @@ function buildWhere(
   if (labels.length) where.storeProductLabel = { in: labels };
   if (sp.from || sp.to) {
     where.orderDate = {};
-    if (sp.from) where.orderDate.gte = new Date(sp.from);
+    if (sp.from) {
+      const start = parseDateOnlyStart(sp.from);
+      if (start) where.orderDate.gte = start;
+    }
     if (sp.to) {
-      const end = new Date(sp.to);
-      end.setHours(23, 59, 59, 999);
-      where.orderDate.lte = end;
+      const end = parseDateOnlyEnd(sp.to);
+      if (end) where.orderDate.lte = end;
     }
   }
   // Commission rate range filter (user inputs as %, stored as decimal)

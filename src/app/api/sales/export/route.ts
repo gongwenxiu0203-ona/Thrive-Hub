@@ -5,6 +5,7 @@ import { getSession } from "@/lib/session";
 import { buildSheet } from "@/lib/excel";
 import { SALES_FIELDS } from "@/lib/salesFields";
 import { formatDate } from "@/lib/utils";
+import { parseDateOnlyEnd, parseDateOnlyStart } from "@/lib/dateRange";
 
 // GET /api/sales/export with same query params as the BI page filters.
 // Exports the filtered records as an xlsx with all 37 system fields.
@@ -39,11 +40,13 @@ export async function GET(req: Request) {
   const to = url.searchParams.get("to");
   if (from || to) {
     where.orderDate = {};
-    if (from) where.orderDate.gte = new Date(from);
+    if (from) {
+      const start = parseDateOnlyStart(from);
+      if (start) where.orderDate.gte = start;
+    }
     if (to) {
-      const end = new Date(to);
-      end.setHours(23, 59, 59, 999);
-      where.orderDate.lte = end;
+      const end = parseDateOnlyEnd(to);
+      if (end) where.orderDate.lte = end;
     }
   }
 

@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 import { isStaff } from "@/lib/permissions";
+import { parseDateOnlyEnd, parseDateOnlyStart } from "@/lib/dateRange";
 
 // Clear sales records by filter. No row-count limit.
 // Body: { filter: { platforms?, programs?, brands?, regions?, stores?,
@@ -82,11 +83,13 @@ export async function POST(req: Request) {
   if (f.from || f.to) {
     hasUserFilter = true;
     where.orderDate = {};
-    if (f.from) where.orderDate.gte = new Date(f.from);
+    if (f.from) {
+      const start = parseDateOnlyStart(f.from);
+      if (start) where.orderDate.gte = start;
+    }
     if (f.to) {
-      const end = new Date(f.to);
-      end.setHours(23, 59, 59, 999);
-      where.orderDate.lte = end;
+      const end = parseDateOnlyEnd(f.to);
+      if (end) where.orderDate.lte = end;
     }
   }
 

@@ -268,15 +268,20 @@ export async function POST(req: Request) {
         const existingSet = new Set(existing.map((a) => a.platformAffiliateName));
         const toCreate = uniqueNames.filter((n) => !existingSet.has(n));
         if (toCreate.length > 0) {
-          await prisma.affiliate.createMany({
-            data: toCreate.map((name) => ({
-              platformAffiliateName: name,
-              developmentStatus: "待开发 Not Yet Contacted",
-              tags: "[]",
-            })),
-            skipDuplicates: true,
-          });
-          newAffiliateCount = toCreate.length;
+          for (const name of toCreate) {
+            try {
+              await prisma.affiliate.create({
+                data: {
+                  platformAffiliateName: name,
+                  developmentStatus: "待开发 Not Yet Contacted",
+                  tags: "[]",
+                },
+              });
+              newAffiliateCount++;
+            } catch {
+              // Another import may have created the affiliate after our lookup.
+            }
+          }
         }
       }
     } catch (e) {
