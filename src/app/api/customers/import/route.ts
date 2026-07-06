@@ -8,7 +8,7 @@ import {
   RATING_LABELS,
 } from "@/lib/constants";
 import { CUSTOMER_IMPORT_FIELDS } from "@/lib/customerImport";
-import { capitalizeBrandName } from "@/lib/customer";
+import { capitalizeBrandName } from "@/lib/brandName";
 
 type Row = Record<string, unknown>;
 

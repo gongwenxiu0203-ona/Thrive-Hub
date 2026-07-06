@@ -3,7 +3,7 @@
 import type { Prisma } from "@prisma/client";
 import { SALES_FIELDS, SALES_FIELDS_BY_KEY } from "./salesFields";
 import { suggestPlatformMapping, getPlatform } from "./platformMappings";
-import { capitalizeBrandName } from "./customer";
+import { capitalizeBrandName } from "./brandName";
 
 export { SALES_FIELDS, UPLOAD_FIELDS } from "./salesFields";
 

@@ -1,17 +1,11 @@
 import { prisma } from "@/lib/prisma";
 import { CUSTOMER_STATUS_ORDER } from "@/lib/constants";
+export { capitalizeBrandName } from "@/lib/brandName";
 
 // ---- JSON field helpers ---------------------------------------------------
 
 export type SiteLink = { link: string; price: string; asin: string };
 export type SiteLinks = Record<string, SiteLink>;
-
-export function capitalizeBrandName(raw: string | null | undefined): string {
-  if (!raw) return "";
-  const s = raw.trim();
-  if (!s) return "";
-  return s.charAt(0).toLocaleUpperCase() + s.slice(1).toLocaleLowerCase();
-}
 
 export function parseStringArray(value: string | null | undefined): string[] {
   if (!value) return [];
