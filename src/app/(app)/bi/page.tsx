@@ -32,6 +32,24 @@ function isStaff(role: string) {
 }
 
 const PAGE_SIZE = 50;
+const BI_FILTER_CACHE_TTL_MS = 60 * 1000;
+
+type AffTypeRow = { platformAffiliateName: string; affiliateType: string | null };
+type BiFilterContext = {
+  filterOptions: FilterOptions;
+  affLibrary: AffTypeRow[];
+};
+type UploadBatchRow = {
+  id: string;
+  fileName: string;
+  recordCount: number;
+  affiliatePlatform: string | null;
+  customer: { brandName: string } | null;
+  uploader: { name: string };
+  createdAt: Date;
+};
+
+const biFilterCache = new Map<string, { expiresAt: number; value: BiFilterContext }>();
 
 function csv(sp: Record<string, string | undefined>, key: string): string[] {
   return (sp[key] ?? "")
@@ -106,7 +124,7 @@ function buildWhere(
  * Falls back to the stored value if no library entry found.
  */
 function buildAffTypeResolver(
-  affiliates: { platformAffiliateName: string; affiliateType: string | null }[],
+  affiliates: AffTypeRow[],
 ) {
   const exact = new Map<string, string>();
   const lower = new Map<string, string>();
@@ -127,6 +145,68 @@ function buildAffTypeResolver(
     }
     return (stored ?? "").trim();
   };
+}
+
+function stableCacheKey(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (value instanceof Date) return JSON.stringify(value.toISOString());
+  if (Array.isArray(value)) return `[${value.map(stableCacheKey).join(",")}]`;
+  const obj = value as Record<string, unknown>;
+  return `{${Object.keys(obj)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableCacheKey(obj[key])}`)
+    .join(",")}}`;
+}
+
+async function getBiFilterContext(baseWhere: Prisma.SalesRecordWhereInput): Promise<BiFilterContext> {
+  const key = stableCacheKey(baseWhere);
+  const now = Date.now();
+  const cached = biFilterCache.get(key);
+  if (cached && cached.expiresAt > now) return cached.value;
+
+  const [allDistinct, affLibrary] = await Promise.all([
+    prisma.salesRecord.findMany({
+      where: baseWhere,
+      select: {
+        affiliatePlatform: true,
+        affiliateProgram: true,
+        brand: true,
+        region: true,
+        store: true,
+        affiliateName: true,
+        affiliateType: true,
+        asin: true,
+        parentAsin: true,
+        storeProductLabel: true,
+      },
+    }),
+    prisma.affiliate.findMany({
+      select: { platformAffiliateName: true, affiliateType: true },
+    }),
+  ]);
+  const resolveTypePage = buildAffTypeResolver(affLibrary);
+  const uniq = (xs: (string | null)[]) =>
+    [...new Set(xs.filter((x): x is string => !!x && x.trim() !== ""))].sort();
+
+  const value: BiFilterContext = {
+    affLibrary,
+    filterOptions: {
+      platforms: uniq(allDistinct.map((r) => r.affiliatePlatform)),
+      programs: uniq(allDistinct.map((r) => r.affiliateProgram)),
+      brands: uniq(allDistinct.map((r) => r.brand)),
+      regions: uniq(allDistinct.map((r) => r.region)),
+      stores: uniq(allDistinct.map((r) => r.store)),
+      affiliateNames: uniq(allDistinct.map((r) => r.affiliateName)),
+      // Resolve types from the affiliate library so the dropdown shows current
+      // types even if stored affiliateType fields are empty.
+      types: uniq(allDistinct.map((r) => resolveTypePage(r.affiliateName, r.affiliateType))),
+      asins: uniq(allDistinct.map((r) => r.asin)),
+      parentAsins: uniq(allDistinct.map((r) => r.parentAsin)),
+      labels: uniq(allDistinct.map((r) => r.storeProductLabel)),
+    },
+  };
+  biFilterCache.set(key, { expiresAt: now + BI_FILTER_CACHE_TTL_MS, value });
+  return value;
 }
 
 function exportQueryString(
@@ -209,61 +289,26 @@ export default async function BIPage({
     baseWhere.customerId = { in: customerIds };
   }
 
-  // Fetch distinct filter values AND affiliate library in parallel.
-  // The affiliate library is used to resolve affiliate types at display time,
-  // ensuring types are up-to-date even for records imported before the library
-  // was populated.
-  const [allDistinct, affLibrary] = await Promise.all([
-    prisma.salesRecord.findMany({
-      where: baseWhere,
-      select: {
-        affiliatePlatform: true,
-        affiliateProgram: true,
-        brand: true,
-        region: true,
-        store: true,
-        affiliateName: true,
-        affiliateType: true,
-        asin: true,
-        parentAsin: true,
-        storeProductLabel: true,
-      },
-    }),
-    prisma.affiliate.findMany({
-      select: { platformAffiliateName: true, affiliateType: true },
-    }),
-  ]);
-  const resolveTypePage = buildAffTypeResolver(affLibrary);
+  const needsBiData = tab === "dashboard" || tab === "detail" || tab === "cleanup";
+  let filterContext: BiFilterContext | null = null;
+  let where: Prisma.SalesRecordWhereInput | null = null;
+  if (needsBiData) {
+    filterContext = await getBiFilterContext(baseWhere);
+    const resolveTypePage = buildAffTypeResolver(filterContext.affLibrary);
 
-  // Build type-aware WHERE clause: use affiliate library lookup so that records
-  // whose affiliateType was not stored but is now resolvable are still matched.
-  const typeFilter = csv(sp, "types");
-  const typeAffNames = typeFilter.length
-    ? affLibrary
-        .filter((a) => typeFilter.includes(resolveTypePage(a.platformAffiliateName, null)))
-        .map((a) => a.platformAffiliateName.trim())
-    : undefined;
-  const userWhere = buildWhere(sp, typeAffNames);
-  const where: Prisma.SalesRecordWhereInput = {
-    AND: [baseWhere, userWhere],
-  };
-
-  const uniq = (xs: (string | null)[]) =>
-    [...new Set(xs.filter((x): x is string => !!x && x.trim() !== ""))].sort();
-  const filterOptions: FilterOptions = {
-    platforms: uniq(allDistinct.map((r) => r.affiliatePlatform)),
-    programs: uniq(allDistinct.map((r) => r.affiliateProgram)),
-    brands: uniq(allDistinct.map((r) => r.brand)),
-    regions: uniq(allDistinct.map((r) => r.region)),
-    stores: uniq(allDistinct.map((r) => r.store)),
-    affiliateNames: uniq(allDistinct.map((r) => r.affiliateName)),
-    // Resolve types from the affiliate library so the dropdown shows current
-    // types even if stored affiliateType fields are empty.
-    types: uniq(allDistinct.map((r) => resolveTypePage(r.affiliateName, r.affiliateType))),
-    asins: uniq(allDistinct.map((r) => r.asin)),
-    parentAsins: uniq(allDistinct.map((r) => r.parentAsin)),
-    labels: uniq(allDistinct.map((r) => r.storeProductLabel)),
-  };
+    // Build type-aware WHERE clause: use affiliate library lookup so that records
+    // whose affiliateType was not stored but is now resolvable are still matched.
+    const typeFilter = csv(sp, "types");
+    const typeAffNames = typeFilter.length
+      ? filterContext.affLibrary
+          .filter((a) => typeFilter.includes(resolveTypePage(a.platformAffiliateName, null)))
+          .map((a) => a.platformAffiliateName.trim())
+      : undefined;
+    const userWhere = buildWhere(sp, typeAffNames);
+    where = {
+      AND: [baseWhere, userWhere],
+    };
+  }
 
   // For CHANNEL role: only show limited filters
   const isChannel = role === "CHANNEL";
@@ -314,19 +359,25 @@ export default async function BIPage({
 
       {tab === "dashboard" && (
         <DashboardTab
-          filterOptions={filterOptions}
-          where={where}
+          filterOptions={filterContext!.filterOptions}
+          where={where!}
+          affLibrary={filterContext!.affLibrary}
           isChannel={isChannel}
           isBrand={isBrand}
           regions={csv(sp, "regions")}
         />
       )}
       {tab === "detail" && isStaff(role) && (
-        <DetailTab filterOptions={filterOptions} where={where} sp={sp} />
+        <DetailTab
+          filterOptions={filterContext!.filterOptions}
+          where={where!}
+          sp={sp}
+          affLibrary={filterContext!.affLibrary}
+        />
       )}
       {tab === "upload" && isStaff(role) && <UploadTab />}
       {tab === "cleanup" && isStaff(role) && (
-        <CleanupTab filterOptions={filterOptions} where={where} sp={sp} />
+        <CleanupTab filterOptions={filterContext!.filterOptions} where={where!} sp={sp} />
       )}
       {tab === "asin" && isStaff(role) && <AsinTab />}
     </div>
@@ -336,21 +387,20 @@ export default async function BIPage({
 async function DashboardTab({
   filterOptions,
   where,
+  affLibrary,
   isChannel = false,
   isBrand = false,
   regions = [],
 }: {
   filterOptions: FilterOptions;
   where: Prisma.SalesRecordWhereInput;
+  affLibrary: AffTypeRow[];
   isChannel?: boolean;
   isBrand?: boolean;
   regions?: string[];
 }) {
-  const [records, affLibrary, affPromo] = await Promise.all([
+  const [records, affPromo] = await Promise.all([
     prisma.salesRecord.findMany({ where, orderBy: { orderDate: "asc" } }),
-    prisma.affiliate.findMany({
-      select: { platformAffiliateName: true, affiliateType: true },
-    }),
     // 反向拉取联盟商资源库中的往期推广内容
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (prisma.affiliate.findMany as any)({
@@ -766,13 +816,15 @@ async function DetailTab({
   filterOptions,
   where,
   sp,
+  affLibrary,
 }: {
   filterOptions: FilterOptions;
   where: Prisma.SalesRecordWhereInput;
   sp: Record<string, string | undefined>;
+  affLibrary: AffTypeRow[];
 }) {
   const page = Math.max(1, Number(sp.page) || 1);
-  const [records, total, affLibrary, customers] = await Promise.all([
+  const [records, total, customers] = await Promise.all([
     prisma.salesRecord.findMany({
       where,
       orderBy: { orderDate: "desc" },
@@ -780,9 +832,6 @@ async function DetailTab({
       take: PAGE_SIZE,
     }),
     prisma.salesRecord.count({ where }),
-    prisma.affiliate.findMany({
-      select: { platformAffiliateName: true, affiliateType: true },
-    }),
     prisma.customer.findMany({
       where: { deletedAt: null },
       orderBy: { brandName: "asc" },
@@ -868,7 +917,7 @@ async function UploadTab() {
         customer: { select: { brandName: true } },
       },
       take: 30,
-    }),
+    }) as Promise<UploadBatchRow[]>,
     prisma.customer.findMany({
       where: { deletedAt: null },
       orderBy: { brandName: "asc" },

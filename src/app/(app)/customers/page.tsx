@@ -2,9 +2,7 @@
 import { prisma } from "@/lib/prisma";
 import { runCustomerStatusChecks, parseStringArray } from "@/lib/customer";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { Badge } from "@/components/ui/Badge";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { FilterBar, SearchFilter } from "@/components/ui/Filters";
+import { SearchFilter } from "@/components/ui/Filters";
 import { MultiSelectFilter } from "@/components/ui/MultiSelectFilter";
 import { IntakeLinkButton } from "@/components/IntakeLinkButton";
 import {
@@ -158,44 +156,44 @@ export default async function CustomersPage({
     q: (sp.q ?? "").trim(),
   };
 
-  const filtered = customers.filter((c) => matches(c, f));
+  const filtered = customers.filter((c: CustomerRow) => matches(c, f));
 
   // Cascading option sets: each filter's options reflect customers that match
   // all *other* active filters.
   const opts = (key: keyof Filters) =>
-    customers.filter((c) => matches(c, f, key));
+    customers.filter((c: CustomerRow) => matches(c, f, key));
 
   const userName = new Map(users.map((u) => [u.id, u.name]));
   const uniq = (xs: (string | null | undefined)[]) =>
     [...new Set(xs.filter((x): x is string => !!x))];
 
   const statusOptions = Object.entries(CUSTOMER_STATUS_LABELS).map(([value, label]) => ({ value, label }));
-  const platformPool = opts("platform").flatMap((c) =>
+  const platformPool = opts("platform").flatMap((c: CustomerRow) =>
     parseStringArray(c.targetPlatforms),
   );
   const platformOptions = PROMO_PLATFORMS.filter((p) =>
     platformPool.includes(p),
   ).map((p) => ({ value: p, label: p }));
-  const goalPool = opts("goal").flatMap((c) =>
+  const goalPool = opts("goal").flatMap((c: CustomerRow) =>
     parseStringArray(c.promotionGoals),
   );
   const goalOptions = PROMOTION_GOALS.filter((g) => goalPool.includes(g)).map(
     (g) => ({ value: g, label: g }),
   );
-  const ratingOptions = uniq(opts("rating").map((c) => c.rating)).map((r) => ({
+  const ratingOptions = uniq(opts("rating").map((c: CustomerRow) => c.rating)).map((r) => ({
     value: r,
     label: labelOf(RATING_LABELS, r),
   }));
   const businessOptions = uniq(
-    opts("business").map((c) => c.businessOwnerId),
+    opts("business").map((c: CustomerRow) => c.businessOwnerId),
   ).map((id) => ({ value: id, label: userName.get(id) ?? id }));
   const backendOptions = uniq(
-    opts("backend").map((c) => c.backendOwnerId),
+    opts("backend").map((c: CustomerRow) => c.backendOwnerId),
   ).map((id) => ({ value: id, label: userName.get(id) ?? id }));
   const categoryOptions = AMAZON_CATEGORIES.map((cat) => ({ value: cat, label: cat }));
 
   const userOptions = users.map((u) => ({ id: u.id, name: u.name }));
-  const tableRows: CustomerTableRow[] = filtered.map((c) => {
+  const tableRows: CustomerTableRow[] = filtered.map((c: CustomerRow) => {
     const latestContract = c.contracts?.[0] ?? null;
     const latestContractLabel = latestContract
       ? labelOf(CONTRACT_STATUS_LABELS, latestContract.status)
@@ -206,6 +204,7 @@ export default async function CustomersPage({
       category: c.category,
       mainSites: parseStringArray(c.mainSites),
       targetPlatforms: parseStringArray(c.targetPlatforms),
+      affiliatePlatforms: c.affiliatePlatforms,
       status: c.status,
       rating: c.rating,
       businessOwnerId: c.businessOwnerId,
@@ -247,7 +246,16 @@ export default async function CustomersPage({
         }
       />
 
-      <FilterBar>
+      <CustomerTableClient
+        rows={tableRows}
+        users={userOptions}
+        isStaff={isStaff(session.role)}
+        canDeleteCustomers={session.role === "ADMIN"}
+        isChannel={isChannel}
+        staffUserId={isStaff(session.role) ? session.userId : undefined}
+        channelUserId={isChannel ? session.userId : undefined}
+        filterControls={
+          <>
         <SearchFilter placeholder="搜索品牌 / 联系人 / 邮箱" />
         <MultiSelectFilter
           paramKey="status"
@@ -284,23 +292,9 @@ export default async function CustomersPage({
           placeholder="后端负责人"
           options={backendOptions}
         />
-      </FilterBar>
-
-      {filtered.length === 0 ? (
-        <EmptyState
-          title="没有符合条件的客户"
-          description="调整筛选条件，或新建 / 导入客户"
-        />
-      ) : (
-        <CustomerTableClient
-          rows={tableRows}
-          users={userOptions}
-          isStaff={isStaff(session.role)}
-          isChannel={isChannel}
-          staffUserId={isStaff(session.role) ? session.userId : undefined}
-          channelUserId={isChannel ? session.userId : undefined}
-        />
-      )}
+          </>
+        }
+      />
 
       <p className="mt-3 text-xs text-slate-400">
         共 {filtered.length} / {customers.length} 位客户

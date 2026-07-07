@@ -301,6 +301,14 @@ export async function getCustomerDeleteImpact(id: string): Promise<CustomerDelet
   };
 }
 
+export async function getBulkCustomerDeleteImpact(ids: string[]): Promise<CustomerDeleteImpact[]> {
+  const session = await requireSession();
+  if (!canDeleteCustomer(session.role)) throw new Error("无权删除客户");
+  const cleanIds = [...new Set(ids.filter(Boolean))];
+  if (!cleanIds.length) return [];
+  return Promise.all(cleanIds.map((id) => getCustomerDeleteImpact(id)));
+}
+
 export async function deleteCustomerWithRelations(id: string) {
   const session = await requireSession();
   if (!canDeleteCustomer(session.role)) throw new Error("无权删除客户");
@@ -333,6 +341,42 @@ export async function deleteCustomerWithRelations(id: string) {
   revalidatePath("/bi");
   revalidatePath("/recycle-bin");
   redirect("/customers");
+}
+
+export async function bulkDeleteCustomersWithRelations(ids: string[]): Promise<SaveResult> {
+  const session = await requireSession();
+  if (!canDeleteCustomer(session.role)) return { ok: false, error: "无权删除客户" };
+  const cleanIds = [...new Set(ids.filter(Boolean))];
+  if (!cleanIds.length) return { ok: false, error: "请选择要删除的客户" };
+  const now = new Date();
+
+  await prisma.$transaction(async (tx) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (tx.contract.updateMany as any)({ where: { customerId: { in: cleanIds }, deletedAt: null }, data: { deletedAt: now } });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (tx.task.updateMany as any)({ where: { customerId: { in: cleanIds }, deletedAt: null }, data: { deletedAt: now } });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (tx.project.updateMany as any)({ where: { customerId: { in: cleanIds }, deletedAt: null }, data: { deletedAt: now } });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (tx.customerReconciliation.updateMany as any)({ where: { customerId: { in: cleanIds }, deletedAt: null }, data: { deletedAt: now } });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (tx.accountsReceivable.updateMany as any)({ where: { customerId: { in: cleanIds }, deletedAt: null }, data: { deletedAt: now } });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (tx.salesBatch.updateMany as any)({ where: { customerId: { in: cleanIds }, deletedAt: null }, data: { deletedAt: now } });
+    await tx.salesRecord.updateMany({ where: { customerId: { in: cleanIds }, deletedAt: null }, data: { deletedAt: now } });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (tx.customer.updateMany as any)({ where: { id: { in: cleanIds }, deletedAt: null }, data: { deletedAt: now } });
+  });
+
+  revalidatePath("/customers");
+  revalidatePath("/contracts");
+  revalidatePath("/finance");
+  revalidatePath("/operations");
+  revalidatePath("/projects");
+  revalidatePath("/tasks");
+  revalidatePath("/bi");
+  revalidatePath("/recycle-bin");
+  return { ok: true };
 }
 
 export async function bulkUpdateCustomers(
