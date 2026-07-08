@@ -281,7 +281,7 @@ export async function getCustomerDeleteImpact(id: string): Promise<CustomerDelet
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (prisma.customerReconciliation.count as any)({ where: { customerId: id, deletedAt: null } }),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (prisma.accountsReceivable.count as any)({ where: { customerId: id, deletedAt: null } }),
+    (prisma.accountsReceivable.count as any)({ where: { customerId: id } }),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (prisma.salesBatch.count as any)({ where: { customerId: id, deletedAt: null } }),
     prisma.salesRecord.count({ where: { customerId: id, deletedAt: null } }),
@@ -294,7 +294,7 @@ export async function getCustomerDeleteImpact(id: string): Promise<CustomerDelet
       { key: "tasks", label: "关联任务", count: tasks },
       { key: "projects", label: "关联项目", count: projects },
       { key: "reconciliations", label: "客户收入对账", count: reconciliations },
-      { key: "accountsReceivable", label: "应收账款", count: accountsReceivable },
+      { key: "accountsReceivable", label: "应收账款（解除客户关联）", count: accountsReceivable },
       { key: "salesBatches", label: "推广数据批次", count: salesBatches },
       { key: "salesRecords", label: "推广数据明细关联", count: salesRecords },
     ],
@@ -324,7 +324,7 @@ export async function deleteCustomerWithRelations(id: string) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await (tx.customerReconciliation.updateMany as any)({ where: { customerId: id, deletedAt: null }, data: { deletedAt: now } });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (tx.accountsReceivable.updateMany as any)({ where: { customerId: id, deletedAt: null }, data: { deletedAt: now } });
+    await (tx.accountsReceivable.updateMany as any)({ where: { customerId: id }, data: { customerId: null } });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await (tx.salesBatch.updateMany as any)({ where: { customerId: id, deletedAt: null }, data: { deletedAt: now } });
     await tx.salesRecord.updateMany({ where: { customerId: id, deletedAt: null }, data: { deletedAt: now } });
@@ -360,7 +360,7 @@ export async function bulkDeleteCustomersWithRelations(ids: string[]): Promise<S
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await (tx.customerReconciliation.updateMany as any)({ where: { customerId: { in: cleanIds }, deletedAt: null }, data: { deletedAt: now } });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (tx.accountsReceivable.updateMany as any)({ where: { customerId: { in: cleanIds }, deletedAt: null }, data: { deletedAt: now } });
+    await (tx.accountsReceivable.updateMany as any)({ where: { customerId: { in: cleanIds } }, data: { customerId: null } });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await (tx.salesBatch.updateMany as any)({ where: { customerId: { in: cleanIds }, deletedAt: null }, data: { deletedAt: now } });
     await tx.salesRecord.updateMany({ where: { customerId: { in: cleanIds }, deletedAt: null }, data: { deletedAt: now } });

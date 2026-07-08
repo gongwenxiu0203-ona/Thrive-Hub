@@ -486,7 +486,7 @@ export function CustomerTableClient({
           {bulkMode === "delete" && (
             <div className="space-y-3">
               <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                删除规则：客户和合同删除仅管理员可操作；删除客户时，关联合同、任务、项目、客户收入对账、应收账款、推广数据批次、推广数据明细会一起软删除进入回收站；回收站内每条数据可单独恢复；联盟商资源库和推广数据 BI 的记录单独删除时，不反向删除客户和合同数据。
+                删除规则：客户和合同删除仅管理员可操作；删除客户时，关联合同、任务、项目、客户收入对账、推广数据批次、推广数据明细会一起软删除进入回收站，应收账款会解除客户关联但不直接删除；回收站内每条数据可单独恢复；联盟商资源库和推广数据 BI 的记录单独删除时，不反向删除客户和合同数据。
               </div>
               {!deleteImpacts ? (
                 <p className="text-sm text-slate-500">正在读取关联数据...</p>

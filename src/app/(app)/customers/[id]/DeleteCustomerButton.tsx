@@ -63,7 +63,7 @@ export function DeleteCustomerButton({ id }: { id: string }) {
       </button>
       <Modal open={open} onClose={() => setOpen(false)} title="删除客户">
         <p className="text-sm text-slate-600">
-          删除客户会同时处理下方关联数据。每一项有关联数据时都需要单独勾选确认。
+          删除客户会同时处理下方关联数据。每一项有关联数据时都需要单独勾选确认；应收账款会解除客户关联，不会直接删除。
         </p>
         {impact && (
           <div className="mt-4 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
