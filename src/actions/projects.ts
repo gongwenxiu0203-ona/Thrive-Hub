@@ -9,7 +9,7 @@ export type ProjectSaveResult = { ok: boolean; error?: string; projectId?: strin
 
 /**
  * 整合合作：选关联客户（可多项目）+ 关联合同（可选）创建项目。
- * 商务负责人自动取客户负责人；项目负责人默认创建人（可手动改）。
+ * 商务负责人自动取客户负责人；Strategy AM 默认创建人（可手动改）。
  */
 export async function createIntegratedProject(payload: {
   customerId: string;
@@ -41,10 +41,10 @@ export async function createIntegratedProject(payload: {
   const project = await (prisma.project.create as any)({
     data: {
       type: "INTEGRATED",
-      name: payload.name?.trim() || `${customer.brandName} 整合合作`,
+      name: payload.name?.trim() || `${customer.brandName} 联盟营销`,
       customerId: payload.customerId,
       contractId: payload.contractId || null,
-      ownerId: payload.ownerId || session.userId, // 默认创建人
+      ownerId: payload.ownerId || session.userId, // Strategy AM 默认创建人
       createdById: session.userId,
     },
   });
@@ -66,6 +66,103 @@ export async function createIntegratedProject(payload: {
 
   revalidatePath("/projects");
   return { ok: true, projectId: project.id };
+}
+
+export async function updateProjectBasicInfo(payload: {
+  projectId: string;
+  name?: string;
+  customerId?: string | null;
+  contractId?: string | null;
+  ownerId?: string | null;
+}): Promise<ProjectSaveResult> {
+  const session = await requireSession();
+  if (!isStaff(session.role)) return { ok: false, error: "无权修改项目" };
+  if (!payload.projectId) return { ok: false, error: "缺少项目 id" };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const existing = await (prisma.project.findFirst as any)({
+    where: { id: payload.projectId, deletedAt: null },
+    select: { id: true, type: true, contractId: true },
+  });
+  if (!existing) return { ok: false, error: "项目不存在" };
+
+  const data: Record<string, unknown> = {};
+  if (payload.name !== undefined) {
+    const name = payload.name.trim();
+    if (!name) return { ok: false, error: "请填写项目名称" };
+    data.name = name;
+  }
+
+  if (payload.customerId !== undefined) {
+    if (payload.customerId) {
+      const customer = await prisma.customer.findUnique({
+        where: { id: payload.customerId },
+        select: { id: true },
+      });
+      if (!customer) return { ok: false, error: "客户不存在" };
+      data.customerId = payload.customerId;
+    } else {
+      data.customerId = null;
+    }
+  }
+
+  if (payload.ownerId !== undefined) {
+    data.ownerId = payload.ownerId || null;
+  }
+
+  if (payload.contractId !== undefined) {
+    if (payload.contractId) {
+      const contract = await prisma.contract.findUnique({
+        where: { id: payload.contractId },
+        select: { id: true, customerId: true, contractNo: true, status: true },
+      });
+      if (!contract) return { ok: false, error: "合同不存在" };
+      const nextCustomerId =
+        payload.customerId === undefined ? undefined : payload.customerId;
+      const projectCustomerId =
+        nextCustomerId === undefined
+          ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (await (prisma.project.findUnique as any)({
+              where: { id: payload.projectId },
+              select: { customerId: true },
+            }))?.customerId
+          : nextCustomerId;
+      if (projectCustomerId && contract.customerId !== projectCustomerId) {
+        return { ok: false, error: "所选合同不属于当前客户" };
+      }
+      data.contractId = payload.contractId;
+    } else {
+      data.contractId = null;
+    }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (prisma.project.update as any)({
+    where: { id: payload.projectId },
+    data,
+  });
+
+  if (payload.contractId !== undefined && payload.contractId !== existing.contractId && payload.contractId) {
+    const { CONTRACT_STATUS_LABELS } = await import("@/lib/constants");
+    const contract = await prisma.contract.findUnique({
+      where: { id: payload.contractId },
+      select: { contractNo: true, status: true },
+    });
+    if (contract) {
+      await prisma.projectEntry.create({
+        data: {
+          projectId: payload.projectId,
+          kind: "CONTRACT",
+          content: `更新关联合同 ${contract.contractNo}，当前状态：${CONTRACT_STATUS_LABELS[contract.status] ?? contract.status}`,
+          authorId: session.userId,
+        },
+      });
+    }
+  }
+
+  revalidatePath("/projects");
+  revalidatePath(`/projects/${payload.projectId}`);
+  return { ok: true, projectId: payload.projectId };
 }
 
 /** 合同状态变动时，同步一条「合同进度」节点到关联的整合合作项目时间流 */

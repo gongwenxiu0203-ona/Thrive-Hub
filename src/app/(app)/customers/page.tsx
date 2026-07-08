@@ -289,7 +289,7 @@ export default async function CustomersPage({
         />
         <MultiSelectFilter
           paramKey="backend"
-          placeholder="后端负责人"
+          placeholder="售前方案负责人"
           options={backendOptions}
         />
           </>

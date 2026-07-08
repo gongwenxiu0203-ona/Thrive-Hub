@@ -25,6 +25,28 @@ export function completionRate(target: number, actual: number): number | null {
   return actual / target;
 }
 
+export function effectiveKpiActual(
+  biGmv: number,
+  reconciliationGmv: number,
+): {
+  actualGmv: number;
+  actualSource: "BI" | "RECONCILIATION";
+  reconciliationCompleted: boolean;
+} {
+  if (reconciliationGmv > 0) {
+    return {
+      actualGmv: reconciliationGmv,
+      actualSource: "RECONCILIATION",
+      reconciliationCompleted: true,
+    };
+  }
+  return {
+    actualGmv: biGmv,
+    actualSource: "BI",
+    reconciliationCompleted: false,
+  };
+}
+
 /** "是否达标"：>= 80% 为达标。target=0 时返回 null（"未设置目标"）。 */
 export function isAchieved(target: number, actual: number): boolean | null {
   if (!target || target <= 0) return null;

@@ -154,17 +154,22 @@ function EmployeeCard({ row: r }: { row: EmployeeKpiRow }) {
         {/* 项目段 */}
         <SectionPanel
           icon={<Target className="h-3.5 w-3.5" />}
-          title="项目目标（作为 AM）"
+          title="项目目标（Strategy AM）"
           accent="text-brand-600"
           hasData={hasProject}
           emptyText="本月无项目目标"
           metrics={[
             { label: "项目数", value: String(r.project.count) },
             { label: "目标合计", value: `${sym}${r.project.totalTarget.toLocaleString()}` },
-            { label: "对账 GMV", value: `${sym}${r.project.totalReconciliationGmv.toLocaleString()}` },
+            {
+              label: "实际 GMV",
+              value: `${sym}${r.project.totalActualGmv.toLocaleString()}`,
+              hint: r.project.reconciliationCompleted ? "已对账" : "BI 动态",
+            },
             {
               label: "完成率",
               value: r.project.completionRatePct == null ? "—" : `${r.project.completionRatePct.toFixed(1)}%`,
+              hint: r.project.reconciliationCompleted ? "已对账" : "BI 动态",
               color: r.project.completionRatePct == null ? "text-slate-400"
                 : r.project.completionRatePct >= 80 ? "text-emerald-600" : "text-rose-600",
             },
@@ -182,10 +187,15 @@ function EmployeeCard({ row: r }: { row: EmployeeKpiRow }) {
           metrics={[
             { label: "渠道数", value: String(r.channel.count) },
             { label: "目标合计", value: `${sym}${r.channel.totalTarget.toLocaleString()}` },
-            { label: "折算对账", value: `${sym}${r.channel.totalReconciliationGmv.toLocaleString()}`, hint: "按占比派生" },
+            {
+              label: "折算实际",
+              value: `${sym}${r.channel.totalActualGmv.toLocaleString()}`,
+              hint: r.channel.reconciliationCompleted ? "已对账，按占比派生" : "BI 动态，按占比派生",
+            },
             {
               label: "完成率",
               value: r.channel.completionRatePct == null ? "—" : `${r.channel.completionRatePct.toFixed(1)}%`,
+              hint: r.channel.reconciliationCompleted ? "已对账" : "BI 动态",
               color: r.channel.completionRatePct == null ? "text-slate-400"
                 : r.channel.completionRatePct >= 80 ? "text-emerald-600" : "text-rose-600",
             },
@@ -289,7 +299,7 @@ function ProjectSubTable({ items }: { items: ProjectKpiRow[] }) {
           <tr>
             <th className="px-2 py-1 text-left">项目 / 客户</th>
             <th className="px-2 py-1 text-right">目标</th>
-            <th className="px-2 py-1 text-right">对账</th>
+            <th className="px-2 py-1 text-right">实际GMV</th>
             <th className="px-2 py-1 text-right">完成率</th>
             <th className="px-2 py-1 text-center">达标</th>
           </tr>
@@ -306,7 +316,10 @@ function ProjectSubTable({ items }: { items: ProjectKpiRow[] }) {
                   <p className="text-[10px] text-slate-400">{p.customerName}</p>
                 </td>
                 <td className="px-2 py-1 text-right">{sym}{p.monthlyTarget.toLocaleString()}</td>
-                <td className="px-2 py-1 text-right">{sym}{p.reconciliationGmv.toLocaleString()}</td>
+                <td className="px-2 py-1 text-right">
+                  {sym}{p.actualGmv.toLocaleString()}
+                  <p className="text-[9px] text-slate-400">{p.reconciliationCompleted ? "已对账" : "BI 动态"}</p>
+                </td>
                 <td className={`px-2 py-1 text-right font-semibold ${
                   p.completionRatePct == null ? "text-slate-400"
                     : p.completionRatePct >= 80 ? "text-emerald-600" : "text-rose-600"
@@ -339,7 +352,7 @@ function ChannelSubTable({ items }: { items: ChannelKpiRow[] }) {
             <th className="px-2 py-1 text-left">渠道 / 项目</th>
             <th className="px-2 py-1 text-right">占比</th>
             <th className="px-2 py-1 text-right">目标</th>
-            <th className="px-2 py-1 text-right">对账</th>
+            <th className="px-2 py-1 text-right">实际GMV</th>
             <th className="px-2 py-1 text-right">完成率</th>
             <th className="px-2 py-1 text-center">达标</th>
           </tr>
@@ -357,7 +370,10 @@ function ChannelSubTable({ items }: { items: ChannelKpiRow[] }) {
                 </td>
                 <td className="px-2 py-1 text-right">{c.sharePercent.toFixed(1)}%</td>
                 <td className="px-2 py-1 text-right">{sym}{c.monthlyChannelTarget.toLocaleString()}</td>
-                <td className="px-2 py-1 text-right">{sym}{c.channelReconciliationGmv.toLocaleString()}</td>
+                <td className="px-2 py-1 text-right">
+                  {sym}{c.channelActualGmv.toLocaleString()}
+                  <p className="text-[9px] text-slate-400">{c.reconciliationCompleted ? "已对账" : "BI 动态"}</p>
+                </td>
                 <td className={`px-2 py-1 text-right font-semibold ${
                   c.completionRatePct == null ? "text-slate-400"
                     : c.completionRatePct >= 80 ? "text-emerald-600" : "text-rose-600"

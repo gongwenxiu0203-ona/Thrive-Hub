@@ -32,7 +32,7 @@ export async function MyKpiSummary() {
             <OverallChip ach={summary.overallAchieved} reason={summary.overallReason} />
           </div>
           <p className="mt-0.5 text-xs text-slate-400">
-            项目 KPI（作为 AM）和渠道 KPI（作为负责人）分别考核；月度总评以项目目标为准。
+            项目 KPI（Strategy AM）和渠道 KPI（作为负责人）分别考核；月度总评以项目目标为准。
           </p>
         </div>
         <Link href="/operations?tab=kpi" className="flex items-center gap-1 text-sm text-brand-600 hover:underline">
@@ -44,16 +44,16 @@ export async function MyKpiSummary() {
         {/* 项目段 */}
         <div className="rounded-xl border border-slate-200 bg-white p-4">
           <p className="mb-2 flex items-center gap-1 text-xs font-semibold text-slate-600">
-            <Target className="h-3.5 w-3.5" /> 项目 KPI（AM）
+            <Target className="h-3.5 w-3.5" /> 项目 KPI（Strategy AM）
           </p>
           {summary.project.count === 0 ? (
-            <p className="text-xs text-slate-400">本月没有作为 AM 的项目目标</p>
+            <p className="text-xs text-slate-400">本月没有作为 Strategy AM 的项目目标</p>
           ) : (
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <Mini label="进行中项目" value={String(summary.project.count)} />
               <Mini label="目标合计" value={`${sym}${summary.project.totalTarget.toLocaleString()}`} hint={summary.mixedCurrency ? "混币种" : undefined} />
-              <Mini label="客户对账" value={`${sym}${summary.project.totalReconciliationGmv.toLocaleString()}`} />
-              <Mini label="完成率" value={summary.project.completionRatePct == null ? "—" : `${summary.project.completionRatePct.toFixed(1)}%`} color={projectRateColor} />
+              <Mini label="实际 GMV" value={`${sym}${summary.project.totalActualGmv.toLocaleString()}`} hint={summary.project.reconciliationCompleted ? "已对账" : "BI 动态"} />
+              <Mini label="完成率" value={summary.project.completionRatePct == null ? "—" : `${summary.project.completionRatePct.toFixed(1)}%`} color={projectRateColor} hint={summary.project.reconciliationCompleted ? "已对账" : "BI 动态"} />
             </div>
           )}
         </div>
@@ -69,8 +69,8 @@ export async function MyKpiSummary() {
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <Mini label="负责渠道" value={String(summary.channel.count)} />
               <Mini label="目标合计" value={`${sym}${summary.channel.totalTarget.toLocaleString()}`} />
-              <Mini label="折算对账" value={`${sym}${summary.channel.totalReconciliationGmv.toLocaleString()}`} hint="按占比派生" />
-              <Mini label="完成率" value={summary.channel.completionRatePct == null ? "—" : `${summary.channel.completionRatePct.toFixed(1)}%`} color={channelRateColor} />
+              <Mini label="折算实际" value={`${sym}${summary.channel.totalActualGmv.toLocaleString()}`} hint={summary.channel.reconciliationCompleted ? "已对账，按占比派生" : "BI 动态，按占比派生"} />
+              <Mini label="完成率" value={summary.channel.completionRatePct == null ? "—" : `${summary.channel.completionRatePct.toFixed(1)}%`} color={channelRateColor} hint={summary.channel.reconciliationCompleted ? "已对账" : "BI 动态"} />
             </div>
           )}
         </div>

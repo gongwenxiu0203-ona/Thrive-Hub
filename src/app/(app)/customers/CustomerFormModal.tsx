@@ -144,7 +144,7 @@ export function CustomerFormModal({
                 </select>
               </div>
               <div>
-                <label className="label text-xs">后端负责人</label>
+                <label className="label text-xs">售前方案负责人</label>
                 <select
                   name="backendOwnerId"
                   className="input"
@@ -184,7 +184,7 @@ export function CustomerFormModal({
             </div>
             {!isEdit && (
               <p className="mt-2 text-xs text-slate-400">
-                选择商务负责人将自动创建「客户会议预约」任务；选择后端负责人将自动创建「Demo方案制定」任务（使用上方截止日期，创建后无需在详情页二次选择）。
+                选择商务负责人将自动创建「客户会议预约」任务；选择售前方案负责人将自动创建「Demo方案制定」任务（使用上方截止日期，创建后无需在详情页二次选择）。
               </p>
             )}
           </section>

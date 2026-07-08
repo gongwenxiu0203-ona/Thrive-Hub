@@ -50,6 +50,7 @@ type ProjectRow = {
   status: string;
   stage?: string | null;
   customerName: string;
+  ownerName: string;
   businessOwner: string;
   backendOwner: string;
   contractNo: string;
@@ -85,11 +86,11 @@ export default function ProjectsClient({
     <div className="space-y-5">
       <PageHeader
         title="项目管理"
-        description="整合合作：合同签署完成后创建项目跟进；单次合作：需求驱动的流程化合作"
+        description="联盟营销：合同签署完成后创建项目跟进；单次合作：需求驱动的流程化合作"
         actions={
           tab === "INTEGRATED" ? (
             <button className="btn-primary" onClick={() => setShowCreate(true)}>
-              <Plus className="h-4 w-4" /> 新建整合合作项目
+              <Plus className="h-4 w-4" /> 新建联盟营销项目
             </button>
           ) : (
             <button className="btn-primary" onClick={() => setShowCreateOneOff(true)}>
@@ -102,7 +103,7 @@ export default function ProjectsClient({
       {/* Tab 切换 */}
       <div className="flex gap-1 border-b border-slate-200">
         {([
-          { key: "INTEGRATED", label: "整合合作" },
+          { key: "INTEGRATED", label: "联盟营销" },
           { key: "ONE_OFF", label: "单次合作" },
         ] as const).map((t) => (
           <button
@@ -124,11 +125,11 @@ export default function ProjectsClient({
         <div className="card flex flex-col items-center justify-center py-16 text-center">
           <FolderKanban className="h-10 w-10 text-slate-300" />
           <p className="mt-3 text-sm font-medium text-slate-600">
-            {tab === "INTEGRATED" ? "暂无整合合作项目" : "暂无单次合作项目"}
+            {tab === "INTEGRATED" ? "暂无联盟营销项目" : "暂无单次合作项目"}
           </p>
           <p className="mt-1 text-xs text-slate-400">
             {tab === "INTEGRATED"
-              ? "合同签署完成后，点击右上角「新建整合合作项目」创建"
+              ? "合同签署完成后，点击右上角「新建联盟营销项目」创建"
               : "需求创建 → 提交 → 确认价格 → 提交信息 → 确认合作 → 结算"}
           </p>
         </div>
@@ -140,8 +141,9 @@ export default function ProjectsClient({
                 <th className="px-4 py-2.5 text-left font-medium">项目名称</th>
                 <th className="px-4 py-2.5 text-left font-medium">{tab === "ONE_OFF" ? "流程阶段" : "状态"}</th>
                 <th className="px-4 py-2.5 text-left font-medium">客户</th>
+                {tab === "INTEGRATED" && <th className="px-4 py-2.5 text-left font-medium">Strategy AM</th>}
                 {tab === "INTEGRATED" && <th className="px-4 py-2.5 text-left font-medium">商务负责人</th>}
-                {tab === "INTEGRATED" && <th className="px-4 py-2.5 text-left font-medium">后端负责人</th>}
+                {tab === "INTEGRATED" && <th className="px-4 py-2.5 text-left font-medium">售前方案负责人</th>}
                 {tab === "INTEGRATED" && <th className="px-4 py-2.5 text-left font-medium">关联合同</th>}
                 <th className="px-4 py-2.5 text-left font-medium">进度条数</th>
                 <th className="px-4 py-2.5 text-left font-medium">创建时间</th>
@@ -168,6 +170,7 @@ export default function ProjectsClient({
                     )}
                   </td>
                   <td className="px-4 py-3 text-slate-600">{p.customerName}</td>
+                  {tab === "INTEGRATED" && <td className="px-4 py-3 text-slate-600">{p.ownerName}</td>}
                   {tab === "INTEGRATED" && <td className="px-4 py-3 text-slate-600">{p.businessOwner}</td>}
                   {tab === "INTEGRATED" && <td className="px-4 py-3 text-slate-600">{p.backendOwner}</td>}
                   {tab === "INTEGRATED" && (
@@ -331,7 +334,7 @@ function CreateProjectModal({
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 pt-10">
       <div className="w-full max-w-lg rounded-2xl bg-white shadow-xl">
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-          <h2 className="text-sm font-semibold text-slate-900">新建整合合作项目</h2>
+          <h2 className="text-sm font-semibold text-slate-900">新建联盟营销项目</h2>
           <button onClick={onClose}><X className="h-5 w-5 text-slate-400 hover:text-slate-700" /></button>
         </div>
         <div className="space-y-4 px-5 py-5">
@@ -369,18 +372,18 @@ function CreateProjectModal({
               <p className="mt-1 text-[11px] text-slate-400">自动取该客户的商务负责人</p>
             </div>
             <div>
-              <label className="label">项目负责人</label>
+              <label className="label">Strategy AM</label>
               <select className="input" value={ownerId} onChange={(e) => setOwnerId(e.target.value)}>
                 <option value="">未指定</option>
                 {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
               </select>
-              <p className="mt-1 text-[11px] text-slate-400">默认创建人，可手动修改</p>
+              <p className="mt-1 text-[11px] text-slate-400">默认创建人，可手动修改；项目 GMV 目标默认取此人</p>
             </div>
           </div>
           <div>
             <label className="label">项目名称（可选）</label>
             <input className="input" value={name} onChange={(e) => setName(e.target.value)}
-              placeholder={customer ? `默认：${customer.brandName} 整合合作` : "默认使用客户品牌名"} />
+              placeholder={customer ? `默认：${customer.brandName} 联盟营销` : "默认使用客户品牌名"} />
           </div>
           {error && (
             <div className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-sm text-rose-600">{error}</div>

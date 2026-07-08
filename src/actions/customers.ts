@@ -178,7 +178,7 @@ export async function createCustomer(fd: FormData): Promise<SaveResult> {
       businessOwnerId,
       backendOwnerId,
       createdById: session.userId,
-      // 无论是否分配后端负责人，只要选了日期就保存到客户记录
+      // 无论是否分配售前方案负责人，只要选了日期就保存到客户记录
       demoDueDate: demoDueDate ? new Date(demoDueDate) : null,
       source: "INTERNAL",
       // 优先使用手动选择的合作状态；否则按是否分配负责人自动判定
@@ -583,7 +583,7 @@ async function createDemoTask(
   await prisma.task.create({
     data: {
       title: `${brandName} Demo方案制定`,
-      description: "系统根据后端负责人指派自动创建，请完成 Demo 推广方案。",
+      description: "系统根据售前方案负责人指派自动创建，请完成 Demo 推广方案。",
       customerId,
       ownerId,
       publisherId: ownerId,

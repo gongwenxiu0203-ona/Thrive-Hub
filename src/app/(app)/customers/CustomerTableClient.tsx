@@ -315,7 +315,7 @@ export function CustomerTableClient({
                 <SortHeader label="当前进度" sortKey="status" sort={sort} onSort={changeSort} />
                 <SortHeader label="评级" sortKey="rating" sort={sort} onSort={changeSort} />
                 <SortHeader label="商务负责人" sortKey="businessOwnerName" sort={sort} onSort={changeSort} />
-                <SortHeader label="后端负责人" sortKey="backendOwnerName" sort={sort} onSort={changeSort} />
+                <SortHeader label="售前方案负责人" sortKey="backendOwnerName" sort={sort} onSort={changeSort} />
                 <SortHeader label="来源" sortKey="source" sort={sort} onSort={changeSort} />
                 <th>操作</th>
               </tr>
@@ -429,7 +429,7 @@ export function CustomerTableClient({
                     <option value="rating">客户评级</option>
                     <option value="targetPlatforms">目标推广平台</option>
                     <option value="businessOwnerId">商务负责人</option>
-                    <option value="backendOwnerId">后端负责人</option>
+                    <option value="backendOwnerId">售前方案负责人</option>
                   </select>
                 </div>
                 {bulkField !== "targetPlatforms" && (

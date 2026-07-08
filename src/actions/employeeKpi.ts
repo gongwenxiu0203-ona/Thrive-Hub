@@ -3,7 +3,7 @@
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { isStaff, kpiScope, type ViewScope } from "@/lib/dataScope";
-import { computeBiGmv, computeReconciliationGmv, completionRate, isAchieved } from "@/lib/projectKpi";
+import { computeBiGmv, computeReconciliationGmv, completionRate, effectiveKpiActual, isAchieved } from "@/lib/projectKpi";
 
 // 项目目标（作为 amOwner 的项目）
 export interface ProjectKpiRow {
@@ -18,6 +18,9 @@ export interface ProjectKpiRow {
   thresholdAt80: number;          // 80% 达标线
   biGmv: number;                  // BI 实际 GMV
   reconciliationGmv: number;      // 客户对账 GMV
+  actualGmv: number;              // KPI 当前采用 GMV：有对账用对账，否则用 BI
+  actualSource: "BI" | "RECONCILIATION";
+  reconciliationCompleted: boolean;
   completionRatePct: number | null;
   achieved: boolean | null;
 }
@@ -36,6 +39,9 @@ export interface ChannelKpiRow {
   thresholdAt80: number;
   channelBiGmv: number;                  // 项目 BI GMV × share%
   channelReconciliationGmv: number;      // 项目对账 GMV × share%
+  channelActualGmv: number;              // KPI 当前采用 GMV × share%
+  actualSource: "BI" | "RECONCILIATION";
+  reconciliationCompleted: boolean;
   completionRatePct: number | null;
   achieved: boolean | null;
 }
@@ -47,12 +53,14 @@ export interface EmployeeKpiRow {
   month: string;
   primaryCurrency: string;
   mixedCurrency: boolean;
-  // 项目 KPI（作为 AM）
+  // 项目 KPI（作为 Strategy AM）
   project: {
     count: number;
     totalTarget: number;
     totalBiGmv: number;
     totalReconciliationGmv: number;
+    totalActualGmv: number;
+    reconciliationCompleted: boolean;
     completionRatePct: number | null;
     achieved: boolean | null;
     items: ProjectKpiRow[];
@@ -63,6 +71,8 @@ export interface EmployeeKpiRow {
     totalTarget: number;
     totalBiGmv: number;
     totalReconciliationGmv: number;
+    totalActualGmv: number;
+    reconciliationCompleted: boolean;
     completionRatePct: number | null;
     achieved: boolean | null;
     items: ChannelKpiRow[];
@@ -192,6 +202,8 @@ export async function getEmployeeKpiByMonth(
         totalTarget: 0,
         totalBiGmv: 0,
         totalReconciliationGmv: 0,
+        totalActualGmv: 0,
+        reconciliationCompleted: false,
         completionRatePct: null,
         achieved: null,
         items: [],
@@ -201,6 +213,8 @@ export async function getEmployeeKpiByMonth(
         totalTarget: 0,
         totalBiGmv: 0,
         totalReconciliationGmv: 0,
+        totalActualGmv: 0,
+        reconciliationCompleted: false,
         completionRatePct: null,
         achieved: null,
         items: [],
@@ -212,8 +226,9 @@ export async function getEmployeeKpiByMonth(
 
   for (const e of enriched) {
     const { target: t, brandName, biGmv, reconciliationGmv } = e;
-    const projectRate = completionRate(t.monthlyTarget, reconciliationGmv);
-    const projectAch = isAchieved(t.monthlyTarget, reconciliationGmv);
+    const projectActual = effectiveKpiActual(biGmv, reconciliationGmv);
+    const projectRate = completionRate(t.monthlyTarget, projectActual.actualGmv);
+    const projectAch = isAchieved(t.monthlyTarget, projectActual.actualGmv);
 
     // 项目 KPI 归入 amOwner
     if (t.amOwnerId && rowsMap.has(t.amOwnerId)) {
@@ -230,6 +245,9 @@ export async function getEmployeeKpiByMonth(
         thresholdAt80: t.monthlyTarget * 0.8,
         biGmv,
         reconciliationGmv,
+        actualGmv: projectActual.actualGmv,
+        actualSource: projectActual.actualSource,
+        reconciliationCompleted: projectActual.reconciliationCompleted,
         completionRatePct: projectRate == null ? null : projectRate * 100,
         achieved: projectAch,
       });
@@ -237,6 +255,9 @@ export async function getEmployeeKpiByMonth(
       row.project.totalTarget += t.monthlyTarget;
       row.project.totalBiGmv += biGmv;
       row.project.totalReconciliationGmv += reconciliationGmv;
+      row.project.totalActualGmv += projectActual.actualGmv;
+      row.project.reconciliationCompleted =
+        row.project.reconciliationCompleted || projectActual.reconciliationCompleted;
 
       // 主货币
       if (row.project.count === 1 && row.channel.count === 0) {
@@ -253,8 +274,9 @@ export async function getEmployeeKpiByMonth(
       const channelTarget = t.monthlyTarget * (ch.sharePercent || 0) / 100;
       const channelBi = biGmv * (ch.sharePercent || 0) / 100;
       const channelRec = reconciliationGmv * (ch.sharePercent || 0) / 100;
-      const chRate = completionRate(channelTarget, channelRec);
-      const chAch = isAchieved(channelTarget, channelRec);
+      const channelActual = effectiveKpiActual(channelBi, channelRec);
+      const chRate = completionRate(channelTarget, channelActual.actualGmv);
+      const chAch = isAchieved(channelTarget, channelActual.actualGmv);
       row.channel.items.push({
         channelTargetId: ch.id,
         projectId: t.projectId,
@@ -268,6 +290,9 @@ export async function getEmployeeKpiByMonth(
         thresholdAt80: channelTarget * 0.8,
         channelBiGmv: channelBi,
         channelReconciliationGmv: channelRec,
+        channelActualGmv: channelActual.actualGmv,
+        actualSource: channelActual.actualSource,
+        reconciliationCompleted: channelActual.reconciliationCompleted,
         completionRatePct: chRate == null ? null : chRate * 100,
         achieved: chAch,
       });
@@ -275,6 +300,9 @@ export async function getEmployeeKpiByMonth(
       row.channel.totalTarget += channelTarget;
       row.channel.totalBiGmv += channelBi;
       row.channel.totalReconciliationGmv += channelRec;
+      row.channel.totalActualGmv += channelActual.actualGmv;
+      row.channel.reconciliationCompleted =
+        row.channel.reconciliationCompleted || channelActual.reconciliationCompleted;
 
       if (row.project.count === 0 && row.channel.count === 1) {
         row.primaryCurrency = ch.currency;
@@ -288,12 +316,12 @@ export async function getEmployeeKpiByMonth(
   for (const row of rowsMap.values()) {
     if (row.project.totalTarget > 0) {
       row.project.completionRatePct =
-        (row.project.totalReconciliationGmv / row.project.totalTarget) * 100;
+        (row.project.totalActualGmv / row.project.totalTarget) * 100;
       row.project.achieved = row.project.completionRatePct >= 80;
     }
     if (row.channel.totalTarget > 0) {
       row.channel.completionRatePct =
-        (row.channel.totalReconciliationGmv / row.channel.totalTarget) * 100;
+        (row.channel.totalActualGmv / row.channel.totalTarget) * 100;
       row.channel.achieved = row.channel.completionRatePct >= 80;
     }
     // 总评：项目优先

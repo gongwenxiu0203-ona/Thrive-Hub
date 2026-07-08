@@ -29,14 +29,17 @@ export interface ProjectGmvTargetInput {
   channels: ChannelInput[];
 }
 
-/** Resolve default amOwner: Customer.backendOwnerId of the project's customer.
+/** Resolve default Strategy AM: Project.ownerId, with legacy customer owner fallback.
  *  Used when caller doesn't pass amOwnerId. */
 async function defaultAmOwner(projectId: string): Promise<string | null> {
   const p = await prisma.project.findUnique({
     where: { id: projectId },
-    select: { customer: { select: { backendOwnerId: true } } },
+    select: {
+      ownerId: true,
+      customer: { select: { backendOwnerId: true } },
+    },
   });
-  return p?.customer?.backendOwnerId ?? null;
+  return p?.ownerId ?? p?.customer?.backendOwnerId ?? null;
 }
 
 /** 行级权限校验：ADMIN 通过；其他内部员工必须命中 projectScope("mine")。
@@ -158,4 +161,3 @@ export async function deleteProjectGmvTarget(targetId: string): Promise<Result> 
   revalidatePath("/operations");
   return { ok: true };
 }
-

@@ -66,7 +66,7 @@ export async function sendOwnerAssignmentNotification(opts: {
   ]);
   if (!owner || !assigner) return;
 
-  const roleLabel = opts.ownerRole === "business" ? "商务负责人" : "后端负责人";
+  const roleLabel = opts.ownerRole === "business" ? "商务负责人" : "售前方案负责人";
   const title = `您已被指派为「${opts.customerName}」的${roleLabel}`;
   const body = `系统通知：您已被指派为客户「${opts.customerName}」的${roleLabel}，请登录系统查看相关任务。`;
 

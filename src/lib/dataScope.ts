@@ -209,7 +209,7 @@ export function projectScope(
 
 /** 员工 KPI 行级权限（作用于 ProjectGmvTarget）。
  *  ADMIN（all）：无过滤；
- *  非 ADMIN 或 mine：仅自己作为 amOwner / 项目负责人 / 客户后端负责人的项目目标。
+ *  非 ADMIN 或 mine：仅自己作为 Strategy AM / 项目 owner / 客户售前方案负责人的项目目标。
  *  BRAND/CHANNEL：完全禁入（上层路由再加一道隐藏拦截）。 */
 export function kpiScope(
   session: Session,

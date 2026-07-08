@@ -16,6 +16,9 @@ export interface CurrentTargetView {
   thresholdAt80: number;
   biGmv: number;
   reconciliationGmv: number;
+  actualGmv: number;
+  actualSource: "BI" | "RECONCILIATION";
+  reconciliationCompleted: boolean;
   completionRatePct: number | null;
   achieved: boolean | null;
   remark: string | null;
@@ -123,11 +126,17 @@ export function ProjectGmvTargetPanel({
       ) : (
         <>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <Stat label="AM 负责人" value={current.amOwnerName} />
+            <Stat label="Strategy AM" value={current.amOwnerName} />
             <Stat label="月度 GMV 目标" value={`${sym}${current.monthlyTarget.toLocaleString()}`} />
             <Stat label="80% 达标线" value={`${sym}${current.thresholdAt80.toLocaleString()}`} />
             <Stat label="BI 实际 GMV" value={`${sym}${current.biGmv.toLocaleString()}`} />
             <Stat label="客户对账 GMV" value={`${sym}${current.reconciliationGmv.toLocaleString()}`} />
+            <Stat
+              label="KPI 实际 GMV"
+              value={`${sym}${current.actualGmv.toLocaleString()}`}
+              sub={current.reconciliationCompleted ? "已完成对账" : "按 BI 动态计算"}
+              color={current.reconciliationCompleted ? "text-emerald-600" : "text-brand-700"}
+            />
             <Stat
               label="完成率"
               value={
@@ -135,6 +144,7 @@ export function ProjectGmvTargetPanel({
                   ? "—"
                   : `${current.completionRatePct.toFixed(1)}%`
               }
+              sub={current.reconciliationCompleted ? "已对账" : "BI 动态"}
               color={
                 current.completionRatePct != null && current.completionRatePct >= 80
                   ? "text-emerald-600"
@@ -213,11 +223,12 @@ export function ProjectGmvTargetPanel({
   );
 }
 
-function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
+function Stat({ label, value, color, sub }: { label: string; value: string; color?: string; sub?: string }) {
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-3">
       <p className="text-[11px] text-slate-400">{label}</p>
       <p className={`mt-0.5 text-sm font-semibold ${color ?? "text-slate-800"}`}>{value}</p>
+      {sub && <p className="mt-0.5 text-[10px] text-slate-400">{sub}</p>}
     </div>
   );
 }

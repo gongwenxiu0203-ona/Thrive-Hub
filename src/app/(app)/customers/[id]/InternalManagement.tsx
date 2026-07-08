@@ -78,7 +78,7 @@ export function InternalManagement({
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  // 默认显示创建时已保存的 Demo 截止日期（即使后端负责人空着）
+  // 默认显示创建时已保存的 Demo 截止日期（即使售前方案负责人空着）
   const [demoDue, setDemoDue] = useState(demoDueDate ?? "");
 
   function run(fn: () => Promise<unknown>) {
@@ -237,13 +237,13 @@ export function InternalManagement({
         <TaskList tasks={businessTasks} emptyHint="分配商务负责人后，相关任务将在此处显示" />
       </div>
 
-      {/* ── 4. 后端负责人 ── */}
+      {/* ── 4. 售前方案负责人 ── */}
       <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-4">
         <div className="flex items-center gap-2">
           <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-100">
             <Wrench className="h-3.5 w-3.5 text-violet-600" />
           </div>
-          <p className="text-sm font-semibold text-slate-700">后端负责人</p>
+          <p className="text-sm font-semibold text-slate-700">售前方案负责人</p>
         </div>
         <div>
           <label className="label text-xs">Demo 方案任务截止日期</label>
@@ -255,13 +255,13 @@ export function InternalManagement({
             onChange={(e) => {
               const v = e.target.value;
               setDemoDue(v);
-              // 若后端负责人已选，则同步保存到客户记录与 Demo 任务（独立于选人顺序）
+              // 若售前方案负责人已选，则同步保存到客户记录与 Demo 任务（独立于选人顺序）
               if (backendOwnerId) {
                 run(() => setBackendOwner(customerId, backendOwnerId, v));
               }
             }}
           />
-          <p className="mt-1 text-[10px] text-slate-400">截止日期与后端负责人可独立选择，无先后顺序。</p>
+          <p className="mt-1 text-[10px] text-slate-400">截止日期与售前方案负责人可独立选择，无先后顺序。</p>
         </div>
         <select
           className="input"
@@ -275,7 +275,7 @@ export function InternalManagement({
           ))}
         </select>
 
-        <TaskList tasks={backendTasks} emptyHint="分配后端负责人后，将自动创建「Demo 方案制定」任务" />
+        <TaskList tasks={backendTasks} emptyHint="分配售前方案负责人后，将自动创建「Demo 方案制定」任务" />
       </div>
     </div>
   );

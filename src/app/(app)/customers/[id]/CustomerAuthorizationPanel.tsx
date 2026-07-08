@@ -59,7 +59,7 @@ export function CustomerAuthorizationPanel({
   }
 
   return (
-    <div>
+    <div id="authorization-info" className="scroll-mt-24">
       <div className="mb-4 flex items-center gap-3">
         <div className="flex h-6 w-6 items-center justify-center rounded-md bg-amber-100 text-amber-700">
           <KeyRound className="h-3.5 w-3.5" />

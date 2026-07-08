@@ -27,6 +27,7 @@ export default async function ProjectsPage() {
         },
         contract: { select: { id: true, contractNo: true } },
         createdBy: { select: { name: true } },
+        owner: { select: { name: true } },
         _count: { select: { entries: true } },
       },
       orderBy: { createdAt: "desc" },
@@ -44,7 +45,7 @@ export default async function ProjectsPage() {
     }),
   ]);
 
-  // 关联客户（含商务负责人，自动带出）+ 项目负责人候选用户
+  // 关联客户（含商务负责人，自动带出）+ Strategy AM 候选用户
   const [customers, users] = await Promise.all([
     prisma.customer.findMany({
       select: { id: true, brandName: true, businessOwner: { select: { name: true } } },
@@ -73,6 +74,7 @@ export default async function ProjectsPage() {
     status: p.status,
     stage: p.stage ?? null,
     customerName: p.customer?.brandName ?? "—",
+    ownerName: p.owner?.name ?? "—",
     businessOwner: p.customer?.businessOwner?.name ?? "—",
     backendOwner: p.customer?.backendOwner?.name ?? "—",
     contractNo: p.contract?.contractNo ?? "—",

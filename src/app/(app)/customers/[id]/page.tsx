@@ -220,7 +220,7 @@ export default async function CustomerDetailPage({
           <div className="flex items-center gap-2.5 px-4 py-3">
             <Building2 className="h-4 w-4 shrink-0 text-slate-400" />
             <div className="min-w-0">
-              <p className="text-[10px] text-slate-400">后端负责人</p>
+              <p className="text-[10px] text-slate-400">售前方案负责人</p>
               <p className="truncate text-sm font-medium text-slate-800">{customer.backendOwner?.name ?? "未分配"}</p>
             </div>
           </div>

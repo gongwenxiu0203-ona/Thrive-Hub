@@ -121,13 +121,13 @@ export function GmvTargetEditModal({
               className="input"
             />
           </Field>
-          <Field label="AM 人员">
+          <Field label="Strategy AM">
             <select
               value={amOwnerId}
               onChange={(e) => setAmOwnerId(e.target.value)}
               className="input"
             >
-              <option value="">未指定（默认客户后端负责人）</option>
+              <option value="">未指定（默认项目 Strategy AM）</option>
               {users.map((u) => (
                 <option key={u.id} value={u.id}>{u.name}</option>
               ))}
