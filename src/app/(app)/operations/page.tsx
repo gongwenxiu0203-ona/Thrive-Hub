@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { isStaff } from "@/lib/permissions";
 import { customerScope, projectScope } from "@/lib/dataScope";
-import { currentMonthKey } from "@/lib/financeOperations";
+import { currentMonthKey, monthRange } from "@/lib/financeOperations";
 import { OperationsClient } from "./OperationsClient";
 import { getEmployeeKpiByMonth } from "@/actions/employeeKpi";
 
@@ -20,6 +20,7 @@ export default async function FinanceOperationsPage({
   const sp = await searchParams;
 
   const month = sp.month || currentMonthKey();
+  const { start: monthStart, end: monthEnd } = monthRange(month);
   const initialTab = (sp.tab as "revenue" | "count" | "ar" | "pipeline" | "kpi") || "revenue";
   const kpiAmOwnerId = sp.amOwnerId || "";
   const kpiCustomerId = sp.customerId || "";
@@ -29,15 +30,39 @@ export default async function FinanceOperationsPage({
   const kpiDefaultsAll = isAdmin && initialTab === "kpi" && sp.scope !== "mine";
   const scopeView: "mine" | "all" = sp.scope === "all" || kpiDefaultsAll ? "all" : "mine";
 
-  const [snapshots, ars, pipelines, customers, users] = await Promise.all([
+  const [snapshots, reconciliations, ars, pipelines, customers, users] = await Promise.all([
     prisma.clientRevenueSnapshot.findMany({
       where: { month },
       include: {
-        customer: { select: { id: true, brandName: true } },
+        customer: {
+          select: {
+            id: true,
+            brandName: true,
+            contracts: {
+              where: { deletedAt: null, startDate: { not: null } },
+              select: { startDate: true },
+              orderBy: { startDate: "asc" },
+              take: 1,
+            },
+          },
+        },
         amOwner: { select: { id: true, name: true } },
         bdOwner: { select: { id: true, name: true } },
       },
       orderBy: { monthlyTotalIncome: "desc" },
+    }),
+    prisma.customerReconciliation.findMany({
+      where: {
+        deletedAt: null,
+        status: "CONFIRMED",
+        periodStart: { lte: monthEnd },
+        periodEnd: { gte: monthStart },
+      },
+      select: {
+        customerId: true,
+        finalSalesAmount: true,
+        actualSalesAmount: true,
+      },
     }),
     prisma.accountsReceivable.findMany({
       include: {
@@ -61,6 +86,14 @@ export default async function FinanceOperationsPage({
       orderBy: { name: "asc" },
     }),
   ]);
+
+  const reconciledGmvByCustomer = new Map<string, number>();
+  for (const rec of reconciliations) {
+    reconciledGmvByCustomer.set(
+      rec.customerId,
+      (reconciledGmvByCustomer.get(rec.customerId) ?? 0) + (rec.finalSalesAmount ?? rec.actualSalesAmount ?? 0),
+    );
+  }
 
   // KPI rows + KPI 下拉数据（仅当 tab=kpi 时拉取，节省查询）
   const kpiRows = initialTab === "kpi"
@@ -126,7 +159,7 @@ export default async function FinanceOperationsPage({
         customerId: s.customerId,
         customerName: s.customer?.brandName ?? "（已删除客户）",
         month: s.month,
-        projectStartDate: s.projectStartDate?.toISOString() ?? null,
+        projectStartDate: (s.projectStartDate ?? s.customer?.contracts[0]?.startDate ?? null)?.toISOString() ?? null,
         clientStatus: s.clientStatus,
         monthlyFeeCurrency: s.monthlyFeeCurrency,
         monthlyFeeAmount: s.monthlyFeeAmount,
@@ -136,6 +169,7 @@ export default async function FinanceOperationsPage({
         monthlyGmv: s.monthlyGmv,
         monthlyCommissionIncome: s.monthlyCommissionIncome,
         monthlyTotalIncome: s.monthlyTotalIncome,
+        monthlyReconciledGmv: s.customerId ? (reconciledGmvByCustomer.get(s.customerId) ?? 0) : 0,
         cumulativeIncome: s.cumulativeIncome,
         amOwnerName: s.amOwner?.name ?? "—",
         bdOwnerName: s.bdOwner?.name ?? "—",

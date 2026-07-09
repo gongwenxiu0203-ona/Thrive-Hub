@@ -38,9 +38,47 @@ function parseRate(raw: string | null): number {
 /** Default USD->RMB rate when caller does not provide one (placeholder until FX API wired) */
 const DEFAULT_USD_RMB = 7.2;
 
+function normalizeCurrency(raw: string | null): string {
+  const text = (raw ?? "RMB").trim().toUpperCase();
+  if (text.includes("人民币") || text.includes("RMB") || text.includes("CNY") || text.includes("¥") || text.includes("￥")) return "RMB";
+  if (text.includes("美金") || text.includes("美元") || text.includes("USD") || text.includes("$")) return "USD";
+  if (text.includes("欧元") || text.includes("EUR") || text.includes("€")) return "EUR";
+  if (text.includes("英镑") || text.includes("GBP") || text.includes("£")) return "GBP";
+  if (text.includes("港币") || text.includes("港元") || text.includes("HKD") || text.includes("HK$")) return "HKD";
+  if (text.includes("日元") || text.includes("JPY") || text.includes("円")) return "JPY";
+  if (text.includes("加元") || text.includes("CAD")) return "CAD";
+  if (text.includes("澳元") || text.includes("AUD")) return "AUD";
+  return raw?.trim() || "RMB";
+}
+
+function defaultCurrencyToRmbRate(currency: string, override?: number): number {
+  if (override && override > 0) return override;
+  switch (currency) {
+    case "RMB":
+    case "CNY":
+      return 1;
+    case "USD":
+      return DEFAULT_USD_RMB;
+    case "EUR":
+      return 7.85;
+    case "GBP":
+      return 9.15;
+    case "HKD":
+      return 0.92;
+    case "JPY":
+      return 0.05;
+    case "CAD":
+      return 5.25;
+    case "AUD":
+      return 4.75;
+    default:
+      return 1;
+  }
+}
+
 /**
  * Generate/refresh client revenue snapshots for the given month.
- * Inputs: Customer + Contract + SalesRecord + (optional) CustomerReconciliation.
+ * Inputs: Customer + Contract + SalesRecord.
  * Upsert based on the unique constraint (customerId, month).
  */
 export async function generateMonthlySnapshot(
@@ -52,14 +90,13 @@ export async function generateMonthlySnapshot(
 
   const month = monthInput || currentMonthKey();
   const { start, end } = monthRange(month);
-  const exchangeRate = exchangeRateOverride && exchangeRateOverride > 0 ? exchangeRateOverride : DEFAULT_USD_RMB;
 
   // Pull all live customers along with their signed/in-progress contracts.
   const customers = await prisma.customer.findMany({
     where: { deletedAt: null },
     include: {
       contracts: {
-        where: { status: { in: ["SIGNING", "COMPLETED"] } },
+        where: { deletedAt: null },
         orderBy: { startDate: "asc" },
       },
     },
@@ -73,12 +110,9 @@ export async function generateMonthlySnapshot(
     if (!earliestContract) continue; // customers without any contract are skipped
 
     // Monthly fee / currency / commission rate
-    const feeCurrencyRaw = earliestContract.feeCurrency ?? "RMB";
-    // Treat "USD" / "美金" (US dollar) as USD; everything else as RMB.
-    const isUsd = feeCurrencyRaw.toUpperCase() === "USD" || feeCurrencyRaw.includes("美");
-    const monthlyFeeCurrency = isUsd ? "USD" : "RMB";
+    const monthlyFeeCurrency = normalizeCurrency(earliestContract.feeCurrency);
+    const currencyToRmbRate = defaultCurrencyToRmbRate(monthlyFeeCurrency, exchangeRateOverride);
     const monthlyFeeAmount = parseAmount(earliestContract.feeAmount);
-    const monthlyFeeRmb = monthlyFeeCurrency === "USD" ? monthlyFeeAmount * exchangeRate : monthlyFeeAmount;
     const commissionRate = parseRate(earliestContract.commissionRate);
 
     // Monthly GMV from BI sales records.
@@ -88,14 +122,10 @@ export async function generateMonthlySnapshot(
     });
     const monthlyGmv = salesAgg._sum.revenue ?? 0;
 
-    // Monthly commission income: prefer reconciliation final number when present.
-    const rec = await prisma.customerReconciliation.findFirst({
-      where: { customerId: c.id, periodStart: { gte: start }, periodEnd: { lte: end }, deletedAt: null },
-      orderBy: { createdAt: "desc" },
-    });
-    const monthlyCommissionIncome = rec?.finalCommissionAmount ?? rec?.commissionAmount ?? (monthlyGmv * commissionRate);
+    // Estimated monthly commission income: BI GMV * contract commission rate.
+    const monthlyCommissionIncome = monthlyGmv * commissionRate;
 
-    const monthlyTotalIncome = monthlyFeeRmb + monthlyCommissionIncome;
+    const monthlyTotalIncome = monthlyFeeAmount + monthlyCommissionIncome;
 
     // Client status mapping.
     let clientStatus: "NEW" | "ACTIVE" | "CHURNED" | "PAUSED" = "ACTIVE";
@@ -128,8 +158,8 @@ export async function generateMonthlySnapshot(
       clientStatus,
       monthlyFeeCurrency,
       monthlyFeeAmount,
-      exchangeRate,
-      monthlyFeeRmb,
+      exchangeRate: currencyToRmbRate,
+      monthlyFeeRmb: monthlyFeeAmount,
       commissionRate,
       monthlyGmv,
       monthlyCommissionIncome,
@@ -161,6 +191,7 @@ export async function updateSnapshot(
     signingCompany?: string | null;
     receivingCompany?: string | null;
     clientStatus?: string;
+    exchangeRate?: number;
     remark?: string | null;
   },
 ): Promise<SaveResult> {
@@ -171,6 +202,15 @@ export async function updateSnapshot(
     data: patch as Record<string, unknown>,
   });
   revalidatePath("/operations");
+  return { ok: true, id };
+}
+
+export async function deleteSnapshot(id: string): Promise<SaveResult> {
+  const session = await requireSession();
+  if (session.role !== "ADMIN") return { ok: false, error: "仅管理员可删除客户收入记录" };
+  await prisma.clientRevenueSnapshot.delete({ where: { id } });
+  revalidatePath("/operations");
+  revalidatePath("/dashboard");
   return { ok: true, id };
 }
 

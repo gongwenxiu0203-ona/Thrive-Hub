@@ -18,7 +18,7 @@ import {
 } from "@/lib/financeOperations";
 import {
   generateMonthlySnapshot, updateSnapshot,
-  createAR, updateAR, deleteAR, refreshArRisks,
+  deleteSnapshot, createAR, updateAR, deleteAR, refreshArRisks,
   createPipeline, updatePipelineStage, updatePipeline, deletePipeline,
 } from "@/actions/financeOperations";
 
@@ -41,6 +41,7 @@ export type SnapshotRow = {
   monthlyGmv: number;
   monthlyCommissionIncome: number;
   monthlyTotalIncome: number;
+  monthlyReconciledGmv: number;
   cumulativeIncome: number;
   amOwnerName: string;
   bdOwnerName: string;
@@ -218,6 +219,27 @@ export function OperationsClient({
 // Tab 1: Client Revenue Table
 // =============================================================================
 
+function formatMoney(amount: number, currency: string | null | undefined): string {
+  const symbol = ({
+    RMB: "¥",
+    CNY: "¥",
+    USD: "$",
+    EUR: "€",
+    GBP: "£",
+    HKD: "HK$",
+  } as Record<string, string>)[currency ?? ""] ?? `${currency ?? "USD"} `;
+  return `${symbol}${amount.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+}
+
+function inferSingleCurrency(rows: SnapshotRow[]): string {
+  const currencies = new Set(rows.map((row) => row.monthlyFeeCurrency || "USD"));
+  return currencies.size === 1 ? [...currencies][0] : "USD";
+}
+
+function calcReconciledTotalRmb(row: SnapshotRow): number {
+  return (row.monthlyFeeAmount + row.commissionRate * row.monthlyReconciledGmv) * row.exchangeRate;
+}
+
 function RevenueTab({
   snapshots, month, onMonthChange, isAdmin,
 }: {
@@ -225,7 +247,6 @@ function RevenueTab({
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [exchangeRate, setExchangeRate] = useState<string>("7.2");
   const [note, setNote] = useState<string | null>(null);
   const [editing, setEditing] = useState<SnapshotRow | null>(null);
 
@@ -233,20 +254,30 @@ function RevenueTab({
     const newCount = snapshots.filter((s) => s.clientStatus === "NEW").length;
     const churnedCount = snapshots.filter((s) => s.clientStatus === "CHURNED").length;
     const cumCustomerCount = snapshots.length;
-    const mrr = snapshots.reduce((sum, s) => sum + s.monthlyFeeRmb, 0);
+    const mrr = snapshots.reduce((sum, s) => sum + s.monthlyFeeAmount, 0);
     const totalCommission = snapshots.reduce((sum, s) => sum + s.monthlyCommissionIncome, 0);
     const totalIncome = snapshots.reduce((sum, s) => sum + s.monthlyTotalIncome, 0);
-    const cumIncome = snapshots.reduce((sum, s) => sum + s.cumulativeIncome, 0);
-    return { newCount, churnedCount, cumCustomerCount, mrr, totalCommission, totalIncome, cumIncome };
+    const currency = inferSingleCurrency(snapshots);
+    return { newCount, churnedCount, cumCustomerCount, mrr, totalCommission, totalIncome, currency };
   }, [snapshots]);
 
   function runGenerate() {
     setNote(null);
-    const rate = parseFloat(exchangeRate);
     startTransition(async () => {
-      const result = await generateMonthlySnapshot(month, isNaN(rate) ? undefined : rate);
+      const result = await generateMonthlySnapshot(month);
       if (!result.ok) { setNote(result.error ?? "生成失败"); return; }
       setNote(`✅ 完成：新增 ${result.created} 条，更新 ${result.updated} 条`);
+      router.refresh();
+    });
+  }
+
+  function onDeleteSnapshot(row: SnapshotRow) {
+    if (!confirm(`确认删除「${row.customerName}」在 ${row.month} 的客户收入记录？\n\n只会删除本条经营管理快照，不会删除客户、合同或 BI 数据。`)) return;
+    setNote(null);
+    startTransition(async () => {
+      const result = await deleteSnapshot(row.id);
+      if (!result.ok) { setNote(result.error ?? "删除失败"); return; }
+      setNote("✅ 已删除客户收入记录");
       router.refresh();
     });
   }
@@ -261,17 +292,10 @@ function RevenueTab({
             value={month} onChange={(e) => onMonthChange(e.target.value)} />
         </div>
         {isAdmin && (
-          <>
-            <div className="flex items-center gap-2">
-              <label className="text-xs text-slate-500">USD→RMB 汇率：</label>
-              <input type="number" step="0.01" className="input h-9 w-24 text-sm"
-                value={exchangeRate} onChange={(e) => setExchangeRate(e.target.value)} />
-            </div>
-            <button onClick={runGenerate} disabled={pending} className="btn-primary text-sm">
-              <RefreshCw className={cn("h-4 w-4", pending && "animate-spin")} />
-              {pending ? "生成中…" : "一键生成 / 刷新当月快照"}
-            </button>
-          </>
+          <button onClick={runGenerate} disabled={pending} className="btn-primary text-sm">
+            <RefreshCw className={cn("h-4 w-4", pending && "animate-spin")} />
+            {pending ? "生成中…" : "一键生成 / 刷新当月快照"}
+          </button>
         )}
         {note && (
           <span className={cn("text-xs", note.startsWith("✅") ? "text-emerald-600" : "text-rose-500")}>
@@ -285,9 +309,9 @@ function RevenueTab({
         <StatCard label="新增客户数" value={totals.newCount} />
         <StatCard label="本月客户数" value={totals.cumCustomerCount} />
         <StatCard label="流失客户数" value={totals.churnedCount} accent="text-rose-600" />
-        <StatCard label="MRR (RMB)" value={`¥${totals.mrr.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} accent="text-brand-600" />
-        <StatCard label="本月佣金" value={`¥${totals.totalCommission.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} accent="text-amber-600" />
-        <StatCard label="本月总收入" value={`¥${totals.totalIncome.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} accent="text-emerald-600" />
+        <StatCard label="MRR" value={formatMoney(totals.mrr, totals.currency)} accent="text-brand-600" />
+        <StatCard label="预估月佣金收入" value={formatMoney(totals.totalCommission, totals.currency)} accent="text-amber-600" />
+        <StatCard label="预估月总收入" value={formatMoney(totals.totalIncome, totals.currency)} accent="text-emerald-600" />
       </div>
 
       {/* Snapshot table */}
@@ -295,25 +319,30 @@ function RevenueTab({
         <table className="w-full text-xs">
           <thead>
             <tr className="border-b border-slate-100 bg-slate-50 text-[11px] text-slate-500">
-              <th className="px-3 py-2 text-left font-medium">客户</th>
-              <th className="px-3 py-2 text-left font-medium">项目开始</th>
-              <th className="px-3 py-2 text-left font-medium">状态</th>
+              <th rowSpan={2} className="px-3 py-2 text-left font-medium align-bottom">客户</th>
+              <th rowSpan={2} className="px-3 py-2 text-left font-medium align-bottom">项目开始</th>
+              <th rowSpan={2} className="px-3 py-2 text-left font-medium align-bottom">状态</th>
+              <th colSpan={5} className="border-l border-slate-200 px-3 py-2 text-center font-semibold text-slate-600">预估收入（原币种）</th>
+              <th colSpan={3} className="border-l border-slate-200 px-3 py-2 text-center font-semibold text-slate-600">对账后收入（RMB）</th>
+              <th rowSpan={2} className="px-3 py-2 text-left font-medium align-bottom">AM</th>
+              <th rowSpan={2} className="px-3 py-2 text-left font-medium align-bottom">BD</th>
+              <th rowSpan={2} className="px-3 py-2 text-left font-medium align-bottom">等级</th>
+              <th rowSpan={2} className="px-3 py-2 align-bottom"></th>
+            </tr>
+            <tr className="border-b border-slate-100 bg-slate-50 text-[11px] text-slate-500">
               <th className="px-3 py-2 text-right font-medium">月费</th>
-              <th className="px-3 py-2 text-right font-medium">月费(RMB)</th>
               <th className="px-3 py-2 text-right font-medium">抽佣</th>
               <th className="px-3 py-2 text-right font-medium">月 GMV</th>
-              <th className="px-3 py-2 text-right font-medium">月佣金收入</th>
-              <th className="px-3 py-2 text-right font-medium">月总收入</th>
-              <th className="px-3 py-2 text-right font-medium">累计收入</th>
-              <th className="px-3 py-2 text-left font-medium">AM</th>
-              <th className="px-3 py-2 text-left font-medium">BD</th>
-              <th className="px-3 py-2 text-left font-medium">等级</th>
-              <th className="px-3 py-2"></th>
+              <th className="px-3 py-2 text-right font-medium">预估月佣金收入</th>
+              <th className="px-3 py-2 text-right font-medium">预估月总收入</th>
+              <th className="border-l border-slate-200 px-3 py-2 text-right font-medium">月对账GMV</th>
+              <th className="px-3 py-2 text-right font-medium">汇率</th>
+              <th className="px-3 py-2 text-right font-medium">当月总收入(RMB)</th>
             </tr>
           </thead>
           <tbody>
             {snapshots.length === 0 ? (
-              <tr><td colSpan={14} className="py-10 text-center text-slate-400">暂无快照，点击「一键生成」按月汇总</td></tr>
+              <tr><td colSpan={15} className="py-10 text-center text-slate-400">暂无快照，点击「一键生成」按月汇总</td></tr>
             ) : snapshots.map((s) => (
               <tr key={s.id} className="border-b border-slate-50 hover:bg-slate-50/50">
                 <td className="px-3 py-2 font-medium text-slate-800">
@@ -325,13 +354,14 @@ function RevenueTab({
                     {CLIENT_STATUS_LABELS[s.clientStatus] ?? s.clientStatus}
                   </span>
                 </td>
-                <td className="px-3 py-2 text-right">{s.monthlyFeeCurrency === "USD" ? "$" : "¥"}{s.monthlyFeeAmount.toLocaleString()}</td>
-                <td className="px-3 py-2 text-right">¥{s.monthlyFeeRmb.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                <td className="px-3 py-2 text-right">{formatMoney(s.monthlyFeeAmount, s.monthlyFeeCurrency)}</td>
                 <td className="px-3 py-2 text-right">{(s.commissionRate * 100).toFixed(1)}%</td>
-                <td className="px-3 py-2 text-right">${s.monthlyGmv.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
-                <td className="px-3 py-2 text-right">¥{s.monthlyCommissionIncome.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
-                <td className="px-3 py-2 text-right font-semibold text-emerald-700">¥{s.monthlyTotalIncome.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
-                <td className="px-3 py-2 text-right text-brand-600">¥{s.cumulativeIncome.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                <td className="px-3 py-2 text-right">{formatMoney(s.monthlyGmv, s.monthlyFeeCurrency)}</td>
+                <td className="px-3 py-2 text-right">{formatMoney(s.monthlyCommissionIncome, s.monthlyFeeCurrency)}</td>
+                <td className="px-3 py-2 text-right font-semibold text-emerald-700">{formatMoney(s.monthlyTotalIncome, s.monthlyFeeCurrency)}</td>
+                <td className="border-l border-slate-200 px-3 py-2 text-right">{formatMoney(s.monthlyReconciledGmv, s.monthlyFeeCurrency)}</td>
+                <td className="px-3 py-2 text-right text-slate-500">{s.exchangeRate.toLocaleString(undefined, { maximumFractionDigits: 4 })}</td>
+                <td className="px-3 py-2 text-right font-semibold text-brand-700">¥{calcReconciledTotalRmb(s).toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
                 <td className="px-3 py-2 text-slate-600">{s.amOwnerName}</td>
                 <td className="px-3 py-2 text-slate-600">{s.bdOwnerName}</td>
                 <td className="px-3 py-2">
@@ -341,9 +371,14 @@ function RevenueTab({
                 </td>
                 <td className="px-3 py-2 text-right">
                   {isAdmin && (
-                    <button onClick={() => setEditing(s)} className="rounded p-1 text-slate-300 hover:bg-slate-100 hover:text-slate-600">
-                      <Pencil className="h-3.5 w-3.5" />
-                    </button>
+                    <span className="flex justify-end gap-1">
+                      <button onClick={() => setEditing(s)} className="rounded p-1 text-slate-300 hover:bg-slate-100 hover:text-slate-600" title="编辑">
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                      <button onClick={() => onDeleteSnapshot(s)} className="rounded p-1 text-slate-300 hover:bg-rose-50 hover:text-rose-500" title="删除客户收入记录">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </span>
                   )}
                 </td>
               </tr>
@@ -366,15 +401,20 @@ function SnapshotEditModal({ snapshot, onClose }: { snapshot: SnapshotRow; onClo
   const [signing, setSigning] = useState<string>(snapshot.signingCompany ?? "");
   const [receiving, setReceiving] = useState<string>(snapshot.receivingCompany ?? "");
   const [status, setStatus] = useState<string>(snapshot.clientStatus);
+  const [exchangeRate, setExchangeRate] = useState<string>(
+    snapshot.exchangeRate > 0 ? snapshot.exchangeRate.toString() : "1",
+  );
   const [err, setErr] = useState<string | null>(null);
 
   function onSave() {
     startTransition(async () => {
+      const parsedRate = parseFloat(exchangeRate);
       const r = await updateSnapshot(snapshot.id, {
         revenueGrade: grade,
         signingCompany: signing || null,
         receivingCompany: receiving || null,
         clientStatus: status,
+        exchangeRate: Number.isFinite(parsedRate) && parsedRate > 0 ? parsedRate : 1,
       });
       if (!r.ok) { setErr(r.error ?? "保存失败"); return; }
       onClose(); router.refresh();
@@ -401,6 +441,20 @@ function SnapshotEditModal({ snapshot, onClose }: { snapshot: SnapshotRow; onClo
             <select className="input" value={status} onChange={(e) => setStatus(e.target.value)}>
               {Object.entries(CLIENT_STATUS_LABELS).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
             </select>
+          </div>
+          <div>
+            <label className="label">对账后收入汇率</label>
+            <input
+              type="number"
+              step="0.0001"
+              min="0"
+              className="input"
+              value={exchangeRate}
+              onChange={(e) => setExchangeRate(e.target.value)}
+            />
+            <p className="mt-1 text-[11px] text-slate-400">
+              用于计算当月总收入(RMB)：（月费 + 抽佣 × 月对账GMV）× 汇率
+            </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
