@@ -75,6 +75,7 @@ model User {
   projectGmvTargetsCreated   ProjectGmvTarget[]     @relation("ProjectGmvTargetCreator")
   projectChannelTargetsOwned ProjectChannelTarget[]
   customerAuthorizationInfosCreated CustomerAuthorizationInfo[] @relation("CustomerAuthorizationInfoCreator")
+  bulkOperationLogs          BulkOperationLog[]      @relation("BulkOperationOperator")
 }
 
 // 角色级权限配置（每个角色 + 功能 = 一个等级）
@@ -570,6 +571,28 @@ model SalesRecord {
   @@index([region])
   @@index([orderDate])
   @@index([deletedAt])
+}
+
+// 批量操作日志：用于记录可撤销的批量操作快照
+model BulkOperationLog {
+  id           String    @id @default(cuid())
+  module       String    // BI_SALES_DETAIL
+  actionType   String    // CUSTOMER_UPDATE | DELETE
+  summary      String
+  recordCount  Int       @default(0)
+  snapshotJson String    // JSON: 操作前快照/受影响记录 id
+  operatorId   String
+  revertedAt   DateTime?
+  revertedById String?
+  createdAt    DateTime  @default(now())
+
+  operator User @relation("BulkOperationOperator", fields: [operatorId], references: [id])
+
+  @@index([module])
+  @@index([actionType])
+  @@index([operatorId])
+  @@index([createdAt])
+  @@index([revertedAt])
 }
 
 // Parent Asin / 链接标签匹配表 —— 品牌+店铺+地区+ASIN 唯一

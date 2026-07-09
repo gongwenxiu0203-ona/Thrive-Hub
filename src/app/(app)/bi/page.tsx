@@ -14,7 +14,12 @@ import { AsinMappingPanel } from "./AsinMappingPanel";
 import { SalesDetailTable, type SalesDetailRecord } from "./SalesDetailTable";
 import { formatCurrencyWith, formatCurrency, getCurrencyCode, currencySymbol, formatNumber, formatDateTime, cn } from "@/lib/utils";
 import { requireSession } from "@/lib/session";
-import { parseDateOnlyEnd, parseDateOnlyStart } from "@/lib/dateRange";
+import {
+  buildSalesRecordWhereFromParams,
+  csvFilterValues,
+  exportSalesFilterQueryString,
+  EMPTY_FILTER_VALUE,
+} from "@/lib/salesRecordFilters";
 
 export const metadata = { title: "推广数据BI · Thraive联盟营销系统" };
 
@@ -50,73 +55,6 @@ type UploadBatchRow = {
 };
 
 const biFilterCache = new Map<string, { expiresAt: number; value: BiFilterContext }>();
-
-function csv(sp: Record<string, string | undefined>, key: string): string[] {
-  return (sp[key] ?? "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
-function buildWhere(
-  sp: Record<string, string | undefined>,
-  // Affiliate names that match the selected types (resolved from the affiliate
-  // library). When provided, type filtering uses affiliateName OR stored
-  // affiliateType so records whose type was not stored but is now resolvable
-  // are still included.
-  typeAffNames?: string[],
-): Prisma.SalesRecordWhereInput {
-  const where: Prisma.SalesRecordWhereInput = {};
-  const platforms = csv(sp, "platforms");
-  if (platforms.length) where.affiliatePlatform = { in: platforms };
-  const programs = csv(sp, "programs");
-  if (programs.length) where.affiliateProgram = { in: programs };
-  const brands = csv(sp, "brands");
-  if (brands.length) where.brand = { in: brands };
-  const regions = csv(sp, "regions");
-  if (regions.length) where.region = { in: regions };
-  const stores = csv(sp, "stores");
-  if (stores.length) where.store = { in: stores };
-  const aff = csv(sp, "affiliateNames");
-  if (aff.length) where.affiliateName = { in: aff };
-  const types = csv(sp, "types");
-  if (types.length) {
-    if (typeAffNames !== undefined) {
-      // Prefer affiliate-library lookup: match by name OR stored affiliateType
-      const orClauses: Prisma.SalesRecordWhereInput[] = [];
-      if (typeAffNames.length > 0)
-        orClauses.push({ affiliateName: { in: typeAffNames } });
-      orClauses.push({ affiliateType: { in: types } });
-      where.OR = orClauses;
-    } else {
-      where.affiliateType = { in: types };
-    }
-  }
-  const asins = csv(sp, "asins");
-  if (asins.length) where.asin = { in: asins };
-  const parents = csv(sp, "parentAsins");
-  if (parents.length) where.parentAsin = { in: parents };
-  const labels = csv(sp, "labels");
-  if (labels.length) where.storeProductLabel = { in: labels };
-  if (sp.from || sp.to) {
-    where.orderDate = {};
-    if (sp.from) {
-      const start = parseDateOnlyStart(sp.from);
-      if (start) where.orderDate.gte = start;
-    }
-    if (sp.to) {
-      const end = parseDateOnlyEnd(sp.to);
-      if (end) where.orderDate.lte = end;
-    }
-  }
-  // Commission rate range filter (user inputs as %, stored as decimal)
-  if (sp.rateMin || sp.rateMax) {
-    where.commissionRate = {};
-    if (sp.rateMin) where.commissionRate.gte = Number(sp.rateMin) / 100;
-    if (sp.rateMax) where.commissionRate.lte = Number(sp.rateMax) / 100;
-  }
-  return where;
-}
 
 /**
  * Builds a function that resolves an affiliate's type from the affiliate
@@ -209,31 +147,6 @@ async function getBiFilterContext(baseWhere: Prisma.SalesRecordWhereInput): Prom
   return value;
 }
 
-function exportQueryString(
-  sp: Record<string, string | undefined>,
-): string {
-  const params = new URLSearchParams();
-  for (const k of [
-    "platforms",
-    "programs",
-    "brands",
-    "regions",
-    "stores",
-    "affiliateNames",
-    "types",
-    "asins",
-    "parentAsins",
-    "labels",
-    "from",
-    "to",
-    "rateMin",
-    "rateMax",
-  ]) {
-    if (sp[k]) params.set(k, sp[k]!);
-  }
-  return params.toString();
-}
-
 export default async function BIPage({
   searchParams,
 }: {
@@ -298,13 +211,13 @@ export default async function BIPage({
 
     // Build type-aware WHERE clause: use affiliate library lookup so that records
     // whose affiliateType was not stored but is now resolvable are still matched.
-    const typeFilter = csv(sp, "types");
+    const typeFilter = csvFilterValues(sp, "types").filter((v) => v !== EMPTY_FILTER_VALUE);
     const typeAffNames = typeFilter.length
       ? filterContext.affLibrary
           .filter((a) => typeFilter.includes(resolveTypePage(a.platformAffiliateName, null)))
           .map((a) => a.platformAffiliateName.trim())
       : undefined;
-    const userWhere = buildWhere(sp, typeAffNames);
+    const userWhere = buildSalesRecordWhereFromParams(sp, typeAffNames);
     where = {
       AND: [baseWhere, userWhere],
     };
@@ -322,7 +235,7 @@ export default async function BIPage({
         actions={
           isStaff(role) && (tab === "dashboard" || tab === "detail") && (
             <a
-              href={`/api/sales/export?${exportQueryString(sp)}`}
+              href={`/api/sales/export?${exportSalesFilterQueryString(sp)}`}
               className="btn-secondary"
             >
               <Download className="h-4 w-4" /> 导出当前筛选
@@ -364,7 +277,7 @@ export default async function BIPage({
           affLibrary={filterContext!.affLibrary}
           isChannel={isChannel}
           isBrand={isBrand}
-          regions={csv(sp, "regions")}
+          regions={csvFilterValues(sp, "regions")}
         />
       )}
       {tab === "detail" && isStaff(role) && (
@@ -863,7 +776,7 @@ async function DetailTab({
   return (
     <>
       <BIFilters options={filterOptions} />
-      <SalesDetailTable records={detailRows} customers={customers} />
+      <SalesDetailTable records={detailRows} customers={customers} total={total} filterParams={sp} />
       <div className="flex items-center justify-between text-sm">
         <span className="text-slate-500">共 {formatNumber(total)} 条</span>
         {pages > 1 && (
@@ -970,14 +883,14 @@ async function CleanupTab({
 
   // Serialize current URL-based filter to the format /api/sales/clear expects
   const filterJson = JSON.stringify({
-    platforms: csv(sp, "platforms"),
-    programs: csv(sp, "programs"),
-    brands: csv(sp, "brands"),
-    regions: csv(sp, "regions"),
-    stores: csv(sp, "stores"),
-    affiliateNames: csv(sp, "affiliateNames"),
-    affiliateTypes: csv(sp, "types"),
-    asins: csv(sp, "asins"),
+    platforms: csvFilterValues(sp, "platforms"),
+    programs: csvFilterValues(sp, "programs"),
+    brands: csvFilterValues(sp, "brands"),
+    regions: csvFilterValues(sp, "regions"),
+    stores: csvFilterValues(sp, "stores"),
+    affiliateNames: csvFilterValues(sp, "affiliateNames"),
+    affiliateTypes: csvFilterValues(sp, "types"),
+    asins: csvFilterValues(sp, "asins"),
     from: sp.from ?? "",
     to: sp.to ?? "",
   });

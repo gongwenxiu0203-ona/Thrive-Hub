@@ -3,7 +3,12 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 import { isStaff } from "@/lib/permissions";
-import { parseDateOnlyEnd, parseDateOnlyStart } from "@/lib/dateRange";
+import {
+  buildSalesRecordWhereFromParams,
+  csvFilterValues,
+  EMPTY_FILTER_VALUE,
+  type SalesRecordFilterParams,
+} from "@/lib/salesRecordFilters";
 
 // Clear sales records by filter. No row-count limit.
 // Body: { filter: { platforms?, programs?, brands?, regions?, stores?,
@@ -44,54 +49,36 @@ export async function POST(req: Request) {
   }
 
   const f = body.filter ?? {};
-  const where: Prisma.SalesRecordWhereInput = { deletedAt: null, batch: { deletedAt: null } };
-  let hasUserFilter = false;
-  if (f.platforms?.length)
-    where.affiliatePlatform = { in: f.platforms };
-  if (f.platforms?.length) hasUserFilter = true;
-  if (f.programs?.length) {
-    where.affiliateProgram = { in: f.programs };
-    hasUserFilter = true;
+  const filterParams: SalesRecordFilterParams = {
+    platforms: f.platforms?.join(","),
+    programs: f.programs?.join(","),
+    brands: f.brands?.join(","),
+    regions: f.regions?.join(","),
+    stores: f.stores?.join(","),
+    affiliateNames: f.affiliateNames?.join(","),
+    types: f.affiliateTypes?.join(","),
+    asins: f.asins?.join(","),
+    from: f.from,
+    to: f.to,
+  };
+  const hasUserFilter = Object.values(filterParams).some(Boolean) || !!f.customerId;
+
+  const types = csvFilterValues(filterParams, "types").filter((v) => v !== EMPTY_FILTER_VALUE);
+  let typeAffNames: string[] | undefined;
+  if (types.length) {
+    const affLibrary = await prisma.affiliate.findMany({
+      where: { affiliateType: { in: types } },
+      select: { platformAffiliateName: true },
+    });
+    typeAffNames = affLibrary.map((a) => a.platformAffiliateName.trim()).filter(Boolean);
   }
-  if (f.brands?.length) {
-    where.brand = { in: f.brands };
-    hasUserFilter = true;
-  }
-  if (f.regions?.length) {
-    where.region = { in: f.regions };
-    hasUserFilter = true;
-  }
-  if (f.stores?.length) {
-    where.store = { in: f.stores };
-    hasUserFilter = true;
-  }
-  if (f.affiliateNames?.length)
-    where.affiliateName = { in: f.affiliateNames };
-  if (f.affiliateNames?.length) hasUserFilter = true;
-  if (f.affiliateTypes?.length) {
-    where.affiliateType = { in: f.affiliateTypes };
-    hasUserFilter = true;
-  }
-  if (f.asins?.length) {
-    where.asin = { in: f.asins };
-    hasUserFilter = true;
-  }
-  if (f.customerId) {
-    where.customerId = f.customerId;
-    hasUserFilter = true;
-  }
-  if (f.from || f.to) {
-    hasUserFilter = true;
-    where.orderDate = {};
-    if (f.from) {
-      const start = parseDateOnlyStart(f.from);
-      if (start) where.orderDate.gte = start;
-    }
-    if (f.to) {
-      const end = parseDateOnlyEnd(f.to);
-      if (end) where.orderDate.lte = end;
-    }
-  }
+  const where: Prisma.SalesRecordWhereInput = {
+    AND: [
+      { deletedAt: null, batch: { deletedAt: null } },
+      buildSalesRecordWhereFromParams(filterParams, typeAffNames),
+      ...(f.customerId ? [{ customerId: f.customerId }] : []),
+    ],
+  };
 
   // Require at least one filter to prevent accidental全表删除.
   if (!hasUserFilter) {

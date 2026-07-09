@@ -5,6 +5,7 @@ import { MultiSelectFilter } from "@/components/ui/MultiSelectFilter";
 import { DateRangeFilter } from "./DateRangeFilter";
 import { X } from "lucide-react";
 import { useState, useEffect } from "react";
+import { EMPTY_FILTER_VALUE } from "@/lib/salesRecordFilters";
 
 const FILTER_KEYS = [
   "platforms",
@@ -74,8 +75,10 @@ export function BIFilters({
 
   const hasAny = FILTER_KEYS.some((k) => sp.get(k));
 
-  const toOpts = (xs: string[]) =>
-    xs.filter(Boolean).map((v) => ({ value: v, label: v }));
+  const toOpts = (xs: string[]) => [
+    { value: EMPTY_FILTER_VALUE, label: "（空）" },
+    ...xs.filter(Boolean).map((v) => ({ value: v, label: v })),
+  ];
 
   return (
     <div className="card p-4">
