@@ -106,6 +106,7 @@ export const CONTRACT_TYPE_LABELS: Record<string, string> = {
   CHANNEL: "渠道商合同",
   BRAND: "品牌方合同",
   REBATE: "返佣合同",
+  TRANSACTIONAL: "事务性合同",
 };
 
 export const CONTRACT_STATUS_LABELS: Record<string, string> = {

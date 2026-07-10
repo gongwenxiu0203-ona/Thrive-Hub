@@ -1,10 +1,11 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
-import { FilePlus2, Upload } from "lucide-react";
+import { FilePlus2, Upload, FileUp } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { ContractV4Form } from "./ContractV4Form";
 import { UploadExistingForm } from "./UploadExistingForm";
+import { TransactionalUploadForm } from "./TransactionalUploadForm";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "新建合同 · Thraive联盟营销系统" };
@@ -20,7 +21,7 @@ export default async function NewContractPage({
   const sp = await searchParams;
   const customerId = sp.customerId;
   const contractId = sp.contractId; // 编辑模式
-  const mode = sp.mode === "upload" ? "upload" : sp.mode === "new" ? "new" : null;
+  const mode = sp.mode === "upload" ? "upload" : sp.mode === "transactional" ? "transactional" : sp.mode === "new" ? "new" : null;
 
   let customer: { id: string; brandName: string } | null = null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -40,7 +41,7 @@ export default async function NewContractPage({
       where: { id: contractId },
     });
     if (!existingContract) notFound();
-    if (!customer) {
+    if (!customer && existingContract.customerId) {
       customer = await prisma.customer.findUnique({
         where: { id: existingContract.customerId },
         select: { id: true, brandName: true },
@@ -88,7 +89,7 @@ export default async function NewContractPage({
           <h1 className="text-xl font-bold text-slate-900">新建合同</h1>
           <p className="mt-1 text-sm text-slate-500">请选择创建方式</p>
         </div>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-3">
           <Link
             href={`/contracts/new?mode=new${qs}`}
             className="card flex flex-col gap-2 p-6 transition-colors hover:border-brand-400 hover:bg-brand-50/30"
@@ -105,7 +106,32 @@ export default async function NewContractPage({
             <p className="text-base font-semibold text-slate-800">上传已有合同</p>
             <p className="text-sm text-slate-500">直接上传 .docx，系统自动识别甲方与合作信息；字段齐全则一键推送审核。</p>
           </Link>
+          <Link
+            href="/contracts/new?mode=transactional"
+            className="card flex flex-col gap-2 p-6 transition-colors hover:border-brand-400 hover:bg-brand-50/30"
+          >
+            <FileUp className="h-6 w-6 text-brand-600" />
+            <p className="text-base font-semibold text-slate-800">上传事务性合同</p>
+            <p className="text-sm text-slate-500">不识别字段、不关联客户、不走审核模板，仅上传源文件并归档。</p>
+          </Link>
         </div>
+      </div>
+    );
+  }
+
+  if (mode === "transactional") {
+    return (
+      <div className="mx-auto max-w-3xl space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-xl font-bold text-slate-900">上传事务性合同</h1>
+            <p className="mt-1 text-sm text-slate-500">仅填写合同类型、合同负责人并上传源文件</p>
+          </div>
+          <Link href="/contracts/new" className="text-sm text-slate-500 hover:text-slate-700">
+            ← 返回选择创建方式
+          </Link>
+        </div>
+        <TransactionalUploadForm users={users} currentUserId={session.userId} />
       </div>
     );
   }

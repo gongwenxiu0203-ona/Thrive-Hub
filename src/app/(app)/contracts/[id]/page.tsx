@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { FileDown, Pencil } from "lucide-react";
+import { ExternalLink, FileDown, Pencil } from "lucide-react";
 import { BackButton } from "@/components/BackButton";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
@@ -70,14 +70,20 @@ export default async function ContractDetailPage({
   });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   if (!contract || (contract as any).deletedAt) notFound();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const c = contract as any;
+  const isTransactionalContract = c.uploadType === "TRANSACTIONAL" || contract.type === "TRANSACTIONAL";
 
   // 行级权限校验
   if (session.role === "BRAND" && session.brandName) {
-    if (contract.customer.brandName !== session.brandName) notFound();
+    if (!contract.customer || contract.customer.brandName !== session.brandName) notFound();
   } else if (session.role === "CHANNEL") {
     if (
-      contract.customer.channelUserId !== session.userId &&
-      contract.customer.createdById !== session.userId
+      !contract.customer ||
+      (
+        contract.customer.channelUserId !== session.userId &&
+        contract.customer.createdById !== session.userId
+      )
     ) {
       notFound();
     }
@@ -151,10 +157,6 @@ export default async function ContractDetailPage({
     (isReviewer || isAdmin) &&
     contract.status === "REVIEWING" &&
     !!currentReview;
-
-  // Field values keyed for compare view + review panel (v3 template fields).
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const c = contract as any;
 
   // 「上传已有合同」的缺失字段：用 contract 表实际列回查（与 AI 抽取结果分离）
   const uploadValueByKey: Record<string, unknown> = {
@@ -357,7 +359,7 @@ export default async function ContractDetailPage({
       </div>
 
       {/* 上传已有合同：缺失字段提醒 */}
-      {uploadMissing.length > 0 && (
+      {!isTransactionalContract && uploadMissing.length > 0 && (
         <div className="card border-amber-200 bg-amber-50 p-4">
           <div className="flex items-start gap-3">
             <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
@@ -382,7 +384,7 @@ export default async function ContractDetailPage({
       )}
 
       {/* 状态流转 */}
-      <div className="card flex items-center gap-2 overflow-x-auto p-4">
+      {!isTransactionalContract && <div className="card flex items-center gap-2 overflow-x-auto p-4">
         {CONTRACT_STATUS_ORDER.map((s, i) => {
           const reached =
             CONTRACT_STATUS_ORDER.indexOf(contract.status) >= i;
@@ -403,10 +405,10 @@ export default async function ContractDetailPage({
             </div>
           );
         })}
-      </div>
+      </div>}
 
       {/* 合同审核：提交审核后置顶展示；上传「签署完成存档」无需审核，不展示 */}
-      {c.uploadArchiveMode !== "SIGNED_ARCHIVE" && (reviewRounds.length > 0 || canActReview) && (
+      {!isTransactionalContract && c.uploadArchiveMode !== "SIGNED_ARCHIVE" && (reviewRounds.length > 0 || canActReview) && (
         <ReviewerActionsPanel
           contractId={contract.id}
           contractStatus={contract.status}
@@ -422,27 +424,29 @@ export default async function ContractDetailPage({
       )}
 
       {/* 合同流程：生成 + 提交审核（双路径）+ 盖章 + 版本历史 */}
-      <ContractWorkflowPanel
-        contractId={contract.id}
-        status={contract.status}
-        archived={c.uploadArchiveMode === "SIGNED_ARCHIVE"}
-        hasTemplate={!!c.templateId}
-        hasGeneratedDoc={!!contract.generatedDocUrl}
-        pendingNewUpload={!!c.pendingNewUpload}
-        hasSourceAnnotations={!!c.hasSourceAnnotations}
-        stampStatus={c.stampStatus ?? "NONE"}
-        stampedDocUrl={c.stampedDocUrl ?? null}
-        isAdmin={isAdmin}
-        versions={contract.versions.map((v): ContractVersionRow => ({
-          id: v.id,
-          versionNo: v.versionNo,
-          fileUrl: v.fileUrl,
-          fileType: v.fileType,
-          reason: v.reason,
-          createdByName: v.createdBy?.name ?? "—",
-          createdAt: v.createdAt.toISOString(),
-        }))}
-      />
+      {!isTransactionalContract && (
+        <ContractWorkflowPanel
+          contractId={contract.id}
+          status={contract.status}
+          archived={c.uploadArchiveMode === "SIGNED_ARCHIVE"}
+          hasTemplate={!!c.templateId}
+          hasGeneratedDoc={!!contract.generatedDocUrl}
+          pendingNewUpload={!!c.pendingNewUpload}
+          hasSourceAnnotations={!!c.hasSourceAnnotations}
+          stampStatus={c.stampStatus ?? "NONE"}
+          stampedDocUrl={c.stampedDocUrl ?? null}
+          isAdmin={isAdmin}
+          versions={contract.versions.map((v): ContractVersionRow => ({
+            id: v.id,
+            versionNo: v.versionNo,
+            fileUrl: v.fileUrl,
+            fileType: v.fileType,
+            reason: v.reason,
+            createdByName: v.createdBy?.name ?? "—",
+            createdAt: v.createdAt.toISOString(),
+          }))}
+        />
+      )}
 
       {/* 合同基础信息 */}
       <section className="card p-5">
@@ -451,14 +455,14 @@ export default async function ContractDetailPage({
           <Field label="合同编号" value={contract.contractNo} />
           <Field
             label="关联客户"
-            value={
+            value={contract.customer ? (
               <Link
                 href={`/customers/${contract.customerId}`}
                 className="text-brand-700 hover:underline"
               >
                 {contract.customer.brandName}
               </Link>
-            }
+            ) : "—"}
           />
           <Field
             label="合同类型"
@@ -486,14 +490,14 @@ export default async function ContractDetailPage({
       </section>
 
       {/* 合同字段展示：与创建合同一致分为四个业务板块 */}
-      {reviewFieldGroups
+      {!isTransactionalContract && reviewFieldGroups
         .filter((group) => group.fields.some((field) => !field.key.startsWith("partyB")))
         .map((group) => (
         <ReviewFieldDisplaySection key={group.title} title={group.title} fields={group.fields} />
       ))}
 
       {/* 合同中的乙方详细信息 */}
-      <section className="card p-5">
+      {!isTransactionalContract && <section className="card p-5">
         <h2 className="mb-4 font-semibold text-slate-900">乙方信息</h2>
         <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
           <Field label="乙方公司" value={partyBCompanyLabels[c.partyBCompany] ?? c.partyBCompany ?? "—"} />
@@ -511,10 +515,10 @@ export default async function ContractDetailPage({
             }
           />
         </dl>
-      </section>
+      </section>}
 
       {/* 旧版合同兜底：保留原文对照 */}
-      {!c.fillMethod && (
+      {!isTransactionalContract && !c.fillMethod && (
         <ContractCompare
           contractText={contract.contractText ?? ""}
           fields={reviewFieldRows.map((field) => ({
@@ -523,6 +527,37 @@ export default async function ContractDetailPage({
             value: field.value,
           }))}
         />
+      )}
+
+      {isTransactionalContract && (
+        <section className="card p-5">
+          <h2 className="mb-1 font-semibold text-slate-900">事务性合同源文件</h2>
+          <p className="mb-4 text-sm text-slate-400">源文件不参与字段识别、模板生成或审核流程</p>
+          {contract.fileUrl ? (
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 px-3 py-3">
+              <span className="min-w-0 flex-1 truncate text-sm text-slate-700">
+                {files.find((file) => file.fileUrl === contract.fileUrl)?.fileName ?? "事务性合同源文件"}
+              </span>
+              <a
+                href={contract.fileUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="btn-outline inline-flex items-center gap-1.5 text-sm"
+              >
+                <ExternalLink className="h-4 w-4" /> 在线查看
+              </a>
+              <a
+                href={contract.fileUrl}
+                download
+                className="btn-secondary inline-flex items-center gap-1.5 text-sm"
+              >
+                <FileDown className="h-4 w-4" /> 下载源文件
+              </a>
+            </div>
+          ) : (
+            <p className="text-sm text-slate-400">暂无源文件</p>
+          )}
+        </section>
       )}
 
       {/* 合同文件 */}

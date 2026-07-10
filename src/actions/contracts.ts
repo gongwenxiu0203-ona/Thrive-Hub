@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
+import { saveUploadedFile } from "@/lib/upload";
 import { bumpCustomerStatus } from "@/lib/customer";
 import {
   commissionConfigFromLegacy,
@@ -67,6 +68,20 @@ export type ContractSaveResult = {
   error?: string;
   contractId?: string;
 };
+
+async function nextContractNoByPrefix(prefix: string): Promise<string> {
+  const year = new Date().getFullYear();
+  const existing = await prisma.contract.findMany({
+    where: { contractNo: { startsWith: `${prefix}-${year}-` } },
+    select: { contractNo: true },
+  });
+  let max = 0;
+  for (const { contractNo } of existing) {
+    const seq = parseInt(contractNo.split("-").pop() ?? "0", 10);
+    if (!isNaN(seq) && seq > max) max = seq;
+  }
+  return `${prefix}-${year}-${String(max + 1).padStart(3, "0")}`;
+}
 
 /** Return the next available contract number for the given prefix (LYNQ | THRAIVE). */
 export async function nextContractNo(prefix: "LYNQ" | "THRAIVE"): Promise<string> {
@@ -433,6 +448,56 @@ export interface ContractV4Payload {
   partyBCompany?: string;             // "THRAIVE" | "LINGYUE"
   partyBBankAccounts?: string;        // JSON array of bank keys
   specialCommissionTerms?: string;
+}
+
+export async function uploadTransactionalContract(
+  fd: FormData,
+): Promise<ContractSaveResult> {
+  const session = await requireSession();
+  const file = fd.get("file");
+  const ownerId = str(fd, "ownerId") || session.userId;
+  const type = str(fd, "type") || "TRANSACTIONAL";
+
+  if (type !== "TRANSACTIONAL") {
+    return { ok: false, error: "事务性合同类型无效" };
+  }
+  if (!(file instanceof File)) {
+    return { ok: false, error: "请上传事务性合同文件" };
+  }
+
+  const saved = await saveUploadedFile(file);
+  const contractNo = await nextContractNoByPrefix("TX");
+  const contract = await prisma.contract.create({
+    data: {
+      contractNo,
+      customerId: null,
+      type: "TRANSACTIONAL",
+      status: "COMPLETED",
+      ownerId,
+      reviewerId: null,
+      createdById: session.userId,
+      fileUrl: saved.fileUrl,
+      generatedDocUrl: saved.fileUrl,
+      fillMethod: "TRANSACTIONAL_UPLOAD",
+      uploadType: "TRANSACTIONAL",
+      uploadArchiveMode: "SIGNED_ARCHIVE",
+      extractedBy: null,
+    },
+  });
+
+  await prisma.attachment.create({
+    data: {
+      fileName: saved.fileName,
+      fileUrl: saved.fileUrl,
+      fileSize: saved.fileSize,
+      entityType: "CONTRACT",
+      entityId: contract.id,
+      uploadedById: session.userId,
+    },
+  });
+
+  revalidatePath("/contracts");
+  return { ok: true, contractId: contract.id };
 }
 
 /** Resolve fixed Party B identity fields based on the selected company key.

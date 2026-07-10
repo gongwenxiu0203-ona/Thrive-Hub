@@ -51,6 +51,7 @@ function commissionConfigValue(ct: Record<string, unknown>, path: string[]): unk
 }
 
 function missingContractFields(ct: Record<string, unknown>): string[] {
+  if (ct.type === "TRANSACTIONAL" || ct.uploadType === "TRANSACTIONAL") return [];
   const required: Array<[string, unknown]> = [
     ["甲方公司名称", ct.partyA],
     ["销售平台 / 推广平台", ct.promoPlatform],
@@ -135,7 +136,7 @@ export default async function ContractsPage({
       const ql = q.toLowerCase();
       if (
         !ct.contractNo.toLowerCase().includes(ql) &&
-        !ct.customer.brandName.toLowerCase().includes(ql)
+        !(ct.customer?.brandName ?? "").toLowerCase().includes(ql)
       )
         return false;
     }
@@ -221,12 +222,16 @@ export default async function ContractsPage({
                     </Link>
                   </td>
                   <td className="px-4 py-3">
-                    <Link
-                      href={`/customers/${ct.customerId}`}
-                      className="text-slate-700 hover:text-brand-600 hover:underline"
-                    >
-                      {ct.customer.brandName}
-                    </Link>
+                    {ct.customer ? (
+                      <Link
+                        href={`/customers/${ct.customerId}`}
+                        className="text-slate-700 hover:text-brand-600 hover:underline"
+                      >
+                        {ct.customer.brandName}
+                      </Link>
+                    ) : (
+                      <span className="text-slate-300">—</span>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">

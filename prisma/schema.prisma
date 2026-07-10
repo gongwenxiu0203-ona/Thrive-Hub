@@ -189,8 +189,8 @@ model CustomerAuthorizationInfo {
 model Contract {
   id         String @id @default(cuid())
   contractNo String @unique
-  customerId String // 必须从客户管理中选取
-  type       String @default("CHANNEL") // CHANNEL 渠道商 | BRAND 品牌方 | REBATE 返佣
+  customerId String? // 新建/上传已有合同必须从客户管理中选取；事务性合同允许为空
+  type       String @default("CHANNEL") // CHANNEL 渠道商 | BRAND 品牌方 | REBATE 返佣 | TRANSACTIONAL 事务性合同
   status     String @default("IN_PROGRESS") // IN_PROGRESS 推进中 | REVIEWING 审核中 | SIGNING 签署中 | COMPLETED 签署完成
 
   ownerId    String? // 合同负责人（提交审核人）
@@ -289,7 +289,7 @@ model Contract {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  customer     Customer              @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  customer     Customer?             @relation(fields: [customerId], references: [id], onDelete: Cascade)
   createdBy    User                  @relation("ContractCreator", fields: [createdById], references: [id])
   owner        User?                 @relation("ContractOwner", fields: [ownerId], references: [id])
   reviewer     User?                 @relation("ContractReviewer", fields: [reviewerId], references: [id])
