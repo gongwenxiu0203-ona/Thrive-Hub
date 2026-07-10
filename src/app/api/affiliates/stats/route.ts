@@ -34,7 +34,18 @@ export async function GET(req: NextRequest) {
   ];
   if (sources.length)     where.source            = { in: sources };
   if (categories.length)  where.category          = { in: categories };
-  if (types.length)       where.affiliateType     = { in: types };
+  if (types.length) {
+    const normalTypes = types.filter((type) => type !== "待定");
+    where.AND = [
+      ...(where.AND ?? []),
+      {
+        OR: [
+          ...(normalTypes.length ? [{ affiliateType: { in: normalTypes } }] : []),
+          ...(types.includes("待定") ? [{ affiliateType: "待定" }, { affiliateType: null }, { affiliateType: "" }] : []),
+        ],
+      },
+    ];
+  }
   if (brands.length)      where.brand             = { in: brands };
   if (statuses.length)    where.developmentStatus = { in: statuses };
   if (owners.length)      where.personInChargeId  = { in: owners };
@@ -151,7 +162,7 @@ export async function GET(req: NextRequest) {
     total: affiliates.length,
     bySource:         countBy((a) => a.source),
     byCategory:       countBy((a) => a.category),
-    byType:           countBy((a) => a.affiliateType),
+    byType:           countBy((a) => a.affiliateType || "待定"),
     byBrand:          countBy((a) => a.brand),
     byStatus:         countBy((a) => a.developmentStatus),
     byTag:            flatJsonCount((a) => a.tags),

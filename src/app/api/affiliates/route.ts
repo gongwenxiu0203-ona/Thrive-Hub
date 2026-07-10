@@ -26,6 +26,8 @@ export async function GET(req: NextRequest) {
   const regions = multi("regions");
   const dateFrom = sp.get("dateFrom")?.trim();
   const dateTo = sp.get("dateTo")?.trim();
+  const sort = sp.get("sort")?.trim() ?? "createdAt";
+  const dir = sp.get("dir") === "asc" ? "asc" : "desc";
   const names = multi("names");        // 联盟商名称 (platformAffiliateName)
   const pics = multi("pics");          // 负责人 (matches User.name OR personInChargeName text)
   // Sales-linked filters (brand / affiliateType from SalesRecord)
@@ -44,7 +46,18 @@ export async function GET(req: NextRequest) {
   }
   if (sources.length) where.source = { in: sources };
   if (categories.length) where.category = { in: categories };
-  if (types.length) where.affiliateType = { in: types };
+  if (types.length) {
+    const normalTypes = types.filter((type) => type !== "待定");
+    where.AND = [
+      ...(where.AND ?? []),
+      {
+        OR: [
+          ...(normalTypes.length ? [{ affiliateType: { in: normalTypes } }] : []),
+          ...(types.includes("待定") ? [{ affiliateType: "待定" }, { affiliateType: null }, { affiliateType: "" }] : []),
+        ],
+      },
+    ];
+  }
   if (brands.length) where.brand = { in: brands };
   if (statuses.length) where.developmentStatus = { in: statuses };
   if (owners.length) where.personInChargeId = { in: owners };
@@ -121,7 +134,7 @@ export async function GET(req: NextRequest) {
     prisma.affiliate.findMany({
       where,
       include: { personInCharge: { select: { id: true, name: true } } },
-      orderBy: { createdAt: "desc" },
+      orderBy: sort === "createdAt" ? { createdAt: dir } : { createdAt: "desc" },
       skip: (page - 1) * pageSize,
       take: pageSize,
     }),
@@ -169,8 +182,9 @@ export async function POST(req: NextRequest) {
       internalAffiliateName: body.internalAffiliateName ?? null,
       source: body.source ?? null,
       category: body.category ?? null,
-      affiliateType: body.affiliateType ?? null,
+      affiliateType: body.affiliateType || "待定",
       tags: serialise(body.tags),
+      promotionPlacements: serialise(body.promotionPlacements),
       websiteLink: body.websiteLink ?? null,
       websiteTraffic: body.websiteTraffic ? Number(body.websiteTraffic) : null,
       websitePlacements: serialise(body.websitePlacements),
@@ -209,7 +223,7 @@ export async function POST(req: NextRequest) {
       sampleShipping: body.sampleShipping ?? null,
       brandEntries: serialise(body.brandEntries),
       promoContents: serialise(body.promoContents),
-      personInChargeId: body.personInChargeId ?? null,
+      mediaKitItems: serialise(body.mediaKitItems),
     },
   });
 

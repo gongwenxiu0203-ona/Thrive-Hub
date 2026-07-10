@@ -54,20 +54,43 @@ export async function POST(req: NextRequest) {
   });
 
   // Load existing affiliate names for dedup check
-  const existing = await prisma.affiliate.findMany({
-    select: { id: true, platformAffiliateName: true },
-  });
+  const existing = await prisma.affiliate.findMany();
 
   const dataRows = rows.slice(1); // skip header
   const results: {
     row: number;
-    status: "created" | "skipped" | "duplicate_warning";
+    status: "created" | "merged" | "duplicate_warning";
     name: string;
     duplicateOf?: string;
+    mergedFields?: string[];
   }[] = [];
 
   const serialise = (v: unknown) =>
     typeof v === "string" ? v : JSON.stringify(v ?? []);
+
+  const normalizeName = (value: string) => value.trim().toLowerCase();
+  const isBlank = (value: unknown) => value == null || String(value).trim() === "";
+  const mergeJsonArray = (current: string | null | undefined, incoming: string) => {
+    let base: unknown[] = [];
+    let add: unknown[] = [];
+    try {
+      const parsed = JSON.parse(current ?? "[]");
+      if (Array.isArray(parsed)) base = parsed;
+    } catch { /* ignore */ }
+    try {
+      const parsed = JSON.parse(incoming || "[]");
+      if (Array.isArray(parsed)) add = parsed;
+    } catch { /* ignore */ }
+    const seen = new Set(base.map((item) => JSON.stringify(item)));
+    for (const item of add) {
+      const key = JSON.stringify(item);
+      if (!seen.has(key)) {
+        seen.add(key);
+        base.push(item);
+      }
+    }
+    return JSON.stringify(base);
+  };
 
   for (let ri = 0; ri < dataRows.length; ri++) {
     const row = dataRows[ri];
@@ -79,16 +102,6 @@ export async function POST(req: NextRequest) {
 
     const name = fields["platformAffiliateName"];
     if (!name) continue;
-
-    // Check duplicates
-    const dupMatch = existing.find((e) =>
-      mightBeDuplicate(e.platformAffiliateName, name),
-    );
-
-    if (dupMatch && dupMatch.platformAffiliateName.toLowerCase() === name.toLowerCase()) {
-      results.push({ row: ri + 2, status: "skipped", name, duplicateOf: dupMatch.platformAffiliateName });
-      continue;
-    }
 
     const parseNum = (k: string) => {
       const v = parseFloat(fields[k] ?? "");
@@ -111,54 +124,91 @@ export async function POST(req: NextRequest) {
       return JSON.stringify([{ placement: p, flatfee: isNaN(fee) ? null : fee }]);
     };
 
-    await prisma.affiliate.create({
-      data: {
-        batchId: batch.id,
-        region: fields["region"] ? normalizeRegion(fields["region"]) : null,
-        platformAffiliateName: name,
-        internalAffiliateName: fields["internalAffiliateName"] || null,
-        source: fields["source"] || null,
-        category: fields["category"] || null,
-        affiliateType: fields["affiliateType"] || null,
-        tags: parseMulti("tags"),
-        websiteLink: fields["websiteLink"] || null,
-        websiteTraffic: parseNum("websiteTraffic"),
-        websitePlacements: buildPlacements("websitePlacement", "websiteFlatfee"),
-        websiteNote: fields["websiteNote"] || null,
-        instagramLink: fields["instagramLink"] || null,
-        insFollowers: parseNum("insFollowers"),
-        instagramPlacements: buildPlacements("instagramPlacement", "instagramFlatfee"),
-        insNote: fields["insNote"] || null,
-        facebookLink: fields["facebookLink"] || null,
-        fbFollowers: parseNum("fbFollowers"),
-        facebookPlacements: buildPlacements("facebookPlacement", "facebookFlatfee"),
-        fbNote: fields["fbNote"] || null,
-        youtubeLink: fields["youtubeLink"] || null,
-        youtubeFollowers: parseNum("youtubeFollowers"),
-        youtubePlacements: buildPlacements("youtubePlacement", "youtubeFlatfee"),
-        tiktokLink: fields["tiktokLink"] || null,
-        tiktokFollowers: parseNum("tiktokFollowers"),
-        tiktokPlacements: buildPlacements("tiktokPlacement", "tiktokFlatfee"),
-        amazonStorefrontLink: fields["amazonStorefrontLink"] || null,
-        topCreator: fields["topCreator"] || null,
-        storefrontFlatfee: parseNum("storefrontFlatfee"),
-        storefrontNote: fields["storefrontNote"] || null,
-        ltkLink: fields["ltkLink"] || null,
-        ltkFlatfee: parseNum("ltkFlatfee"),
-        pinterestLink: fields["pinterestLink"] || null,
-        pinterestFlatfee: parseNum("pinterestFlatfee"),
-        flatfeeSupplementary: fields["flatfeeSupplementary"] || null,
-        note: fields["note"] || null,
-        contactInfo: fields["contactInfo"] || null,
-        brand: fields["brand"] || null,
-        developmentStatus: fields["developmentStatus"] || null,
-        developmentDesc: fields["developmentDesc"] || null,
-        contactEmail: fields["contactEmail"] || null,
-        personInChargeName: fields["personInChargeName"] || null,
-        cooperationMode: parseMulti("cooperationMode"),
-        sampleShipping: fields["sampleShipping"] || null,
-      },
-    });
+    const createData = {
+      batchId: batch.id,
+      region: fields["region"] ? normalizeRegion(fields["region"]) : null,
+      platformAffiliateName: name,
+      internalAffiliateName: fields["internalAffiliateName"] || null,
+      source: fields["source"] || null,
+      category: fields["category"] || null,
+      affiliateType: fields["affiliateType"] || "待定",
+      tags: parseMulti("tags"),
+      websiteLink: fields["websiteLink"] || null,
+      websiteTraffic: parseNum("websiteTraffic"),
+      websitePlacements: buildPlacements("websitePlacement", "websiteFlatfee"),
+      websiteNote: fields["websiteNote"] || null,
+      instagramLink: fields["instagramLink"] || null,
+      insFollowers: parseNum("insFollowers"),
+      instagramPlacements: buildPlacements("instagramPlacement", "instagramFlatfee"),
+      insNote: fields["insNote"] || null,
+      facebookLink: fields["facebookLink"] || null,
+      fbFollowers: parseNum("fbFollowers"),
+      facebookPlacements: buildPlacements("facebookPlacement", "facebookFlatfee"),
+      fbNote: fields["fbNote"] || null,
+      youtubeLink: fields["youtubeLink"] || null,
+      youtubeFollowers: parseNum("youtubeFollowers"),
+      youtubePlacements: buildPlacements("youtubePlacement", "youtubeFlatfee"),
+      tiktokLink: fields["tiktokLink"] || null,
+      tiktokFollowers: parseNum("tiktokFollowers"),
+      tiktokPlacements: buildPlacements("tiktokPlacement", "tiktokFlatfee"),
+      amazonStorefrontLink: fields["amazonStorefrontLink"] || null,
+      topCreator: fields["topCreator"] || null,
+      storefrontFlatfee: parseNum("storefrontFlatfee"),
+      storefrontNote: fields["storefrontNote"] || null,
+      ltkLink: fields["ltkLink"] || null,
+      ltkFlatfee: parseNum("ltkFlatfee"),
+      pinterestLink: fields["pinterestLink"] || null,
+      pinterestFlatfee: parseNum("pinterestFlatfee"),
+      flatfeeSupplementary: fields["flatfeeSupplementary"] || null,
+      note: fields["note"] || null,
+      contactInfo: fields["contactInfo"] || null,
+      brand: fields["brand"] || null,
+      developmentStatus: fields["developmentStatus"] || null,
+      developmentDesc: fields["developmentDesc"] || null,
+      contactEmail: fields["contactEmail"] || null,
+      personInChargeName: fields["personInChargeName"] || null,
+      cooperationMode: parseMulti("cooperationMode"),
+      sampleShipping: fields["sampleShipping"] || null,
+    };
+
+    const exactMatch = existing.find((e) => normalizeName(e.platformAffiliateName) === normalizeName(name));
+    const dupMatch = existing.find((e) => mightBeDuplicate(e.platformAffiliateName, name));
+
+    if (exactMatch) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const updateData: any = {};
+      const mergedFields: string[] = [];
+      for (const [key, value] of Object.entries(createData)) {
+        if (key === "batchId" || key === "platformAffiliateName") continue;
+        if (["tags", "cooperationMode", "websitePlacements", "instagramPlacements", "facebookPlacements", "youtubePlacements", "tiktokPlacements"].includes(key)) {
+          const merged = mergeJsonArray((exactMatch as any)[key], String(value ?? "[]"));
+          if (merged !== ((exactMatch as any)[key] ?? "[]")) {
+            updateData[key] = merged;
+            mergedFields.push(key);
+          }
+          continue;
+        }
+        if (key === "affiliateType") {
+          if ((isBlank((exactMatch as any)[key]) || (exactMatch as any)[key] === "待定") && !isBlank(value)) {
+            updateData[key] = value;
+            mergedFields.push(key);
+          }
+          continue;
+        }
+        if (isBlank((exactMatch as any)[key]) && !isBlank(value)) {
+          updateData[key] = value;
+          mergedFields.push(key);
+        }
+      }
+      if (Object.keys(updateData).length > 0) {
+        await prisma.affiliate.update({ where: { id: exactMatch.id }, data: updateData });
+        Object.assign(exactMatch, updateData);
+      }
+      results.push({ row: ri + 2, status: "merged", name, duplicateOf: exactMatch.platformAffiliateName, mergedFields });
+      continue;
+    }
+
+    await prisma.affiliate.create({ data: createData });
 
     const isDupWarning = !!dupMatch;
     results.push({
@@ -169,18 +219,18 @@ export async function POST(req: NextRequest) {
     });
 
     // Update local cache for subsequent dedup checks
-    existing.push({ id: "new", platformAffiliateName: name });
+    existing.push({ ...createData, id: "new", deletedAt: null, createdAt: new Date(), updatedAt: new Date(), customerCooperations: "[]", brandEntries: "[]", promoContents: "[]", promotionPlacements: "[]", mediaKitItems: "[]" } as any);
   }
 
   const created = results.filter((r) => r.status === "created").length;
-  const skipped = results.filter((r) => r.status === "skipped").length;
+  const merged = results.filter((r) => r.status === "merged").length;
   const warnings = results.filter((r) => r.status === "duplicate_warning").length;
 
   // Update batch record count
   await prisma.affiliateBatch.update({
     where: { id: batch.id },
-    data: { recordCount: created + warnings },
+    data: { recordCount: created + warnings + merged },
   });
 
-  return NextResponse.json({ created, skipped, warnings, results });
+  return NextResponse.json({ created, merged, warnings, results });
 }

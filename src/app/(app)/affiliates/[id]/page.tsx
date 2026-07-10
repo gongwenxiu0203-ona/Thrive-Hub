@@ -9,6 +9,7 @@ import { AFFILIATE_DEV_STATUS_COLORS } from "@/lib/constants";
 import { parsePlacements } from "@/lib/affiliateFields";
 import AffiliateDetailClient from "./AffiliateDetailClient";
 import { AffiliateSalesPanel, type SaleRec } from "./AffiliateSalesPanel";
+import AffiliateMediaKitPanel, { type MediaKitItem } from "./AffiliateMediaKitPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -86,6 +87,10 @@ export default async function AffiliateDetailPage({
   let promoContents: { brand: string; publishedAt: string; promoLink: string }[] = [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   try { promoContents = JSON.parse((affiliate as any).promoContents ?? "[]"); } catch { /* ignore */ }
+
+  let mediaKitItems: MediaKitItem[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  try { mediaKitItems = JSON.parse((affiliate as any).mediaKitItems ?? "[]"); } catch { /* ignore */ }
 
   // Extract platforms with ANY recorded data for CoopReviewModal dropdown
   // (link auto-fills if present, but we show a platform as long as it has any data)
@@ -166,6 +171,12 @@ export default async function AffiliateDetailPage({
             </InfoGrid>
             {parseArr(affiliate.tags).length > 0 && (
               <TagRow label="联盟商标签" tags={parseArr(affiliate.tags)} />
+            )}
+            {parseArr((affiliate as unknown as { promotionPlacements?: string }).promotionPlacements).length > 0 && (
+              <TagRow
+                label="推广版位"
+                tags={parseArr((affiliate as unknown as { promotionPlacements?: string }).promotionPlacements)}
+              />
             )}
             {affiliate.note && (
               <div className="mt-3">
@@ -297,6 +308,10 @@ export default async function AffiliateDetailPage({
                 <span className="font-medium">Flatfee合作费用补充：</span>{affiliate.flatfeeSupplementary}
               </div>
             )}
+          </InfoCard>
+
+          <InfoCard title="Rate card / Media kit">
+            <AffiliateMediaKitPanel affiliateId={id} initialItems={mediaKitItems} />
           </InfoCard>
         </div>
 

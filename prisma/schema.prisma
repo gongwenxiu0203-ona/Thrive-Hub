@@ -449,6 +449,12 @@ model Affiliate {
   // 往期推广内容 (JSON [{brand, publishedAt, promoLink}]，可多条；用于 BI 推广内容看板反向拉取)
   promoContents String @default("[]")
 
+  // 推广版位标签 (JSON string[])
+  promotionPlacements String @default("[]")
+
+  // Rate card / media kit 附件识别记录 (JSON [{attachmentId,fileName,fileUrl,text,createdAt,error?}])
+  mediaKitItems String @default("[]")
+
   // 批次管理
   batchId String? // 关联 AffiliateBatch
 

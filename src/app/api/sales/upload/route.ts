@@ -274,6 +274,7 @@ export async function POST(req: Request) {
                 data: {
                   platformAffiliateName: name,
                   developmentStatus: "待开发 Not Yet Contacted",
+                  affiliateType: "待定",
                   tags: "[]",
                 },
               });

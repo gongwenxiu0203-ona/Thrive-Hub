@@ -57,7 +57,7 @@ async function loadOptions() {
   return {
     sources: distinct(affRows.map((a: any) => a.source)),
     categories: distinct(affRows.map((a: any) => a.category)),
-    types: distinct(affRows.map((a: any) => a.affiliateType)),
+    types: distinct([...affRows.map((a: any) => a.affiliateType || "待定"), "待定"]),
     tags: flatJson(affRows.map((a: any) => a.tags)),
     // 品牌：联盟商自身 brand + 多品牌记录(brandEntries) + 往期合作数据(销售记录) 的品牌并集
     brands: distinct([

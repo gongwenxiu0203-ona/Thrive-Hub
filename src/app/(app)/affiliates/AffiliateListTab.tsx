@@ -29,6 +29,7 @@ interface AffiliateRow {
   websiteLink: string | null;
   contactEmail: string | null;
   contactInfo: string | null;
+  createdAt: string;
   salesRevenue: number;
   salesUnits: number;
   personInCharge: { id: string; name: string } | null;
@@ -126,8 +127,8 @@ export default function AffiliateListTab({ options }: Props) {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState(sp.get("q") ?? "");
-  const [sortKey, setSortKey] = useState<string | null>(null);
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [sortKey, setSortKey] = useState<string | null>(sp.get("sort"));
+  const [sortDir, setSortDir] = useState<"asc" | "desc">(sp.get("dir") === "desc" ? "desc" : "asc");
   const [dateFromVal, setDateFromVal] = useState(sp.get("dateFrom") ?? "");
   const [dateToVal, setDateToVal] = useState(sp.get("dateTo") ?? "");
 
@@ -167,7 +168,7 @@ export default function AffiliateListTab({ options }: Props) {
   }
 
   const page = parseInt(sp.get("page") ?? "1", 10);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     setDateFromVal(sp.get("dateFrom") ?? "");
@@ -177,6 +178,13 @@ export default function AffiliateListTab({ options }: Props) {
   const buildQuery = useCallback(() => {
     const p = new URLSearchParams(sp.toString());
     if (q) p.set("q", q); else p.delete("q");
+    if (sortKey) {
+      p.set("sort", sortKey);
+      p.set("dir", sortDir);
+    } else {
+      p.delete("sort");
+      p.delete("dir");
+    }
     p.set("page", String(page));
     p.set("pageSize", String(PAGE_SIZE));
     return p;
@@ -195,7 +203,7 @@ export default function AffiliateListTab({ options }: Props) {
 
   function handleSearch(val: string) {
     setQ(val);
-    clearTimeout(debounceRef.current);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       const p = new URLSearchParams(sp.toString());
       if (val) p.set("q", val); else p.delete("q");
@@ -211,10 +219,14 @@ export default function AffiliateListTab({ options }: Props) {
   }
 
   function handleSort(key: string) {
-    if (sortKey === key) {
-      if (sortDir === "asc") setSortDir("desc");
-      else { setSortKey(null); }
-    } else { setSortKey(key); setSortDir("asc"); }
+    const nextDir = sortKey === key && sortDir === "asc" ? "desc" : "asc";
+    setSortKey(key);
+    setSortDir(nextDir);
+    const p = new URLSearchParams(sp.toString());
+    p.set("sort", key);
+    p.set("dir", nextDir);
+    p.delete("page");
+    router.push(`${pathname}?${p.toString()}`);
   }
 
   const sorted = sortKey ? [...data].sort((a, b) => {
@@ -227,6 +239,7 @@ export default function AffiliateListTab({ options }: Props) {
     else if (sortKey === "tiktokFollowers") { av = a.tiktokFollowers ?? -1; bv = b.tiktokFollowers ?? -1; }
     else if (sortKey === "youtubeFollowers") { av = a.youtubeFollowers ?? -1; bv = b.youtubeFollowers ?? -1; }
     else if (sortKey === "salesRevenue") { av = a.salesRevenue ?? -1; bv = b.salesRevenue ?? -1; }
+    else if (sortKey === "createdAt") { av = new Date(a.createdAt).getTime(); bv = new Date(b.createdAt).getTime(); }
     if (av === null || av === bv) return 0;
     if (typeof av === "number") return sortDir === "asc" ? (av as number) - (bv as number) : (bv as number) - (av as number);
     return sortDir === "asc" ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
@@ -419,6 +432,7 @@ export default function AffiliateListTab({ options }: Props) {
               <th className="px-4 py-2.5 text-left font-medium">来源</th>
               <th className="px-4 py-2.5 text-left font-medium">类目</th>
               <SortableHeader label="联盟商类型" sortKey="affiliateType" current={sortKey} dir={sortDir} onSort={handleSort} />
+              <SortableHeader label="入库时间" sortKey="createdAt" current={sortKey} dir={sortDir} onSort={handleSort} />
               <th className="px-4 py-2.5 text-left font-medium">标签</th>
               <th className="px-4 py-2.5 text-left font-medium">社媒粉丝(K)</th>
               <SortableHeader label="开发状态" sortKey="developmentStatus" current={sortKey} dir={sortDir} onSort={handleSort} />
@@ -430,9 +444,9 @@ export default function AffiliateListTab({ options }: Props) {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={13} className="py-10 text-center text-slate-400">加载中…</td></tr>
+              <tr><td colSpan={14} className="py-10 text-center text-slate-400">加载中…</td></tr>
             ) : sorted.length === 0 ? (
-              <tr><td colSpan={13} className="py-10 text-center text-slate-400">暂无数据</td></tr>
+              <tr><td colSpan={14} className="py-10 text-center text-slate-400">暂无数据</td></tr>
             ) : sorted.map((a) => {
               const tags = parseTags(a.tags);
               const statusColor = AFFILIATE_DEV_STATUS_COLORS[a.developmentStatus ?? ""] ?? "bg-slate-100 text-slate-600";
@@ -452,7 +466,10 @@ export default function AffiliateListTab({ options }: Props) {
                   <td className="px-4 py-2.5 text-slate-500">{a.internalAffiliateName ?? "—"}</td>
                   <td className="px-4 py-2.5 text-slate-600">{a.source ?? "—"}</td>
                   <td className="px-4 py-2.5 text-slate-600">{a.category ?? "—"}</td>
-                  <td className="px-4 py-2.5 text-slate-600 max-w-[160px] truncate" title={a.affiliateType ?? ""}>{a.affiliateType ?? "—"}</td>
+                  <td className="px-4 py-2.5 text-slate-600 max-w-[160px] truncate" title={a.affiliateType ?? "待定"}>{a.affiliateType || "待定"}</td>
+                  <td className="whitespace-nowrap px-4 py-2.5 text-xs text-slate-500">
+                    {new Date(a.createdAt).toLocaleDateString("zh-CN")}
+                  </td>
                   <td className="px-4 py-2.5">
                     <div className="flex flex-wrap gap-1">
                       {tags.slice(0, 2).map((t) => (

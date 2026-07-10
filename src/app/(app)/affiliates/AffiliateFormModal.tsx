@@ -16,6 +16,7 @@ import {
   AFFILIATE_DEV_STATUS_OPTIONS,
   COOPERATION_MODE_OPTIONS,
   SAMPLE_SHIPPING_OPTIONS,
+  AFFILIATE_PROMOTION_PLACEMENT_OPTIONS,
 } from "@/lib/constants";
 import { type PlacementEntry } from "@/lib/affiliateFields";
 
@@ -70,6 +71,7 @@ export default function AffiliateFormModal({ users, customers, currentUserId, af
   const isEdit = !!affiliate?.id;
 
   const [tags, setTags] = useState<string[]>(parseArr(affiliate?.tags));
+  const [promotionPlacements, setPromotionPlacements] = useState<string[]>(parseArr(affiliate?.promotionPlacements));
   const [modes, setModes] = useState<string[]>(parseArr(affiliate?.cooperationMode));
   const [websitePlacements, setWebsitePlacements] = useState<PlacementEntry[]>(parsePlacements(affiliate?.websitePlacements));
   const [instagramPlacements, setInstagramPlacements] = useState<PlacementEntry[]>(parsePlacements(affiliate?.instagramPlacements));
@@ -105,6 +107,7 @@ export default function AffiliateFormModal({ users, customers, currentUserId, af
     const body: Record<string, unknown> = {};
     fd.forEach((v, k) => { body[k] = v; });
     body.tags = JSON.stringify(tags);
+    body.promotionPlacements = JSON.stringify(promotionPlacements);
     body.cooperationMode = JSON.stringify(modes);
     body.websitePlacements = JSON.stringify(websitePlacements);
     body.instagramPlacements = JSON.stringify(instagramPlacements);
@@ -199,6 +202,13 @@ export default function AffiliateFormModal({ users, customers, currentUserId, af
             </Field>
             <Field label="联盟商标签 (多选)">
               <MultiCheck options={AFFILIATE_TAG_OPTIONS} selected={tags} onChange={setTags} />
+            </Field>
+            <Field label="推广版位 (多选)">
+              <MultiCheck
+                options={AFFILIATE_PROMOTION_PLACEMENT_OPTIONS}
+                selected={promotionPlacements}
+                onChange={setPromotionPlacements}
+              />
             </Field>
           </Section>
 

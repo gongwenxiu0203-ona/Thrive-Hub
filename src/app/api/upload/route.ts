@@ -10,6 +10,7 @@ const VALID_ENTITY_TYPES = new Set([
   "CUSTOMER_DEMO",
   "TASK",
   "CONTRACT",
+  "AFFILIATE",
 ]);
 
 export async function POST(req: Request) {

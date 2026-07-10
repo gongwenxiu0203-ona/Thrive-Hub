@@ -70,7 +70,7 @@ export async function PATCH(
     "developmentStatus","developmentDesc","contactEmail","personInChargeId",
     "sampleShipping","customerCooperations",
   ];
-  const jsonFields = ["tags","websitePlacements","instagramPlacements","facebookPlacements","youtubePlacements","tiktokPlacements","cooperationMode","brandEntries","promoContents"];
+  const jsonFields = ["tags","promotionPlacements","websitePlacements","instagramPlacements","facebookPlacements","youtubePlacements","tiktokPlacements","cooperationMode","brandEntries","promoContents","mediaKitItems"];
   const numericFields = ["websiteTraffic","insFollowers","fbFollowers","youtubeFollowers","tiktokFollowers","storefrontFlatfee","ltkFlatfee","pinterestFlatfee"];
 
   for (const k of simple) {

@@ -456,6 +456,13 @@ export const COOPERATION_MODE_OPTIONS = [
 // 样品寄送 (Excel AU)
 export const SAMPLE_SHIPPING_OPTIONS = ["是", "否", "均可"] as const;
 
+export const AFFILIATE_PROMOTION_PLACEMENT_OPTIONS = [
+  "Google Paid Search",
+  "Paid Social Traffic",
+  "Email newsletter",
+  "Organic Social Traffic",
+] as const;
+
 // 当前客户合作状态 (per-customer cooperation status, written back by coop review)
 export const AFFILIATE_COOP_STATUS_OPTIONS = [
   "待开发 Not Yet Contacted",

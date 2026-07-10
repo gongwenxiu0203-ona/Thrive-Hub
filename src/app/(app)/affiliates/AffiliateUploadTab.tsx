@@ -2,16 +2,17 @@
 
 import { useState, useRef, useEffect } from "react";
 import {
-  Download, Upload, AlertTriangle, CheckCircle2, XCircle,
+  Download, Upload, AlertTriangle, CheckCircle2,
   UserCheck, Trash2, RefreshCw, ChevronDown, Search,
 } from "lucide-react";
 import { UPLOADABLE_AFFILIATE_FIELDS } from "@/lib/affiliateFields";
 
 interface UploadResult {
   row: number;
-  status: "created" | "skipped" | "duplicate_warning";
+  status: "created" | "merged" | "duplicate_warning";
   name: string;
   duplicateOf?: string;
+  mergedFields?: string[];
 }
 
 interface BatchRecord {
@@ -193,7 +194,7 @@ export default function AffiliateUploadTab({ users, onComplete }: Props) {
   const [mapping, setMapping] = useState<Record<number, string>>({});
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [uploading, setUploading] = useState(false);
-  const [results, setResults] = useState<{ created: number; skipped: number; warnings: number; results: UploadResult[] } | null>(null);
+  const [results, setResults] = useState<{ created: number; merged: number; warnings: number; results: UploadResult[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Batch management
@@ -485,15 +486,15 @@ export default function AffiliateUploadTab({ users, onComplete }: Props) {
               <div className="flex items-center gap-2">
                 <AlertTriangle className="h-5 w-5 text-amber-500" />
                 <div>
-                  <p className="text-xs text-slate-500">疑似重复（已导入）</p>
-                  <p className="text-2xl font-bold text-amber-600">{results.warnings}</p>
+                  <p className="text-xs text-slate-500">合并到原记录</p>
+                  <p className="text-2xl font-bold text-amber-600">{results.merged}</p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <XCircle className="h-5 w-5 text-slate-400" />
+                <AlertTriangle className="h-5 w-5 text-slate-400" />
                 <div>
-                  <p className="text-xs text-slate-500">跳过（完全重复）</p>
-                  <p className="text-2xl font-bold text-slate-500">{results.skipped}</p>
+                  <p className="text-xs text-slate-500">疑似重复（已新增）</p>
+                  <p className="text-2xl font-bold text-amber-600">{results.warnings}</p>
                 </div>
               </div>
             </div>
@@ -514,13 +515,16 @@ export default function AffiliateUploadTab({ users, onComplete }: Props) {
                         <td className="py-1 pr-3 text-slate-400">第{r.row}行</td>
                         <td className="py-1 pr-3">{r.name}</td>
                         <td className="py-1 pr-3">
-                          {r.status === "skipped" ? (
-                            <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-600">已跳过</span>
+                          {r.status === "merged" ? (
+                            <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-emerald-700">已合并</span>
                           ) : (
                             <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-700">疑似重复</span>
                           )}
                         </td>
-                        <td className="py-1 text-slate-400">{r.duplicateOf ?? "—"}</td>
+                        <td className="py-1 text-slate-400">
+                          {r.duplicateOf ?? "—"}
+                          {r.mergedFields?.length ? ` · 新增 ${r.mergedFields.length} 个字段` : ""}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
