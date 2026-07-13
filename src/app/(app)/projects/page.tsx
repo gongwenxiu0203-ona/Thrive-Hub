@@ -34,7 +34,7 @@ export default async function ProjectsPage() {
     }),
     // 可关联的合同：签署完成的合同（一个客户可多项目，不再限制一合同一项目）
     prisma.contract.findMany({
-      where: { status: "COMPLETED" },
+      where: { status: "COMPLETED", customerId: { not: null } },
       select: {
         id: true,
         contractNo: true,
@@ -59,12 +59,15 @@ export default async function ProjectsPage() {
   ]);
 
   // 所有签署完成的合同都可关联（一客户多项目，不再排除已用）
-  const availableContracts = completedContracts.map((c) => ({
-    id: c.id,
-    contractNo: c.contractNo,
-    brandName: c.customer.brandName,
-    customerId: c.customerId,
-  }));
+  const availableContracts = completedContracts.flatMap((c) => {
+    if (!c.customer || !c.customerId) return [];
+    return [{
+      id: c.id,
+      contractNo: c.contractNo,
+      brandName: c.customer.brandName,
+      customerId: c.customerId,
+    }];
+  });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rows = (projects as any[]).map((p) => ({

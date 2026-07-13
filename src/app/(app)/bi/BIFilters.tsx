@@ -4,7 +4,7 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { MultiSelectFilter } from "@/components/ui/MultiSelectFilter";
 import { DateRangeFilter } from "./DateRangeFilter";
 import { X } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useTransition } from "react";
 import { EMPTY_FILTER_VALUE } from "@/lib/salesRecordFilters";
 
 const FILTER_KEYS = [
@@ -47,6 +47,7 @@ export function BIFilters({
   const router = useRouter();
   const pathname = usePathname();
   const sp = useSearchParams();
+  const [isPending, startTransition] = useTransition();
 
   // Local state for rate range inputs (string to allow partial typing)
   const [rateMin, setRateMin] = useState(sp.get("rateMin") ?? "");
@@ -63,14 +64,18 @@ export function BIFilters({
     if (rateMin) next.set("rateMin", rateMin); else next.delete("rateMin");
     if (rateMax) next.set("rateMax", rateMax); else next.delete("rateMax");
     next.delete("page");
-    router.push(`${pathname}?${next.toString()}`);
+    startTransition(() => {
+      router.push(`${pathname}?${next.toString()}`);
+    });
   }
 
   function clearAll() {
     const next = new URLSearchParams(sp.toString());
     for (const k of FILTER_KEYS) next.delete(k);
     next.delete("page");
-    router.push(`${pathname}?${next.toString()}`);
+    startTransition(() => {
+      router.push(`${pathname}?${next.toString()}`);
+    });
   }
 
   const hasAny = FILTER_KEYS.some((k) => sp.get(k));
@@ -81,8 +86,8 @@ export function BIFilters({
   ];
 
   return (
-    <div className="card p-4">
-      <div className="mb-2 flex items-center justify-between">
+    <div className="filter-bar !block p-4" aria-busy={isPending}>
+      <div className="mb-3 flex items-center justify-between">
         <h2 className="text-sm font-semibold text-slate-700">筛选器</h2>
         {hasAny && (
           <button
@@ -243,7 +248,7 @@ function FilterCell({
 }) {
   return (
     <div>
-      <p className="mb-1 text-[11px] text-slate-500">{label}</p>
+      <p className="mb-1.5 text-xs font-medium text-slate-500">{label}</p>
       {children}
     </div>
   );

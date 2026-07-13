@@ -6,6 +6,16 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Badge } from "@/components/ui/Badge";
 import { formatDate } from "@/lib/utils";
 import { PermissionsPanel } from "./PermissionsPanel";
+import {
+  AdminOverviewPanel,
+  ApiAccessPanel,
+  AuditLogPanel,
+  DataQualityPanel,
+  type AdminOverview,
+  type ApiAccessLogRow,
+  type AuditLogRow,
+  type DataQualityIssue,
+} from "./AdminObservabilityPanels";
 
 type UserRecord = {
   id: string;
@@ -84,9 +94,23 @@ const ROLE_COLORS: Record<string, string> = {
   CHANNEL: "bg-teal-100 text-teal-700",
 };
 
-export function AdminClient({ initialUsers }: { initialUsers: UserRecord[] }) {
+type AdminTab = "overview" | "pending" | "all" | "permissions" | "quality" | "audit" | "api";
+
+export function AdminClient({
+  initialUsers,
+  overview,
+  qualityIssues,
+  auditLogs,
+  apiLogs,
+}: {
+  initialUsers: UserRecord[];
+  overview: AdminOverview;
+  qualityIssues: DataQualityIssue[];
+  auditLogs: AuditLogRow[];
+  apiLogs: ApiAccessLogRow[];
+}) {
   const [users, setUsers] = useState<UserRecord[]>(initialUsers);
-  const [tab, setTab] = useState<"pending" | "all" | "permissions">("pending");
+  const [tab, setTab] = useState<AdminTab>("overview");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editRole, setEditRole] = useState("");
   const [editStatus, setEditStatus] = useState("");
@@ -102,7 +126,7 @@ export function AdminClient({ initialUsers }: { initialUsers: UserRecord[] }) {
   const [pending, startTransition] = useTransition();
 
   const pendingUsers = users.filter((u) => u.status === "PENDING");
-  const displayed = tab === "pending" ? pendingUsers : users;
+  const displayed = tab === "pending" ? pendingUsers : tab === "all" ? users : [];
 
   async function refreshUsers() {
     const res = await fetch("/api/admin/users");
@@ -175,13 +199,13 @@ export function AdminClient({ initialUsers }: { initialUsers: UserRecord[] }) {
   }
 
   function deleteUser(id: string) {
-    if (!confirm("确认删除此用户？")) return;
+    if (!confirm("确认移除该用户？\n\n该账号将无法登录。已有客户、合同和财务等业务数据不会删除，相关负责人会按系统规则清空或转交。此操作不可恢复。")) return;
     startTransition(async () => {
       const res = await fetch(`/api/admin/users/${id}`, { method: "DELETE" });
       if (res.ok) await refreshUsers();
       else {
         const d = await res.json();
-        setError(d.error ?? "删除失败");
+        setError(d.error ?? "移除失败");
       }
     });
   }
@@ -319,7 +343,14 @@ export function AdminClient({ initialUsers }: { initialUsers: UserRecord[] }) {
       )}
 
       {/* Tabs */}
-      <div className="flex gap-1 border-b border-slate-200">
+      <div className="tab-strip overflow-x-auto">
+        <button
+          type="button"
+          onClick={() => setTab("overview")}
+          className={tab === "overview" ? "tab-trigger tab-trigger-active" : "tab-trigger"}
+        >
+          {"\u7ba1\u7406\u6982\u89c8"}
+        </button>
         <button
           type="button"
           onClick={() => setTab("pending")}
@@ -358,9 +389,34 @@ export function AdminClient({ initialUsers }: { initialUsers: UserRecord[] }) {
         >
           权限分配
         </button>
+        <button
+          type="button"
+          onClick={() => setTab("quality")}
+          className={tab === "quality" ? "tab-trigger tab-trigger-active" : "tab-trigger"}
+        >
+          {"\u6570\u636e\u8d28\u91cf"}
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("audit")}
+          className={tab === "audit" ? "tab-trigger tab-trigger-active" : "tab-trigger"}
+        >
+          {"\u64cd\u4f5c\u5ba1\u8ba1"}
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("api")}
+          className={tab === "api" ? "tab-trigger tab-trigger-active" : "tab-trigger"}
+        >
+          {"API \u8bbf\u95ee"}
+        </button>
       </div>
 
+      {tab === "overview" && <AdminOverviewPanel overview={overview} issues={qualityIssues} auditLogs={auditLogs} apiLogs={apiLogs} />}
       {tab === "permissions" && <PermissionsPanel users={users} />}
+      {tab === "quality" && <DataQualityPanel issues={qualityIssues} />}
+      {tab === "audit" && <AuditLogPanel logs={auditLogs} />}
+      {tab === "api" && <ApiAccessPanel logs={apiLogs} />}
 
       {error && !showCreate && (
         <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">
@@ -368,7 +424,7 @@ export function AdminClient({ initialUsers }: { initialUsers: UserRecord[] }) {
         </p>
       )}
 
-      {tab !== "permissions" && (displayed.length === 0 ? (
+      {(tab === "pending" || tab === "all") && (displayed.length === 0 ? (
         <div className="card p-8 text-center text-slate-400">
           {tab === "pending" ? "暂无待审核用户" : "暂无用户"}
         </div>
@@ -536,7 +592,7 @@ export function AdminClient({ initialUsers }: { initialUsers: UserRecord[] }) {
                               onClick={() => deleteUser(u.id)}
                               disabled={pending}
                             >
-                              删除
+                              移除用户
                             </button>
                           </>
                         )}

@@ -43,18 +43,18 @@ function SortTh({ label, sk, sort, onSort, right }: {
 }
 
 const PIE_COLORS = [
-  "#3b65f6",
-  "#10b981",
-  "#f59e0b",
-  "#ef4444",
-  "#8b5cf6",
-  "#06b6d4",
-  "#ec4899",
-  "#84cc16",
-  "#f97316",
-  "#0ea5e9",
-  "#a855f7",
-  "#14b8a6",
+  "#7a65fb",
+  "#30c0b4",
+  "#f2ba02",
+  "#e44033",
+  "#844df2",
+  "#75bd42",
+  "#d804c9",
+  "#4874cb",
+  "#ee822f",
+  "#dc8df2",
+  "#44546a",
+  "#a35ef9",
 ];
 
 type Pair = { name: string; value: number };
@@ -233,7 +233,7 @@ export function SalesDashboard({
         >
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={brandBars}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#e7e0ef" />
               <XAxis
                 dataKey="name"
                 tick={{ fontSize: 10 }}
@@ -247,7 +247,7 @@ export function SalesDashboard({
                 formatter={(v: number) => formatCurrency(v)}
                 contentStyle={{ fontSize: 12, borderRadius: 8 }}
               />
-              <Bar dataKey="value" fill="#3b65f6" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="value" fill="#7a65fb" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </PanelCard>
@@ -525,7 +525,7 @@ export function SalesDashboard({
         </div>
         <ResponsiveContainer width="100%" height={340}>
           <LineChart data={trendData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+            <CartesianGrid strokeDasharray="3 3" stroke="#e7e0ef" />
             <XAxis
               dataKey="date"
               tick={{ fontSize: 10 }}
@@ -621,7 +621,7 @@ export function SalesDashboard({
         </div>
         <ResponsiveContainer width="100%" height={340}>
           <LineChart data={shiftData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+            <CartesianGrid strokeDasharray="3 3" stroke="#e7e0ef" />
             <XAxis dataKey="month" tick={{ fontSize: 11 }} />
             <YAxis tick={{ fontSize: 11 }} />
             <Tooltip

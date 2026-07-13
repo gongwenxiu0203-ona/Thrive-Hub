@@ -3,6 +3,7 @@ import { randomBytes } from "crypto";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { hashPassword } from "@/lib/password";
+import { writeAdminAudit, writeApiAccessLog } from "@/lib/adminObservability";
 
 function generateUniqueCode(): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -41,6 +42,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const startedAt = Date.now();
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
   if (!isAdmin(session.role))
@@ -71,6 +73,25 @@ export async function POST(req: NextRequest) {
       brandName: brandName ?? null,
       uniqueCode,
     },
+  });
+
+  await writeAdminAudit({
+    actorId: session.userId,
+    action: "USER_CREATE",
+    module: "ADMIN",
+    targetType: "USER",
+    targetId: user.id,
+    targetLabel: user.name,
+    summary: `创建用户：${user.name}`,
+    after: { name: user.name, email: user.email, role: user.role, status: user.status },
+  });
+  await writeApiAccessLog({
+    actorId: session.userId,
+    method: "POST",
+    route: "/api/admin/users",
+    operation: "管理员创建用户",
+    statusCode: 201,
+    startedAt,
   });
 
   return NextResponse.json({ user }, { status: 201 });

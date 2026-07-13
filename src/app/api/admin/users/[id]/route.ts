@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { hashPassword } from "@/lib/password";
+import { writeAdminAudit, writeApiAccessLog } from "@/lib/adminObservability";
 
 function isAdmin(role: string) {
   return role === "ADMIN";
@@ -11,6 +12,7 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const startedAt = Date.now();
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
   if (!isAdmin(session.role))
@@ -19,6 +21,10 @@ export async function PATCH(
   const { id } = await params;
   const body = await req.json();
   const { role, status, brandName, newPassword } = body;
+  const previous = await prisma.user.findUnique({
+    where: { id },
+    select: { id: true, name: true, email: true, role: true, status: true, brandName: true },
+  });
 
   const updateData: Record<string, unknown> = {};
   if (role !== undefined) updateData.role = role;
@@ -37,6 +43,26 @@ export async function PATCH(
     data: updateData,
   });
 
+  await writeAdminAudit({
+    actorId: session.userId,
+    action: "USER_UPDATE",
+    module: "ADMIN",
+    targetType: "USER",
+    targetId: user.id,
+    targetLabel: user.name,
+    summary: `更新用户：${user.name}`,
+    before: previous,
+    after: { name: user.name, email: user.email, role: user.role, status: user.status, brandName: user.brandName, passwordChanged: newPassword !== undefined },
+  });
+  await writeApiAccessLog({
+    actorId: session.userId,
+    method: "PATCH",
+    route: "/api/admin/users/[id]",
+    operation: "管理员更新用户",
+    statusCode: 200,
+    startedAt,
+  });
+
   return NextResponse.json({ user });
 }
 
@@ -44,12 +70,17 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const startedAt = Date.now();
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
   if (!isAdmin(session.role))
     return NextResponse.json({ error: "无权限" }, { status: 403 });
 
   const { id } = await params;
+  const target = await prisma.user.findUnique({
+    where: { id },
+    select: { id: true, name: true, email: true, role: true, status: true, brandName: true },
+  });
 
   // Prevent self-deletion
   if (id === session.userId) {
@@ -104,6 +135,25 @@ export async function DELETE(
 
     // ── Finally delete the user (UserPermissionOverride cascade) ──
     await tx.user.delete({ where: { id } });
+  });
+
+  await writeAdminAudit({
+    actorId: session.userId,
+    action: "USER_DELETE",
+    module: "ADMIN",
+    targetType: "USER",
+    targetId: id,
+    targetLabel: target?.name ?? null,
+    summary: `删除用户：${target?.name ?? id}`,
+    before: target,
+  });
+  await writeApiAccessLog({
+    actorId: session.userId,
+    method: "DELETE",
+    route: "/api/admin/users/[id]",
+    operation: "管理员删除用户",
+    statusCode: 200,
+    startedAt,
   });
 
   return NextResponse.json({ ok: true });

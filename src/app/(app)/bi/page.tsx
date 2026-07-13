@@ -37,7 +37,10 @@ function isStaff(role: string) {
 }
 
 const PAGE_SIZE = 50;
+// Filter options are shared by all BI tabs. Keep the derived values briefly so
+// repeated tab switches do not rebuild the same option lists from raw records.
 const BI_FILTER_CACHE_TTL_MS = 60 * 1000;
+const BI_DASHBOARD_CACHE_TTL_MS = 45 * 1000;
 
 type AffTypeRow = { platformAffiliateName: string; affiliateType: string | null };
 type BiFilterContext = {
@@ -55,6 +58,34 @@ type UploadBatchRow = {
 };
 
 const biFilterCache = new Map<string, { expiresAt: number; value: BiFilterContext }>();
+const biDashboardRecordCache = new Map<string, { expiresAt: number; value: DashboardRecord[] }>();
+const biDashboardAffiliateCache = new Map<string, { expiresAt: number; value: DashboardAffiliate[] }>();
+
+const dashboardRecordSelect = {
+  orderDate: true,
+  affiliatePlatform: true,
+  affiliateProgram: true,
+  brand: true,
+  affiliateName: true,
+  affiliateType: true,
+  asin: true,
+  parentAsin: true,
+  storeProductLabel: true,
+  revenue: true,
+  commission: true,
+  commissionRate: true,
+  totalFee: true,
+  unitsSold: true,
+  clicks: true,
+} satisfies Prisma.SalesRecordSelect;
+
+type DashboardRecord = Prisma.SalesRecordGetPayload<{ select: typeof dashboardRecordSelect }>;
+type DashboardAffiliate = {
+  platformAffiliateName: string;
+  internalAffiliateName: string | null;
+  affiliateType: string | null;
+  promoContents: string;
+};
 
 /**
  * Builds a function that resolves an affiliate's type from the affiliate
@@ -96,28 +127,73 @@ function stableCacheKey(value: unknown): string {
     .join(",")}}`;
 }
 
+async function getDashboardRecords(where: Prisma.SalesRecordWhereInput): Promise<DashboardRecord[]> {
+  const key = stableCacheKey(where);
+  const cached = biDashboardRecordCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+
+  const value = await prisma.salesRecord.findMany({
+    where,
+    orderBy: { orderDate: "asc" },
+    // The dashboard aggregates these fields only. Selecting the full record
+    // serializes dozens of unused fields for every sales row.
+    select: dashboardRecordSelect,
+  });
+  biDashboardRecordCache.set(key, {
+    expiresAt: Date.now() + BI_DASHBOARD_CACHE_TTL_MS,
+    value,
+  });
+  return value;
+}
+
+async function getDashboardAffiliates(): Promise<DashboardAffiliate[]> {
+  const key = "promotion-content";
+  const cached = biDashboardAffiliateCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const value = await (prisma.affiliate.findMany as any)({
+    select: {
+      platformAffiliateName: true,
+      internalAffiliateName: true,
+      affiliateType: true,
+      promoContents: true,
+    },
+  }) as DashboardAffiliate[];
+  biDashboardAffiliateCache.set(key, {
+    expiresAt: Date.now() + BI_DASHBOARD_CACHE_TTL_MS,
+    value,
+  });
+  return value;
+}
+
 async function getBiFilterContext(baseWhere: Prisma.SalesRecordWhereInput): Promise<BiFilterContext> {
   const key = stableCacheKey(baseWhere);
   const now = Date.now();
   const cached = biFilterCache.get(key);
   if (cached && cached.expiresAt > now) return cached.value;
 
-  const [allDistinct, affLibrary] = await Promise.all([
-    prisma.salesRecord.findMany({
-      where: baseWhere,
-      select: {
-        affiliatePlatform: true,
-        affiliateProgram: true,
-        brand: true,
-        region: true,
-        store: true,
-        affiliateName: true,
-        affiliateType: true,
-        asin: true,
-        parentAsin: true,
-        storeProductLabel: true,
-      },
-    }),
+  const [
+    platforms,
+    programs,
+    brands,
+    regions,
+    stores,
+    affiliatePairs,
+    asins,
+    parentAsins,
+    labels,
+    affLibrary,
+  ] = await Promise.all([
+    prisma.salesRecord.groupBy({ where: baseWhere, by: ["affiliatePlatform"] }),
+    prisma.salesRecord.groupBy({ where: baseWhere, by: ["affiliateProgram"] }),
+    prisma.salesRecord.groupBy({ where: baseWhere, by: ["brand"] }),
+    prisma.salesRecord.groupBy({ where: baseWhere, by: ["region"] }),
+    prisma.salesRecord.groupBy({ where: baseWhere, by: ["store"] }),
+    prisma.salesRecord.groupBy({ where: baseWhere, by: ["affiliateName", "affiliateType"] }),
+    prisma.salesRecord.groupBy({ where: baseWhere, by: ["asin"] }),
+    prisma.salesRecord.groupBy({ where: baseWhere, by: ["parentAsin"] }),
+    prisma.salesRecord.groupBy({ where: baseWhere, by: ["storeProductLabel"] }),
     prisma.affiliate.findMany({
       select: { platformAffiliateName: true, affiliateType: true },
     }),
@@ -129,18 +205,18 @@ async function getBiFilterContext(baseWhere: Prisma.SalesRecordWhereInput): Prom
   const value: BiFilterContext = {
     affLibrary,
     filterOptions: {
-      platforms: uniq(allDistinct.map((r) => r.affiliatePlatform)),
-      programs: uniq(allDistinct.map((r) => r.affiliateProgram)),
-      brands: uniq(allDistinct.map((r) => r.brand)),
-      regions: uniq(allDistinct.map((r) => r.region)),
-      stores: uniq(allDistinct.map((r) => r.store)),
-      affiliateNames: uniq(allDistinct.map((r) => r.affiliateName)),
+      platforms: uniq(platforms.map((r) => r.affiliatePlatform)),
+      programs: uniq(programs.map((r) => r.affiliateProgram)),
+      brands: uniq(brands.map((r) => r.brand)),
+      regions: uniq(regions.map((r) => r.region)),
+      stores: uniq(stores.map((r) => r.store)),
+      affiliateNames: uniq(affiliatePairs.map((r) => r.affiliateName)),
       // Resolve types from the affiliate library so the dropdown shows current
       // types even if stored affiliateType fields are empty.
-      types: uniq(allDistinct.map((r) => resolveTypePage(r.affiliateName, r.affiliateType))),
-      asins: uniq(allDistinct.map((r) => r.asin)),
-      parentAsins: uniq(allDistinct.map((r) => r.parentAsin)),
-      labels: uniq(allDistinct.map((r) => r.storeProductLabel)),
+      types: uniq(affiliatePairs.map((r) => resolveTypePage(r.affiliateName, r.affiliateType))),
+      asins: uniq(asins.map((r) => r.asin)),
+      parentAsins: uniq(parentAsins.map((r) => r.parentAsin)),
+      labels: uniq(labels.map((r) => r.storeProductLabel)),
     },
   };
   biFilterCache.set(key, { expiresAt: now + BI_FILTER_CACHE_TTL_MS, value });
@@ -244,7 +320,7 @@ export default async function BIPage({
         }
       />
 
-      <div className="flex gap-1 border-b border-slate-200">
+      <div className="tab-strip">
         {TABS.map((t) => {
           const active = t.key === tab;
           const params = new URLSearchParams();
@@ -257,11 +333,12 @@ export default async function BIPage({
             <Link
               key={t.key}
               href={`/bi?${params.toString()}`}
+              prefetch
               className={cn(
-                "rounded-t-lg px-4 py-2 text-sm font-medium transition-colors",
+                "tab-trigger",
                 active
-                  ? "border-b-2 border-brand-600 text-brand-700"
-                  : "text-slate-500 hover:text-slate-800",
+                  ? "tab-trigger-active"
+                  : "",
               )}
             >
               {t.label}
@@ -313,17 +390,8 @@ async function DashboardTab({
   regions?: string[];
 }) {
   const [records, affPromo] = await Promise.all([
-    prisma.salesRecord.findMany({ where, orderBy: { orderDate: "asc" } }),
-    // 反向拉取联盟商资源库中的往期推广内容
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (prisma.affiliate.findMany as any)({
-      select: {
-        platformAffiliateName: true,
-        internalAffiliateName: true,
-        affiliateType: true,
-        promoContents: true,
-      },
-    }),
+    getDashboardRecords(where),
+    getDashboardAffiliates(),
   ]);
   const resolveType = buildAffTypeResolver(affLibrary);
 
@@ -344,8 +412,7 @@ async function DashboardTab({
     publishedAt: string;
     promoLink: string;
   }[] = [];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  for (const a of affPromo as any[]) {
+  for (const a of affPromo) {
     let list: { brand?: string; publishedAt?: string; promoLink?: string }[] = [];
     try { list = JSON.parse(a.promoContents ?? "[]"); } catch { list = []; }
     for (const pc of list) {

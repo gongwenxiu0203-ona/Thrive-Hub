@@ -75,7 +75,7 @@ export function PanelCard({
                 type="button"
                 onClick={handleExport}
                 title="导出数据"
-                className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                className="rounded-md p-1 text-slate-400 hover:bg-brand-50 hover:text-brand-700"
               >
                 <Download className="h-4 w-4" />
               </button>
@@ -84,7 +84,7 @@ export function PanelCard({
               type="button"
               onClick={() => setZoomed(true)}
               title="放大"
-              className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+              className="rounded-md p-1 text-slate-400 hover:bg-brand-50 hover:text-brand-700"
             >
               <Maximize2 className="h-4 w-4" />
             </button>

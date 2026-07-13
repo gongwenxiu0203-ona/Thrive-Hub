@@ -1,13 +1,13 @@
 "use client";
 
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
-import { useCallback } from "react";
+import { useCallback, useTransition } from "react";
 import { Search } from "lucide-react";
 
 /** URL-search-param backed filter controls used across list pages. */
 export function FilterBar({ children }: { children: React.ReactNode }) {
   return (
-    <div className="mb-4 flex flex-wrap items-center gap-2">{children}</div>
+    <div className="filter-bar">{children}</div>
   );
 }
 
@@ -15,6 +15,7 @@ export function useFilters() {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
+  const [isPending, startTransition] = useTransition();
 
   const setParam = useCallback(
     (key: string, value: string) => {
@@ -22,12 +23,14 @@ export function useFilters() {
       if (value) next.set(key, value);
       else next.delete(key);
       next.delete("page");
-      router.push(`${pathname}?${next.toString()}`);
+      startTransition(() => {
+        router.push(`${pathname}?${next.toString()}`);
+      });
     },
-    [params, pathname, router],
+    [params, pathname, router, startTransition],
   );
 
-  return { params, setParam };
+  return { params, setParam, isPending };
 }
 
 export function SelectFilter({
@@ -69,6 +72,7 @@ export function SearchFilter({
       <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
       <input
         className="input w-56 pl-8"
+        aria-label={placeholder}
         placeholder={placeholder}
         defaultValue={params.get(paramKey) ?? ""}
         onKeyDown={(e) => {

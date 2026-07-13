@@ -14,15 +14,15 @@ export function StatCard({
   accent?: string;
 }) {
   return (
-    <div className="card p-5">
+    <div className="card p-4">
       <div className="flex items-start justify-between">
         <div>
-          <p className="text-sm text-slate-500">{label}</p>
-          <p className="mt-2 text-2xl font-semibold text-slate-900">{value}</p>
+          <p className="text-xs font-medium text-slate-500">{label}</p>
+          <p className="mt-2 text-[22px] font-semibold tabular-nums text-slate-900">{value}</p>
           {hint && <p className="mt-1 text-xs text-slate-400">{hint}</p>}
         </div>
         {icon && (
-          <div className={cn("rounded-lg bg-slate-50 p-2", accent)}>{icon}</div>
+          <div className={cn("rounded-md bg-brand-50 p-2", accent)}>{icon}</div>
         )}
       </div>
     </div>

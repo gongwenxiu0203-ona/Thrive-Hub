@@ -279,7 +279,7 @@ export function CustomerTableClient({
 
   return (
     <div className="space-y-3">
-      <div className="mb-4 flex flex-wrap items-center gap-2">
+      <div className="filter-bar">
         {filterControls}
         {isStaff && (
           <button
@@ -322,7 +322,7 @@ export function CustomerTableClient({
             </thead>
             <tbody>
               {sortedRows.map((c) => (
-                <tr key={c.id}>
+                <tr key={c.id} className={selected.has(c.id) ? "bg-brand-50/70" : undefined}>
                   {isStaff && (
                     <td>
                       <input

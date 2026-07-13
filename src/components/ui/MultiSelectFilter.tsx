@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import {
   Check,
@@ -35,6 +35,7 @@ export function MultiSelectFilter({
   const params = useSearchParams();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
+  const [isPending, startTransition] = useTransition();
   const ref = useRef<HTMLDivElement>(null);
 
   const selected = useMemo(
@@ -67,7 +68,9 @@ export function MultiSelectFilter({
     if (cleaned.length) sp.set(paramKey, cleaned.join(","));
     else sp.delete(paramKey);
     sp.delete("page");
-    router.push(`${pathname}?${sp.toString()}`);
+    startTransition(() => {
+      router.push(`${pathname}?${sp.toString()}`);
+    });
   }
 
   function toggle(value: string) {
@@ -138,6 +141,7 @@ export function MultiSelectFilter({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
+        disabled={isPending}
         className={cn(
           "flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm transition",
           selected.length
@@ -265,6 +269,7 @@ export function MultiSelectFilter({
               <button
                 type="button"
                 className="btn-primary btn-sm"
+                disabled={isPending}
                 onClick={() => {
                   commit(draft);
                   setOpen(false);

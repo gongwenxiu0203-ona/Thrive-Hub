@@ -13,77 +13,79 @@ datasource db {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  name         String
-  email        String   @unique
-  passwordHash String
-  role         String   @default("USER") // ADMIN | USER | LYNQ_STAFF | BRAND | CHANNEL
-  status       String   @default("APPROVED") // PENDING | APPROVED | REJECTED
-  brandName    String?  // for BRAND role: which brand they belong to
+  id            String   @id @default(cuid())
+  name          String
+  email         String   @unique
+  passwordHash  String
+  role          String   @default("USER") // ADMIN | USER | LYNQ_STAFF | BRAND | CHANNEL
+  status        String   @default("APPROVED") // PENDING | APPROVED | REJECTED
+  brandName     String? // for BRAND role: which brand they belong to
   channelUserId String? // for CHANNEL role: their userId (self-referential for filtering)
-  uniqueCode   String?  @unique // auto-generated user identification code
-  invitedById  String?  // 邀请人 userId（注册时带 ?inviter=... 参数）
+  uniqueCode    String?  @unique // auto-generated user identification code
+  invitedById   String? // 邀请人 userId（注册时带 ?inviter=... 参数）
   // Integration authorizations chosen at registration time.
-  feishuAuth   Boolean  @default(false) // 飞书日历同步授权
-  googleAuth   Boolean  @default(false) // Google 日历同步授权
-  emailAuth    Boolean  @default(false) // 邮件收发授权
-  createdAt    DateTime @default(now())
+  feishuAuth    Boolean  @default(false) // 飞书日历同步授权
+  googleAuth    Boolean  @default(false) // Google 日历同步授权
+  emailAuth     Boolean  @default(false) // 邮件收发授权
+  createdAt     DateTime @default(now())
 
-  customersAsBusiness Customer[]            @relation("BusinessOwner")
-  customersAsBackend  Customer[]            @relation("BackendOwner")
-  tasksOwned          Task[]                @relation("TaskOwner")
-  tasksPublished      Task[]                @relation("TaskPublisher")
-  remindersReceived   Reminder[]            @relation("ReminderTarget")
-  remindersCreated    Reminder[]            @relation("ReminderCreator")
-  affiliatesOwned     Affiliate[]           @relation("AffiliatePersonInCharge")
-  contractsCreated    Contract[]            @relation("ContractCreator")
-  contractsOwned      Contract[]            @relation("ContractOwner")
-  contractsReviewing  Contract[]            @relation("ContractReviewer")
-  fieldReviews        ContractFieldReview[]
-  salesBatches        SalesBatch[]
-  affiliateBatches    AffiliateBatch[]
-  attachments         Attachment[]
+  customersAsBusiness                 Customer[]                  @relation("BusinessOwner")
+  customersAsBackend                  Customer[]                  @relation("BackendOwner")
+  tasksOwned                          Task[]                      @relation("TaskOwner")
+  tasksPublished                      Task[]                      @relation("TaskPublisher")
+  remindersReceived                   Reminder[]                  @relation("ReminderTarget")
+  remindersCreated                    Reminder[]                  @relation("ReminderCreator")
+  affiliatesOwned                     Affiliate[]                 @relation("AffiliatePersonInCharge")
+  contractsCreated                    Contract[]                  @relation("ContractCreator")
+  contractsOwned                      Contract[]                  @relation("ContractOwner")
+  contractsReviewing                  Contract[]                  @relation("ContractReviewer")
+  fieldReviews                        ContractFieldReview[]
+  salesBatches                        SalesBatch[]
+  affiliateBatches                    AffiliateBatch[]
+  attachments                         Attachment[]
   // Finance module relations
-  reconciliationsCreated   CustomerReconciliation[] @relation("ReconciliationCreator")
-  reconciliationsSubmitted CustomerReconciliation[] @relation("ReconciliationSubmitter")
-  reconciliationsTargeted  CustomerReconciliation[] @relation("ReconciliationTarget")
-  reconciliationReviews    ReconciliationReview[]   @relation("ReconciliationReviewer")
-  settlementsCreated       Settlement[]             @relation("SettlementCreator")
-  channelReconciliationsCreated  ChannelReconciliation[] @relation("ChannelReconciliationCreator")
-  channelReconciliationsAsChannel ChannelReconciliation[] @relation("ChannelUserReconciliations")
-  affiliateReconciliationsAsSubmitter AffiliateReconciliation[] @relation("AffiliateReconciliationSubmitter")
+  reconciliationsCreated              CustomerReconciliation[]    @relation("ReconciliationCreator")
+  reconciliationsSubmitted            CustomerReconciliation[]    @relation("ReconciliationSubmitter")
+  reconciliationsTargeted             CustomerReconciliation[]    @relation("ReconciliationTarget")
+  reconciliationReviews               ReconciliationReview[]      @relation("ReconciliationReviewer")
+  settlementsCreated                  Settlement[]                @relation("SettlementCreator")
+  channelReconciliationsCreated       ChannelReconciliation[]     @relation("ChannelReconciliationCreator")
+  channelReconciliationsAsChannel     ChannelReconciliation[]     @relation("ChannelUserReconciliations")
+  affiliateReconciliationsAsSubmitter AffiliateReconciliation[]   @relation("AffiliateReconciliationSubmitter")
   // 项目管理 + 工作日志
-  projectsCreated Project[]      @relation("ProjectCreator")
-  projectsOwned   Project[]      @relation("ProjectOwner")
-  projectEntries  ProjectEntry[] @relation("ProjectEntryAuthor")
-  workLogs        WorkLog[]      @relation("WorkLogAuthor")
+  projectsCreated                     Project[]                   @relation("ProjectCreator")
+  projectsOwned                       Project[]                   @relation("ProjectOwner")
+  projectEntries                      ProjectEntry[]              @relation("ProjectEntryAuthor")
+  workLogs                            WorkLog[]                   @relation("WorkLogAuthor")
   // 财务经营管理
-  revenueSnapshotsAm ClientRevenueSnapshot[] @relation("RevenueSnapshotAm")
-  revenueSnapshotsBd ClientRevenueSnapshot[] @relation("RevenueSnapshotBd")
-  arFollowing        AccountsReceivable[]    @relation("ARFollowOwner")
-  pipelinesOwned     SalesPipeline[]         @relation("PipelineBdOwner")
+  revenueSnapshotsAm                  ClientRevenueSnapshot[]     @relation("RevenueSnapshotAm")
+  revenueSnapshotsBd                  ClientRevenueSnapshot[]     @relation("RevenueSnapshotBd")
+  arFollowing                         AccountsReceivable[]        @relation("ARFollowOwner")
+  pipelinesOwned                      SalesPipeline[]             @relation("PipelineBdOwner")
   // Permission overrides
-  permissionOverrides            UserPermissionOverride[]
-  invitedBy                      User?  @relation("UserInvitedBy", fields: [invitedById], references: [id])
-  invitedUsers                   User[] @relation("UserInvitedBy")
+  permissionOverrides                 UserPermissionOverride[]
+  invitedBy                           User?                       @relation("UserInvitedBy", fields: [invitedById], references: [id])
+  invitedUsers                        User[]                      @relation("UserInvitedBy")
   // 合同模板与版本
-  contractTemplatesUploaded ContractTemplate[] @relation("ContractTemplateUploader")
-  contractVersionsCreated   ContractVersion[]  @relation("ContractVersionCreator")
-  contractReviews           ContractReview[]
+  contractTemplatesUploaded           ContractTemplate[]          @relation("ContractTemplateUploader")
+  contractVersionsCreated             ContractVersion[]           @relation("ContractVersionCreator")
+  contractReviews                     ContractReview[]
   // 项目 GMV 目标（员工 KPI）
-  projectGmvTargetsAm        ProjectGmvTarget[]     @relation("ProjectGmvTargetAm")
-  projectGmvTargetsCreated   ProjectGmvTarget[]     @relation("ProjectGmvTargetCreator")
-  projectChannelTargetsOwned ProjectChannelTarget[]
-  customerAuthorizationInfosCreated CustomerAuthorizationInfo[] @relation("CustomerAuthorizationInfoCreator")
-  bulkOperationLogs          BulkOperationLog[]      @relation("BulkOperationOperator")
+  projectGmvTargetsAm                 ProjectGmvTarget[]          @relation("ProjectGmvTargetAm")
+  projectGmvTargetsCreated            ProjectGmvTarget[]          @relation("ProjectGmvTargetCreator")
+  projectChannelTargetsOwned          ProjectChannelTarget[]
+  customerAuthorizationInfosCreated   CustomerAuthorizationInfo[] @relation("CustomerAuthorizationInfoCreator")
+  bulkOperationLogs                   BulkOperationLog[]          @relation("BulkOperationOperator")
+  adminAuditLogs                      AdminAuditLog[]             @relation("AdminAuditActor")
+  apiAccessLogs                       ApiAccessLog[]              @relation("ApiAccessActor")
 }
 
 // 角色级权限配置（每个角色 + 功能 = 一个等级）
 model RolePermission {
   id        String   @id @default(cuid())
-  role      String   // ADMIN | USER | LYNQ_STAFF | BRAND | CHANNEL | GUEST
-  feature   String   // dashboard | customers | tasks | contracts | finance | reminders | bi | affiliates | admin
-  level     String   // NONE | READ | EDIT | MANAGE
+  role      String // ADMIN | USER | LYNQ_STAFF | BRAND | CHANNEL | GUEST
+  feature   String // dashboard | customers | tasks | contracts | finance | reminders | bi | affiliates | admin
+  level     String // NONE | READ | EDIT | MANAGE
   updatedAt DateTime @updatedAt
 
   @@unique([role, feature])
@@ -95,7 +97,7 @@ model UserPermissionOverride {
   id        String   @id @default(cuid())
   userId    String
   feature   String
-  level     String   // NONE | READ | EDIT | MANAGE
+  level     String // NONE | READ | EDIT | MANAGE
   updatedAt DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -109,8 +111,8 @@ model Customer {
 
   // ① 基础信息
   brandName  String // 品牌/店铺名称
-  mainSites  String @default("[]") // JSON array: US | UK | DE | CA | JP
-  siteLinks  String @default("{}") // JSON: { US: { link, price, asin }, ... }
+  mainSites  String  @default("[]") // JSON array: US | UK | DE | CA | JP
+  siteLinks  String  @default("{}") // JSON: { US: { link, price, asin }, ... }
   competitor String? // 品牌竞品（名称/链接）
 
   // ② 推广平台信息
@@ -132,10 +134,10 @@ model Customer {
 
   // 内部管理
   category        String? // 品类
-  status          String   @default("UNASSIGNED") // 见 CUSTOMER_STATUS_LABELS
-  statusChangedAt DateTime @default(now()) // 用于状态超时自动流转
-  rating          String   @default("PENDING") // S | A | B | C | PENDING(待评估)
-  evaluationData  String?  // JSON: { revenueScore, bsrScore, mediaBuyScore, commissionScore, categoryScore, ... }
+  status          String    @default("UNASSIGNED") // 见 CUSTOMER_STATUS_LABELS
+  statusChangedAt DateTime  @default(now()) // 用于状态超时自动流转
+  rating          String    @default("PENDING") // S | A | B | C | PENDING(待评估)
+  evaluationData  String? // JSON: { revenueScore, bsrScore, mediaBuyScore, commissionScore, categoryScore, ... }
   businessOwnerId String?
   backendOwnerId  String?
   demoDueDate     DateTime? // Demo 方案截止日期（独立存储，不依赖是否分配后端负责人）
@@ -148,26 +150,26 @@ model Customer {
   contactEmail String?
   contactPhone String?
 
-  source    String   @default("INTERNAL") // INTERNAL | INTAKE
+  source    String    @default("INTERNAL") // INTERNAL | INTAKE
   deletedAt DateTime? // 回收站软删除标记（7天内可恢复，到期物理清理）
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
-  businessOwner User?         @relation("BusinessOwner", fields: [businessOwnerId], references: [id])
-  backendOwner  User?         @relation("BackendOwner", fields: [backendOwnerId], references: [id])
-  contracts     Contract[]
-  tasks         Task[]
-  salesBatches  SalesBatch[]
-  salesRecords  SalesRecord[]
+  businessOwner            User?                       @relation("BusinessOwner", fields: [businessOwnerId], references: [id])
+  backendOwner             User?                       @relation("BackendOwner", fields: [backendOwnerId], references: [id])
+  contracts                Contract[]
+  tasks                    Task[]
+  salesBatches             SalesBatch[]
+  salesRecords             SalesRecord[]
   // Finance module relations
-  reconciliations        CustomerReconciliation[]
-  channelReconciliations ChannelReconciliation[] @relation("CustomerChannelReconciliations")
+  reconciliations          CustomerReconciliation[]
+  channelReconciliations   ChannelReconciliation[]     @relation("CustomerChannelReconciliations")
   affiliateReconciliations AffiliateReconciliation[]
-  projects               Project[]
-  revenueSnapshots       ClientRevenueSnapshot[]
-  accountsReceivable     AccountsReceivable[]
-  splitRule              ChannelSplitRule?
-  authorizationInfos     CustomerAuthorizationInfo[]
+  projects                 Project[]
+  revenueSnapshots         ClientRevenueSnapshot[]
+  accountsReceivable       AccountsReceivable[]
+  splitRule                ChannelSplitRule?
+  authorizationInfos       CustomerAuthorizationInfo[]
 }
 
 model CustomerAuthorizationInfo {
@@ -187,11 +189,11 @@ model CustomerAuthorizationInfo {
 }
 
 model Contract {
-  id         String @id @default(cuid())
-  contractNo String @unique
+  id         String  @id @default(cuid())
+  contractNo String  @unique
   customerId String? // 新建/上传已有合同必须从客户管理中选取；事务性合同允许为空
-  type       String @default("CHANNEL") // CHANNEL 渠道商 | BRAND 品牌方 | REBATE 返佣 | TRANSACTIONAL 事务性合同
-  status     String @default("IN_PROGRESS") // IN_PROGRESS 推进中 | REVIEWING 审核中 | SIGNING 签署中 | COMPLETED 签署完成
+  type       String  @default("CHANNEL") // CHANNEL 渠道商 | BRAND 品牌方 | REBATE 返佣 | TRANSACTIONAL 事务性合同
+  status     String  @default("IN_PROGRESS") // IN_PROGRESS 推进中 | REVIEWING 审核中 | SIGNING 签署中 | COMPLETED 签署完成
 
   ownerId    String? // 合同负责人（提交审核人）
   reviewerId String? // 审核人
@@ -201,82 +203,82 @@ model Contract {
   extractedBy  String? // RULE | AI — 字段抽取方式
 
   // 自动提取 / 人工填写的审核字段
-  partyA           String? // 甲方合同主体
-  accountingPeriod String? // 核算周期（原文）
-  feeCycle         String? // 固费周期：无 | 月度 | 季度
-  feeAmount        String? // 固费金额（¥）
-  feeCurrency      String? // 固费货币：人民币 | 美金
-  paymentMethod    String? // 付款方式：月付 | 季度预付
-  commissionRate   String? // 抽佣比例（带 %）
-  commissionType   String? // 佣金类型：FIXED | THRESHOLD | TIERED
-  tieredCommission String? // 阶梯式佣金规则（原文）
-  affiliateRule    String? // 联盟佣金规则（原文）
-  paymentCycle     String? // 付款周期（原文）
-  hasBet           String  @default("false") // 是否有对赌协议：true | false
-  betTarget        String? // 对赌目标（GMV 金额或单量描述）
+  partyA            String? // 甲方合同主体
+  accountingPeriod  String? // 核算周期（原文）
+  feeCycle          String? // 固费周期：无 | 月度 | 季度
+  feeAmount         String? // 固费金额（¥）
+  feeCurrency       String? // 固费货币：人民币 | 美金
+  paymentMethod     String? // 付款方式：月付 | 季度预付
+  commissionRate    String? // 抽佣比例（带 %）
+  commissionType    String? // 佣金类型：FIXED | THRESHOLD | TIERED
+  tieredCommission  String? // 阶梯式佣金规则（原文）
+  affiliateRule     String? // 联盟佣金规则（原文）
+  paymentCycle      String? // 付款周期（原文）
+  hasBet            String  @default("false") // 是否有对赌协议：true | false
+  betTarget         String? // 对赌目标（GMV 金额或单量描述）
   betTargetCurrency String? // 对赌 GMV 货币：人民币 | 美金
-  invoiceReq       String? // 发票要求（原文，无则「无」）
-  lateLiability    String? // 逾期责任（原文）
-  remark           String? // 备注（人工填写）
+  invoiceReq        String? // 发票要求（原文，无则「无」）
+  lateLiability     String? // 逾期责任（原文）
+  remark            String? // 备注（人工填写）
 
   // ── 新版项目确认书字段（v3 模板）─────────────────────────────────────────────
-  promoPlatform         String? // 推广平台（独立站 | Amazon | 沃尔玛）
-  targetSite            String? // 目标站点（US | UK | DE | CA | JP）
-  thresholdAmount       String? // THRESHOLD 机制：GMV 门槛金额
-  thresholdCurrency     String? // THRESHOLD 机制：门槛货币（人民币 | 美金）
-  tieredRules           String? // TIERED 机制：阶梯 JSON {currency, tiers:[{from,to,rate}]}
-  excessBaseMonths      String? // EXCESS 机制：基准月数
-  excessCommissionRate  String? // EXCESS 机制：增长服务佣金比例（带 %）
-  gmvSettlementCycle    String? // 联盟归因 GMV 结算周期
-  commissionConfig      String  @default("{}") // 5 类佣金机制结构化配置 JSON
+  promoPlatform        String? // 推广平台（独立站 | Amazon | 沃尔玛）
+  targetSite           String? // 目标站点（US | UK | DE | CA | JP）
+  thresholdAmount      String? // THRESHOLD 机制：GMV 门槛金额
+  thresholdCurrency    String? // THRESHOLD 机制：门槛货币（人民币 | 美金）
+  tieredRules          String? // TIERED 机制：阶梯 JSON {currency, tiers:[{from,to,rate}]}
+  excessBaseMonths     String? // EXCESS 机制：基准月数
+  excessCommissionRate String? // EXCESS 机制：增长服务佣金比例（带 %）
+  gmvSettlementCycle   String? // 联盟归因 GMV 结算周期
+  commissionConfig     String  @default("{}") // 5 类佣金机制结构化配置 JSON
 
   // ── 合同表单填写字段（v4 甲方项目确认书）────────────────────────────────────
   // 甲方补充信息
-  partyACreditCode   String?   // 统一社会信用代码（或其他对应信息）
-  partyALegalRep     String?   // 甲方法定代表人
-  partyAAddress      String?   // 甲方地址（第十四条通知与送达）
-  partyAContact      String?   // 甲方指定联系人
-  partyAPhone        String?   // 甲方联系电话
-  partyAEmail        String?   // 甲方联系邮箱
+  partyACreditCode String? // 统一社会信用代码（或其他对应信息）
+  partyALegalRep   String? // 甲方法定代表人
+  partyAAddress    String? // 甲方地址（第十四条通知与送达）
+  partyAContact    String? // 甲方指定联系人
+  partyAPhone      String? // 甲方联系电话
+  partyAEmail      String? // 甲方联系邮箱
 
   // 合同费用补充
   taxType        String  @default("不含税") // 税费类型
-  taxBearer      String  @default("甲方")  // 税费承担方
-  firstPeriodFee Float?                    // 首期服务费金额
-  productList    String?                   // 推广商品清单 JSON [{name,asin,price,trackLink}]
-  coopChannels   String?                   // 合作渠道 JSON string[]
+  taxBearer      String  @default("甲方") // 税费承担方
+  firstPeriodFee Float? // 首期服务费金额
+  productList    String? // 推广商品清单 JSON [{name,asin,price,trackLink}]
+  coopChannels   String? // 合作渠道 JSON string[]
 
   // 填写方式与外部链接
-  fillMethod         String?   // MANUAL | AI_EXTRACT | EXTERNAL_LINK
+  fillMethod         String? // MANUAL | AI_EXTRACT | EXTERNAL_LINK
   externalFillToken  String?   @unique // 外部填写链接 Token（唯一）
-  externalFillExpiry DateTime?          // Token 过期时间（默认 7 天）
+  externalFillExpiry DateTime? // Token 过期时间（默认 7 天）
 
   // 生成的合同文档
   generatedDocUrl String? // 生成的 DOCX/PDF 文件路径
 
   // ── P1 模板化合同字段（乙方/模板/盖章/版本）─────────────────────────────────
   // 乙方信息（选乙方公司时自动联动；灵跃公司无 partyBLegalRep）
-  partyBCompany       String?  // "THRAIVE" | "LINGYUE"
-  partyBCreditCode    String?
-  partyBLegalRep      String?  // 仅 THRAIVE 有值
-  partyBAddress       String?
-  partyBContact       String?
-  partyBPhone         String?
-  partyBEmail         String?
-  partyBBankAccounts  String   @default("[]") // JSON: ["THRAIVE","LINGYUE"] 可多选
+  partyBCompany          String? // "THRAIVE" | "LINGYUE"
+  partyBCreditCode       String?
+  partyBLegalRep         String? // 仅 THRAIVE 有值
+  partyBAddress          String?
+  partyBContact          String?
+  partyBPhone            String?
+  partyBEmail            String?
+  partyBBankAccounts     String  @default("[]") // JSON: ["THRAIVE","LINGYUE"] 可多选
   // 模板引用
-  templateId          String?
+  templateId             String?
   // 特殊佣金机制专用文本
   specialCommissionTerms String?
   // 盖章 / 审核 / 版本
-  stampedDocUrl       String?
-  stampStatus         String   @default("NONE") // NONE | STAMPED | FAILED
-  pendingNewUpload    Boolean  @default(false)  // 审核选了"上传新版"等待重抽字段
+  stampedDocUrl          String?
+  stampStatus            String  @default("NONE") // NONE | STAMPED | FAILED
+  pendingNewUpload       Boolean @default(false) // 审核选了"上传新版"等待重抽字段
   // 创建方式：NEW 新建 | EXISTING 上传已有；null 视为 NEW（老数据兼容）
-  uploadType          String?
+  uploadType             String?
   // 上传已有合同模式：SIGNED_ARCHIVE 签署完成存档 | REVIEW_AND_STAMP 上传审核盖章
-  uploadArchiveMode   String?
-  hasSourceAnnotations Boolean @default(false) // 原文在线批注标记，退回时提示提交人查看
+  uploadArchiveMode      String?
+  hasSourceAnnotations   Boolean @default(false) // 原文在线批注标记，退回时提示提交人查看
 
   startDate DateTime? // 合作期限-开始
   endDate   DateTime? // 合作期限-结束
@@ -286,28 +288,28 @@ model Contract {
 
   createdById String
   deletedAt   DateTime? // 回收站软删除标记
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
-  customer     Customer?             @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  createdBy    User                  @relation("ContractCreator", fields: [createdById], references: [id])
-  owner        User?                 @relation("ContractOwner", fields: [ownerId], references: [id])
-  reviewer     User?                 @relation("ContractReviewer", fields: [reviewerId], references: [id])
-  template     ContractTemplate?     @relation(fields: [templateId], references: [id])
-  versions     ContractVersion[]
-  fieldReviews ContractFieldReview[]
-  reviews      ContractReview[]
-  annotations  ContractAnnotation[]
-  reconciliations CustomerReconciliation[]
-  channelReconciliations ChannelReconciliation[] @relation("ContractChannelReconciliations")
-  projects Project[]
+  customer               Customer?                @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  createdBy              User                     @relation("ContractCreator", fields: [createdById], references: [id])
+  owner                  User?                    @relation("ContractOwner", fields: [ownerId], references: [id])
+  reviewer               User?                    @relation("ContractReviewer", fields: [reviewerId], references: [id])
+  template               ContractTemplate?        @relation(fields: [templateId], references: [id])
+  versions               ContractVersion[]
+  fieldReviews           ContractFieldReview[]
+  reviews                ContractReview[]
+  annotations            ContractAnnotation[]
+  reconciliations        CustomerReconciliation[]
+  channelReconciliations ChannelReconciliation[]  @relation("ContractChannelReconciliations")
+  projects               Project[]
 }
 
 model ContractFieldReview {
-  id           String  @id @default(cuid())
+  id           String   @id @default(cuid())
   contractId   String
   fieldName    String // partyA | accountingPeriod | feeCycle | feeAmount | commissionRate | affiliateRule | paymentCycle | invoiceReq | lateLiability | remark | contractPeriod
-  decision     String  @default("APPROVED") // APPROVED 通过 | REJECTED 驳回（默认通过）
+  decision     String   @default("APPROVED") // APPROVED 通过 | REJECTED 驳回（默认通过）
   modification String? // 修改意见
   reviewerId   String?
   createdAt    DateTime @default(now())
@@ -320,25 +322,25 @@ model ContractFieldReview {
 }
 
 model Task {
-  id          String  @id @default(cuid())
-  title       String
-  description String?
-  customerId  String?
-  contractId  String? // 关联合同（合同提交类任务）
-  ownerId     String?
-  publisherId String?
-  priority    String  @default("MID") // LOW | MID | HIGH | URGENT
-  category    String  @default("GENERAL") // GENERAL | DEMO_PLAN | MEETING_BOOKING
-  status      String  @default("TODO") // TODO | IN_PROGRESS | REVIEW | DONE | RETURNED | CANCELLED
+  id           String  @id @default(cuid())
+  title        String
+  description  String?
+  customerId   String?
+  contractId   String? // 关联合同（合同提交类任务）
+  ownerId      String?
+  publisherId  String?
+  priority     String  @default("MID") // LOW | MID | HIGH | URGENT
+  category     String  @default("GENERAL") // GENERAL | DEMO_PLAN | MEETING_BOOKING
+  status       String  @default("TODO") // TODO | IN_PROGRESS | REVIEW | DONE | RETURNED | CANCELLED
   returnReason String? // 退回理由
 
-  externalLinks   String  @default("[]") // JSON array of {label, url}
+  externalLinks String @default("[]") // JSON array of {label, url}
 
   // 客户会议预约类任务的结构化信息
   meetingTime     DateTime?
   meetingMode     String? // ONLINE 线上 | OFFLINE 线下
   meetingLocation String? // 线下会议地点
-  attendees       String  @default("[]") // JSON array of user ids
+  attendees       String    @default("[]") // JSON array of user ids
 
   sortOrder Int       @default(0)
   dueDate   DateTime?
@@ -352,16 +354,16 @@ model Task {
 }
 
 model Reminder {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   title       String
   content     String?
   remindDate  DateTime
-  type        String   @default("FOLLOWUP") // DELIVERY | MEETING | CONTRACT_EXPIRY | REVIEW | FOLLOWUP | STATUS_CHECK
-  isRead      Boolean  @default(false)
+  type        String    @default("FOLLOWUP") // DELIVERY | MEETING | CONTRACT_EXPIRY | REVIEW | FOLLOWUP | STATUS_CHECK
+  isRead      Boolean   @default(false)
   targetId    String
   createdById String
   deletedAt   DateTime? // 回收站软删除标记
-  createdAt   DateTime @default(now())
+  createdAt   DateTime  @default(now())
 
   target    User @relation("ReminderTarget", fields: [targetId], references: [id])
   createdBy User @relation("ReminderCreator", fields: [createdById], references: [id])
@@ -369,14 +371,14 @@ model Reminder {
 
 // 联盟资源库 — 字段与「资源库字段.xlsx」第一行完全对应
 model Affiliate {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   deletedAt DateTime? // 回收站软删除标记
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
   // 核心身份 (Excel B-G)
   region                String? // 地区 Region: US|UK|DE|CA|JP|FR|AU etc.
-  platformAffiliateName String  // 平台联盟商名称 Affiliate Name on Network
+  platformAffiliateName String // 平台联盟商名称 Affiliate Name on Network
   internalAffiliateName String? // 内部联盟商名称 Internal Affiliate Name (相同=关联账号)
   source                String? // 联盟商来源: LTK|Iconically|Levanta|ACC|PartnerBoost|Amazon Tag search|Wayward
   category              String? // 一级类目: Network|Publisher
@@ -385,36 +387,36 @@ model Affiliate {
 
   // Website (Excel H-L)
   websiteLink       String?
-  websiteTraffic    Float?  // 【单位K】月流量Monthly Traffic
+  websiteTraffic    Float? // 【单位K】月流量Monthly Traffic
   websitePlacements String  @default("[]") // JSON [{placement,flatfee}]: Website版位+Flatfee
   websiteNote       String? // website备注
 
   // Instagram (Excel M-Q)
-  instagramLink        String?
-  insFollowers         Float?  // 【单位K】INS粉丝数 Followers
-  instagramPlacements  String  @default("[]") // JSON [{placement,flatfee}]: INS版位+Flatfee
-  insNote              String? // INS备注
+  instagramLink       String?
+  insFollowers        Float? // 【单位K】INS粉丝数 Followers
+  instagramPlacements String  @default("[]") // JSON [{placement,flatfee}]: INS版位+Flatfee
+  insNote             String? // INS备注
 
   // Facebook (Excel R-V)
-  facebookLink        String?
-  fbFollowers         Float?  // 【单位K】FB粉丝数 Followers
-  facebookPlacements  String  @default("[]") // JSON [{placement,flatfee}]: Facebook版位+Flatfee
-  fbNote              String? // FB备注
+  facebookLink       String?
+  fbFollowers        Float? // 【单位K】FB粉丝数 Followers
+  facebookPlacements String  @default("[]") // JSON [{placement,flatfee}]: Facebook版位+Flatfee
+  fbNote             String? // FB备注
 
   // YouTube (Excel W-Z)
-  youtubeLink        String?
-  youtubeFollowers   Float?  // 【单位K】YouTube粉丝数 Followers
-  youtubePlacements  String  @default("[]") // JSON [{placement,flatfee}]: YouTube版位+Flatfee
+  youtubeLink       String?
+  youtubeFollowers  Float? // 【单位K】YouTube粉丝数 Followers
+  youtubePlacements String  @default("[]") // JSON [{placement,flatfee}]: YouTube版位+Flatfee
 
   // TikTok (Excel AA-AD)
-  tiktokLink        String?
-  tiktokFollowers   Float?  // 【单位K】TikTok粉丝数 Followers
-  tiktokPlacements  String  @default("[]") // JSON [{placement,flatfee}]: TikTok版位+Flatfee
+  tiktokLink       String?
+  tiktokFollowers  Float? // 【单位K】TikTok粉丝数 Followers
+  tiktokPlacements String  @default("[]") // JSON [{placement,flatfee}]: TikTok版位+Flatfee
 
   // Amazon Storefront (Excel AE-AH)
   amazonStorefrontLink String?
   topCreator           String? // Top Creator: 是|否
-  storefrontFlatfee    Float?  // Storefront flatfee
+  storefrontFlatfee    Float? // Storefront flatfee
   storefrontNote       String? // Storefront备注
 
   // LTK (Excel AI-AJ)
@@ -430,15 +432,15 @@ model Affiliate {
   note                 String? // 备注
 
   // 联系与开发
-  contactInfo       String? // 联系方式 contact information
-  brand             String? // 品牌 Brand
-  developmentStatus String? // 开发状态Status
-  developmentDesc   String? // 开发情况描述
-  contactEmail      String? // 负责人建联邮箱
-  personInChargeId  String? // 负责人 Person in Charge (User FK)
+  contactInfo        String? // 联系方式 contact information
+  brand              String? // 品牌 Brand
+  developmentStatus  String? // 开发状态Status
+  developmentDesc    String? // 开发情况描述
+  contactEmail       String? // 负责人建联邮箱
+  personInChargeId   String? // 负责人 Person in Charge (User FK)
   personInChargeName String? // 负责人姓名 (上传时的原始文本，未关联系统用户)
-  cooperationMode   String  @default("[]") // JSON string[]: 合作模式 (多选)
-  sampleShipping    String? // 样品寄送: 是|否|均可
+  cooperationMode    String  @default("[]") // JSON string[]: 合作模式 (多选)
+  sampleShipping     String? // 样品寄送: 是|否|均可
 
   // 合作客户 (新增字段 — 由合作审核写入)
   customerCooperations String @default("[]") // JSON [{customerId,customerName,status}]
@@ -458,9 +460,9 @@ model Affiliate {
   // 批次管理
   batchId String? // 关联 AffiliateBatch
 
-  personInCharge User?                 @relation("AffiliatePersonInCharge", fields: [personInChargeId], references: [id])
-  batch          AffiliateBatch?       @relation(fields: [batchId], references: [id], onDelete: SetNull)
-  coopReviews    AffiliateCoopReview[]
+  personInCharge           User?                     @relation("AffiliatePersonInCharge", fields: [personInChargeId], references: [id])
+  batch                    AffiliateBatch?           @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  coopReviews              AffiliateCoopReview[]
   affiliateReconciliations AffiliateReconciliation[]
 }
 
@@ -478,32 +480,32 @@ model AffiliateBatch {
 
 // 合作审核记录
 model AffiliateCoopReview {
-  id          String   @id @default(cuid())
-  affiliateId String
-  customerId  String?  // 关联客户
-  customerName String? // 快照客户名称
-  platform    String?  // 合作平台
-  fee         Float?   // 合作费用
-  blurBrands  Boolean  @default(false) // 往期数据品牌模糊化
-  notes       String?  // 备注
-  reviewerId  String?  // 审核人 User id
-  reviewerName String? // 审核人名称快照
+  id             String   @id @default(cuid())
+  affiliateId    String
+  customerId     String? // 关联客户
+  customerName   String? // 快照客户名称
+  platform       String? // 合作平台
+  fee            Float? // 合作费用
+  blurBrands     Boolean  @default(false) // 往期数据品牌模糊化
+  notes          String? // 备注
+  reviewerId     String? // 审核人 User id
+  reviewerName   String? // 审核人名称快照
   customerStatus String? // 写回联盟商合作客户的状态
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   affiliate Affiliate @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
 }
 
 model SalesBatch {
-  id                String   @id @default(cuid())
+  id                String    @id @default(cuid())
   fileName          String
   customerId        String? // 上传时选择的客户
   affiliatePlatform String? // 上传时选择的联盟平台
-  recordCount       Int      @default(0)
+  recordCount       Int       @default(0)
   uploaderId        String
   deletedAt         DateTime? // 回收站软删除标记
-  createdAt         DateTime @default(now())
+  createdAt         DateTime  @default(now())
 
   customer Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
   uploader User          @relation(fields: [uploaderId], references: [id])
@@ -512,8 +514,8 @@ model SalesBatch {
 
 // 推广销售记录 — 字段与「各平台数据标头字段映射」表第一行 1:1 对应
 model SalesRecord {
-  id                String   @id @default(cuid())
-  batchId           String
+  id      String @id @default(cuid())
+  batchId String
 
   // 标识维度
   affiliatePlatform String // 联盟平台 Affiiate Network Platform
@@ -528,13 +530,13 @@ model SalesRecord {
   orderDate DateTime // 订单日期 Order Date
 
   // 销售数字
-  orders         Int     @default(0) // 订单数 Orders
-  unitsSold      Int     @default(0) // 销售数量 Unit Sold
-  revenue        Float   @default(0) // 销售金额 Revenue
-  commission     Float   @default(0) // 联盟商佣金 Commission for Publishers
-  commissionRate Float   @default(0) // 联盟商佣金比例 Commission Rate %
-  platformFee    Float   @default(0) // 平台销售额佣金
-  totalFee       Float   @default(0) // 总费用 Total Fee（公式计算）
+  orders           Int   @default(0) // 订单数 Orders
+  unitsSold        Int   @default(0) // 销售数量 Unit Sold
+  revenue          Float @default(0) // 销售金额 Revenue
+  commission       Float @default(0) // 联盟商佣金 Commission for Publishers
+  commissionRate   Float @default(0) // 联盟商佣金比例 Commission Rate %
+  platformFee      Float @default(0) // 平台销售额佣金
+  totalFee         Float @default(0) // 总费用 Total Fee（公式计算）
   affiliateFlatfee Float @default(0) // 联盟商固定费用 Flatfee
   platformFlatfee  Float @default(0) // 平台固定费用 Flatfee
   sampleFee        Float @default(0) // 样品费用 Sample
@@ -554,9 +556,9 @@ model SalesRecord {
   campaignBudget    Float?    @default(0) // Campaign Budget 预算
 
   // 自动匹配的字段
-  parentAsin           String? // Parent Asin（通过 AsinMapping 匹配）
-  storeProductLabel    String? // 链接标签 Store-Product Label（通过 AsinMapping 匹配）
-  affiliateType        String? // 联盟商类型 Type（从联盟资源库匹配）
+  parentAsin            String? // Parent Asin（通过 AsinMapping 匹配）
+  storeProductLabel     String? // 链接标签 Store-Product Label（通过 AsinMapping 匹配）
+  affiliateType         String? // 联盟商类型 Type（从联盟资源库匹配）
   internalAffiliateName String? // 内部联盟商名称 Internal Affiliate Name
 
   // 同环比
@@ -582,11 +584,11 @@ model SalesRecord {
 // 批量操作日志：用于记录可撤销的批量操作快照
 model BulkOperationLog {
   id           String    @id @default(cuid())
-  module       String    // BI_SALES_DETAIL
-  actionType   String    // CUSTOMER_UPDATE | DELETE
+  module       String // BI_SALES_DETAIL
+  actionType   String // CUSTOMER_UPDATE | DELETE
   summary      String
   recordCount  Int       @default(0)
-  snapshotJson String    // JSON: 操作前快照/受影响记录 id
+  snapshotJson String // JSON: 操作前快照/受影响记录 id
   operatorId   String
   revertedAt   DateTime?
   revertedById String?
@@ -599,6 +601,49 @@ model BulkOperationLog {
   @@index([operatorId])
   @@index([createdAt])
   @@index([revertedAt])
+}
+
+model AdminAuditLog {
+  id           String   @id @default(cuid())
+  actorId      String?
+  action       String
+  module       String
+  targetType   String
+  targetId     String?
+  targetLabel  String?
+  summary      String
+  beforeJson   String?
+  afterJson    String?
+  metadataJson String?
+  status       String   @default("SUCCESS")
+  createdAt    DateTime @default(now())
+
+  actor User? @relation("AdminAuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([actorId])
+  @@index([module])
+  @@index([action])
+}
+
+model ApiAccessLog {
+  id           String   @id @default(cuid())
+  actorId      String?
+  method       String
+  route        String
+  operation    String
+  statusCode   Int
+  durationMs   Int?
+  outcome      String   @default("SUCCESS")
+  errorSummary String?
+  createdAt    DateTime @default(now())
+
+  actor User? @relation("ApiAccessActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([actorId])
+  @@index([route])
+  @@index([outcome])
 }
 
 // Parent Asin / 链接标签匹配表 —— 品牌+店铺+地区+ASIN 唯一
@@ -647,11 +692,11 @@ model Project {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  customer  Customer?      @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  contract  Contract?      @relation(fields: [contractId], references: [id], onDelete: SetNull)
-  createdBy User           @relation("ProjectCreator", fields: [createdById], references: [id])
-  owner     User?          @relation("ProjectOwner", fields: [ownerId], references: [id])
-  entries   ProjectEntry[]
+  customer   Customer?          @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  contract   Contract?          @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  createdBy  User               @relation("ProjectCreator", fields: [createdById], references: [id])
+  owner      User?              @relation("ProjectOwner", fields: [ownerId], references: [id])
+  entries    ProjectEntry[]
   gmvTargets ProjectGmvTarget[]
 
   @@index([customerId])
@@ -664,18 +709,18 @@ model Project {
 // - amOwnerId 决定该月该项目落到哪位员工的 KPI 汇总
 // - monthlyTarget 是输入；80% 达标线 / 完成率 / 是否达标 均运行时派生，不入库
 model ProjectGmvTarget {
-  id            String   @id @default(cuid())
+  id            String    @id @default(cuid())
   projectId     String
-  month         String   // "YYYY-MM"
-  amOwnerId     String?  // 默认 = Customer.backendOwnerId
-  amRole        String   @default("AM")
-  currency      String   @default("USD") // USD | GBP | EUR | RMB
-  monthlyTarget Float    @default(0)
+  month         String // "YYYY-MM"
+  amOwnerId     String? // 默认 = Customer.backendOwnerId
+  amRole        String    @default("AM")
+  currency      String    @default("USD") // USD | GBP | EUR | RMB
+  monthlyTarget Float     @default(0)
   remark        String?
   createdById   String
   deletedAt     DateTime?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   project        Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
   amOwner        User?                  @relation("ProjectGmvTargetAm", fields: [amOwnerId], references: [id], onDelete: SetNull)
@@ -710,9 +755,9 @@ model ProjectChannelTarget {
 
 // 项目时间流条目（日常工作瀑布流 / 数据维度记录 / 流程节点）
 model ProjectEntry {
-  id            String  @id @default(cuid())
+  id            String   @id @default(cuid())
   projectId     String
-  kind          String  @default("DAILY") // DAILY 日常工作 | DATA 数据维度 | NODE 流程节点（单次合作）
+  kind          String   @default("DAILY") // DAILY 日常工作 | DATA 数据维度 | NODE 流程节点（单次合作）
   content       String
   authorId      String?
   fromWorkLogId String? // 从工作日志拉取时记录来源
@@ -727,17 +772,17 @@ model ProjectEntry {
 
 // 工作日志（周报/月报，P2 使用）
 model WorkLog {
-  id         String   @id @default(cuid())
+  id         String    @id @default(cuid())
   authorId   String
-  period     String   @default("WEEKLY") // WEEKLY 周报 | MONTHLY 月报
-  projectIds String   @default("[]") // JSON string[]: 关联项目 id
-  workTypes  String   @default("[]") // JSON string[]: 项目管理 | BD
-  content    String   // 项目管理工作进度（选了「项目管理」时填写）
-  bdProgress String?  // BD 工作进度 JSON [{affiliateId,affiliateName,progress}]（选了「BD」时填写）
-  logDate    DateTime @default(now()) // 日志时间（自动生成）
+  period     String    @default("WEEKLY") // WEEKLY 周报 | MONTHLY 月报
+  projectIds String    @default("[]") // JSON string[]: 关联项目 id
+  workTypes  String    @default("[]") // JSON string[]: 项目管理 | BD
+  content    String // 项目管理工作进度（选了「项目管理」时填写）
+  bdProgress String? // BD 工作进度 JSON [{affiliateId,affiliateName,progress}]（选了「BD」时填写）
+  logDate    DateTime  @default(now()) // 日志时间（自动生成）
   deletedAt  DateTime? // 软删除（回收站 7 天保留）
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
   author User @relation("WorkLogAuthor", fields: [authorId], references: [id])
 
@@ -793,7 +838,7 @@ model CustomerReconciliation {
 
   // 对赌条款
   betType        String @default("NONE") // NONE | ORDER_COUNT | SALES_AMOUNT | BOTH
-  betOrderCount  Int?   // 对赌单量
+  betOrderCount  Int? // 对赌单量
   betSalesAmount Float? // 对赌销售额（¥）
 
   // 实际数据（从 BI 自动拉取）
@@ -810,11 +855,11 @@ model CustomerReconciliation {
   commissionCurrency String @default("人民币") // 人民币 | 美金
 
   // 工作流状态
-  status              String    @default("DRAFT") // DRAFT | PENDING_REVIEW | DISPUTED | CONFIRMED
-  submittedById       String?
-  submittedAt         DateTime?
-  submittedToUserId   String?   // 提交给哪个用户审核
-  submittedDeadline   DateTime? // 截止时间
+  status            String    @default("DRAFT") // DRAFT | PENDING_REVIEW | DISPUTED | CONFIRMED
+  submittedById     String?
+  submittedAt       DateTime?
+  submittedToUserId String? // 提交给哪个用户审核
+  submittedDeadline DateTime? // 截止时间
 
   // 结算7天提醒（CONFIRMED后7天未结算则触发）
   settlementReminderSent Boolean @default(false)
@@ -836,13 +881,13 @@ model CustomerReconciliation {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  customer        Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  contract        Contract @relation(fields: [contractId], references: [id])
-  createdBy       User     @relation("ReconciliationCreator", fields: [createdById], references: [id])
-  submittedBy     User?    @relation("ReconciliationSubmitter", fields: [submittedById], references: [id])
-  submittedToUser User?    @relation("ReconciliationTarget", fields: [submittedToUserId], references: [id])
-  reviews         ReconciliationReview[]
-  settlements     Settlement[]
+  customer               Customer                @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  contract               Contract                @relation(fields: [contractId], references: [id])
+  createdBy              User                    @relation("ReconciliationCreator", fields: [createdById], references: [id])
+  submittedBy            User?                   @relation("ReconciliationSubmitter", fields: [submittedById], references: [id])
+  submittedToUser        User?                   @relation("ReconciliationTarget", fields: [submittedToUserId], references: [id])
+  reviews                ReconciliationReview[]
+  settlements            Settlement[]
   channelReconciliations ChannelReconciliation[] @relation("CustomerReconciliationToChannels")
 
   @@index([customerId])
@@ -853,15 +898,15 @@ model CustomerReconciliation {
 
 // 对账审核/争议记录（每次提交、确认、争议各一条，保留完整历史）
 model ReconciliationReview {
-  id               String   @id @default(cuid())
-  reconciliationId String
-  reviewerId       String
+  id                  String   @id @default(cuid())
+  reconciliationId    String
+  reviewerId          String
   // SUBMITTED 提交对账 | APPROVED 无异议确认 | DISPUTED 提出异议 | FINAL_CONFIRMED 最终确认
-  action           String
-  disputedOrders      Int?   // 争议时填写的己方单量
+  action              String
+  disputedOrders      Int? // 争议时填写的己方单量
   disputedSalesAmount Float? // 争议时填写的己方销售额
-  note             String? // 备注/意见
-  createdAt        DateTime @default(now())
+  note                String? // 备注/意见
+  createdAt           DateTime @default(now())
 
   reconciliation CustomerReconciliation @relation(fields: [reconciliationId], references: [id], onDelete: Cascade)
   reviewer       User                   @relation("ReconciliationReviewer", fields: [reviewerId], references: [id])
@@ -871,22 +916,22 @@ model ReconciliationReview {
 
 // 结算跟踪（每条对账对应固费 + 抽佣两条结算记录）
 model Settlement {
-  id               String   @id @default(cuid())
+  id               String    @id @default(cuid())
   reconciliationId String
-  type             String   // FIXED_FEE 固费 | COMMISSION 抽佣
-  amount           Float    @default(0)
-  status           String   @default("PENDING") // PENDING 待结算 | SETTLED 已结算
+  type             String // FIXED_FEE 固费 | COMMISSION 抽佣
+  amount           Float     @default(0)
+  status           String    @default("PENDING") // PENDING 待结算 | SETTLED 已结算
   estimatedDate    DateTime? // 预计结算时间
   actualDate       DateTime? // 实际结算时间（填写后自动变为已结算）
-  reminderSent     Boolean  @default(false) // 预计时间前1天提醒是否已发
+  reminderSent     Boolean   @default(false) // 预计时间前1天提醒是否已发
   note             String?
 
   createdById String
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  reconciliation CustomerReconciliation @relation(fields: [reconciliationId], references: [id], onDelete: Cascade)
-  createdBy      User                   @relation("SettlementCreator", fields: [createdById], references: [id])
+  reconciliation CustomerReconciliation  @relation(fields: [reconciliationId], references: [id], onDelete: Cascade)
+  createdBy      User                    @relation("SettlementCreator", fields: [createdById], references: [id])
   channelSplits  ChannelReconciliation[]
 
   @@index([reconciliationId])
@@ -895,12 +940,12 @@ model Settlement {
 
 // 渠道商分账记录（v2：一条记录含固费+抽佣两侧分账）
 model ChannelReconciliation {
-  id            String @id @default(cuid())
-  customerId    String
-  contractId    String?  // 关联合同
+  id                       String  @id @default(cuid())
+  customerId               String
+  contractId               String? // 关联合同
   customerReconciliationId String? // 关联月度客户对账（v3）
-  settlementId  String? // legacy 关联（保留向后兼容）
-  channelUserId String // 渠道商 User id
+  settlementId             String? // legacy 关联（保留向后兼容）
+  channelUserId            String // 渠道商 User id
 
   // 分账期
   periodNo    Int       @default(1) // 分账期数
@@ -908,13 +953,13 @@ model ChannelReconciliation {
   periodEnd   DateTime?
 
   // ── 固费分账 ─────────────────────────────────────────────
-  fixedFeeReceived        Float?    // 到账固费金额（实际结算后填写，否则显示"—"）
+  fixedFeeReceived        Float? // 到账固费金额（实际结算后填写，否则显示"—"）
   fixedFeeShareRate       Float     @default(0) // 固费分账比例（小数）
   fixedFeeShareAmount     Float     @default(0) // 自动 = received × rate
   fixedFeeShareCurrency   String    @default("人民币")
   fixedFeeEstimatedDate   DateTime?
   fixedFeeActualDate      DateTime?
-  fixedFeeProofUrl        String?   // 转账截图 URL
+  fixedFeeProofUrl        String? // 转账截图 URL
   fixedFeePushedToChannel Boolean   @default(false)
 
   // ── 抽佣分账 ─────────────────────────────────────────────
@@ -928,13 +973,13 @@ model ChannelReconciliation {
   commissionPushedToChannel Boolean   @default(false)
 
   // legacy 字段（保留兼容）
-  fixedFeeSharePerPeriod Float @default(0)
-  fixedFeeSharePeriods   Int   @default(1)
-  fixedFeeShareTotal     Float @default(0)
+  fixedFeeSharePerPeriod   Float @default(0)
+  fixedFeeSharePeriods     Int   @default(1)
+  fixedFeeShareTotal       Float @default(0)
   commissionSharePerPeriod Float @default(0)
   commissionSharePeriods   Int   @default(1)
   commissionShareTotal     Float @default(0)
-  totalShareAmount Float @default(0)
+  totalShareAmount         Float @default(0)
 
   status        String    @default("PENDING") // PENDING | SETTLED
   estimatedDate DateTime?
@@ -949,19 +994,19 @@ model ChannelReconciliation {
   commissionTotal Float?
 
   // 关联到客户配置的分账规则（autoCreated=true 时由规则触发器写入；手动创建为 null）
-  splitRuleId     String?
+  splitRuleId String?
 
   createdById String
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  customer               Customer                @relation("CustomerChannelReconciliations", fields: [customerId], references: [id])
-  contract               Contract?               @relation("ContractChannelReconciliations", fields: [contractId], references: [id])
-  customerReconciliation CustomerReconciliation? @relation("CustomerReconciliationToChannels", fields: [customerReconciliationId], references: [id])
-  channelUser            User                    @relation("ChannelUserReconciliations", fields: [channelUserId], references: [id])
-  settlement             Settlement?             @relation(fields: [settlementId], references: [id])
-  createdBy              User                    @relation("ChannelReconciliationCreator", fields: [createdById], references: [id])
-  splitRule              ChannelSplitRule?       @relation(fields: [splitRuleId], references: [id])
+  customer               Customer                      @relation("CustomerChannelReconciliations", fields: [customerId], references: [id])
+  contract               Contract?                     @relation("ContractChannelReconciliations", fields: [contractId], references: [id])
+  customerReconciliation CustomerReconciliation?       @relation("CustomerReconciliationToChannels", fields: [customerReconciliationId], references: [id])
+  channelUser            User                          @relation("ChannelUserReconciliations", fields: [channelUserId], references: [id])
+  settlement             Settlement?                   @relation(fields: [settlementId], references: [id])
+  createdBy              User                          @relation("ChannelReconciliationCreator", fields: [createdById], references: [id])
+  splitRule              ChannelSplitRule?             @relation(fields: [splitRuleId], references: [id])
   periods                ChannelReconciliationPeriod[]
 
   @@index([customerId])
@@ -975,16 +1020,16 @@ model ChannelReconciliation {
 // ruleType=A：commissionRate 单一比例
 // ruleType=B：tieredRules JSON 数组 [{gmvMin,gmvMax,rate}]，累计 GMV 分段（个税口径）
 model ChannelSplitRule {
-  id              String   @id @default(cuid())
-  customerId      String   @unique
-  ruleType        String   // "A" | "B"
-  splitEndDate    DateTime
-  fixedFeeRate    Float    // 给渠道商的固费分账比例（小数 0.0~1.0）
-  commissionRate  Float?   // 仅 A：佣金分账比例（小数；UI 默认 0.15，可选 0.25 或自定义）
-  tieredRules     String   @default("[]") // 仅 B：JSON [{gmvMin:number,gmvMax:number|null,rate:number}]
-  createdById     String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id             String   @id @default(cuid())
+  customerId     String   @unique
+  ruleType       String // "A" | "B"
+  splitEndDate   DateTime
+  fixedFeeRate   Float // 给渠道商的固费分账比例（小数 0.0~1.0）
+  commissionRate Float? // 仅 A：佣金分账比例（小数；UI 默认 0.15，可选 0.25 或自定义）
+  tieredRules    String   @default("[]") // 仅 B：JSON [{gmvMin:number,gmvMax:number|null,rate:number}]
+  createdById    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   customer        Customer                @relation(fields: [customerId], references: [id])
   reconciliations ChannelReconciliation[]
@@ -1006,27 +1051,27 @@ model ChannelReconciliationPeriod {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
-  reconciliation   ChannelReconciliation @relation(fields: [reconciliationId], references: [id], onDelete: Cascade)
+  reconciliation ChannelReconciliation @relation(fields: [reconciliationId], references: [id], onDelete: Cascade)
 
-  @@index([reconciliationId])
   @@unique([reconciliationId, periodIndex])
+  @@index([reconciliationId])
 }
 
 // 联盟商对账记录 — 合作审核通过后自动创建
 model AffiliateReconciliation {
-  id                 String    @id @default(cuid())
-  affiliateId        String
-  affiliateName      String    // 平台联盟商名称
-  customerId         String?
-  customerName       String?   // 关联客户名称快照
-  cooperationMode    String    @default("[]") // JSON: 合作模式列表
-  platforms          String    @default("[]") // JSON: [{platform,link,placements:[{name,currency,flatfee}]}]
-  coopReviewId       String?   // 来源审核记录ID
-  submitterId        String?   // 提交审核人 userId
+  id              String  @id @default(cuid())
+  affiliateId     String
+  affiliateName   String // 平台联盟商名称
+  customerId      String?
+  customerName    String? // 关联客户名称快照
+  cooperationMode String  @default("[]") // JSON: 合作模式列表
+  platforms       String  @default("[]") // JSON: [{platform,link,placements:[{name,currency,flatfee}]}]
+  coopReviewId    String? // 来源审核记录ID
+  submitterId     String? // 提交审核人 userId
 
   // 付款信息（由提交审核人填写）
   promotionAsin      String?
-  paymentMethod      String?   // PayPal | 对公账号 | 银行转账
+  paymentMethod      String? // PayPal | 对公账号 | 银行转账
   paymentAccountName String?
   paymentAccount     String?
   paymentNote        String?
@@ -1035,19 +1080,19 @@ model AffiliateReconciliation {
   paymentRequestAt   DateTime?
 
   // 实际付款
-  paidAt             DateTime?
-  transactionNo      String?
-  proofUrl           String?
+  paidAt        DateTime?
+  transactionNo String?
+  proofUrl      String?
 
-  status             String    @default("pending") // pending | info_filled | paid
-  reminderSentAt     DateTime?
+  status         String    @default("pending") // pending | info_filled | paid
+  reminderSentAt DateTime?
 
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  affiliate  Affiliate @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
-  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  submitter  User?     @relation("AffiliateReconciliationSubmitter", fields: [submitterId], references: [id], onDelete: SetNull)
+  affiliate Affiliate @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
+  customer  Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  submitter User?     @relation("AffiliateReconciliationSubmitter", fields: [submitterId], references: [id], onDelete: SetNull)
 
   @@index([affiliateId])
   @@index([customerId])
@@ -1059,29 +1104,29 @@ model AffiliateReconciliation {
 // 客户收入月度快照（按客户+月份汇总，用于经营客户收入总表）
 // 不复用 Customer.rating，经营等级 revenueGrade 由当月 monthlyTotalIncome 自动计算
 model ClientRevenueSnapshot {
-  id                       String    @id @default(cuid())
-  customerId               String?
-  month                    String    // YYYY-MM 文本，便于按月筛选
-  projectStartDate         DateTime?
-  clientStatus             String    @default("ACTIVE") // NEW | ACTIVE | CHURNED | PAUSED
-  churnedAt                DateTime?
-  monthlyFeeCurrency       String    @default("USD") // USD | RMB
-  monthlyFeeAmount         Float     @default(0)
-  exchangeRate             Float     @default(1) // 锁定当月汇率
-  monthlyFeeRmb            Float     @default(0)
-  commissionRate           Float     @default(0) // 0.05 = 5%
-  monthlyGmv               Float     @default(0) // 自 SalesRecord 拉取
-  monthlyCommissionIncome  Float     @default(0)
-  monthlyTotalIncome       Float     @default(0)
-  cumulativeIncome         Float     @default(0) // 历史累计
-  amOwnerId                String?   // AM = 后端负责人
-  bdOwnerId                String?   // BD = 商务负责人
-  revenueGrade             String    @default("C") // S | A | B | C
-  signingCompany           String?   // FOSHAN | HONGKONG
-  receivingCompany         String?   // FOSHAN | HONGKONG
-  remark                   String?
-  createdAt                DateTime  @default(now())
-  updatedAt                DateTime  @updatedAt
+  id                      String    @id @default(cuid())
+  customerId              String?
+  month                   String // YYYY-MM 文本，便于按月筛选
+  projectStartDate        DateTime?
+  clientStatus            String    @default("ACTIVE") // NEW | ACTIVE | CHURNED | PAUSED
+  churnedAt               DateTime?
+  monthlyFeeCurrency      String    @default("USD") // USD | RMB
+  monthlyFeeAmount        Float     @default(0)
+  exchangeRate            Float     @default(1) // 锁定当月汇率
+  monthlyFeeRmb           Float     @default(0)
+  commissionRate          Float     @default(0) // 0.05 = 5%
+  monthlyGmv              Float     @default(0) // 自 SalesRecord 拉取
+  monthlyCommissionIncome Float     @default(0)
+  monthlyTotalIncome      Float     @default(0)
+  cumulativeIncome        Float     @default(0) // 历史累计
+  amOwnerId               String? // AM = 后端负责人
+  bdOwnerId               String? // BD = 商务负责人
+  revenueGrade            String    @default("C") // S | A | B | C
+  signingCompany          String? // FOSHAN | HONGKONG
+  receivingCompany        String? // FOSHAN | HONGKONG
+  remark                  String?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
 
   customer Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
   amOwner  User?     @relation("RevenueSnapshotAm", fields: [amOwnerId], references: [id], onDelete: SetNull)
@@ -1095,23 +1140,23 @@ model ClientRevenueSnapshot {
 
 // 应收账款（独立建模，不复用 Settlement —— Settlement 是对账后的结算跟踪）
 model AccountsReceivable {
-  id                  String    @id @default(cuid())
-  customerId          String?
-  invoiceNo           String    @unique
-  invoiceDate         DateTime
-  invoiceAmount       Float
-  currency            String    @default("USD") // USD | RMB
-  exchangeRate        Float     @default(1)
-  amountRmb           Float     @default(0)
-  receivedAmount      Float     @default(0)
-  dueDate             DateTime
-  actualReceivedDate  DateTime?
-  status              String    @default("NOT_DUE") // NOT_DUE | PAID | PARTIAL | OVERDUE
-  riskLevel           String    @default("GREEN") // GREEN | YELLOW | ORANGE | RED
-  followOwnerId       String?
-  remark              String?
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
+  id                 String    @id @default(cuid())
+  customerId         String?
+  invoiceNo          String    @unique
+  invoiceDate        DateTime
+  invoiceAmount      Float
+  currency           String    @default("USD") // USD | RMB
+  exchangeRate       Float     @default(1)
+  amountRmb          Float     @default(0)
+  receivedAmount     Float     @default(0)
+  dueDate            DateTime
+  actualReceivedDate DateTime?
+  status             String    @default("NOT_DUE") // NOT_DUE | PAID | PARTIAL | OVERDUE
+  riskLevel          String    @default("GREEN") // GREEN | YELLOW | ORANGE | RED
+  followOwnerId      String?
+  remark             String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   customer    Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
   followOwner User?     @relation("ARFollowOwner", fields: [followOwnerId], references: [id], onDelete: SetNull)
@@ -1125,8 +1170,8 @@ model AccountsReceivable {
 // 销售漏斗（独立建模，不复用 Project.stage —— Project.stage 是项目流程）
 model SalesPipeline {
   id                      String    @id @default(cuid())
-  prospectName            String    // 潜在客户名称
-  source                  String?   // 客户来源
+  prospectName            String // 潜在客户名称
+  source                  String? // 客户来源
   countryRegion           String?
   category                String?
   estimatedMonthlyFee     Float?
@@ -1152,15 +1197,15 @@ model SalesPipeline {
 // 合同模板库（管理员上传的 .docx 模板）
 // templateKey 枚举：FIXED 全量·固佣 / SPECIAL 特殊佣金 / TIERED 全量·阶梯 / THRESHOLD 全量·门槛 / INCREMENTAL 增量
 model ContractTemplate {
-  id           String   @id @default(cuid())
-  name         String                       // 显示名（如 "全量·固佣同模板"）
-  templateKey  String                       // 见上枚举（多模板可共享 key）
-  fileUrl      String                       // 服务器存储路径
+  id           String    @id @default(cuid())
+  name         String // 显示名（如 "全量·固佣同模板"）
+  templateKey  String // 见上枚举（多模板可共享 key）
+  fileUrl      String // 服务器存储路径
   description  String?
   uploadedById String
   deletedAt    DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   uploader  User       @relation("ContractTemplateUploader", fields: [uploadedById], references: [id])
   contracts Contract[]
@@ -1173,10 +1218,10 @@ model ContractTemplate {
 model ContractVersion {
   id          String   @id @default(cuid())
   contractId  String
-  versionNo   Int                          // 1, 2, 3 …
-  fileUrl     String                       // 该版本 .docx 或 .pdf 路径
-  fileType    String   @default("docx")   // docx | pdf
-  reason      String                       // "首次生成" | "审核后重传" | "盖章后归档"
+  versionNo   Int // 1, 2, 3 …
+  fileUrl     String // 该版本 .docx 或 .pdf 路径
+  fileType    String   @default("docx") // docx | pdf
+  reason      String // "首次生成" | "审核后重传" | "盖章后归档"
   createdById String
   createdAt   DateTime @default(now())
 
@@ -1184,16 +1229,16 @@ model ContractVersion {
   createdBy   User                 @relation("ContractVersionCreator", fields: [createdById], references: [id])
   annotations ContractAnnotation[]
 
-  @@index([contractId])
   @@unique([contractId, versionNo])
+  @@index([contractId])
 }
 
 // 合同审核轮次（一次 PENDING/APPROVED/REJECTED 为一轮；退回后再提交累加 round）
 model ContractReview {
   id         String   @id @default(cuid())
   contractId String
-  round      Int                          // 从 1 开始
-  reviewerId String                       // 当前业务取 shallow.w@thraiveagency.com 对应 userId，由业务层决定
+  round      Int // 从 1 开始
+  reviewerId String // 当前业务取 shallow.w@thraiveagency.com 对应 userId，由业务层决定
   status     String   @default("PENDING") // PENDING | APPROVED | REJECTED
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
@@ -1209,14 +1254,14 @@ model ContractReview {
 
 // 合同字段意见（绑定到某一轮审核 + 某一字段；可选关联一条批注）
 model ContractReviewComment {
-  id            String  @id @default(cuid())
-  reviewId      String
-  fieldKey      String                       // 对齐 PLACEHOLDER_KEYS 的 key
-  comment       String                       // 文字意见
-  decision      String  @default("PENDING")  // PENDING | APPROVED | REJECTED
-  annotationId  String?                      // 关联 ContractAnnotation（可空）
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id           String   @id @default(cuid())
+  reviewId     String
+  fieldKey     String // 对齐 PLACEHOLDER_KEYS 的 key
+  comment      String // 文字意见
+  decision     String   @default("PENDING") // PENDING | APPROVED | REJECTED
+  annotationId String? // 关联 ContractAnnotation（可空）
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   review     ContractReview      @relation(fields: [reviewId], references: [id], onDelete: Cascade)
   annotation ContractAnnotation? @relation(fields: [annotationId], references: [id], onDelete: SetNull)
@@ -1230,8 +1275,8 @@ model ContractAnnotation {
   id         String   @id @default(cuid())
   contractId String
   versionId  String
-  content    String                         // 批注正文（系统内直接展示，无需下载文件）
-  fileUrl    String?                        // 带批注的文件路径（可空：纯系统内批注时为空）
+  content    String // 批注正文（系统内直接展示，无需下载文件）
+  fileUrl    String? // 带批注的文件路径（可空：纯系统内批注时为空）
   createdAt  DateTime @default(now())
 
   contract Contract                @relation(fields: [contractId], references: [id], onDelete: Cascade)

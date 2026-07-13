@@ -163,7 +163,7 @@ export function OperationsClient({
       </div>
 
       {/* Tabs */}
-      <div className="flex flex-wrap gap-1 border-b border-slate-200">
+      <div className="tab-strip">
         {([
           { key: "revenue", label: "客户收入总表", icon: TrendingUp },
           { key: "count", label: "客户数统计", icon: Users },
@@ -175,10 +175,10 @@ export function OperationsClient({
             key={t.key}
             onClick={() => setTabUrl(t.key)}
             className={cn(
-              "flex items-center gap-1.5 border-b-2 px-4 py-2 text-sm font-medium transition-colors",
+              "tab-trigger",
               tab === t.key
-                ? "border-brand-600 text-brand-700"
-                : "border-transparent text-slate-500 hover:text-slate-700",
+                ? "tab-trigger-active"
+                : "",
             )}
           >
             <t.icon className="h-4 w-4" /> {t.label}
