@@ -52,7 +52,7 @@ export default async function ProjectsPage() {
       orderBy: { brandName: "asc" },
     }),
     prisma.user.findMany({
-      where: { status: "APPROVED", role: { in: ["ADMIN", "USER", "LYNQ_STAFF"] } },
+      where: { status: "APPROVED", role: { in: ["ADMIN", "USER"] } },
       select: { id: true, name: true },
       orderBy: { name: "asc" },
     }),

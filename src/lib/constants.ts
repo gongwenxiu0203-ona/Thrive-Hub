@@ -6,7 +6,6 @@ export const ROLE_LABELS: Record<string, string> = {
   USER: "内部员工",
   BRAND: "品牌方",
   CHANNEL: "渠道商",
-  GUEST: "游客",
 };
 
 // ---- Customer: 基础信息 ----------------------------------------------------

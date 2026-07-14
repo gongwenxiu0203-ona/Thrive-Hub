@@ -4,7 +4,7 @@
 //   BRAND   ：硬性限制，仅 Customer.brandName == user.brandName 的数据。即使有 READ 权限也无法跨品牌查看。
 //   CHANNEL ：硬性限制，仅 channelUserId/createdById == user.id 的客户。
 //   ADMIN/USER（内部员工）：默认显示自己相关的（"我的"），但可通过 ?scope=all 切换到全部
-//   GUEST   ：完全无访问
+//   其他角色：完全无访问
 
 type Session = {
   userId: string;
@@ -16,7 +16,7 @@ type Session = {
 export type ViewScope = "mine" | "all";
 
 export function isStaff(role: string): boolean {
-  return role === "ADMIN" || role === "USER" || role === "LYNQ_STAFF";
+  return role === "ADMIN" || role === "USER";
 }
 
 export function isExternalRole(role: string): boolean {
@@ -59,7 +59,7 @@ export function customerScope(
       ],
     };
   }
-  // GUEST 等：拒绝
+  // 未识别角色：拒绝
   return { id: "__NO_ACCESS__" };
 }
 

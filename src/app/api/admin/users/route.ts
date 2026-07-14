@@ -5,6 +5,8 @@ import { prisma } from "@/lib/prisma";
 import { hashPassword } from "@/lib/password";
 import { writeAdminAudit, writeApiAccessLog } from "@/lib/adminObservability";
 
+const ALLOWED_ROLES = new Set(["ADMIN", "USER", "BRAND", "CHANNEL"]);
+
 function generateUniqueCode(): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const bytes = randomBytes(6);
@@ -54,6 +56,10 @@ export async function POST(req: NextRequest) {
   if (!name || !email || !password) {
     return NextResponse.json({ error: "缺少必填字段" }, { status: 400 });
   }
+  const requestedRole = role ?? "ADMIN";
+  if (typeof requestedRole !== "string" || !ALLOWED_ROLES.has(requestedRole)) {
+    return NextResponse.json({ error: "角色只能为管理员、内部员工、品牌方或渠道商" }, { status: 400 });
+  }
 
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) {
@@ -68,7 +74,7 @@ export async function POST(req: NextRequest) {
       name,
       email,
       passwordHash: await hashPassword(password),
-      role: role ?? "ADMIN",
+      role: requestedRole,
       status: "APPROVED",
       brandName: brandName ?? null,
       uniqueCode,

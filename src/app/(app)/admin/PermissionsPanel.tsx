@@ -162,7 +162,6 @@ function UserPermissionsTab({ users }: { users: UserRecord[] }) {
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const filtered = users
-    .filter((u) => u.role !== "GUEST")
     .filter(
       (u) =>
         !search ||

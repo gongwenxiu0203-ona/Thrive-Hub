@@ -12,25 +12,6 @@ import {
 import { verifyPassword, hashPassword } from "@/lib/password";
 import { sendMail } from "@/lib/mailer";
 
-export async function guestLoginAction() {
-  const store = await cookies();
-  const token = await createSessionToken({
-    userId: "guest",
-    name: "游客",
-    email: "",
-    role: "GUEST",
-    status: "APPROVED",
-  });
-  store.set(SESSION_COOKIE, token, {
-    httpOnly: true,
-    secure: process.env.COOKIE_SECURE === "true",
-    sameSite: "lax",
-    maxAge: SESSION_MAX_AGE,
-    path: "/",
-  });
-  redirect("/dashboard");
-}
-
 function generateUniqueCode(): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const bytes = randomBytes(6);
@@ -105,7 +86,7 @@ export async function registerAction(
   const feishuAuth = formData.get("feishuAuth") === "on";
   const googleAuth = formData.get("googleAuth") === "on";
   const emailAuth = formData.get("emailAuth") === "on";
-  const identity = String(formData.get("identity") ?? "").trim(); // LYNQ_STAFF | BRAND | CHANNEL
+  const identity = String(formData.get("identity") ?? "").trim(); // USER | BRAND | CHANNEL
   const brandNameInput = String(formData.get("brandName") ?? "").trim();
   const inviter = String(formData.get("inviter") ?? "").trim(); // 邀请人 userId（来自 ?inviter= URL 参数）
 

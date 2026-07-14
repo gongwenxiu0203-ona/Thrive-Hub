@@ -6,11 +6,6 @@ import { verifyPassword, hashPassword } from "@/lib/password";
 export async function PATCH(req: NextRequest) {
   const session = await requireSession();
 
-  // Guest users cannot change passwords
-  if (session.role === "GUEST") {
-    return NextResponse.json({ error: "游客账号不支持修改密码" }, { status: 403 });
-  }
-
   const { currentPassword, newPassword, confirmPassword } = await req.json();
 
   if (!currentPassword || !newPassword || !confirmPassword) {

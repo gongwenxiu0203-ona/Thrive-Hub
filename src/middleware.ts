@@ -27,8 +27,7 @@ export async function middleware(req: NextRequest) {
   const session = token ? await verifySessionToken(token) : null;
 
   // Already signed in but visiting /login or /register → send to role landing.
-  // Guest sessions are excluded — guests should be able to reach /login to upgrade.
-  if ((pathname === "/login" || pathname === "/register") && session && session.role !== "GUEST") {
+  if ((pathname === "/login" || pathname === "/register") && session) {
     const userStatus = session.status ?? "APPROVED";
     if (userStatus === "PENDING") {
       return NextResponse.redirect(new URL("/pending", req.url));

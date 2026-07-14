@@ -92,28 +92,13 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, Record<string, PermLevel>>
     intake: "NONE",
     admin: "NONE",
   },
-  // 游客：全部 NONE
-  GUEST: {
-    dashboard: "NONE",
-    customers: "NONE",
-    tasks: "NONE",
-    contracts: "NONE",
-    finance_customer: "NONE",
-    finance_channel: "NONE",
-    reminders: "NONE",
-    bi: "NONE",
-    affiliates: "NONE",
-    intake: "NONE",
-    admin: "NONE",
-  },
 };
 
-export const ALL_ROLES = ["ADMIN", "USER", "BRAND", "CHANNEL", "GUEST"] as const;
+export const ALL_ROLES = ["ADMIN", "USER", "BRAND", "CHANNEL"] as const;
 
 export const ROLE_LABELS_FOR_PERM: Record<string, string> = {
   ADMIN: "管理员",
   USER: "内部员工",
   BRAND: "品牌方",
   CHANNEL: "渠道商",
-  GUEST: "游客",
 };

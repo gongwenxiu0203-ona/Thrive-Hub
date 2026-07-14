@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { Copy, Check, Link } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Badge } from "@/components/ui/Badge";
+import { Modal } from "@/components/ui/Modal";
 import { formatDate } from "@/lib/utils";
 import { PermissionsPanel } from "./PermissionsPanel";
 import {
@@ -28,6 +29,28 @@ type UserRecord = {
   inviter: { id: string; name: string; email: string } | null;
   createdAt: string;
 };
+
+type TransferImpact = {
+  key: string;
+  label: string;
+  count: number;
+};
+
+type TransferPreview = {
+  user: Pick<UserRecord, "id" | "name" | "email" | "role" | "status">;
+  impacts: TransferImpact[];
+  total: number;
+  requiresChannelRecipient: boolean;
+};
+
+async function readApiResponse(response: Response) {
+  const content = await response.text();
+  try {
+    return content ? JSON.parse(content) : {};
+  } catch {
+    return { error: `请求失败（HTTP ${response.status}）` };
+  }
+}
 
 function InviteButton() {
   const [copied, setCopied] = useState(false);
@@ -122,6 +145,9 @@ export function AdminClient({
   const [newPassword, setNewPassword] = useState("");
   const [newRole, setNewRole] = useState("ADMIN");
   const [newBrandName, setNewBrandName] = useState("");
+  const [removalUser, setRemovalUser] = useState<UserRecord | null>(null);
+  const [removalPreview, setRemovalPreview] = useState<TransferPreview | null>(null);
+  const [transferToUserId, setTransferToUserId] = useState("");
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
 
@@ -198,17 +224,61 @@ export function AdminClient({
     });
   }
 
-  function deleteUser(id: string) {
-    if (!confirm("确认移除该用户？\n\n该账号将无法登录。已有客户、合同和财务等业务数据不会删除，相关负责人会按系统规则清空或转交。此操作不可恢复。")) return;
+  function openRemoval(user: UserRecord) {
+    setError("");
+    setRemovalUser(user);
+    setRemovalPreview(null);
+    setTransferToUserId("");
     startTransition(async () => {
-      const res = await fetch(`/api/admin/users/${id}`, { method: "DELETE" });
-      if (res.ok) await refreshUsers();
-      else {
-        const d = await res.json();
-        setError(d.error ?? "移除失败");
+      try {
+        const res = await fetch(`/api/admin/users/${user.id}`);
+        const data = await readApiResponse(res);
+        if (!res.ok) {
+          setError(data.error ?? "无法读取该用户的关联数据");
+          setRemovalUser(null);
+          return;
+        }
+        setRemovalPreview(data as TransferPreview);
+      } catch {
+        setError("读取关联数据失败，请稍后重试");
+        setRemovalUser(null);
       }
     });
   }
+
+  function closeRemoval() {
+    if (pending) return;
+    setRemovalUser(null);
+    setRemovalPreview(null);
+    setTransferToUserId("");
+  }
+
+  function deleteUser() {
+    if (!removalUser || !transferToUserId) return;
+    startTransition(async () => {
+      setError("");
+      try {
+        const res = await fetch(`/api/admin/users/${removalUser.id}`, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ transferToUserId }),
+        });
+        const data = await readApiResponse(res);
+        if (!res.ok) {
+          setError(data.error ?? "移除失败");
+          return;
+        }
+        closeRemoval();
+        await refreshUsers();
+      } catch {
+        setError("移除失败，请稍后重试");
+      }
+    });
+  }
+
+  const transferCandidates = removalUser
+    ? users.filter((user) => user.id !== removalUser.id && user.status === "APPROVED" && (!removalPreview?.requiresChannelRecipient || user.role === "CHANNEL"))
+    : [];
 
   function createAdmin() {
     startTransition(async () => {
@@ -342,6 +412,82 @@ export function AdminClient({
         </div>
       )}
 
+      <Modal
+        open={Boolean(removalUser)}
+        onClose={closeRemoval}
+        title="移除用户并移交数据"
+      >
+        {!removalPreview ? (
+          <div className="py-5 text-sm text-slate-500">正在检查该用户关联的数据...</div>
+        ) : (
+          <div className="space-y-4">
+            <p className="text-sm leading-6 text-slate-600">
+              将移除 <span className="font-semibold text-slate-900">{removalPreview.user.name}</span>（{removalPreview.user.email}）。
+              下列业务记录会完整移交给接收账户，不会被删除。
+            </p>
+
+            {removalPreview.impacts.length > 0 ? (
+              <div className="grid grid-cols-2 gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:grid-cols-3">
+                {removalPreview.impacts.map((impact) => (
+                  <div key={impact.key} className="rounded-md bg-white px-3 py-2">
+                    <div className="text-xs text-slate-500">{impact.label}</div>
+                    <div className="mt-0.5 text-sm font-semibold text-slate-900">{impact.count} 条</div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">
+                未发现需要移交的业务记录。
+              </div>
+            )}
+
+            {removalPreview.requiresChannelRecipient && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                该账户关联渠道商数据，接收账户必须选择“渠道商”角色。
+              </div>
+            )}
+
+            <div>
+              <label className="label">接收关联数据的账户</label>
+              <select
+                className="input"
+                value={transferToUserId}
+                onChange={(event) => setTransferToUserId(event.target.value)}
+                disabled={pending}
+              >
+                <option value="">请选择接收账户</option>
+                {transferCandidates.map((user) => (
+                  <option key={user.id} value={user.id}>
+                    {user.name} · {ROLE_LABELS[user.role] ?? user.role} · {user.email}
+                  </option>
+                ))}
+              </select>
+              {transferCandidates.length === 0 && (
+                <p className="mt-1.5 text-xs text-rose-600">
+                  没有可用的接收账户。请先创建并审核通过一个符合条件的账户。
+                </p>
+              )}
+            </div>
+
+            {error && <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</p>}
+
+            <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+              <button type="button" className="btn-secondary" onClick={closeRemoval} disabled={pending}>
+                取消
+              </button>
+              <button
+                type="button"
+                className="rounded-md bg-rose-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={deleteUser}
+                disabled={pending || !transferToUserId || transferCandidates.length === 0}
+              >
+                {pending ? "移交中..." : "确认移交并移除"}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
       {/* Tabs */}
       <div className="tab-strip overflow-x-auto">
         <button
@@ -460,7 +606,6 @@ export function AdminClient({
                         >
                           <option value="ADMIN">管理员</option>
                           <option value="USER">普通员工</option>
-                          <option value="LYNQ_STAFF">LYNQ内部员工</option>
                           <option value="BRAND">品牌方</option>
                           <option value="CHANNEL">渠道商</option>
                         </select>
@@ -589,7 +734,7 @@ export function AdminClient({
                             <button
                               type="button"
                               className="rounded px-2 py-1 text-xs text-rose-600 hover:bg-rose-50 transition-colors"
-                              onClick={() => deleteUser(u.id)}
+                              onClick={() => openRemoval(u)}
                               disabled={pending}
                             >
                               移除用户

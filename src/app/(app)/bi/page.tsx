@@ -33,7 +33,7 @@ const ALL_TABS = [
 
 // Roles treated as full-access staff
 function isStaff(role: string) {
-  return role === "ADMIN" || role === "USER" || role === "LYNQ_STAFF";
+  return role === "ADMIN" || role === "USER";
 }
 
 const PAGE_SIZE = 50;

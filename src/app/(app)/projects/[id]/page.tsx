@@ -115,7 +115,7 @@ export default async function ProjectDetailPage({
       orderBy: { createdAt: "desc" },
     }),
     prisma.user.findMany({
-      where: { status: "APPROVED", role: { in: ["ADMIN", "USER", "LYNQ_STAFF"] } },
+      where: { status: "APPROVED", role: { in: ["ADMIN", "USER"] } },
       select: { id: true, name: true },
       orderBy: { name: "asc" },
     }),
@@ -127,7 +127,7 @@ export default async function ProjectDetailPage({
   let submittedToName: string | null = null;
   if (isOneOff) {
     users = await prisma.user.findMany({
-      where: { status: "APPROVED", role: { in: ["ADMIN", "USER", "LYNQ_STAFF"] } },
+      where: { status: "APPROVED", role: { in: ["ADMIN", "USER"] } },
       select: { id: true, name: true },
       orderBy: { name: "asc" },
     });
@@ -232,7 +232,7 @@ export default async function ProjectDetailPage({
     }
     gmvDefaultAmOwner = project.owner?.id ?? project.customer?.backendOwnerId ?? null;
     gmvAllUsers = await prisma.user.findMany({
-      where: { status: "APPROVED", role: { in: ["ADMIN", "USER", "LYNQ_STAFF"] } },
+      where: { status: "APPROVED", role: { in: ["ADMIN", "USER"] } },
       select: { id: true, name: true },
       orderBy: { name: "asc" },
     });

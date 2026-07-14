@@ -1,9 +1,9 @@
 "use client";
 
-import { useActionState, useTransition } from "react";
+import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
 import Link from "next/link";
-import { loginAction, guestLoginAction } from "@/actions/auth";
+import { loginAction } from "@/actions/auth";
 
 function SubmitButton() {
   const { pending } = useFormStatus();
@@ -16,12 +16,6 @@ function SubmitButton() {
 
 export function LoginForm() {
   const [state, formAction] = useActionState(loginAction, {});
-  const [guestPending, startGuest] = useTransition();
-
-  function handleGuest() {
-    startGuest(() => guestLoginAction());
-  }
-
   return (
     <div className="space-y-4">
       <form action={formAction} className="space-y-4">
@@ -69,22 +63,6 @@ export function LoginForm() {
         )}
         <SubmitButton />
       </form>
-      <div className="relative">
-        <div className="absolute inset-0 flex items-center">
-          <div className="w-full border-t border-slate-200" />
-        </div>
-        <div className="relative flex justify-center text-xs text-slate-400">
-          <span className="bg-white px-2">或</span>
-        </div>
-      </div>
-      <button
-        type="button"
-        onClick={handleGuest}
-        disabled={guestPending}
-        className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors"
-      >
-        {guestPending ? "进入中…" : "游客体验（数据模糊）"}
-      </button>
     </div>
   );
 }
