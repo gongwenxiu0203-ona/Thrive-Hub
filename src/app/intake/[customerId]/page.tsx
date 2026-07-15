@@ -1,12 +1,12 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { IntakeForm } from "../IntakeForm";
+import { verifyIntakeToken } from "@/lib/intakeToken";
 import {
   parseStringArray,
   parseSiteLinks,
   parseRecord,
 } from "@/lib/customer";
-import { resolveIntakeReferrer } from "@/lib/intakeReferrer";
 
 export const metadata = {
   title: "品牌信息收集表 · 联盟营销服务",
@@ -22,7 +22,9 @@ export default async function CustomerIntakePage({
 }) {
   const { customerId } = await params;
   const sp = await searchParams;
-  const referrer = await resolveIntakeReferrer(sp.channel, sp.staff);
+  const token = sp.token ?? "";
+  const claims = token ? await verifyIntakeToken(token) : null;
+  if (!claims || claims.type !== "CUSTOMER_UPDATE" || claims.customerId !== customerId) notFound();
   const customer = await prisma.customer.findUnique({
     where: { id: customerId },
   });
@@ -67,8 +69,7 @@ export default async function CustomerIntakePage({
         <div className="card p-6 sm:p-8">
           <IntakeForm
             customerId={customer.id}
-            channelId={referrer.channelId}
-            staffId={referrer.staffId}
+            token={token}
             defaults={defaults}
           />
         </div>

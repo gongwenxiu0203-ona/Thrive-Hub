@@ -9,7 +9,7 @@ import {
 import { MAIN_SITES, PROMO_PLATFORMS } from "@/lib/constants";
 
 // Build the intake JSON payload from the CustomerSectionFields form.
-function buildPayload(form: HTMLFormElement, customerId?: string, channelId?: string, staffId?: string) {
+function buildPayload(form: HTMLFormElement, token: string, customerId?: string) {
   const fd = new FormData(form);
   const str = (k: string) => String(fd.get(k) ?? "").trim();
 
@@ -33,8 +33,7 @@ function buildPayload(form: HTMLFormElement, customerId?: string, channelId?: st
 
   return {
     customerId: customerId ?? "",
-    channelId: channelId ?? "",
-    staffId: staffId ?? "",
+    token,
     referrerName: str("referrerName"),
     brandName: str("brandName"),
     mainSites,
@@ -59,13 +58,11 @@ function buildPayload(form: HTMLFormElement, customerId?: string, channelId?: st
 
 export function IntakeForm({
   customerId,
-  channelId,
-  staffId,
+  token,
   defaults,
 }: {
   customerId?: string;
-  channelId?: string;
-  staffId?: string;
+  token: string;
   defaults?: CustomerSectionDefaults;
 }) {
   const router = useRouter();
@@ -76,7 +73,7 @@ export function IntakeForm({
     e.preventDefault();
     setError(null);
     setPending(true);
-    const payload = buildPayload(e.currentTarget, customerId, channelId, staffId);
+    const payload = buildPayload(e.currentTarget, token, customerId);
     if (!payload.referrerName) {
       setError("请填写推荐人");
       setPending(false);

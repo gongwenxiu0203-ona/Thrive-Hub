@@ -4,7 +4,6 @@ import { runCustomerStatusChecks, parseStringArray } from "@/lib/customer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { SearchFilter } from "@/components/ui/Filters";
 import { MultiSelectFilter } from "@/components/ui/MultiSelectFilter";
-import { IntakeLinkButton } from "@/components/IntakeLinkButton";
 import {
   CUSTOMER_STATUS_LABELS,
   CUSTOMER_STATUS_COLORS,
@@ -140,10 +139,14 @@ export default async function CustomersPage({
     view,
   );
 
-  const [customers, users] = await Promise.all([
+  const [customers, users, pendingIntakes] = await Promise.all([
     loadCustomers({ ...scope, deletedAt: null }),
     prisma.user.findMany({ orderBy: { name: "asc" } }),
+    session.role === "ADMIN" ? prisma.customerIntakeSubmission.findMany({ where: { status: "PENDING" }, orderBy: { submittedAt: "desc" } }) : Promise.resolve([]),
   ]);
+  const pendingByCustomer = new Map<string, number>();
+  for (const item of pendingIntakes) if (item.customerId) pendingByCustomer.set(item.customerId, (pendingByCustomer.get(item.customerId) ?? 0) + 1);
+  const pendingNewCustomers = pendingIntakes.filter((item) => item.type === "GENERAL_NEW");
 
   const f: Filters = {
     status: csv(sp, "status"),
@@ -218,6 +221,7 @@ export default async function CustomersPage({
       latestContractNo: latestContract?.contractNo ?? null,
       latestContractStatus: latestContract?.status ?? null,
       latestContractLabel,
+      pendingReviewCount: pendingByCustomer.get(c.id) ?? 0,
     };
   });
 
@@ -235,10 +239,6 @@ export default async function CustomersPage({
         actions={
           <>
             {isStaff(session.role) && <ScopeToggle defaultView={session.role === "ADMIN" ? "all" : "mine"} />}
-            <IntakeLinkButton
-              channelUserId={isChannel ? session.userId : undefined}
-              staffUserId={isStaff(session.role) ? session.userId : undefined}
-            />
             <CustomerImportModal />
             <QuickCreateModal />
             <CustomerFormModal users={userOptions} />
@@ -295,6 +295,13 @@ export default async function CustomersPage({
           </>
         }
       />
+
+      {session.role === "ADMIN" && pendingNewCustomers.length > 0 && (
+        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <div className="mb-3 flex items-center justify-between"><div><p className="font-semibold text-amber-900">待审核新客户</p><p className="text-sm text-amber-700">审核通过后才会成为正式客户。</p></div><span className="rounded-full bg-amber-200 px-2.5 py-1 text-xs font-semibold text-amber-900">{pendingNewCustomers.length}</span></div>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{pendingNewCustomers.map(item => <Link key={item.id} href="/admin?tab=intake" className="rounded-lg border border-amber-200 bg-white px-3 py-2 hover:border-amber-400"><p className="font-medium text-slate-900">{item.brandName}</p><p className="mt-1 text-xs text-amber-700">待审核新客户 · 前往审核</p></Link>)}</div>
+        </div>
+      )}
 
       <p className="mt-3 text-xs text-slate-400">
         共 {filtered.length} / {customers.length} 位客户

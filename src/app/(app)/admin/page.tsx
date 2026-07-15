@@ -4,8 +4,9 @@ import { AdminClient } from "./AdminClient";
 
 export const metadata = { title: "管理员面板 · Thraive联盟营销系统" };
 
-export default async function AdminPage() {
+export default async function AdminPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   await requireAdmin();
+  const sp = await searchParams;
 
   const [users, contractsWithoutCustomer, contractsWithMissingFields, unlinkedSales, untypedAffiliates, projectsWithoutCustomer, auditLogs, apiLogs, apiFailureCount] = await Promise.all([
     prisma.user.findMany({
@@ -58,6 +59,7 @@ export default async function AdminPage() {
 
   return <AdminClient
     initialUsers={usersWithExtra}
+    initialTab={sp.tab === "intake" ? "intake" : "overview"}
     overview={{ totalUsers: users.length, pendingUsers: users.filter((user) => user.status === "PENDING").length, auditCount: auditLogs.length, apiFailureCount }}
     qualityIssues={qualityIssues}
     auditLogs={auditLogs.map((log) => ({ id: log.id, actorName: log.actor?.name ?? null, action: log.action, module: log.module, targetLabel: log.targetLabel, summary: log.summary, status: log.status, createdAt: log.createdAt.toISOString() }))}

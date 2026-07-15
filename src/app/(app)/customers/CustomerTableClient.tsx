@@ -46,6 +46,7 @@ export type CustomerTableRow = {
   latestContractNo: string | null;
   latestContractStatus: string | null;
   latestContractLabel: string;
+  pendingReviewCount: number;
 };
 
 type SortKey =
@@ -156,12 +157,13 @@ export function CustomerTableClient({
   const [deleteImpacts, setDeleteImpacts] = useState<CustomerDeleteImpact[] | null>(null);
   const [confirmedDeletes, setConfirmedDeletes] = useState<Set<string>>(new Set());
   const [message, setMessage] = useState<string | null>(null);
+  const [reviewFilter, setReviewFilter] = useState<"all" | "pending">("all");
 
   const sortedRows = useMemo(() => {
-    const next = [...rows];
+    const next = reviewFilter === "pending" ? rows.filter((row) => row.pendingReviewCount > 0) : [...rows];
     next.sort((a, b) => compareRows(a, b, sort));
     return next;
-  }, [rows, sort]);
+  }, [rows, sort, reviewFilter]);
 
   const selectedIds = [...selected];
   const allChecked = sortedRows.length > 0 && sortedRows.every((r) => selected.has(r.id));
@@ -281,6 +283,10 @@ export function CustomerTableClient({
     <div className="space-y-3">
       <div className="filter-bar">
         {filterControls}
+        <select className="input h-9 w-auto text-sm" value={reviewFilter} onChange={(e) => setReviewFilter(e.target.value as "all" | "pending")} aria-label="资料审核筛选">
+          <option value="all">全部资料状态</option>
+          <option value="pending">有资料待审核</option>
+        </select>
         {isStaff && (
           <button
             type="button"
@@ -307,6 +313,7 @@ export function CustomerTableClient({
                   </th>
                 )}
                 <SortHeader label="品牌/店铺名称" sortKey="brandName" sort={sort} onSort={changeSort} />
+                <th>资料更新</th>
                 <SortHeader label="品类" sortKey="category" sort={sort} onSort={changeSort} />
                 <SortHeader label="主营站点" sortKey="mainSites" sort={sort} onSort={changeSort} />
                 <SortHeader label="当前平台" sortKey="targetPlatforms" sort={sort} onSort={changeSort} />
@@ -336,6 +343,13 @@ export function CustomerTableClient({
                     <Link href={`/customers/${c.id}`} className="font-medium text-brand-700 hover:underline">
                       {c.brandName}
                     </Link>
+                  </td>
+                  <td>
+                    {c.pendingReviewCount > 0 ? (
+                      <Link href="/admin?tab=intake" className="inline-flex whitespace-nowrap rounded-full bg-amber-100 px-2 py-1 text-xs font-medium text-amber-800 hover:bg-amber-200">
+                        ⚠ 资料待审核 {c.pendingReviewCount}
+                      </Link>
+                    ) : <span className="text-slate-300">—</span>}
                   </td>
                   <td>{c.category ?? "-"}</td>
                   <td>

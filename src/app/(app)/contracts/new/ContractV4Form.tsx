@@ -639,7 +639,7 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
                     {tokenCopied ? "已复制" : "复制"}
                   </button>
                 </div>
-                <p className="text-[11px] text-emerald-700">链接有效期 7 天，客户填写后甲方信息自动同步到本合同。</p>
+                <p className="text-[11px] text-emerald-700">链接有效期 60 天，可转发给甲方相关人员重复填写；合同进入审核或签署流程后自动失效。</p>
               </div>
             )}
           </div>

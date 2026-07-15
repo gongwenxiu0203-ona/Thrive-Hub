@@ -1,5 +1,5 @@
 import { IntakeForm } from "./IntakeForm";
-import { resolveIntakeReferrer } from "@/lib/intakeReferrer";
+import { verifyIntakeToken } from "@/lib/intakeToken";
 
 export const metadata = {
   title: "品牌信息收集表 · 联盟营销服务",
@@ -12,7 +12,9 @@ export default async function IntakePage({
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const sp = await searchParams;
-  const referrer = await resolveIntakeReferrer(sp.channel, sp.staff);
+  const token = sp.token ?? "";
+  const claims = token ? await verifyIntakeToken(token) : null;
+  if (!claims || claims.type !== "GENERAL_NEW") return <InvalidLink />;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-100 to-brand-50 py-10 px-4">
@@ -29,14 +31,22 @@ export default async function IntakePage({
           </p>
         </div>
         <div className="card p-6 sm:p-8">
-          <IntakeForm
-            channelId={referrer.channelId}
-            staffId={referrer.staffId}
-          />
+          <IntakeForm token={token} />
         </div>
         <p className="mt-6 text-center text-xs text-slate-400">
           您提交的信息将仅用于联盟营销服务对接
         </p>
+      </div>
+    </div>
+  );
+}
+
+function InvalidLink() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
+      <div className="card max-w-md p-8 text-center">
+        <h1 className="text-xl font-semibold text-slate-900">链接无效</h1>
+        <p className="mt-2 text-sm text-slate-600">请通过工作人员分享的安全链接打开客户信息表。</p>
       </div>
     </div>
   );

@@ -36,7 +36,7 @@ export default async function CustomerDetailPage({
   const session = await requireSession();
   const { id } = await params;
 
-  const [customer, channelRec, splitRule] = await Promise.all([
+  const [customer, channelRec, splitRule, pendingIntakeCount] = await Promise.all([
     prisma.customer.findUnique({
       where: { id },
       include: {
@@ -58,6 +58,7 @@ export default async function CustomerDetailPage({
       include: { periods: { orderBy: { periodIndex: "asc" } } },
     }),
     prisma.channelSplitRule.findUnique({ where: { customerId: id } }),
+    session.role === "ADMIN" ? prisma.customerIntakeSubmission.count({ where: { customerId: id, status: "PENDING" } }) : Promise.resolve(0),
   ]);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   if (!customer || (customer as any).deletedAt) notFound();
@@ -148,6 +149,12 @@ export default async function CustomerDetailPage({
     <div className="space-y-6">
       {/* ── Back nav ── */}
       <BackButton label="返回客户列表" fallbackHref="/customers" />
+      {session.role === "ADMIN" && pendingIntakeCount > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <div><p className="font-medium text-amber-900">⚠ 该客户有 {pendingIntakeCount} 条外部资料变更待审核</p><p className="text-sm text-amber-700">审核通过前不会覆盖当前正式资料。</p></div>
+          <Link href="/admin?tab=intake" className="btn-secondary btn-sm">查看并审核</Link>
+        </div>
+      )}
 
       {/* ── Header card ── */}
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">

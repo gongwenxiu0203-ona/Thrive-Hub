@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
 import { formatDate } from "@/lib/utils";
 import { PermissionsPanel } from "./PermissionsPanel";
+import { IntakeReviewPanel } from "./IntakeReviewPanel";
 import {
   AdminOverviewPanel,
   ApiAccessPanel,
@@ -117,23 +118,25 @@ const ROLE_COLORS: Record<string, string> = {
   CHANNEL: "bg-teal-100 text-teal-700",
 };
 
-type AdminTab = "overview" | "pending" | "all" | "permissions" | "quality" | "audit" | "api";
+type AdminTab = "overview" | "intake" | "pending" | "all" | "permissions" | "quality" | "audit" | "api";
 
 export function AdminClient({
   initialUsers,
+  initialTab,
   overview,
   qualityIssues,
   auditLogs,
   apiLogs,
 }: {
   initialUsers: UserRecord[];
+  initialTab: "intake" | "overview";
   overview: AdminOverview;
   qualityIssues: DataQualityIssue[];
   auditLogs: AuditLogRow[];
   apiLogs: ApiAccessLogRow[];
 }) {
   const [users, setUsers] = useState<UserRecord[]>(initialUsers);
-  const [tab, setTab] = useState<AdminTab>("overview");
+  const [tab, setTab] = useState<AdminTab>(initialTab);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editRole, setEditRole] = useState("");
   const [editStatus, setEditStatus] = useState("");
@@ -490,6 +493,7 @@ export function AdminClient({
 
       {/* Tabs */}
       <div className="tab-strip overflow-x-auto">
+        <button type="button" onClick={() => setTab("intake")} className={tab === "intake" ? "tab-trigger tab-trigger-active" : "tab-trigger"}>信息收集审核</button>
         <button
           type="button"
           onClick={() => setTab("overview")}
@@ -559,6 +563,7 @@ export function AdminClient({
       </div>
 
       {tab === "overview" && <AdminOverviewPanel overview={overview} issues={qualityIssues} auditLogs={auditLogs} apiLogs={apiLogs} />}
+      {tab === "intake" && <IntakeReviewPanel />}
       {tab === "permissions" && <PermissionsPanel users={users} />}
       {tab === "quality" && <DataQualityPanel issues={qualityIssues} />}
       {tab === "audit" && <AuditLogPanel logs={auditLogs} />}

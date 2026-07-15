@@ -9,7 +9,6 @@ import {
   FileText,
   BarChart3,
   Handshake,
-  Link2,
   ShieldCheck,
   Receipt,
   UserPlus,
@@ -22,6 +21,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { visibleNavForRole, isStaff } from "@/lib/permissions";
+import { IntakeLinkButton } from "@/components/IntakeLinkButton";
 
 type NavItem = {
   href: string;
@@ -122,14 +122,7 @@ export function Sidebar({ role = "", userId = "" }: { role?: string; userId?: st
             {"\u56de\u6536\u7ad9"}
           </Link>
         )}
-        <Link
-          href="/intake"
-          target="_blank"
-          className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-slate-600 hover:bg-white"
-        >
-          <Link2 className="h-[18px] w-[18px]" />
-          {"\u5ba2\u6237\u95e8\u6237\u8868\u5355"}
-        </Link>
+        {(isStaff(role) || role === "CHANNEL") && <IntakeLinkButton compact />}
         {role === "ADMIN" && (
           <Link
             href="/admin"

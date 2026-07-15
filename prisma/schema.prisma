@@ -78,6 +78,9 @@ model User {
   bulkOperationLogs                   BulkOperationLog[]          @relation("BulkOperationOperator")
   adminAuditLogs                      AdminAuditLog[]             @relation("AdminAuditActor")
   apiAccessLogs                       ApiAccessLog[]              @relation("ApiAccessActor")
+  intakeSubmissionsShared            CustomerIntakeSubmission[]  @relation("IntakeSharedBy")
+  intakeSubmissionsAsChannel         CustomerIntakeSubmission[]  @relation("IntakeChannel")
+  intakeSubmissionsReviewed          CustomerIntakeSubmission[]  @relation("IntakeReviewer")
 }
 
 // 角色级权限配置（每个角色 + 功能 = 一个等级）
@@ -170,6 +173,42 @@ model Customer {
   accountsReceivable       AccountsReceivable[]
   splitRule                ChannelSplitRule?
   authorizationInfos       CustomerAuthorizationInfo[]
+  intakeSubmissions        CustomerIntakeSubmission[] @relation("IntakeTargetCustomer")
+  createdFromSubmissions   CustomerIntakeSubmission[] @relation("IntakeCreatedCustomer")
+}
+
+// External customer information is quarantined here until an administrator reviews it.
+model CustomerIntakeSubmission {
+  id                String   @id @default(cuid())
+  type              String   // GENERAL_NEW | CUSTOMER_UPDATE
+  status            String   @default("PENDING") // PENDING | APPROVED | REJECTED
+  brandName         String
+  payload           String
+  baselinePayload   String?
+  customerId        String?
+  sharedByUserId    String?
+  channelUserId     String?
+  reviewedById      String?
+  reviewedAt        DateTime?
+  reviewNote        String?
+  appliedFields     String?
+  createdCustomerId String?
+  submittedAt       DateTime @default(now())
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  customer        Customer? @relation("IntakeTargetCustomer", fields: [customerId], references: [id], onDelete: SetNull)
+  createdCustomer Customer? @relation("IntakeCreatedCustomer", fields: [createdCustomerId], references: [id], onDelete: SetNull)
+  sharedBy        User?     @relation("IntakeSharedBy", fields: [sharedByUserId], references: [id], onDelete: SetNull)
+  channel         User?     @relation("IntakeChannel", fields: [channelUserId], references: [id], onDelete: SetNull)
+  reviewer        User?     @relation("IntakeReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([status, submittedAt])
+  @@index([type])
+  @@index([customerId, status])
+  @@index([brandName])
+  @@index([sharedByUserId])
+  @@index([channelUserId])
 }
 
 model CustomerAuthorizationInfo {
