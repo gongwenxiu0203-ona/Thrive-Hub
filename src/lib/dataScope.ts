@@ -74,16 +74,7 @@ export function contractScope(
   }
   // 内部员工
   if (isStaff(session.role)) {
-    if (view === "all") return {};
-    return {
-      OR: [
-        { ownerId: session.userId },
-        { createdById: session.userId },
-        { reviewerId: session.userId },
-        { customer: { businessOwnerId: session.userId } },
-        { customer: { backendOwnerId: session.userId } },
-      ],
-    };
+    return {};
   }
   return { id: "__NO_ACCESS__" };
 }

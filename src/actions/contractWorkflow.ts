@@ -1,8 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { promises as fs } from "fs";
-import path from "path";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { fillContractTemplate } from "@/lib/contractTemplateFill";
@@ -10,11 +8,11 @@ import { buildPlaceholderMap } from "@/lib/contractPlaceholders";
 import { contractFileBaseName } from "@/lib/contractFileName";
 import { openReviewRound } from "@/actions/contractReview";
 import { resolveContractTemplateBuffer } from "@/lib/contractTemplateResolve";
+import { writePrivateContractFile } from "@/lib/contractFileStorage";
+import { contractScope } from "@/lib/dataScope";
+import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
 
 type Result<T = void> = { ok: true; data?: T } | { ok: false; error: string };
-
-const OUT_DIR_ABS = path.join(process.cwd(), "public", "contracts-generated");
-const OUT_PREFIX = "/contracts-generated";
 
 /** Resolve current version count + return the next versionNo. */
 async function nextVersionNo(contractId: string): Promise<number> {
@@ -26,20 +24,6 @@ async function nextVersionNo(contractId: string): Promise<number> {
   return (last?.versionNo ?? 0) + 1;
 }
 
-/** Internal: pick the template buffer for a contract. Falls back to error if
- *  no template is selected. */
-async function loadTemplateFor(contractId: string): Promise<{ buffer: Buffer; templateName: string; templateKey: string } | { error: string }> {
-  const c = await prisma.contract.findUnique({
-    where: { id: contractId },
-    select: { templateId: true, template: true },
-  });
-  if (!c) return { error: "合同不存在" };
-  if (!c.templateId) return { error: "请先在合同上选择适用的模板" };
-  const tpl = await resolveContractTemplateBuffer(c.template);
-  if ("error" in tpl) return tpl;
-  return { buffer: tpl.buffer, templateName: tpl.templateName, templateKey: tpl.templateKey };
-}
-
 /** Fill the contract's selected template with current field values, write the
  *  output as a new ContractVersion, and update contract.generatedDocUrl. */
 export async function generateContractFromTemplate(
@@ -47,24 +31,29 @@ export async function generateContractFromTemplate(
   reason: string = "首次生成"
 ): Promise<Result<{ versionNo: number; fileUrl: string }>> {
   const session = await requireSession();
+  try {
+    await requireFeaturePermission(session, "contracts", "EDIT");
+  } catch (error) {
+    if (error instanceof FeaturePermissionError) return { ok: false, error: "无权编辑合同" };
+    throw error;
+  }
 
-  const c = await prisma.contract.findUnique({
-    where: { id: contractId },
+  const c = await prisma.contract.findFirst({
+    where: { id: contractId, ...contractScope(session, session.role === "ADMIN" ? "all" : "mine") },
     include: { customer: { select: { brandName: true } }, template: true },
   });
   if (!c) return { ok: false, error: "合同不存在" };
 
-  const tpl = await loadTemplateFor(contractId);
+  if (!c.templateId) return { ok: false, error: "请先在合同上选择适用的模板" };
+  const tpl = await resolveContractTemplateBuffer(c.template);
   if ("error" in tpl) return { ok: false, error: tpl.error };
 
   const fields = { ...buildPlaceholderMap(c), templateKey: tpl.templateKey };
   const filled = await fillContractTemplate(tpl.buffer, fields);
 
   const versionNo = await nextVersionNo(contractId);
-  await fs.mkdir(OUT_DIR_ABS, { recursive: true });
   const fileName = `${contractFileBaseName(c)}-v${versionNo}.docx`;
-  await fs.writeFile(path.join(OUT_DIR_ABS, fileName), filled);
-  const fileUrl = `${OUT_PREFIX}/${fileName}`;
+  const { fileUrl } = await writePrivateContractFile("contracts-generated", fileName, filled);
 
   await prisma.contractVersion.create({
     data: {
@@ -88,9 +77,15 @@ export async function generateContractFromTemplate(
 /** Submit-review path A: use the current generated/uploaded contract as-is.
  *  Moves status to REVIEWING. */
 export async function submitForReviewUseCurrent(contractId: string): Promise<Result> {
-  await requireSession();
-  const c = await prisma.contract.findUnique({
-    where: { id: contractId },
+  const session = await requireSession();
+  try {
+    await requireFeaturePermission(session, "contracts", "EDIT");
+  } catch (error) {
+    if (error instanceof FeaturePermissionError) return { ok: false, error: "无权编辑合同" };
+    throw error;
+  }
+  const c = await prisma.contract.findFirst({
+    where: { id: contractId, ...contractScope(session, session.role === "ADMIN" ? "all" : "mine") },
     select: { id: true, status: true, generatedDocUrl: true },
   });
   if (!c) return { ok: false, error: "合同不存在" };
@@ -117,6 +112,12 @@ export async function submitForReviewUseCurrent(contractId: string): Promise<Res
  *  Field re-extraction is the reviewer's next step (handled later). */
 export async function submitForReviewUploadNew(fd: FormData): Promise<Result<{ versionNo: number }>> {
   const session = await requireSession();
+  try {
+    await requireFeaturePermission(session, "contracts", "EDIT");
+  } catch (error) {
+    if (error instanceof FeaturePermissionError) return { ok: false, error: "无权编辑合同" };
+    throw error;
+  }
   const contractId = String(fd.get("contractId") ?? "");
   const file = fd.get("file");
   if (!contractId) return { ok: false, error: "缺少合同 id" };
@@ -124,8 +125,8 @@ export async function submitForReviewUploadNew(fd: FormData): Promise<Result<{ v
   if (!file.name.toLowerCase().endsWith(".docx")) return { ok: false, error: "仅支持 .docx 文件" };
   if (file.size > 20 * 1024 * 1024) return { ok: false, error: "文件超过 20MB" };
 
-  const c = await prisma.contract.findUnique({
-    where: { id: contractId },
+  const c = await prisma.contract.findFirst({
+    where: { id: contractId, ...contractScope(session, session.role === "ADMIN" ? "all" : "mine") },
     include: { customer: { select: { brandName: true } } },
   });
   if (!c) return { ok: false, error: "合同不存在" };
@@ -134,11 +135,9 @@ export async function submitForReviewUploadNew(fd: FormData): Promise<Result<{ v
   }
 
   const versionNo = await nextVersionNo(contractId);
-  await fs.mkdir(OUT_DIR_ABS, { recursive: true });
   const fileName = `${contractFileBaseName(c)}-v${versionNo}.docx`;
   const buf = Buffer.from(await file.arrayBuffer());
-  await fs.writeFile(path.join(OUT_DIR_ABS, fileName), buf);
-  const fileUrl = `${OUT_PREFIX}/${fileName}`;
+  const { fileUrl } = await writePrivateContractFile("contracts-generated", fileName, buf);
 
   await prisma.contractVersion.create({
     data: {

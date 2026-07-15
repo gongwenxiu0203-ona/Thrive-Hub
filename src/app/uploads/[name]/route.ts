@@ -1,6 +1,14 @@
 import { NextResponse } from "next/server";
-import { readFile, stat } from "fs/promises";
+import { readFile } from "fs/promises";
 import path from "path";
+import { prisma } from "@/lib/prisma";
+import { getSession } from "@/lib/session";
+import {
+  AttachmentEntityNotFoundError,
+  isAttachmentEntityType,
+  requireAttachmentEntityAccess,
+} from "@/lib/attachmentAccess";
+import { FeaturePermissionError } from "@/lib/permissionGuard";
 
 const MIME: Record<string, string> = {
   ".pdf": "application/pdf",
@@ -23,28 +31,61 @@ const MIME: Record<string, string> = {
     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 };
 
-// Serves files saved under <cwd>/uploads. The session cookie is enforced by
-// middleware before this handler runs.
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ name: string }> },
 ) {
-  const { name } = await params;
-  const safeName = path.basename(name); // strip any path traversal
-  const filePath = path.join(process.cwd(), "uploads", safeName);
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
 
-  try {
-    await stat(filePath);
-  } catch {
-    return new NextResponse("Not found", { status: 404 });
+  const { name } = await params;
+  const safeName = path.basename(name);
+  if (safeName !== name) {
+    return NextResponse.json({ error: "文件不存在" }, { status: 404 });
   }
 
-  const data = await readFile(filePath);
-  const ext = path.extname(safeName).toLowerCase();
-  return new NextResponse(new Uint8Array(data), {
-    headers: {
-      "Content-Type": MIME[ext] ?? "application/octet-stream",
-      "Cache-Control": "private, max-age=3600",
-    },
+  const attachment = await prisma.attachment.findFirst({
+    where: { fileUrl: `/uploads/${safeName}` },
+    select: { entityType: true, entityId: true },
   });
+  if (!attachment || !isAttachmentEntityType(attachment.entityType)) {
+    return NextResponse.json({ error: "文件不存在" }, { status: 404 });
+  }
+
+  try {
+    await requireAttachmentEntityAccess(
+      session,
+      attachment.entityType,
+      attachment.entityId,
+      "READ",
+    );
+  } catch (error) {
+    if (
+      error instanceof FeaturePermissionError ||
+      error instanceof AttachmentEntityNotFoundError
+    ) {
+      return NextResponse.json({ error: "文件不存在" }, { status: 404 });
+    }
+    throw error;
+  }
+
+  const uploadsRoot = path.resolve(process.cwd(), "uploads");
+  const filePath = path.resolve(uploadsRoot, safeName);
+  if (!filePath.startsWith(`${uploadsRoot}${path.sep}`)) {
+    return NextResponse.json({ error: "文件不存在" }, { status: 404 });
+  }
+
+  try {
+    const data = await readFile(filePath);
+    const ext = path.extname(safeName).toLowerCase();
+    return new NextResponse(new Uint8Array(data), {
+      headers: {
+        "Content-Type": MIME[ext] ?? "application/octet-stream",
+        "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff",
+      },
+    });
+  } catch {
+    return NextResponse.json({ error: "文件不存在" }, { status: 404 });
+  }
 }

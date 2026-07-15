@@ -4,6 +4,7 @@
 import JSZip from "jszip";
 import * as fs from "fs";
 import * as path from "path";
+import { resolvePartyBSignaturePath } from "@/lib/contractSeal";
 
 // ── 乙方固定信息 ─────────────────────────────────────────────────────────────
 export const PARTY_B = {
@@ -275,11 +276,8 @@ export async function generateContractDocx(data: ContractV4Data): Promise<Buffer
 
   // 签名图片路径（优先合同专属，否则用全局默认）
   // 乙方签名：优先合同专属，否则用全局上传的签名文件
-  const globalSig = path.join(process.cwd(), "public", "signature-party-b.png");
-  const sigPath = data.partyBSignatureUrl
-    ? path.join(process.cwd(), "public", data.partyBSignatureUrl.replace(/^\//, ""))
-    : globalSig;
-  const hasSignature = await embedSignature(zip, sigPath);
+  const sigPath = await resolvePartyBSignaturePath();
+  const hasSignature = sigPath ? await embedSignature(zip, sigPath) : false;
   const sigDrawingXml = hasSignature ? buildSignatureDrawingXml() : "";
 
   // ════════════════════════════════════════════════════════════════════════════

@@ -6,12 +6,16 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { TEMPLATE_KEY_LABELS } from "@/lib/contractTemplateKeys";
 import { companySealExistsServer } from "@/lib/contractSeal";
 import { TemplatesClient } from "./TemplatesClient";
+import { resolveUserPermission } from "@/lib/permissionResolver";
+import { hasPermissionLevel } from "@/lib/permissionGuard";
+import { isStaff } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "合同模板库 · Thraive联盟营销系统" };
 
 export default async function ContractTemplatesPage() {
   const session = await requireSession();
+  const contractPermission = await resolveUserPermission(session.userId, "contracts");
 
   const [templates, hasFoshanSeal, hasHongkongSeal] = await Promise.all([
     prisma.contractTemplate.findMany({
@@ -32,19 +36,21 @@ export default async function ContractTemplatesPage() {
       </div>
       <PageHeader
         title="合同模板库"
-        description="管理员上传与维护合同模板，所有人可下载使用。新建合同时也会从此处选择适用模板。"
+        description="管理员上传与维护合同模板；仅具备合同管理权限的内部人员可下载。新建合同时也会从此处选择适用模板。"
       />
 
       <div className="mt-5">
         <TemplatesClient
           isAdmin={session.role === "ADMIN"}
+          canDownloadTemplates={
+            isStaff(session.role) && hasPermissionLevel(contractPermission, "MANAGE")
+          }
           sealStatus={{ FOSHAN: hasFoshanSeal, HONGKONG: hasHongkongSeal }}
           templates={templates.map((t) => ({
             id: t.id,
             name: t.name,
             templateKey: t.templateKey,
             templateKeyLabel: TEMPLATE_KEY_LABELS[t.templateKey] ?? t.templateKey,
-            fileUrl: t.fileUrl,
             description: t.description,
             uploaderName: t.uploader?.name ?? "—",
             createdAt: t.createdAt.toISOString(),

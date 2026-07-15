@@ -1,18 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { promises as fs } from "fs";
-import path from "path";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { TEMPLATE_KEYS } from "@/lib/contractTemplateKeys";
+import { writePrivateContractFile } from "@/lib/contractFileStorage";
 
 type Result<T = void> = { ok: true; data?: T } | { ok: false; error: string };
 
-const UPLOAD_DIR_ABS = path.join(process.cwd(), "public", "contract-templates");
-const PUBLIC_PREFIX = "/contract-templates";
-
-/** Upload a new contract template (admin only). Stores under public/contract-templates/<id>.docx
+/** Upload a new contract template (admin only). Stores under private/contract-templates/<id>.docx
  *  Returns the new template's id on success. */
 export async function uploadContractTemplate(fd: FormData): Promise<Result<{ id: string }>> {
   const session = await requireSession();
@@ -40,13 +36,9 @@ export async function uploadContractTemplate(fd: FormData): Promise<Result<{ id:
     },
   });
 
-  await fs.mkdir(UPLOAD_DIR_ABS, { recursive: true });
   const fileName = `${row.id}.docx`;
-  const absPath = path.join(UPLOAD_DIR_ABS, fileName);
   const buf = Buffer.from(await file.arrayBuffer());
-  await fs.writeFile(absPath, buf);
-
-  const fileUrl = `${PUBLIC_PREFIX}/${fileName}`;
+  const { fileUrl } = await writePrivateContractFile("contract-templates", fileName, buf);
   await prisma.contractTemplate.update({ where: { id: row.id }, data: { fileUrl } });
 
   revalidatePath("/contracts");

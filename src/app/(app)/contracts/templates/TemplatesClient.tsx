@@ -16,7 +16,6 @@ export interface TemplateRow {
   name: string;
   templateKey: string;
   templateKeyLabel: string;
-  fileUrl: string;
   description: string | null;
   uploaderName: string;
   createdAt: string;
@@ -24,10 +23,12 @@ export interface TemplateRow {
 
 export function TemplatesClient({
   isAdmin,
+  canDownloadTemplates,
   sealStatus,
   templates,
 }: {
   isAdmin: boolean;
+  canDownloadTemplates: boolean;
   sealStatus: Record<"FOSHAN" | "HONGKONG", boolean>;
   templates: TemplateRow[];
 }) {
@@ -57,7 +58,7 @@ export function TemplatesClient({
 
   return (
     <div>
-      {isAdmin && <SealUploadCard sealStatus={sealStatus} />}
+      {canDownloadTemplates && <SealUploadCard sealStatus={sealStatus} />}
 
       <div className="mb-4 flex items-center justify-between">
         <p className="text-xs text-slate-400">
@@ -111,13 +112,15 @@ export function TemplatesClient({
                       </div>
                     </div>
                     <div className="mt-3 flex items-center justify-end gap-1">
-                      <a
-                        href={t.fileUrl}
-                        download={`${t.name}.docx`}
-                        className="flex items-center gap-1 rounded bg-brand-50 px-2 py-1 text-[11px] text-brand-700 hover:bg-brand-100"
-                      >
-                        <Download className="h-3 w-3" /> 下载
-                      </a>
+                      {canDownloadTemplates && (
+                        <a
+                          href={`/api/contracts/template-download/${t.id}`}
+                          download
+                          className="flex items-center gap-1 rounded bg-brand-50 px-2 py-1 text-[11px] text-brand-700 hover:bg-brand-100"
+                        >
+                          <Download className="h-3 w-3" /> 下载
+                        </a>
+                      )}
                       {isAdmin && (
                         <button
                           type="button"
@@ -342,8 +345,8 @@ function SealUploadCard({ sealStatus }: { sealStatus: Record<"FOSHAN" | "HONGKON
         </div>
         <div className="grid gap-2 sm:grid-cols-2">
           {([
-            ["FOSHAN", "佛山公司", "/seal/foshan-seal.png"],
-            ["HONGKONG", "香港公司", "/seal/hongkong-seal.png"],
+            ["FOSHAN", "佛山公司", "/api/contracts/seal/FOSHAN"],
+            ["HONGKONG", "香港公司", "/api/contracts/seal/HONGKONG"],
           ] as const).map(([company, label, src]) => {
             const hasSeal = sealStatus[company];
             return (

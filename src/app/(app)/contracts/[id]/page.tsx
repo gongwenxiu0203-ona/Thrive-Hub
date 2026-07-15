@@ -434,12 +434,13 @@ export default async function ContractDetailPage({
           pendingNewUpload={!!c.pendingNewUpload}
           hasSourceAnnotations={!!c.hasSourceAnnotations}
           stampStatus={c.stampStatus ?? "NONE"}
-          stampedDocUrl={c.stampedDocUrl ?? null}
+          stampedVersionId={
+            contract.versions.find((version) => version.fileUrl === c.stampedDocUrl)?.id ?? null
+          }
           isAdmin={isAdmin}
           versions={contract.versions.map((v): ContractVersionRow => ({
             id: v.id,
             versionNo: v.versionNo,
-            fileUrl: v.fileUrl,
             fileType: v.fileType,
             reason: v.reason,
             createdByName: v.createdBy?.name ?? "—",

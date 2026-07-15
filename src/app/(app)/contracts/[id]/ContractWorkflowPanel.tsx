@@ -16,7 +16,6 @@ import { formatDate } from "@/lib/utils";
 export interface ContractVersionRow {
   id: string;
   versionNo: number;
-  fileUrl: string;
   fileType: string;
   reason: string;
   createdByName: string;
@@ -32,7 +31,7 @@ export function ContractWorkflowPanel({
   pendingNewUpload,
   hasSourceAnnotations,
   stampStatus,
-  stampedDocUrl,
+  stampedVersionId,
   isAdmin,
   versions,
 }: {
@@ -44,7 +43,7 @@ export function ContractWorkflowPanel({
   pendingNewUpload: boolean;
   hasSourceAnnotations: boolean;
   stampStatus: string;
-  stampedDocUrl: string | null;
+  stampedVersionId: string | null;
   isAdmin: boolean;
   versions: ContractVersionRow[];
 }) {
@@ -118,9 +117,9 @@ export function ContractWorkflowPanel({
               <Stamp className="h-4 w-4" /> 自动盖章
             </button>
           )}
-          {stampStatus === "STAMPED" && stampedDocUrl && (
+          {stampStatus === "STAMPED" && stampedVersionId && (
             <a
-              href={stampedDocUrl}
+              href={`/api/contracts/version-download/${stampedVersionId}`}
               download
               className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700"
             >

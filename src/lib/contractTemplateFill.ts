@@ -1,5 +1,4 @@
 import fs from "fs";
-import path from "path";
 import JSZip from "jszip";
 
 export type FieldsMap = Record<string, string | number | null | undefined>;
@@ -618,9 +617,4 @@ export async function fillContractTemplate(templateBuffer: Buffer, fields: Field
 export async function fillContractTemplateFromPath(absPath: string, fields: FieldsMap): Promise<Buffer> {
   const buf = fs.readFileSync(absPath);
   return fillContractTemplate(buf, fields);
-}
-
-export function templateUrlToAbsPath(fileUrl: string): string {
-  const rel = fileUrl.replace(/^\//, "");
-  return path.join(process.cwd(), "public", rel);
 }

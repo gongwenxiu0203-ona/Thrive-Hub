@@ -3,23 +3,44 @@ import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
 import { prisma } from "@/lib/prisma";
-import { requireSession } from "@/lib/session";
+import { getSession } from "@/lib/session";
 import { buildPlaceholderMap } from "@/lib/contractPlaceholders";
 import { fillContractTemplate } from "@/lib/contractTemplateFill";
 import { contractFileBaseName } from "@/lib/contractFileName";
 import { resolveContractTemplateBuffer } from "@/lib/contractTemplateResolve";
 import { convertDocxToPdf } from "@/lib/docxToPdf";
+import { contractScope } from "@/lib/dataScope";
+import {
+  FeaturePermissionError,
+  requireFeaturePermission,
+} from "@/lib/permissionGuard";
 
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  await requireSession();
+  const session = await getSession();
+  if (!session) {
+    return NextResponse.json({ error: "未登录" }, { status: 401 });
+  }
   const { id } = await params;
   const format = (req.nextUrl.searchParams.get("format") ?? "docx").toLowerCase();
 
-  const contract = await prisma.contract.findUnique({
-    where: { id },
+  try {
+    await requireFeaturePermission(session, "contracts", "READ");
+  } catch (error) {
+    if (error instanceof FeaturePermissionError) {
+      return NextResponse.json({ error: "无权访问合同" }, { status: 403 });
+    }
+    throw error;
+  }
+
+  const contract = await prisma.contract.findFirst({
+    where: {
+      id,
+      ...contractScope(session, session.role === "ADMIN" ? "all" : "mine"),
+      deletedAt: null,
+    },
     include: { template: true, customer: { select: { brandName: true } } },
   });
 
@@ -72,6 +93,8 @@ export async function GET(
           headers: {
             "Content-Type": "application/pdf",
             "Content-Disposition": `attachment; filename*=UTF-8''${filename}`,
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
           },
         });
       } finally {
@@ -84,6 +107,8 @@ export async function GET(
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "Content-Disposition": `attachment; filename*=UTF-8''${filename}`,
+        "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff",
       },
     });
   } catch (err) {

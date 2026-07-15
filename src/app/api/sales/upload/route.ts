@@ -6,6 +6,8 @@ import { parseSheet } from "@/lib/excel";
 import { readFile, unlink } from "fs/promises";
 import path from "path";
 import os from "os";
+import { hasBiPermission } from "@/lib/biAuthorization";
+import { customerScope } from "@/lib/dataScope";
 
 // Allow up to 5 minutes for large xlsx parsing + DB writes
 export const maxDuration = 300;
@@ -61,6 +63,10 @@ export async function POST(req: Request) {
   try {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
+
+    if (!(await hasBiPermission(session.userId, "EDIT"))) {
+      return NextResponse.json({ error: "无权导入 BI 数据" }, { status: 403 });
+    }
 
     let body: {
       tempId?: string;
@@ -121,9 +127,15 @@ export async function POST(req: Request) {
     }
 
     // Load look-up tables once.
+    const accessibleCustomerWhere = customerScope(
+      session,
+      session.role === "ADMIN" ? "all" : "mine",
+    );
     const [customer, affiliates, asinMappings] = await Promise.all([
       customerId
-        ? prisma.customer.findUnique({ where: { id: customerId } })
+        ? prisma.customer.findFirst({
+            where: { AND: [{ id: customerId, deletedAt: null }, accessibleCustomerWhere] },
+          })
         : Promise.resolve(null),
       prisma.affiliate.findMany({
         select: {
@@ -143,6 +155,14 @@ export async function POST(req: Request) {
         },
       }),
     ]);
+
+    if (!customer) {
+      deleteTempFile(tempId);
+      return NextResponse.json(
+        { error: "客户不存在或无权对该客户导入" },
+        { status: 404 },
+      );
+    }
 
     const affMap = new Map<
       string,
@@ -246,6 +266,24 @@ export async function POST(req: Request) {
         await tx.salesBatch.update({
           where: { id: batch.id },
           data: { recordCount: records.length },
+        });
+
+        await tx.adminAuditLog.create({
+          data: {
+            actorId: session.userId,
+            action: "IMPORT",
+            module: "BI",
+            targetType: "SalesBatch",
+            targetId: batch.id,
+            targetLabel: fileName || platform || null,
+            summary: `导入 BI 销售数据 ${records.length} 条`,
+            metadataJson: JSON.stringify({
+              customerId,
+              platform,
+              importedCount: records.length,
+              skippedCount: skipped.length,
+            }),
+          },
         });
 
         return batch.id;

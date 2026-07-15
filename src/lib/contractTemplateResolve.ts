@@ -1,6 +1,6 @@
 import { promises as fs } from "fs";
 import { prisma } from "@/lib/prisma";
-import { templateUrlToAbsPath } from "@/lib/contractTemplateFill";
+import { resolveContractFilePath } from "@/lib/contractFileStorage";
 
 type TemplateLike = {
   id: string;
@@ -21,7 +21,8 @@ export type ResolvedContractTemplate = {
 
 async function readTemplateFile(fileUrl: string): Promise<Buffer | null> {
   try {
-    return await fs.readFile(templateUrlToAbsPath(fileUrl));
+    const filePath = await resolveContractFilePath(fileUrl, ["contract-templates"]);
+    return filePath ? await fs.readFile(filePath) : null;
   } catch {
     return null;
   }

@@ -61,6 +61,10 @@ function actionLabel(action: string) {
     USER_DELETE: "删除用户",
     ROLE_PERMISSION_UPDATE: "更新角色权限",
     USER_PERMISSION_UPDATE: "更新用户权限",
+    IMPORT: "导入 BI 数据",
+    EXPORT: "导出 BI 数据",
+    CLEAR_PREVIEW: "预览清理 BI 数据",
+    CLEAR: "清理 BI 数据",
   } as Record<string, string>)[action] ?? action;
 }
 

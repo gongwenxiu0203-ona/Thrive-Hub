@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { isStaff } from "@/lib/permissions";
+import { getReconciliationAccess, scopedReconciliationWhere } from "@/lib/reconciliationAccess";
+import { FeaturePermissionError } from "@/lib/permissionGuard";
 
 // POST /api/finance/reconciliations/[id]/submit
 // 提交对账，状态变为 PENDING_REVIEW，通知指定审核人（或客户负责人）
@@ -11,17 +12,15 @@ export async function POST(
 ) {
   try {
     const session = await requireSession();
-    if (!isStaff(session.role)) {
-      return NextResponse.json({ error: "无权限" }, { status: 403 });
-    }
+    const access = await getReconciliationAccess(session, "EDIT", req);
     const { id } = await params;
     const body = await req.json().catch(() => ({}));
     const note = body.note ?? "";
     const submittedToUserId: string | undefined = body.submittedToUserId;
     const submittedDeadline: string | undefined = body.submittedDeadline;
 
-    const rec = await prisma.customerReconciliation.findUnique({
-      where: { id },
+    const rec = await prisma.customerReconciliation.findFirst({
+      where: scopedReconciliationWhere(id, access.scope),
       include: {
         customer: { select: { id: true, brandName: true, businessOwnerId: true } },
       },
@@ -80,6 +79,7 @@ export async function POST(
 
     return NextResponse.json({ success: true });
   } catch (e) {
+    if (e instanceof FeaturePermissionError) return NextResponse.json({ error: "无权限" }, { status: 403 });
     console.error(e);
     return NextResponse.json({ error: "提交失败" }, { status: 500 });
   }

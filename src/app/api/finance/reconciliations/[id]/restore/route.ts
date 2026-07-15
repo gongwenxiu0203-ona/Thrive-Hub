@@ -1,23 +1,22 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { isStaff } from "@/lib/permissions";
+import { getReconciliationAccess, scopedReconciliationWhere } from "@/lib/reconciliationAccess";
+import { FeaturePermissionError } from "@/lib/permissionGuard";
 import { daysRemaining } from "@/lib/reconciliationTrash";
 
 // POST /api/finance/reconciliations/[id]/restore
 // 恢复已软删除的月度对账（7 天内有效）
 export async function POST(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     const session = await requireSession();
-    if (!isStaff(session.role)) {
-      return NextResponse.json({ error: "无权限" }, { status: 403 });
-    }
+    const access = await getReconciliationAccess(session, "MANAGE", req);
     const { id } = await params;
-    const existing = await prisma.customerReconciliation.findUnique({
-      where: { id },
+    const existing = await prisma.customerReconciliation.findFirst({
+      where: scopedReconciliationWhere(id, access.scope),
     });
     if (!existing) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -42,6 +41,7 @@ export async function POST(
 
     return NextResponse.json({ success: true });
   } catch (e) {
+    if (e instanceof FeaturePermissionError) return NextResponse.json({ error: "无权限" }, { status: 403 });
     console.error(e);
     return NextResponse.json({ error: "恢复失败" }, { status: 500 });
   }

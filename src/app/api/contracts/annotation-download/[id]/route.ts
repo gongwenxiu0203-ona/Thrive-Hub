@@ -2,64 +2,66 @@ import { NextRequest, NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
 import { prisma } from "@/lib/prisma";
-import { requireSession } from "@/lib/session";
+import { getSession } from "@/lib/session";
+import { contractScope } from "@/lib/dataScope";
+import {
+  FeaturePermissionError,
+  requireFeaturePermission,
+} from "@/lib/permissionGuard";
+import { resolveContractFilePath } from "@/lib/contractFileStorage";
 
 /**
- * 鉴权下载批注后的 DOCX：会校验当前用户能否访问该合同（admin / 审核人 /
- * 提交人 / 负责人）。文件存放在 process.cwd()/private/contract-annotations
- * （不在 public/ 下，无法被静态直链访问）。
+ * Download an annotated contract document after applying both the contracts
+ * feature permission and the contract row-level scope. Annotation files live
+ * under private/contract-annotations and cannot be served as public assets.
  */
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const session = await requireSession();
+  const session = await getSession();
+  if (!session) {
+    return NextResponse.json({ error: "未登录" }, { status: 401 });
+  }
   const { id } = await params;
 
-  const annotation = await prisma.contractAnnotation.findUnique({
-    where: { id },
-    include: {
+  try {
+    await requireFeaturePermission(session, "contracts", "READ");
+  } catch (error) {
+    if (error instanceof FeaturePermissionError) {
+      return NextResponse.json({ error: "无权访问合同" }, { status: 403 });
+    }
+    throw error;
+  }
+
+  const annotation = await prisma.contractAnnotation.findFirst({
+    where: {
+      id,
       contract: {
-        select: {
-          id: true,
-          createdById: true,
-          ownerId: true,
-          reviewerId: true,
-        },
+        ...contractScope(session, session.role === "ADMIN" ? "all" : "mine"),
+        deletedAt: null,
       },
     },
+    select: { fileUrl: true },
   });
-  if (!annotation || !annotation.fileUrl) {
+  if (!annotation?.fileUrl) {
     return NextResponse.json({ error: "批注文件不存在" }, { status: 404 });
   }
 
-  // 权限：admin / 该合同的 reviewer / owner / 创建人 可下载
-  const c = annotation.contract;
-  const allowed =
-    session.role === "ADMIN" ||
-    session.userId === c.reviewerId ||
-    session.userId === c.ownerId ||
-    session.userId === c.createdById;
-  if (!allowed) {
-    return NextResponse.json({ error: "无权下载该批注" }, { status: 403 });
-  }
-
-  // fileUrl 形如 "/contract-annotations/{id}-annotated-{ts}.docx"
-  const rel = annotation.fileUrl.replace(/^\//, "");
-  const privateRoot = path.resolve(process.cwd(), "private");
-  const abs = path.resolve(privateRoot, rel);
-  if (!abs.startsWith(privateRoot)) {
-    return NextResponse.json({ error: "文件路径无效" }, { status: 400 });
-  }
+  const abs = await resolveContractFilePath(annotation.fileUrl, ["contract-annotations"]);
+  if (!abs) return NextResponse.json({ error: "批注文件读取失败" }, { status: 404 });
 
   try {
     const bytes = await fs.readFile(abs);
     const fileName = encodeURIComponent(path.basename(abs));
     return new NextResponse(bytes, {
       headers: {
-        "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "Content-Type":
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "Content-Disposition": `attachment; filename*=UTF-8''${fileName}`,
         "Content-Length": String(bytes.length),
+        "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff",
       },
     });
   } catch {

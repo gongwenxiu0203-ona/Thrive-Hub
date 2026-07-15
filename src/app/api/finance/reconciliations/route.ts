@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { isStaff } from "@/lib/permissions";
+import { getReconciliationAccess } from "@/lib/reconciliationAccess";
+import { FeaturePermissionError } from "@/lib/permissionGuard";
 
 // GET /api/finance/reconciliations — 获取对账列表
 export async function GET(req: Request) {
   try {
     const session = await requireSession();
+    const access = await getReconciliationAccess(session, "READ", req);
     const { searchParams } = new URL(req.url);
     const status = searchParams.get("status");
     const customerId = searchParams.get("customerId");
@@ -14,12 +16,9 @@ export async function GET(req: Request) {
     const where: Record<string, unknown> = {};
     if (status) where.status = status;
     if (customerId) where.customerId = customerId;
-    if (session.role === "CHANNEL") {
-      where.customer = { channelUserId: session.userId };
-    }
 
     const reconciliations = await prisma.customerReconciliation.findMany({
-      where,
+      where: { AND: [where, access.scope] },
       include: {
         customer: { select: { id: true, brandName: true, channelUserId: true } },
         contract: { select: { id: true, contractNo: true, type: true } },
@@ -32,7 +31,10 @@ export async function GET(req: Request) {
     });
 
     return NextResponse.json(reconciliations);
-  } catch {
+  } catch (e) {
+    if (e instanceof FeaturePermissionError) {
+      return NextResponse.json({ error: "无权限" }, { status: 403 });
+    }
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 }
@@ -43,9 +45,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     const session = await requireSession();
-    if (!isStaff(session.role)) {
-      return NextResponse.json({ error: "无权限" }, { status: 403 });
-    }
+    const access = await getReconciliationAccess(session, "EDIT", req);
     const body = await req.json();
     const {
       customerId,
@@ -60,7 +60,9 @@ export async function POST(req: Request) {
     }
 
     // 获取合同信息，快照到对账记录
-    const contract = await prisma.contract.findUnique({ where: { id: contractId } });
+    const contract = await prisma.contract.findFirst({
+      where: { id: contractId, customerId, customer: access.customerScope },
+    });
     if (!contract) {
       return NextResponse.json({ error: "合同不存在" }, { status: 404 });
     }
@@ -128,6 +130,9 @@ export async function POST(req: Request) {
 
     return NextResponse.json(reconciliation, { status: 201 });
   } catch (e) {
+    if (e instanceof FeaturePermissionError) {
+      return NextResponse.json({ error: "无权限" }, { status: 403 });
+    }
     console.error(e);
     return NextResponse.json({ error: "创建失败" }, { status: 500 });
   }

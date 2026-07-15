@@ -2,7 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 import { promises as fs } from "fs";
-import path from "path";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { REVIEWER_EMAIL } from "@/lib/contractReviewer";
@@ -12,6 +11,7 @@ import {
   getReviewDecisionFields,
 } from "@/lib/contractFieldSnapshot";
 import { appendDocxComment } from "@/lib/docxComment";
+import { resolveContractFilePath, writePrivateContractFile } from "@/lib/contractFileStorage";
 
 type Result<T = void> = { ok: true; data?: T } | { ok: false; error: string };
 
@@ -300,7 +300,8 @@ export async function addAnnotation(
   let annotatedFileUrl: string | null = null;
   if (latestVersion.fileType === "docx") {
     try {
-      const srcAbs = path.join(process.cwd(), "public", latestVersion.fileUrl.replace(/^\//, ""));
+      const srcAbs = await resolveContractFilePath(latestVersion.fileUrl, ["contracts-generated", "contracts-stamped"]);
+      if (!srcAbs) throw new Error("合同版本文件不存在");
       const buf = await fs.readFile(srcAbs);
       const author = session.email || session.name || "审核人";
       const initials = (author.slice(0, 1) || "审").toUpperCase();
@@ -310,11 +311,9 @@ export async function addAnnotation(
         text: content.trim(),
       });
       const outName = `${contractId}-annotated-${Date.now()}.docx`;
-      const OUT_DIR = path.join(process.cwd(), "private", "contract-annotations");
-      await fs.mkdir(OUT_DIR, { recursive: true });
-      await fs.writeFile(path.join(OUT_DIR, outName), buffer);
-      // 存相对路径；UI 通过 /api/contracts/annotation-download/[id] 鉴权下载
-      annotatedFileUrl = `/contract-annotations/${outName}`;
+      const saved = await writePrivateContractFile("contract-annotations", outName, buffer);
+      // 存逻辑路径；UI 通过 /api/contracts/annotation-download/[id] 鉴权下载
+      annotatedFileUrl = saved.fileUrl;
     } catch (e) {
       // 写文件失败不阻塞 — UI 内仍会显示文本批注
       console.warn("[addAnnotation] DOCX comment write failed:", e);

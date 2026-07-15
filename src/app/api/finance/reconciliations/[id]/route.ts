@@ -1,20 +1,22 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { isStaff } from "@/lib/permissions";
+import { getReconciliationAccess, scopedReconciliationWhere } from "@/lib/reconciliationAccess";
+import { FeaturePermissionError } from "@/lib/permissionGuard";
 import { calcCommission } from "@/lib/commissionCalc";
 
 // GET /api/finance/reconciliations/[id]
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     const session = await requireSession();
+    const access = await getReconciliationAccess(session, "READ", req);
     const { id } = await params;
 
-    const rec = await prisma.customerReconciliation.findUnique({
-      where: { id },
+    const rec = await prisma.customerReconciliation.findFirst({
+      where: scopedReconciliationWhere(id, access.scope),
       include: {
         customer: {
           select: {
@@ -40,11 +42,9 @@ export async function GET(
     });
 
     if (!rec) return NextResponse.json({ error: "Not found" }, { status: 404 });
-    if (session.role === "CHANNEL" && rec.customer.channelUserId !== session.userId) {
-      return NextResponse.json({ error: "无权限" }, { status: 403 });
-    }
     return NextResponse.json(rec);
-  } catch {
+  } catch (e) {
+    if (e instanceof FeaturePermissionError) return NextResponse.json({ error: "无权限" }, { status: 403 });
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 }
@@ -58,13 +58,11 @@ export async function PATCH(
 ) {
   try {
     const session = await requireSession();
-    if (!isStaff(session.role)) {
-      return NextResponse.json({ error: "无权限" }, { status: 403 });
-    }
+    const access = await getReconciliationAccess(session, "EDIT", req);
     const { id } = await params;
     const body = await req.json();
 
-    const existing = await prisma.customerReconciliation.findUnique({ where: { id } });
+    const existing = await prisma.customerReconciliation.findFirst({ where: scopedReconciliationWhere(id, access.scope) });
     if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
     // 货币字段任何状态可改
@@ -107,6 +105,7 @@ export async function PATCH(
     const result = await prisma.customerReconciliation.update({ where: { id }, data });
     return NextResponse.json(result);
   } catch (e) {
+    if (e instanceof FeaturePermissionError) return NextResponse.json({ error: "无权限" }, { status: 403 });
     console.error(e);
     return NextResponse.json({ error: "更新失败" }, { status: 500 });
   }
@@ -115,17 +114,15 @@ export async function PATCH(
 // DELETE /api/finance/reconciliations/[id] — 软删除单条月度对账
 // 设置 deletedAt = now()，7 天内可恢复，到期后访问列表时自动物理清理
 export async function DELETE(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     const session = await requireSession();
-    if (!isStaff(session.role)) {
-      return NextResponse.json({ error: "无权限" }, { status: 403 });
-    }
+    const access = await getReconciliationAccess(session, "MANAGE", req);
     const { id } = await params;
-    const existing = await prisma.customerReconciliation.findUnique({
-      where: { id },
+    const existing = await prisma.customerReconciliation.findFirst({
+      where: scopedReconciliationWhere(id, access.scope),
     });
     if (!existing) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -138,6 +135,7 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (e) {
+    if (e instanceof FeaturePermissionError) return NextResponse.json({ error: "无权限" }, { status: 403 });
     console.error(e);
     return NextResponse.json({ error: "删除失败" }, { status: 500 });
   }

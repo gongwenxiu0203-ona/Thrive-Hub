@@ -16,8 +16,27 @@ const PUBLIC_PREFIXES = [
   "/api/contract-fill",    // 外部填写提交 API
 ];
 
+// Sensitive legacy assets may still exist under public/ during the staged
+// migration. They must never be served directly; authenticated APIs read them
+// server-side only as a temporary compatibility fallback.
+const BLOCKED_STATIC_PREFIXES = [
+  "/contracts-generated",
+  "/contracts-stamped",
+  "/contract-templates",
+  "/seal",
+];
+
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+
+  if (
+    pathname === "/signature-party-b.png" ||
+    BLOCKED_STATIC_PREFIXES.some(
+      (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+    )
+  ) {
+    return new NextResponse(null, { status: 404 });
+  }
 
   const isPublic = PUBLIC_PREFIXES.some(
     (p) => pathname === p || pathname.startsWith(p + "/"),

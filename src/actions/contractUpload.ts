@@ -1,8 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { promises as fs } from "fs";
-import path from "path";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { extractDocxContent } from "@/lib/contractDocxExtract";
@@ -23,6 +21,9 @@ import {
   primaryRateFromCommissionConfig,
   stringifyCommissionConfig,
 } from "@/lib/contractCommissionConfig";
+import { writePrivateContractFile } from "@/lib/contractFileStorage";
+import { customerScope } from "@/lib/dataScope";
+import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
 
 type Result<T = void> = { ok: true; data?: T } | { ok: false; error: string };
 type UploadArchiveMode = "SIGNED_ARCHIVE" | "REVIEW_AND_STAMP";
@@ -39,9 +40,6 @@ type UploadExistingContractData = {
   sourceFileType: "docx" | "pdf";
   detectedTemplateKey: string;
 };
-
-const OUT_DIR_ABS = path.join(process.cwd(), "public", "contracts-generated");
-const OUT_PREFIX = "/contracts-generated";
 
 function s(fd: FormData, k: string): string {
   return String(fd.get(k) ?? "").trim();
@@ -169,8 +167,11 @@ export async function uploadExistingContract(
   fd: FormData,
 ): Promise<Result<UploadExistingContractData>> {
   const session = await requireSession();
-  if (session.role === "BRAND" || session.role === "CHANNEL") {
-    return { ok: false, error: "无权创建合同" };
+  try {
+    await requireFeaturePermission(session, "contracts", "EDIT");
+  } catch (error) {
+    if (error instanceof FeaturePermissionError) return { ok: false, error: "无权创建合同" };
+    throw error;
   }
 
   const customerId = s(fd, "customerId");
@@ -221,8 +222,8 @@ export async function uploadExistingContract(
   const ai = text.trim() ? await aiExtractContractFields(text) : createAiResult({});
   if (!ai.ok) return { ok: false, error: ai.error };
 
-  const customer = await prisma.customer.findUnique({
-    where: { id: customerId },
+  const customer = await prisma.customer.findFirst({
+    where: { id: customerId, ...customerScope(session, session.role === "ADMIN" ? "all" : "mine") },
     select: { id: true, brandName: true },
   });
   if (!customer) return { ok: false, error: "客户不存在" };
@@ -350,7 +351,6 @@ export async function uploadExistingContract(
     return { ok: false, error: "合同编号冲突，请稍后重试" };
   }
 
-  await fs.mkdir(OUT_DIR_ABS, { recursive: true });
   const base = contractFileBaseName({
     contractNo: contract.contractNo,
     createdAt: new Date(),
@@ -358,8 +358,7 @@ export async function uploadExistingContract(
     customer,
   });
   const savedName = `${base}-${contract.id}-v1.${ext}`;
-  await fs.writeFile(path.join(OUT_DIR_ABS, savedName), buf);
-  const fileUrl = `${OUT_PREFIX}/${savedName}`;
+  const { fileUrl } = await writePrivateContractFile("contracts-generated", savedName, buf);
 
   await prisma.contract.update({
     where: { id: contract.id },
@@ -432,6 +431,7 @@ export async function uploadExistingContract(
 }
 
 export async function getUploadRequiredFields() {
-  await requireSession();
+  const session = await requireSession();
+  await requireFeaturePermission(session, "contracts", "EDIT");
   return uploadRequiredFields("SIGNED_ARCHIVE");
 }

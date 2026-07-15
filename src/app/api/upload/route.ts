@@ -4,14 +4,22 @@ import path from "path";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 import { saveUploadedFile } from "@/lib/upload";
+import {
+  AttachmentEntityNotFoundError,
+  isAttachmentEntityType,
+  requireAttachmentEntityAccess,
+} from "@/lib/attachmentAccess";
+import { FeaturePermissionError } from "@/lib/permissionGuard";
 
-const VALID_ENTITY_TYPES = new Set([
-  "CUSTOMER",
-  "CUSTOMER_DEMO",
-  "TASK",
-  "CONTRACT",
-  "AFFILIATE",
-]);
+function accessErrorResponse(error: unknown): NextResponse | null {
+  if (error instanceof FeaturePermissionError) {
+    return NextResponse.json({ error: "无权执行此附件操作" }, { status: 403 });
+  }
+  if (error instanceof AttachmentEntityNotFoundError) {
+    return NextResponse.json({ error: "关联实体不存在" }, { status: 404 });
+  }
+  return null;
+}
 
 export async function POST(req: Request) {
   const session = await getSession();
@@ -25,26 +33,35 @@ export async function POST(req: Request) {
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "缺少文件" }, { status: 400 });
   }
-  if (!VALID_ENTITY_TYPES.has(entityType) || !entityId) {
+  if (!isAttachmentEntityType(entityType) || !entityId) {
     return NextResponse.json({ error: "缺少关联实体信息" }, { status: 400 });
   }
 
   try {
+    await requireAttachmentEntityAccess(session, entityType, entityId, "EDIT");
     const saved = await saveUploadedFile(file);
-    const attachment = await prisma.attachment.create({
-      data: {
-        fileName: saved.fileName,
-        fileUrl: saved.fileUrl,
-        fileSize: saved.fileSize,
-        entityType,
-        entityId,
-        uploadedById: session.userId,
-      },
-    });
-    return NextResponse.json({ attachment });
-  } catch (e) {
+    try {
+      const attachment = await prisma.attachment.create({
+        data: {
+          fileName: saved.fileName,
+          fileUrl: saved.fileUrl,
+          fileSize: saved.fileSize,
+          entityType,
+          entityId,
+          uploadedById: session.userId,
+        },
+      });
+      return NextResponse.json({ attachment });
+    } catch (error) {
+      const fileName = path.basename(saved.fileUrl);
+      await unlink(path.join(process.cwd(), "uploads", fileName)).catch(() => {});
+      throw error;
+    }
+  } catch (error) {
+    const accessResponse = accessErrorResponse(error);
+    if (accessResponse) return accessResponse;
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : "上传失败" },
+      { error: error instanceof Error ? error.message : "上传失败" },
       { status: 400 },
     );
   }
@@ -61,15 +78,32 @@ export async function DELETE(req: Request) {
   if (!attachment) {
     return NextResponse.json({ error: "附件不存在" }, { status: 404 });
   }
+  if (!isAttachmentEntityType(attachment.entityType)) {
+    return NextResponse.json({ error: "不支持的附件实体类型" }, { status: 400 });
+  }
 
-  // Best-effort removal of the physical file.
+  try {
+    const required = attachment.uploadedById === session.userId ? "EDIT" : "MANAGE";
+    await requireAttachmentEntityAccess(
+      session,
+      attachment.entityType,
+      attachment.entityId,
+      required,
+    );
+  } catch (error) {
+    const accessResponse = accessErrorResponse(error);
+    if (accessResponse) return accessResponse;
+    throw error;
+  }
+
+  await prisma.attachment.delete({ where: { id } });
+
   try {
     const fileName = path.basename(attachment.fileUrl);
     await unlink(path.join(process.cwd(), "uploads", fileName));
   } catch {
-    // file already gone — ignore
+    // The database authorization record is gone; orphan cleanup is best effort.
   }
 
-  await prisma.attachment.delete({ where: { id } });
   return NextResponse.json({ ok: true });
 }

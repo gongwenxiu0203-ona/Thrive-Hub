@@ -79,19 +79,19 @@ async function generateContractVersion(contractId: string) {
   });
   if (!template || template.deletedAt) return;
 
-  const [{ fillContractTemplate, templateUrlToAbsPath }, { buildPlaceholderMap }, path, fs] =
+  const [{ fillContractTemplate }, { buildPlaceholderMap }, { resolveContractFilePath, writePrivateContractFile }, fs] =
     await Promise.all([
       import("@/lib/contractTemplateFill"),
       import("@/lib/contractPlaceholders"),
-      import("path"),
+      import("@/lib/contractFileStorage"),
       import("fs/promises"),
     ]);
   const fullContract = await prisma.contract.findUnique({ where: { id: contractId } });
   if (!fullContract) return;
-  const templateBuffer = await fs.readFile(templateUrlToAbsPath(template.fileUrl));
+  const templatePath = await resolveContractFilePath(template.fileUrl, ["contract-templates"]);
+  if (!templatePath) return;
+  const templateBuffer = await fs.readFile(templatePath);
   const filled = await fillContractTemplate(templateBuffer, buildPlaceholderMap(fullContract));
-  const outputDir = path.join(process.cwd(), "public", "contracts-generated");
-  await fs.mkdir(outputDir, { recursive: true });
 
   await prisma.$transaction(async (tx) => {
     const latest = await tx.contractVersion.findFirst({
@@ -101,8 +101,7 @@ async function generateContractVersion(contractId: string) {
     });
     const versionNo = (latest?.versionNo ?? 0) + 1;
     const fileName = `${contractId}-v${versionNo}.docx`;
-    const fileUrl = `/contracts-generated/${fileName}`;
-    await fs.writeFile(path.join(outputDir, fileName), filled);
+    const { fileUrl } = await writePrivateContractFile("contracts-generated", fileName, filled);
     await tx.contractVersion.create({
       data: {
         contractId,

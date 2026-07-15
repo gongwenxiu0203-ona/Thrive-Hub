@@ -1,23 +1,22 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { isStaff } from "@/lib/permissions";
+import { getReconciliationAccess, scopedReconciliationWhere } from "@/lib/reconciliationAccess";
+import { FeaturePermissionError } from "@/lib/permissionGuard";
 import { calcBetAndCommission } from "../route";
 
 // POST /api/finance/reconciliations/[id]/pull-bi
 // 根据对账周期从 SalesRecord 自动拉取该客户的销售单量和销售额
 export async function POST(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     const session = await requireSession();
-    if (!isStaff(session.role)) {
-      return NextResponse.json({ error: "无权限" }, { status: 403 });
-    }
+    const access = await getReconciliationAccess(session, "EDIT", req);
     const { id } = await params;
 
-    const rec = await prisma.customerReconciliation.findUnique({ where: { id } });
+    const rec = await prisma.customerReconciliation.findFirst({ where: scopedReconciliationWhere(id, access.scope) });
     if (!rec) return NextResponse.json({ error: "Not found" }, { status: 404 });
     if (rec.status !== "DRAFT") {
       return NextResponse.json({ error: "只有草稿状态可以重新拉取 BI 数据" }, { status: 400 });
@@ -63,6 +62,7 @@ export async function POST(
 
     return NextResponse.json(updated);
   } catch (e) {
+    if (e instanceof FeaturePermissionError) return NextResponse.json({ error: "无权限" }, { status: 403 });
     console.error(e);
     return NextResponse.json({ error: "拉取失败" }, { status: 500 });
   }
