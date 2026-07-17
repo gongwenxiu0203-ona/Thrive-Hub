@@ -12,6 +12,19 @@ import {
 } from "@/lib/contractFieldSnapshot";
 import { appendDocxComment } from "@/lib/docxComment";
 import { resolveContractFilePath, writePrivateContractFile } from "@/lib/contractFileStorage";
+import { contractScope } from "@/lib/dataScope";
+import { requireFeaturePermission } from "@/lib/permissionGuard";
+
+async function requireReviewAccess(contractId: string) {
+  const session = await requireSession();
+  await requireFeaturePermission(session, "contracts", "EDIT");
+  const contract = await prisma.contract.findFirst({
+    where: { id: contractId, ...contractScope(session, session.role === "ADMIN" ? "all" : "mine"), deletedAt: null },
+    select: { id: true },
+  });
+  if (!contract) throw new Error("合同不存在或无权访问");
+  return session;
+}
 
 type Result<T = void> = { ok: true; data?: T } | { ok: false; error: string };
 
@@ -37,6 +50,7 @@ async function resolveReviewerId(contractId: string): Promise<string | null> {
  *  撞 @@unique([contractId, round])。这里捕获唯一冲突并重试最多 3 次，每次
  *  重新读 last。如果仍然失败说明真的有持续冲突，返回错误让上层重试或提醒。 */
 export async function openReviewRound(contractId: string): Promise<Result<{ reviewId: string; round: number }>> {
+  await requireReviewAccess(contractId);
   const reviewerId = await resolveReviewerId(contractId);
   if (!reviewerId) return { ok: false, error: `未找到审核人账号（${REVIEWER_EMAIL}）` };
 
@@ -96,7 +110,7 @@ async function finishOpenRound(
 
 /** Approve the current PENDING review and move contract to SIGNING. */
 export async function approveCurrentReview(contractId: string): Promise<Result> {
-  const session = await requireSession();
+  const session = await requireReviewAccess(contractId);
   const current = await prisma.contractReview.findFirst({
     where: { contractId, status: "PENDING" },
     orderBy: { round: "desc" },
@@ -149,7 +163,7 @@ export async function approveCurrentReview(contractId: string): Promise<Result> 
 
 /** Reject the current PENDING review and move contract to REJECTED. */
 export async function rejectCurrentReview(contractId: string): Promise<Result> {
-  const session = await requireSession();
+  const session = await requireReviewAccess(contractId);
   const current = await prisma.contractReview.findFirst({
     where: { contractId, status: "PENDING" },
     orderBy: { round: "desc" },
@@ -229,12 +243,12 @@ export async function upsertFieldComment(
   annotationId: string | null = null,
   decision: "PENDING" | "APPROVED" | "REJECTED" = "PENDING",
 ): Promise<Result<{ id: string }>> {
-  const session = await requireSession();
   const review = await prisma.contractReview.findUnique({
     where: { id: reviewId },
-    select: { reviewerId: true, status: true },
+    select: { reviewerId: true, status: true, contractId: true },
   });
   if (!review) return { ok: false, error: "审核轮次不存在" };
+  const session = await requireReviewAccess(review.contractId);
   if (review.status !== "PENDING") return { ok: false, error: "该审核轮次已结束，无法修改意见" };
   if (review.reviewerId !== session.userId && session.role !== "ADMIN") {
     return { ok: false, error: "无权填写审核意见" };
@@ -253,12 +267,12 @@ export async function upsertFieldComment(
 
 /** Remove a per-field comment under a review round. */
 export async function deleteFieldComment(commentId: string): Promise<Result> {
-  const session = await requireSession();
   const row = await prisma.contractReviewComment.findUnique({
     where: { id: commentId },
-    select: { review: { select: { reviewerId: true, status: true } } },
+    select: { review: { select: { reviewerId: true, status: true, contractId: true } } },
   });
   if (!row) return { ok: false, error: "意见不存在" };
+  const session = await requireReviewAccess(row.review.contractId);
   if (row.review.status !== "PENDING") return { ok: false, error: "该审核轮次已结束，无法删除意见" };
   if (row.review.reviewerId !== session.userId && session.role !== "ADMIN") {
     return { ok: false, error: "无权删除审核意见" };
@@ -276,7 +290,7 @@ export async function addAnnotation(
   contractId: string,
   content: string,
 ): Promise<Result<{ id: string }>> {
-  const session = await requireSession();
+  const session = await requireReviewAccess(contractId);
   if (!content.trim()) return { ok: false, error: "批注内容不能为空" };
 
   const latestVersion = await prisma.contractVersion.findFirst({

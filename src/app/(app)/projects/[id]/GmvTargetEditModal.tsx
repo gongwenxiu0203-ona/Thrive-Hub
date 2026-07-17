@@ -2,7 +2,8 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { X, Plus, Trash2, AlertTriangle } from "lucide-react";
+import { Plus, Trash2, AlertTriangle } from "lucide-react";
+import { Modal } from "@/components/ui/Modal";
 import { setProjectGmvTarget, type ChannelInput } from "@/actions/projectGmvTarget";
 import { CURRENCY_OPTIONS, CURRENCY_SYMBOLS, type Currency } from "@/lib/projectChannels";
 
@@ -103,15 +104,8 @@ export function GmvTargetEditModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="card max-h-[90vh] w-full max-w-3xl overflow-y-auto p-6">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-slate-900">设置项目 GMV 目标</h2>
-          <button onClick={onClose} className="rounded p-1 hover:bg-slate-100">
-            <X className="h-4 w-4 text-slate-500" />
-          </button>
-        </div>
-
+    <Modal open onClose={onClose} title="设置项目 GMV 目标" wide>
+      <div>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="月份" required>
             <input
@@ -275,7 +269,7 @@ export function GmvTargetEditModal({
           </button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 

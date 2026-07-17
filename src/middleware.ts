@@ -23,6 +23,7 @@ const BLOCKED_STATIC_PREFIXES = [
   "/contracts-generated",
   "/contracts-stamped",
   "/contract-templates",
+  "/contract-annotations",
   "/seal",
 ];
 

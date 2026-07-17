@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Upload, Download, Trash2, Plus, X, FileText, FolderOpen, Stamp } from "lucide-react";
+import { Upload, Download, Trash2, Plus, FileText, FolderOpen, Stamp } from "lucide-react";
 import {
   uploadContractTemplate,
   deleteContractTemplate,
@@ -10,6 +10,7 @@ import {
 import { TEMPLATE_KEY_LABELS, TEMPLATE_KEYS } from "@/lib/contractTemplateKeys";
 import { uploadSeal } from "@/actions/contractStamp";
 import { formatDate } from "@/lib/utils";
+import { Modal } from "@/components/ui/Modal";
 
 export interface TemplateRow {
   id: string;
@@ -210,19 +211,8 @@ function UploadModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <form onSubmit={submit} className="card w-full max-w-md p-6">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-slate-900">上传合同模板</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded p-1 hover:bg-slate-100"
-          >
-            <X className="h-4 w-4 text-slate-500" />
-          </button>
-        </div>
-
+    <Modal open onClose={onClose} title="上传合同模板" size="sm" closeOnBackdrop={false}>
+      <form onSubmit={submit}>
         <div className="space-y-3">
           <div>
             <label className="label">模板名称 <span className="text-rose-500">*</span></label>
@@ -303,7 +293,7 @@ function UploadModal({
           </button>
         </div>
       </form>
-    </div>
+    </Modal>
   );
 }
 

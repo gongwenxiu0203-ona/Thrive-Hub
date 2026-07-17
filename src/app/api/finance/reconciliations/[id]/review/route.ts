@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { getReconciliationAccess, scopedReconciliationWhere } from "@/lib/reconciliationAccess";
 import { FeaturePermissionError } from "@/lib/permissionGuard";
-import { recalcReconciliation } from "../route";
+import { recalcReconciliation } from "@/lib/reconciliationCalc";
 
 // POST /api/finance/reconciliations/[id]/review
 // 客户负责人确认或提出异议

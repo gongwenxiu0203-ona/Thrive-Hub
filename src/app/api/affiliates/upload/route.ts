@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
+import { hasPermissionLevel } from "@/lib/permissionGuard";
+import { resolveUserPermission } from "@/lib/permissionResolver";
 import { UPLOADABLE_AFFILIATE_FIELDS, mightBeDuplicate, normalizeRegion } from "@/lib/affiliateFields";
 
 // Allow up to 5 minutes for large xlsx parsing + DB writes
@@ -10,6 +12,7 @@ export const maxDuration = 300;
 export async function POST(req: NextRequest) {
   const auth = await getSession();
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!hasPermissionLevel(await resolveUserPermission(auth.userId, "affiliates"), "EDIT")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const formData = await req.formData();
   const file = formData.get("file") as File | null;

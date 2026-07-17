@@ -3,9 +3,10 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Plus, FolderKanban, FileText, X, ArrowRight } from "lucide-react";
+import { Plus, FolderKanban, FileText, ArrowRight } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Badge } from "@/components/ui/Badge";
+import { Modal } from "@/components/ui/Modal";
 import { createIntegratedProject, createOneOffProject } from "@/actions/projects";
 import { formatDate, cn } from "@/lib/utils";
 
@@ -243,13 +244,8 @@ function CreateOneOffModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 pt-10">
-      <div className="w-full max-w-lg rounded-2xl bg-white shadow-xl">
-        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-          <h2 className="text-sm font-semibold text-slate-900">新建单次合作</h2>
-          <button onClick={onClose}><X className="h-5 w-5 text-slate-400 hover:text-slate-700" /></button>
-        </div>
-        <div className="space-y-4 px-5 py-5">
+    <Modal open onClose={onClose} title="新建单次合作">
+      <div className="space-y-4">
           <div>
             <label className="label">项目名称 *</label>
             <input className="input" value={name} onChange={(e) => setName(e.target.value)}
@@ -281,9 +277,8 @@ function CreateOneOffModal({
               {pending ? "创建中…" : "创建项目"}
             </button>
           </div>
-        </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -331,13 +326,8 @@ function CreateProjectModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 pt-10">
-      <div className="w-full max-w-lg rounded-2xl bg-white shadow-xl">
-        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-          <h2 className="text-sm font-semibold text-slate-900">新建联盟营销项目</h2>
-          <button onClick={onClose}><X className="h-5 w-5 text-slate-400 hover:text-slate-700" /></button>
-        </div>
-        <div className="space-y-4 px-5 py-5">
+    <Modal open onClose={onClose} title="新建联盟营销项目">
+      <div className="space-y-4">
           <div>
             <label className="label">关联客户 *</label>
             <select className="input" value={customerId}
@@ -394,8 +384,7 @@ function CreateProjectModal({
               {pending ? "创建中…" : "创建项目"}
             </button>
           </div>
-        </div>
       </div>
-    </div>
+    </Modal>
   );
 }

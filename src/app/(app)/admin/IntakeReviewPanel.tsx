@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, X } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
+import { Modal } from "@/components/ui/Modal";
 
 type CustomerOption = { id: string; brandName: string };
 type Submission = {
@@ -163,16 +164,15 @@ export function IntakeReviewPanel() {
       )}
 
       {selected && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/40 p-4">
-          <div className="card mx-auto my-8 max-w-4xl p-6" role="dialog" aria-modal="true" aria-labelledby="intake-review-title">
-            <div className="flex justify-between gap-4">
-              <div>
-                <h3 id="intake-review-title" className="text-lg font-semibold">审核：{selected.brandName ?? show(selected.payload.brandName)}</h3>
-                <p className="text-sm text-slate-500">勾选要应用到正式资料的字段。</p>
-              </div>
-              <button className="btn-ghost h-9 w-9 p-0" aria-label="关闭" onClick={() => setSelected(null)}><X className="h-5 w-5" /></button>
-            </div>
-
+        <Modal
+          open={Boolean(selected)}
+          onClose={() => setSelected(null)}
+          title={selected.brandName ?? show(selected.payload.brandName)}
+          description={"\u52fe\u9009\u8981\u5e94\u7528\u5230\u6b63\u5f0f\u8d44\u6599\u7684\u5b57\u6bb5\u3002"}
+          size="xl"
+          closeOnBackdrop={!busy}
+          closeOnEscape={!busy}
+        >
             {selected.type === "GENERAL_NEW" && (
               <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 p-4">
                 <label className="label" htmlFor="merge-customer">审核结果</label>
@@ -207,8 +207,7 @@ export function IntakeReviewPanel() {
               <button className="btn-secondary text-rose-700" disabled={busy} onClick={() => void action("reject")}>拒绝</button>
               <button className="btn-primary" disabled={busy || fields.size === 0} onClick={() => void action("approve")}>{mergeCustomerId ? "应用并合并" : "应用所选字段"}</button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

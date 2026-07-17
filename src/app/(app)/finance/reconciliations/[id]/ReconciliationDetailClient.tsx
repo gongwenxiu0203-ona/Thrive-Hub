@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/Badge";
+import { Modal } from "@/components/ui/Modal";
 import {
   RECONCILIATION_STATUS_LABELS,
   RECONCILIATION_STATUS_COLORS,
@@ -64,6 +65,7 @@ type Rec = {
   finalSalesAmount: number | null;
   finalCommissionAmount: number | null;
   submittedAt: Date | string | null;
+  submittedById: string | null;
   customer: {
     id: string;
     brandName: string;
@@ -493,14 +495,15 @@ function ReviewModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-md rounded-xl bg-white shadow-2xl">
-        <div className="border-b border-slate-200 px-6 py-4">
-          <h2 className="text-lg font-semibold text-slate-900">
-            {action === "APPROVED" ? "✅ 确认对账" : "⚠️ 提出异议"}
-          </h2>
-        </div>
-        <div className="space-y-4 px-6 py-5">
+    <Modal
+      open
+      onClose={onClose}
+      title={action === "APPROVED" ? "确认对账" : "提出异议"}
+      size="sm"
+      closeOnBackdrop={!loading}
+      closeOnEscape={!loading}
+    >
+        <div className="space-y-4">
           {action === "DISPUTED" && (
             <>
               <div>
@@ -549,8 +552,7 @@ function ReviewModal({
             </button>
           </div>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -582,15 +584,16 @@ function ConfirmModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-md rounded-xl bg-white shadow-2xl">
-        <div className="border-b border-slate-200 px-6 py-4">
-          <h2 className="text-lg font-semibold text-slate-900">最终确认对账</h2>
-          <p className="mt-0.5 text-sm text-slate-500">
-            确认后将锁定当前数据并生成结算记录，不可修改
-          </p>
-        </div>
-        <div className="space-y-4 px-6 py-5">
+    <Modal
+      open
+      onClose={onClose}
+      title="最终确认对账"
+      description="确认后将锁定当前数据并生成结算记录，不可修改"
+      size="sm"
+      closeOnBackdrop={!loading}
+      closeOnEscape={!loading}
+    >
+        <div className="space-y-4">
           <div>
             <label className="label">备注（可选）</label>
             <textarea
@@ -607,8 +610,7 @@ function ConfirmModal({
             </button>
           </div>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 

@@ -1,21 +1,48 @@
 "use client";
 
 import { useState } from "react";
+import type { ComponentType } from "react";
 import { LayoutList, KanbanSquare, Users as UsersIcon } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { AffiliateFormModal, type AffiliateData } from "./AffiliateFormModal";
+import AffiliateFormModalImpl from "./AffiliateFormModal";
 import {
-  AFFILIATE_SOURCE_LABELS,
-  AFFILIATE_TYPE_LABELS,
-  AFFILIATE_STATUS_LABELS,
-  AFFILIATE_STATUS_COLORS,
+  AFFILIATE_SOURCE_OPTIONS,
+  AFFILIATE_TYPE_OPTIONS,
+  AFFILIATE_DEV_STATUS_OPTIONS,
+  AFFILIATE_DEV_STATUS_COLORS,
   labelOf,
 } from "@/lib/constants";
 import { parseJsonArray, formatNumber, cn } from "@/lib/utils";
 
 type Option = { id: string; name: string };
+type AffiliateData = {
+  id: string;
+  platformName: string;
+  internalName: string | null;
+  source: string;
+  type: string;
+  category: string | null;
+  followers: number | null;
+  devStatus: string;
+  tags: string;
+};
 type Affiliate = AffiliateData & { ownerName: string | null };
+
+const optionLabels = (values: readonly string[]): Record<string, string> =>
+  Object.fromEntries(values.map((value) => [value, value]));
+const AFFILIATE_SOURCE_LABELS = optionLabels(AFFILIATE_SOURCE_OPTIONS);
+const AFFILIATE_TYPE_LABELS = optionLabels(AFFILIATE_TYPE_OPTIONS);
+const AFFILIATE_STATUS_LABELS = optionLabels(AFFILIATE_DEV_STATUS_OPTIONS);
+const AFFILIATE_STATUS_COLORS = AFFILIATE_DEV_STATUS_COLORS;
+
+// Legacy view adapter. This file is not mounted by the current affiliate
+// dashboard; retain its historical call shape without changing the live form.
+const AffiliateFormModal = AffiliateFormModalImpl as unknown as ComponentType<{
+  users: Option[];
+  affiliate: Affiliate;
+  trigger: "edit";
+}>;
 
 const STATUS_ORDER = ["TO_DEVELOP", "COMMUNICATING", "COOPERATING", "PAUSED"];
 

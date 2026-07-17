@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { buildSheet } from "@/lib/excel";
 import { getPlatform } from "@/lib/platformMappings";
+import { hasBiPermission } from "@/lib/biAuthorization";
 
 // Download an upload template.
 // Query: ?platform=<name>  → platform-specific template with platform's raw headers
@@ -9,6 +10,9 @@ import { getPlatform } from "@/lib/platformMappings";
 export async function GET(req: Request) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
+  if (!(await hasBiPermission(session.userId, "READ"))) {
+    return NextResponse.json({ error: "无权下载 BI 模板" }, { status: 403 });
+  }
 
   const url = new URL(req.url);
   const platform = url.searchParams.get("platform") ?? "";

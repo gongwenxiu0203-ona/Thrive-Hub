@@ -1,10 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
+import { salesScope } from "@/lib/dataScope";
+import { hasPermissionLevel } from "@/lib/permissionGuard";
+import { resolveUserPermission } from "@/lib/permissionResolver";
 
 export async function GET(req: NextRequest) {
   const auth = await getSession();
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const affiliatePermission = await resolveUserPermission(auth.userId, "affiliates");
+  if (!hasPermissionLevel(affiliatePermission, "READ")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   const sp = req.nextUrl.searchParams;
   const page = Math.max(1, parseInt(sp.get("page") ?? "1", 10));
@@ -105,7 +112,7 @@ export async function GET(req: NextRequest) {
   let nameFilter: string[] | undefined;
   if (salesBrands.length || salesTypes.length) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const srWhere: any = { deletedAt: null };
+    const srWhere: any = { deletedAt: null, ...salesScope(auth, "all") };
     if (salesBrands.length) srWhere.brand = { in: salesBrands };
     if (salesTypes.length) srWhere.affiliateType = { in: salesTypes };
     const matches = await prisma.salesRecord.findMany({
@@ -146,7 +153,7 @@ export async function GET(req: NextRequest) {
   if (pageNames.length) {
     const grouped = await prisma.salesRecord.groupBy({
       by: ["affiliateName"],
-      where: { affiliateName: { in: pageNames }, deletedAt: null },
+      where: { affiliateName: { in: pageNames }, deletedAt: null, ...salesScope(auth, "all") },
       _sum: { revenue: true, unitsSold: true },
     });
     for (const g of grouped) {
@@ -169,6 +176,10 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const auth = await getSession();
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const affiliatePermission = await resolveUserPermission(auth.userId, "affiliates");
+  if (!hasPermissionLevel(affiliatePermission, "EDIT")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   const body = await req.json();
 

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChevronDown, X, Search, Trash2, RotateCcw, Pencil } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
+import { Modal } from "@/components/ui/Modal";
 import {
   RECONCILIATION_STATUS_LABELS,
   RECONCILIATION_STATUS_COLORS,
@@ -768,14 +769,14 @@ function CustomerReconciliationTab({
 
       {/* 删除确认 Modal */}
       {canManage && confirmTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white shadow-2xl">
-            <div className="border-b border-slate-200 px-6 py-4">
-              <h3 className="text-lg font-semibold text-rose-600">
-                确认删除客户对账？
-              </h3>
-            </div>
-            <div className="space-y-3 px-6 py-5 text-sm text-slate-700">
+        <Modal
+          open
+          onClose={() => {
+            if (deletingId === null) setConfirmTarget(null);
+          }}
+          title="确认删除客户对账？"
+        >
+          <div className="space-y-3 text-sm text-slate-700">
               <p>
                 即将删除客户 <strong>{confirmTarget.customerName}</strong>{" "}
                 的全部 <strong>{confirmTarget.count}</strong>{" "}
@@ -784,8 +785,7 @@ function CustomerReconciliationTab({
               <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700">
                 💡 删除后会进入「已删除」Tab，<strong>7 天内可恢复</strong>，超期将自动永久清理。
               </p>
-            </div>
-            <div className="flex justify-end gap-3 border-t border-slate-100 px-6 py-3">
+            <div className="flex justify-end gap-3 border-t border-slate-100 pt-4">
               <button
                 type="button"
                 className="btn-secondary"
@@ -806,7 +806,7 @@ function CustomerReconciliationTab({
               </button>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

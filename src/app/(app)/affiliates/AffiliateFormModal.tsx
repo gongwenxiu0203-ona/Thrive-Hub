@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { X, Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
+import { Modal } from "@/components/ui/Modal";
 import {
   AFFILIATE_SOURCE_OPTIONS,
   AFFILIATE_CATEGORY_OPTIONS,
@@ -173,14 +174,30 @@ export default function AffiliateFormModal({ users, customers, currentUserId, af
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 pt-8">
-      <div className="relative w-full max-w-3xl rounded-xl bg-white shadow-xl">
-        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
-          <h2 className="font-semibold text-slate-900">{isEdit ? "编辑联盟商" : "新增联盟商"}</h2>
-          <button onClick={onClose}><X className="h-5 w-5 text-slate-400 hover:text-slate-700" /></button>
+    <Modal
+      open
+      onClose={onClose}
+      title={isEdit ? "编辑联盟商" : "新增联盟商"}
+      size="lg"
+      closeOnBackdrop={!saving}
+      closeOnEscape={!saving}
+      footer={(
+        <div className="flex w-full items-center justify-between gap-2">
+          <div>
+            {isEdit && (
+              <button type="button" onClick={handleDelete} className="text-sm text-rose-600 hover:text-rose-700">删除</button>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <button type="button" onClick={onClose} className="btn-outline text-sm">取消</button>
+            <button type="submit" form="affiliate-form" className="btn-primary text-sm" disabled={saving}>
+              {saving ? "保存中…" : "保存"}
+            </button>
+          </div>
         </div>
-
-        <form onSubmit={handleSubmit} className="max-h-[75vh] overflow-y-auto px-6 py-5 space-y-6" data-aff="1">
+      )}
+    >
+        <form id="affiliate-form" onSubmit={handleSubmit} className="space-y-6" data-aff="1">
           {/* 核心信息 */}
           <Section title="核心信息">
             <Row2>
@@ -390,24 +407,7 @@ export default function AffiliateFormModal({ users, customers, currentUserId, af
 
           {error && <p className="rounded bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</p>}
         </form>
-
-        <div className="flex items-center justify-between border-t border-slate-100 px-6 py-4">
-          <div>
-            {isEdit && (
-              <button type="button" onClick={handleDelete} className="text-sm text-rose-600 hover:text-rose-700">删除</button>
-            )}
-          </div>
-          <div className="flex gap-2">
-            <button type="button" onClick={onClose} className="btn-outline text-sm">取消</button>
-            <button type="button" onClick={() => {
-              document.querySelector<HTMLFormElement>("form[data-aff]")?.requestSubmit();
-            }} className="btn-primary text-sm" disabled={saving}>
-              {saving ? "保存中…" : "保存"}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 

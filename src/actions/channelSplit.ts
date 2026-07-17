@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { isStaff } from "@/lib/permissions";
+import { channelReconciliationScope, customerScope } from "@/lib/dataScope";
+import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
 import {
   splitPeriodsByMonth,
   parseTieredRules,
@@ -45,12 +46,17 @@ function validateInput(input: SplitRuleInput): string | null {
  * already-signed contract that hasn't been wired to a rule yet. */
 export async function upsertChannelSplitRule(input: SplitRuleInput): Promise<Result<{ id: string }>> {
   const session = await requireSession();
-  if (!isStaff(session.role)) return { ok: false, error: "无权操作" };
+  try {
+    await requireFeaturePermission(session, "finance_channel", "EDIT");
+  } catch (error) {
+    if (error instanceof FeaturePermissionError) return { ok: false, error: "无权操作" };
+    throw error;
+  }
   const err = validateInput(input);
   if (err) return { ok: false, error: err };
 
-  const customer = await prisma.customer.findUnique({
-    where: { id: input.customerId },
+  const customer = await prisma.customer.findFirst({
+    where: { AND: [{ id: input.customerId }, customerScope(session, session.role === "ADMIN" ? "all" : "mine")] },
     select: { id: true, deletedAt: true, channelUserId: true },
   });
   if (!customer || customer.deletedAt) return { ok: false, error: "客户不存在" };
@@ -95,7 +101,14 @@ export async function upsertChannelSplitRule(input: SplitRuleInput): Promise<Res
 
 export async function deleteChannelSplitRule(customerId: string): Promise<Result> {
   const session = await requireSession();
-  if (session.role !== "ADMIN") return { ok: false, error: "仅管理员可删除分账规则" };
+  try {
+    await requireFeaturePermission(session, "finance_channel", "MANAGE");
+  } catch (error) {
+    if (error instanceof FeaturePermissionError) return { ok: false, error: "无权删除分账规则" };
+    throw error;
+  }
+  const customer = await prisma.customer.findFirst({ where: { AND: [{ id: customerId }, customerScope(session, session.role === "ADMIN" ? "all" : "mine")] }, select: { id: true } });
+  if (!customer) return { ok: false, error: "客户不存在或无权操作" };
   await prisma.channelSplitRule.deleteMany({ where: { customerId } });
   revalidatePath(`/customers/${customerId}`);
   return { ok: true };
@@ -109,7 +122,24 @@ export async function ensureReconciliationForContract(args: {
   channelUserId: string;
   createdById: string;
 }): Promise<Result<{ reconciliationId: string }>> {
-  const { contractId, customerId, channelUserId, createdById } = args;
+  const session = await requireSession();
+  await requireFeaturePermission(session, "finance_channel", "EDIT");
+  const { contractId, customerId, channelUserId } = args;
+  const relation = await prisma.contract.findFirst({
+    where: {
+      id: contractId,
+      customerId,
+      deletedAt: null,
+      customer: {
+        ...customerScope(session, session.role === "ADMIN" ? "all" : "mine"),
+        channelUserId,
+        deletedAt: null,
+      },
+    },
+    select: { id: true },
+  });
+  if (!relation) return { ok: false, error: "合同、客户或渠道归属不匹配" };
+  const createdById = session.userId;
 
   // Already wired (rule-driven or stub) for this contract? Skip.
   const existing = await prisma.channelReconciliation.findFirst({
@@ -202,6 +232,16 @@ export async function ensureChannelDueDateReminders(
   reconciliationId: string,
   derivedPeriods: PeriodDerived[]
 ): Promise<void> {
+  const session = await requireSession();
+  await requireFeaturePermission(session, "finance_channel", "READ");
+  const reconciliation = await prisma.channelReconciliation.findFirst({
+    where: {
+      id: reconciliationId,
+      ...channelReconciliationScope(session, session.role === "ADMIN" ? "all" : "mine"),
+    },
+    select: { id: true },
+  });
+  if (!reconciliation) throw new Error("渠道对账不存在或无权访问");
   const due = derivedPeriods.filter((p) => p.dueDate);
   if (due.length === 0) return;
 

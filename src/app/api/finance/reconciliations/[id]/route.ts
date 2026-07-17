@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { getReconciliationAccess, scopedReconciliationWhere } from "@/lib/reconciliationAccess";
 import { FeaturePermissionError } from "@/lib/permissionGuard";
-import { calcCommission } from "@/lib/commissionCalc";
+import { recalcReconciliation } from "@/lib/reconciliationCalc";
 
 // GET /api/finance/reconciliations/[id]
 export async function GET(
@@ -139,91 +139,4 @@ export async function DELETE(
     console.error(e);
     return NextResponse.json({ error: "删除失败" }, { status: 500 });
   }
-}
-
-/**
- * v3 抽佣重算（基于合同 commissionType + 实际销售额）。
- * 回退：合同字段缺失时使用旧的对赌逻辑（FIXED 行为）。
- */
-export async function recalcReconciliation(
-  recId: string,
-  patch: Record<string, unknown>,
-): Promise<{
-  actualCommissionRate: number;
-  commissionAmount: number;
-  betResult: string;
-}> {
-  // 取最新合同 v3 字段
-  const rec = await prisma.customerReconciliation.findUnique({
-    where: { id: recId },
-    select: {
-      contractId: true,
-      commissionRate: true,
-      actualSalesAmount: true,
-      gmvBaseline: true,
-      contract: {
-        select: {
-          commissionType: true,
-          commissionRate: true,
-          thresholdAmount: true,
-          tieredRules: true,
-        },
-      },
-    },
-  });
-  if (!rec) {
-    return { actualCommissionRate: 0, commissionAmount: 0, betResult: "NA" };
-  }
-
-  const actualSalesAmount =
-    typeof patch.actualSalesAmount === "number"
-      ? patch.actualSalesAmount
-      : rec.actualSalesAmount;
-  const gmvBaseline =
-    typeof patch.gmvBaseline === "number"
-      ? patch.gmvBaseline
-      : (rec.gmvBaseline ?? null);
-
-  // 优先用合同的最新比例（避免快照陈旧），失败回退到对账记录的快照
-  const contractRateParsed = parseRatePctServer(rec.contract?.commissionRate);
-  const contractRate = contractRateParsed > 0 ? contractRateParsed : rec.commissionRate;
-
-  const result = calcCommission({
-    commissionType: rec.contract?.commissionType ?? "FIXED",
-    contractRate,
-    thresholdAmount: rec.contract?.thresholdAmount ?? null,
-    tieredRules: rec.contract?.tieredRules ?? null,
-    gmvBaseline,
-    actualSalesAmount,
-  });
-
-  return {
-    actualCommissionRate: result.actualCommissionRate,
-    commissionAmount: result.commissionAmount,
-    betResult: "NA", // v3 不再使用 betResult，统一标 NA
-  };
-}
-
-/** 把 "1.5%" / "0.015" / 1.5 / 0.015 都转为小数（0.015） */
-function parseRatePctServer(s: string | number | null | undefined): number {
-  if (s == null || s === "") return 0;
-  if (typeof s === "number") return s > 1 ? s / 100 : s;
-  const n = Number(String(s).replace(/[%\s]/g, ""));
-  if (!Number.isFinite(n)) return 0;
-  return n > 1 ? n / 100 : n;
-}
-
-/** 兼容旧 review/route.ts 的导出 — 内部已切换到 recalcReconciliation */
-export function calcBetAndCommission(rec: {
-  betType: string;
-  betOrderCount?: number | null;
-  betSalesAmount?: number | null;
-  actualOrders: number;
-  actualSalesAmount: number;
-  commissionRate: number;
-}) {
-  // 退化为 FIXED 行为（v3 模式下 review 异议时使用）
-  const actualCommissionRate = rec.commissionRate;
-  const commissionAmount = rec.actualSalesAmount * actualCommissionRate;
-  return { betResult: "NA", actualCommissionRate, commissionAmount };
 }

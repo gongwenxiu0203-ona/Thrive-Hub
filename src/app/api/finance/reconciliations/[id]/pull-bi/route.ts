@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { getReconciliationAccess, scopedReconciliationWhere } from "@/lib/reconciliationAccess";
 import { FeaturePermissionError } from "@/lib/permissionGuard";
-import { calcBetAndCommission } from "../route";
+import { calcBetAndCommission } from "@/lib/reconciliationCalc";
 
 // POST /api/finance/reconciliations/[id]/pull-bi
 // 根据对账周期从 SalesRecord 自动拉取该客户的销售单量和销售额

@@ -75,7 +75,7 @@ export default async function ContractReviewQueuePage() {
               {pending.map((r) => (
                 <tr key={r.id} className="border-b border-slate-50 last:border-0">
                   <td className="px-4 py-2 font-mono text-xs">{r.contract.contractNo}</td>
-                  <td className="px-4 py-2">{r.contract.customer.brandName}</td>
+                  <td className="px-4 py-2">{r.contract.customer?.brandName ?? "—"}</td>
                   <td className="px-4 py-2">第 {r.round} 轮</td>
                   <td className="px-4 py-2">{r.reviewer.name}</td>
                   <td className="px-4 py-2 text-xs text-slate-500">

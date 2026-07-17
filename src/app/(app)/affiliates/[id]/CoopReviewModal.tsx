@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { X, Plus, Trash2, BarChart2, CheckCircle2 } from "lucide-react";
+import { Plus, Trash2, BarChart2, CheckCircle2 } from "lucide-react";
+import { Modal } from "@/components/ui/Modal";
 import { AFFILIATE_COOP_STATUS_OPTIONS, COOPERATION_MODE_OPTIONS } from "@/lib/constants";
 import type { SaleRec } from "./AffiliateSalesPanel";
 
@@ -201,19 +202,16 @@ export default function CoopReviewModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-2xl max-h-[92vh] overflow-y-auto rounded-2xl bg-white shadow-2xl">
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white px-6 py-4">
-          <div>
-            <h2 className="font-semibold text-slate-900">合作审核</h2>
-            <p className="text-xs text-slate-500">{affiliateName}</p>
-          </div>
-          <button onClick={onClose} className="rounded-lg p-1 hover:bg-slate-100">
-            <X className="h-5 w-5 text-slate-400" />
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-5 px-6 py-5">
+    <Modal
+      open
+      onClose={onClose}
+      title="合作审核"
+      description={affiliateName}
+      size="lg"
+      closeOnBackdrop={!saving}
+      closeOnEscape={!saving}
+    >
+        <form onSubmit={handleSubmit} className="space-y-5">
           {/* 关联客户 */}
           <div>
             <label className="label text-xs">关联客户</label>
@@ -506,7 +504,6 @@ export default function CoopReviewModal({
             </button>
           </div>
         </form>
-      </div>
-    </div>
+    </Modal>
   );
 }

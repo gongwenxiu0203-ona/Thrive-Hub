@@ -1,14 +1,16 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { isStaff } from "@/lib/permissions";
+import { channelReconciliationScope, customerScope, reconciliationScope } from "@/lib/dataScope";
+import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
 
 // GET /api/finance/channel-reconciliations
 export async function GET(_req: Request) {
   try {
     const session = await requireSession();
+    await requireFeaturePermission(session, "finance_channel", "READ");
     const list = await prisma.channelReconciliation.findMany({
-      where: session.role === "CHANNEL" ? { channelUserId: session.userId } : undefined,
+      where: channelReconciliationScope(session, session.role === "ADMIN" ? "all" : "mine"),
       include: {
         customer: { select: { id: true, brandName: true } },
         contract: { select: { id: true, contractNo: true } },
@@ -32,7 +34,8 @@ export async function GET(_req: Request) {
       orderBy: { createdAt: "desc" },
     });
     return NextResponse.json(list);
-  } catch {
+  } catch (e) {
+    if (e instanceof FeaturePermissionError) return NextResponse.json({ error: "无权限" }, { status: 403 });
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 }
@@ -44,9 +47,7 @@ export async function GET(_req: Request) {
 export async function POST(req: Request) {
   try {
     const session = await requireSession();
-    if (!isStaff(session.role)) {
-      return NextResponse.json({ error: "无权限" }, { status: 403 });
-    }
+    await requireFeaturePermission(session, "finance_channel", "EDIT");
     const body = await req.json();
     const {
       customerId,
@@ -69,12 +70,19 @@ export async function POST(req: Request) {
         { status: 400 },
       );
     }
+    const view = session.role === "ADMIN" ? "all" : "mine";
+    const contract = await prisma.contract.findFirst({
+      where: { id: contractId, customerId, customer: customerScope(session, view), deletedAt: null },
+      select: { id: true },
+    });
+    const channelUser = await prisma.user.findFirst({ where: { id: channelUserId, role: "CHANNEL", status: "APPROVED" }, select: { id: true } });
+    if (!contract || !channelUser) return NextResponse.json({ error: "合同、客户或渠道商不存在或无权访问" }, { status: 404 });
 
     // 关联月度客户对账（可选）— 用于联动到账金额
     let custRec = null;
     if (customerReconciliationId) {
-      custRec = await prisma.customerReconciliation.findUnique({
-        where: { id: customerReconciliationId },
+      custRec = await prisma.customerReconciliation.findFirst({
+        where: { AND: [{ id: customerReconciliationId, customerId }, reconciliationScope(session, view)] },
         include: { settlements: true },
       });
       if (!custRec) {
@@ -143,6 +151,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json(record, { status: 201 });
   } catch (e) {
+    if (e instanceof FeaturePermissionError) return NextResponse.json({ error: "无权限" }, { status: 403 });
     console.error(e);
     return NextResponse.json({ error: "创建失败" }, { status: 500 });
   }

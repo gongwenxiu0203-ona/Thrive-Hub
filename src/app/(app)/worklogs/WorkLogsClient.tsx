@@ -8,6 +8,7 @@ import {
   Upload, Check, ChevronDown, Clipboard,
 } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { Modal } from "@/components/ui/Modal";
 import {
   createWorkLog, updateWorkLog, softDeleteWorkLog, fetchProjectProgress,
   type WorkLogPayload,
@@ -307,13 +308,8 @@ function WorkLogFormModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 pt-10">
-      <div className="w-full max-w-2xl rounded-2xl bg-white shadow-xl">
-        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-          <h2 className="text-sm font-semibold text-slate-900">{isEdit ? "编辑日志" : "写日志"}</h2>
-          <button onClick={onClose}><X className="h-5 w-5 text-slate-400 hover:text-slate-700" /></button>
-        </div>
-        <div className="space-y-4 px-5 py-5">
+    <Modal open onClose={onClose} title={isEdit ? "编辑日志" : "写日志"} wide>
+      <div className="space-y-4">
           {/* 日志时间（自动）+ 周期 */}
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
@@ -477,9 +473,8 @@ function WorkLogFormModal({
               {pending ? "保存中…" : isEdit ? "保存修改" : "提交日志"}
             </button>
           </div>
-        </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 

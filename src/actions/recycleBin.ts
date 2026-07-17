@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { type RecycleType } from "@/lib/recycleBin";
+import { requireFeaturePermission } from "@/lib/permissionGuard";
+import { contractScope, customerScope, projectScope, salesScope, taskScope } from "@/lib/dataScope";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function model(type: RecycleType): any {
@@ -22,8 +24,48 @@ function model(type: RecycleType): any {
 
 /** 恢复：清除 deletedAt，移出回收站 */
 export async function restoreItem(type: RecycleType, id: string) {
-  await requireSession();
-  await model(type).update({ where: { id }, data: { deletedAt: null } });
+  const session = await requireSession();
+  const view = session.role === "ADMIN" ? "all" : "mine";
+  let where: Record<string, unknown> = { id };
+  switch (type) {
+    case "customer":
+      await requireFeaturePermission(session, "customers", "MANAGE");
+      where = { AND: [{ id }, customerScope(session, view)] };
+      break;
+    case "contract":
+      await requireFeaturePermission(session, "contracts", "MANAGE");
+      where = { AND: [{ id }, contractScope(session, view)] };
+      break;
+    case "affiliate":
+      await requireFeaturePermission(session, "affiliates", "MANAGE");
+      break;
+    case "task":
+      await requireFeaturePermission(session, "tasks", "MANAGE");
+      where = { AND: [{ id }, taskScope(session, view)] };
+      break;
+    case "reminder":
+      await requireFeaturePermission(session, "reminders", "MANAGE");
+      where = { id, targetId: session.userId };
+      break;
+    case "salesRecord":
+      await requireFeaturePermission(session, "bi", "MANAGE");
+      where = { AND: [{ id }, salesScope(session, view)] };
+      break;
+    case "salesBatch":
+      await requireFeaturePermission(session, "bi", "MANAGE");
+      where = { id, OR: [{ uploaderId: session.userId }, { customer: customerScope(session, view) }] };
+      break;
+    case "project":
+      await requireFeaturePermission(session, "dashboard", "MANAGE");
+      where = { AND: [{ id }, projectScope(session, view)] };
+      break;
+    case "workLog":
+      if (session.role !== "ADMIN") throw new Error("仅管理员可恢复工作记录");
+      break;
+  }
+  const existing = await model(type).findFirst({ where, select: { id: true } });
+  if (!existing) throw new Error("记录不存在或无权恢复");
+  await model(type).update({ where: { id: existing.id }, data: { deletedAt: null } });
   revalidatePath("/recycle-bin");
   revalidatePath("/customers");
   revalidatePath("/contracts");

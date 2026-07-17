@@ -7,6 +7,8 @@
     "build": "prisma generate && node scripts/pre-migrate-backup.js && prisma migrate deploy && next build",
     "build:prod": "cp prisma/schema.mysql.prisma prisma/schema.prisma && prisma generate && prisma migrate deploy && next build",
     "start": "next start",
+    "typecheck": "tsc --noEmit --pretty false",
+    "test:security": "tsx scripts/security-test-runner.ts",
     "lint": "next lint",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",

@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { isStaff } from "@/lib/permissions";
+import { reconciliationScope } from "@/lib/dataScope";
+import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
 
 // PATCH /api/finance/settlements/[id]
 // 更新结算记录（预计结算时间、实际结算时间、备注）
@@ -11,14 +12,12 @@ export async function PATCH(
 ) {
   try {
     const session = await requireSession();
-    if (!isStaff(session.role)) {
-      return NextResponse.json({ error: "无权限" }, { status: 403 });
-    }
+    await requireFeaturePermission(session, "finance_customer", "EDIT");
     const { id } = await params;
     const body = await req.json();
 
-    const settlement = await prisma.settlement.findUnique({
-      where: { id },
+    const settlement = await prisma.settlement.findFirst({
+      where: { id, reconciliation: reconciliationScope(session, session.role === "ADMIN" ? "all" : "mine") },
       include: {
         reconciliation: {
           include: { customer: { select: { brandName: true } } },
@@ -72,6 +71,7 @@ export async function PATCH(
 
     return NextResponse.json(updated);
   } catch (e) {
+    if (e instanceof FeaturePermissionError) return NextResponse.json({ error: "无权限" }, { status: 403 });
     console.error(e);
     return NextResponse.json({ error: "更新失败" }, { status: 500 });
   }

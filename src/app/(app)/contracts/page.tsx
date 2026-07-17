@@ -131,7 +131,7 @@ export default async function ContractsPage({
   const contracts = allContracts.filter((ct) => {
     if (statusFilter.length && !statusFilter.includes(ct.status)) return false;
     if (typeFilter.length && !typeFilter.includes(ct.type)) return false;
-    if (customerFilter.length && !customerFilter.includes(ct.customerId)) return false;
+    if (customerFilter.length && (!ct.customerId || !customerFilter.includes(ct.customerId))) return false;
     if (q) {
       const ql = q.toLowerCase();
       if (

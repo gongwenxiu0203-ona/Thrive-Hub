@@ -14,6 +14,33 @@ import {
 import { CONTRACT_REVIEW_FIELDS } from "@/lib/constants";
 import { syncContractProgressToProjects } from "@/actions/projects";
 import { ensureReconciliationForContract } from "@/actions/channelSplit";
+import { contractScope, customerScope } from "@/lib/dataScope";
+import type { PermLevel } from "@/lib/featurePermissions";
+import { requireFeaturePermission } from "@/lib/permissionGuard";
+
+async function requireContractsPermission(required: PermLevel) {
+  const session = await requireSession();
+  await requireFeaturePermission(session, "contracts", required);
+  return session;
+}
+
+async function requireContractRow(id: string, required: PermLevel) {
+  const session = await requireContractsPermission(required);
+  const row = await prisma.contract.findFirst({
+    where: { id, ...contractScope(session, session.role === "ADMIN" ? "all" : "mine"), deletedAt: null },
+    select: { id: true },
+  });
+  if (!row) throw new Error("合同不存在或无权访问");
+  return session;
+}
+
+async function requireCustomerRow(customerId: string, session: Awaited<ReturnType<typeof requireSession>>) {
+  const row = await prisma.customer.findFirst({
+    where: { id: customerId, ...customerScope(session, session.role === "ADMIN" ? "all" : "mine"), deletedAt: null },
+    select: { id: true },
+  });
+  if (!row) throw new Error("客户不存在或无权访问");
+}
 
 function str(fd: FormData, key: string): string {
   return String(fd.get(key) ?? "").trim();
@@ -85,7 +112,7 @@ async function nextContractNoByPrefix(prefix: string): Promise<string> {
 
 /** Return the next available contract number for the given prefix (LYNQ | THRAIVE). */
 export async function nextContractNo(prefix: "LYNQ" | "THRAIVE"): Promise<string> {
-  await requireSession();
+  await requireContractsPermission("EDIT");
   const year = new Date().getFullYear();
   const like = `${prefix}-${year}-%`;
   // Find the highest sequence number used this year for this prefix.
@@ -105,9 +132,10 @@ export async function nextContractNo(prefix: "LYNQ" | "THRAIVE"): Promise<string
 export async function createContract(
   fd: FormData,
 ): Promise<ContractSaveResult> {
-  const session = await requireSession();
+  const session = await requireContractsPermission("EDIT");
   const contractNo = str(fd, "contractNo");
   const customerId = str(fd, "customerId");
+  if (customerId) await requireCustomerRow(customerId, session);
   if (!contractNo) return { ok: false, error: "合同编号为必填项" };
   if (!customerId) return { ok: false, error: "请选择关联客户" };
 
@@ -141,9 +169,10 @@ export async function updateContract(
   id: string,
   fd: FormData,
 ): Promise<ContractSaveResult> {
-  await requireSession();
+  const session = await requireContractRow(id, "EDIT");
   const contractNo = str(fd, "contractNo");
   const customerId = str(fd, "customerId");
+  if (customerId) await requireCustomerRow(customerId, session);
   if (!contractNo) return { ok: false, error: "合同编号为必填项" };
   if (!customerId) return { ok: false, error: "请选择关联客户" };
 
@@ -169,7 +198,7 @@ export async function updateContract(
 }
 
 export async function deleteContract(id: string) {
-  const session = await requireSession();
+  const session = await requireContractRow(id, "MANAGE");
   if (session.role !== "ADMIN") throw new Error("仅管理员可删除合同");
   // 软删除：进回收站，7 天内可恢复
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -180,7 +209,7 @@ export async function deleteContract(id: string) {
 
 /** 合同推进中 → 合同审核中. Seeds the per-field review rows + notifies reviewer. */
 export async function submitForReview(id: string) {
-  const session = await requireSession();
+  const session = await requireContractRow(id, "EDIT");
   const contract = await prisma.contract.findUnique({
     where: { id },
     include: { fieldReviews: true },
@@ -269,7 +298,7 @@ export async function reviewField(
   decision: string,
   modification: string,
 ) {
-  const session = await requireSession();
+  const session = await requireContractRow(contractId, "EDIT");
   if (session.role !== "ADMIN") throw new Error("仅管理员可审核合同");
 
   await prisma.contractFieldReview.upsert({
@@ -292,7 +321,7 @@ export async function reviewField(
 
 /** Finish review: any 驳回 → 退回「合同推进中」修改; 全部通过 → 合同签署中. */
 export async function finalizeReview(contractId: string) {
-  const session = await requireSession();
+  const session = await requireContractRow(contractId, "EDIT");
   if (session.role !== "ADMIN") throw new Error("仅管理员可审核合同");
 
   const contract = await prisma.contract.findUnique({
@@ -353,7 +382,7 @@ export async function finalizeReview(contractId: string) {
 
 /** Save overall reviewer comment on a contract. */
 export async function saveReviewComment(contractId: string, comment: string) {
-  const session = await requireSession();
+  const session = await requireContractRow(contractId, "EDIT");
   if (session.role !== "ADMIN") throw new Error("仅管理员可填写审核意见");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (prisma.contract.update as any)({
@@ -365,7 +394,7 @@ export async function saveReviewComment(contractId: string, comment: string) {
 
 /** 合同签署中 → 合同签署完成. Advances the linked customer to 合同签署完成. */
 export async function markCompleted(id: string) {
-  const session = await requireSession();
+  const session = await requireContractRow(id, "MANAGE");
   const contract = await prisma.contract.findUnique({ where: { id } });
   if (!contract) throw new Error("合同不存在");
   if (contract.status !== "SIGNING") {
@@ -376,16 +405,20 @@ export async function markCompleted(id: string) {
     data: { status: "COMPLETED" },
   });
   await syncContractProgressToProjects(id, "签署完成");
-  await bumpCustomerStatus(contract.customerId, "CONTRACT_SIGNED");
+  if (contract.customerId) {
+    await bumpCustomerStatus(contract.customerId, "CONTRACT_SIGNED");
+  }
 
   // Auto-create channel reconciliation for customers with a channel user.
   // If the customer has a ChannelSplitRule configured, generates rule-driven
   // periods; otherwise falls back to a single stub record.
-  const customer = await prisma.customer.findUnique({
-    where: { id: contract.customerId },
-    select: { channelUserId: true },
-  });
-  if (customer?.channelUserId) {
+  const customer = contract.customerId
+    ? await prisma.customer.findUnique({
+        where: { id: contract.customerId },
+        select: { channelUserId: true },
+      })
+    : null;
+  if (contract.customerId && customer?.channelUserId) {
     await ensureReconciliationForContract({
       contractId: id,
       customerId: contract.customerId,
@@ -396,7 +429,9 @@ export async function markCompleted(id: string) {
 
   revalidatePath("/contracts");
   revalidatePath(`/contracts/${id}`);
-  revalidatePath(`/customers/${contract.customerId}`);
+  if (contract.customerId) {
+    revalidatePath(`/customers/${contract.customerId}`);
+  }
   revalidatePath("/finance");
 }
 
@@ -453,7 +488,7 @@ export interface ContractV4Payload {
 export async function uploadTransactionalContract(
   fd: FormData,
 ): Promise<ContractSaveResult> {
-  const session = await requireSession();
+  const session = await requireContractsPermission("EDIT");
   const file = fd.get("file");
   const ownerId = str(fd, "ownerId") || session.userId;
   const type = str(fd, "type") || "TRANSACTIONAL";
@@ -542,8 +577,9 @@ function resolvePartyB(companyKey: string | null | undefined) {
 export async function createContractV4(
   payload: ContractV4Payload,
 ): Promise<ContractSaveResult> {
-  const session = await requireSession();
+  const session = await requireContractsPermission("EDIT");
   const { customerId, partyAName } = payload;
+  if (customerId) await requireCustomerRow(customerId, session);
   if (!customerId) return { ok: false, error: "请选择关联客户" };
   // 链接模式草稿：甲方信息由客户填写，允许暂时为空
   const isExternalDraft = payload.fillMethod === "EXTERNAL_LINK";
@@ -659,7 +695,8 @@ export async function updateContractV4(
   id: string,
   payload: Partial<ContractV4Payload>,
 ): Promise<ContractSaveResult> {
-  await requireSession();
+  const session = await requireContractRow(id, "EDIT");
+  if (payload.customerId) await requireCustomerRow(payload.customerId, session);
   let templateKey = payload.commissionType;
   if (payload.templateId) {
     const selectedTemplate = await prisma.contractTemplate.findUnique({
@@ -720,7 +757,7 @@ export async function updateContractV4(
 
 /** 生成外部填写 token，有效期 7 天 */
 export async function generateFillToken(contractId: string): Promise<{ token: string }> {
-  await requireSession();
+  await requireContractRow(contractId, "EDIT");
   const token = crypto.randomUUID();
   const expiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { isStaff } from "@/lib/permissions";
+import { hasBiPermission } from "@/lib/biAuthorization";
+import { customerScope, salesScope } from "@/lib/dataScope";
 import {
   buildSalesRecordWhereFromParams,
   csvFilterValues,
@@ -68,7 +69,14 @@ async function createSalesBulkLog({
   });
 }
 
-async function salesWhereFromFilterParams(filterParams: SalesRecordFilterParams) {
+async function requireBi(userId: string, level: "EDIT" | "MANAGE") {
+  if (!(await hasBiPermission(userId, level))) throw new Error("无权执行该 BI 操作");
+}
+
+async function salesWhereFromFilterParams(
+  filterParams: SalesRecordFilterParams,
+  session: Awaited<ReturnType<typeof requireSession>>,
+) {
   const types = csvFilterValues(filterParams, "types").filter((v) => v !== EMPTY_FILTER_VALUE);
   let typeAffNames: string[] | undefined;
   if (types.length) {
@@ -81,6 +89,7 @@ async function salesWhereFromFilterParams(filterParams: SalesRecordFilterParams)
   return {
     AND: [
       { deletedAt: null, batch: { deletedAt: null } },
+      salesScope(session, session.role === "ADMIN" ? "all" : "mine"),
       buildSalesRecordWhereFromParams(filterParams, typeAffNames),
     ],
   };
@@ -88,14 +97,17 @@ async function salesWhereFromFilterParams(filterParams: SalesRecordFilterParams)
 
 export async function deleteBatch(batchId: string) {
   const session = await requireSession();
-  if (!isStaff(session.role)) {
-    const batch = await prisma.salesBatch.findUnique({
-      where: { id: batchId },
-    });
-    if (!batch || batch.uploaderId !== session.userId) {
-      throw new Error("仅上传者或内部员工可删除该批次");
-    }
-  }
+  await requireBi(session.userId, "MANAGE");
+  const batch = await prisma.salesBatch.findFirst({
+    where: {
+      id: batchId,
+      OR: [
+        { uploaderId: session.userId },
+        { customer: customerScope(session, session.role === "ADMIN" ? "all" : "mine") },
+      ],
+    },
+  });
+  if (!batch) throw new Error("批次不存在或无权操作");
   // 软删除：进回收站（恢复后销售记录仍在；到期物理清理会级联删除记录）
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (prisma.salesBatch.update as any)({ where: { id: batchId }, data: { deletedAt: new Date() } });
@@ -104,22 +116,22 @@ export async function deleteBatch(batchId: string) {
 
 export async function bulkUpdateSalesRecordsCustomer(recordIds: string[], customerId: string): Promise<SalesBulkMutationResult> {
   const session = await requireSession();
-  if (!isStaff(session.role)) throw new Error("仅内部员工可批量修改推广数据关联客户");
+  await requireBi(session.userId, "EDIT");
   const ids = [...new Set(recordIds.filter(Boolean))];
   if (!ids.length) throw new Error("请选择要修改的数据记录");
   if (!customerId) throw new Error("请选择要关联的客户");
   const customer = await prisma.customer.findFirst({
-    where: { id: customerId, deletedAt: null },
+    where: { AND: [{ id: customerId, deletedAt: null }, customerScope(session, session.role === "ADMIN" ? "all" : "mine")] },
     select: { brandName: true },
   });
   if (!customer) throw new Error("客户不存在或已删除");
 
   const snapshots = await prisma.salesRecord.findMany({
-    where: { id: { in: ids }, deletedAt: null },
+    where: { AND: [{ id: { in: ids }, deletedAt: null }, salesScope(session, session.role === "ADMIN" ? "all" : "mine")] },
     select: { id: true, customerId: true, brand: true },
   });
   const result = await prisma.salesRecord.updateMany({
-    where: { id: { in: ids }, deletedAt: null },
+    where: { AND: [{ id: { in: ids }, deletedAt: null }, salesScope(session, session.role === "ADMIN" ? "all" : "mine")] },
     data: {
       customerId,
       brand: customer.brandName,
@@ -141,15 +153,15 @@ export async function bulkUpdateSalesRecordsCustomerByFilter(
   customerId: string,
 ): Promise<SalesBulkMutationResult> {
   const session = await requireSession();
-  if (!isStaff(session.role)) throw new Error("仅内部员工可批量修改推广数据关联客户");
+  await requireBi(session.userId, "EDIT");
   if (!customerId) throw new Error("请选择要关联的客户");
   const customer = await prisma.customer.findFirst({
-    where: { id: customerId, deletedAt: null },
+    where: { AND: [{ id: customerId, deletedAt: null }, customerScope(session, session.role === "ADMIN" ? "all" : "mine")] },
     select: { brandName: true },
   });
   if (!customer) throw new Error("客户不存在或已删除");
 
-  const where = await salesWhereFromFilterParams(filterParams);
+  const where = await salesWhereFromFilterParams(filterParams, session);
   const snapshots = await prisma.salesRecord.findMany({
     where,
     select: { id: true, customerId: true, brand: true },
@@ -172,15 +184,15 @@ export async function bulkUpdateSalesRecordsCustomerByFilter(
 
 export async function bulkDeleteSalesRecords(recordIds: string[]): Promise<SalesBulkMutationResult> {
   const session = await requireSession();
-  if (!isStaff(session.role)) throw new Error("仅内部员工可删除推广数据明细");
+  await requireBi(session.userId, "MANAGE");
   const ids = [...new Set(recordIds.filter(Boolean))];
   if (!ids.length) throw new Error("请选择要删除的数据记录");
   const rows = await prisma.salesRecord.findMany({
-    where: { id: { in: ids }, deletedAt: null },
+    where: { AND: [{ id: { in: ids }, deletedAt: null }, salesScope(session, session.role === "ADMIN" ? "all" : "mine")] },
     select: { id: true },
   });
   const result = await prisma.salesRecord.updateMany({
-    where: { id: { in: ids }, deletedAt: null },
+    where: { AND: [{ id: { in: ids }, deletedAt: null }, salesScope(session, session.role === "ADMIN" ? "all" : "mine")] },
     data: { deletedAt: new Date() },
   });
   const undoDeleteIds = rows.map((r) => r.id);
@@ -200,8 +212,8 @@ export async function bulkDeleteSalesRecordsByFilter(
   filterParams: SalesRecordFilterParams,
 ): Promise<SalesBulkMutationResult> {
   const session = await requireSession();
-  if (!isStaff(session.role)) throw new Error("仅内部员工可删除推广数据明细");
-  const where = await salesWhereFromFilterParams(filterParams);
+  await requireBi(session.userId, "MANAGE");
+  const where = await salesWhereFromFilterParams(filterParams, session);
   const rows = await prisma.salesRecord.findMany({
     where,
     select: { id: true },
@@ -226,7 +238,7 @@ export async function bulkDeleteSalesRecordsByFilter(
 
 export async function undoBulkUpdateSalesRecordsCustomer(snapshots: SalesRecordUndoSnapshot[]): Promise<SalesBulkMutationResult> {
   const session = await requireSession();
-  if (!isStaff(session.role)) throw new Error("仅内部员工可撤回推广数据批量修改");
+  await requireBi(session.userId, "MANAGE");
   const rows = snapshots.filter((s) => s.id);
   if (!rows.length) throw new Error("没有可撤回的批量修改");
   const groups = new Map<string, SalesRecordUndoSnapshot[]>();
@@ -235,8 +247,15 @@ export async function undoBulkUpdateSalesRecordsCustomer(snapshots: SalesRecordU
     groups.set(key, [...(groups.get(key) ?? []), row]);
   }
   for (const group of groups.values()) {
+    if (group[0].customerId) {
+      const target = await prisma.customer.findFirst({
+        where: { AND: [{ id: group[0].customerId, deletedAt: null }, customerScope(session, session.role === "ADMIN" ? "all" : "mine")] },
+        select: { id: true, brandName: true },
+      });
+      if (!target || target.brandName !== group[0].brand) throw new Error("撤回目标客户无权访问或快照无效");
+    }
     await prisma.salesRecord.updateMany({
-      where: { id: { in: group.map((row) => row.id) } },
+      where: { AND: [{ id: { in: group.map((row) => row.id) } }, salesScope(session, session.role === "ADMIN" ? "all" : "mine")] },
       data: { customerId: group[0].customerId, brand: group[0].brand },
     });
   }
@@ -246,11 +265,11 @@ export async function undoBulkUpdateSalesRecordsCustomer(snapshots: SalesRecordU
 
 export async function undoBulkDeleteSalesRecords(recordIds: string[]): Promise<SalesBulkMutationResult> {
   const session = await requireSession();
-  if (!isStaff(session.role)) throw new Error("仅内部员工可撤回推广数据批量删除");
+  await requireBi(session.userId, "MANAGE");
   const ids = [...new Set(recordIds.filter(Boolean))];
   if (!ids.length) throw new Error("没有可撤回的批量删除");
   const result = await prisma.salesRecord.updateMany({
-    where: { id: { in: ids } },
+    where: { AND: [{ id: { in: ids } }, salesScope(session, session.role === "ADMIN" ? "all" : "mine")] },
     data: { deletedAt: null },
   });
   revalidatePath("/bi");
@@ -260,9 +279,9 @@ export async function undoBulkDeleteSalesRecords(recordIds: string[]): Promise<S
 
 export async function getSalesBulkOperationLogs(): Promise<SalesBulkOperationLogRow[]> {
   const session = await requireSession();
-  if (!isStaff(session.role)) throw new Error("仅内部员工可查看批量操作日志");
+  await requireBi(session.userId, "MANAGE");
   const logs = await prisma.bulkOperationLog.findMany({
-    where: { module: BI_SALES_DETAIL_LOG_MODULE },
+    where: { module: BI_SALES_DETAIL_LOG_MODULE, ...(session.role === "ADMIN" ? {} : { operatorId: session.userId }) },
     orderBy: { createdAt: "desc" },
     take: 80,
     include: { operator: { select: { name: true } } },
@@ -280,7 +299,7 @@ export async function getSalesBulkOperationLogs(): Promise<SalesBulkOperationLog
 
 export async function undoSalesBulkOperationLogs(logIds: string[]): Promise<SalesBulkMutationResult> {
   const session = await requireSession();
-  if (!isStaff(session.role)) throw new Error("仅内部员工可撤销批量操作日志");
+  await requireBi(session.userId, "MANAGE");
   const ids = [...new Set(logIds.filter(Boolean))];
   if (!ids.length) throw new Error("请选择要撤销的操作日志");
 
@@ -289,47 +308,64 @@ export async function undoSalesBulkOperationLogs(logIds: string[]): Promise<Sale
       id: { in: ids },
       module: BI_SALES_DETAIL_LOG_MODULE,
       revertedAt: null,
+      ...(session.role === "ADMIN" ? {} : { operatorId: session.userId }),
     },
     orderBy: { createdAt: "desc" },
   });
   if (!logs.length) throw new Error("所选日志均已撤销或不存在");
 
-  let restored = 0;
   const now = new Date();
-  for (const log of logs) {
-    const snapshot = JSON.parse(log.snapshotJson || "{}") as {
-      snapshots?: SalesRecordUndoSnapshot[];
-      ids?: string[];
-    };
-    if (log.actionType === "CUSTOMER_UPDATE") {
-      const rows = (snapshot.snapshots ?? []).filter((row) => row.id);
-      const groups = new Map<string, SalesRecordUndoSnapshot[]>();
-      for (const row of rows) {
-        const key = `${row.customerId ?? ""}\u0000${row.brand}`;
-        groups.set(key, [...(groups.get(key) ?? []), row]);
+  const restored = await prisma.$transaction(async (tx) => {
+    let count = 0;
+    for (const log of logs) {
+      const snapshot = JSON.parse(log.snapshotJson || "{}") as {
+        snapshots?: SalesRecordUndoSnapshot[];
+        ids?: string[];
+      };
+      if (log.actionType === "CUSTOMER_UPDATE") {
+        const rows = (snapshot.snapshots ?? []).filter((row) => row.id);
+        const groups = new Map<string, SalesRecordUndoSnapshot[]>();
+        for (const row of rows) {
+          const key = `${row.customerId ?? ""}\u0000${row.brand}`;
+          groups.set(key, [...(groups.get(key) ?? []), row]);
+        }
+        for (const group of groups.values()) {
+          const targetCustomerId = group[0].customerId;
+          if (targetCustomerId) {
+            const target = await tx.customer.findFirst({
+              where: {
+                id: targetCustomerId,
+                brandName: group[0].brand,
+                deletedAt: null,
+                ...customerScope(session, session.role === "ADMIN" ? "all" : "mine"),
+              },
+              select: { id: true },
+            });
+            if (!target) throw new Error("历史客户已不存在、品牌不匹配或无权访问");
+          }
+          const result = await tx.salesRecord.updateMany({
+            where: { AND: [{ id: { in: group.map((row) => row.id) } }, salesScope(session, session.role === "ADMIN" ? "all" : "mine")] },
+            data: { customerId: targetCustomerId, brand: group[0].brand },
+          });
+          count += result.count;
+        }
+      } else if (log.actionType === "DELETE") {
+        const recordIds = [...new Set((snapshot.ids ?? []).filter(Boolean))];
+        if (recordIds.length) {
+          const result = await tx.salesRecord.updateMany({
+            where: { AND: [{ id: { in: recordIds } }, salesScope(session, session.role === "ADMIN" ? "all" : "mine")] },
+            data: { deletedAt: null },
+          });
+          count += result.count;
+        }
       }
-      for (const group of groups.values()) {
-        const result = await prisma.salesRecord.updateMany({
-          where: { id: { in: group.map((row) => row.id) } },
-          data: { customerId: group[0].customerId, brand: group[0].brand },
-        });
-        restored += result.count;
-      }
-    } else if (log.actionType === "DELETE") {
-      const recordIds = [...new Set((snapshot.ids ?? []).filter(Boolean))];
-      if (recordIds.length) {
-        const result = await prisma.salesRecord.updateMany({
-          where: { id: { in: recordIds } },
-          data: { deletedAt: null },
-        });
-        restored += result.count;
-      }
+      await tx.bulkOperationLog.update({
+        where: { id: log.id },
+        data: { revertedAt: now, revertedById: session.userId },
+      });
     }
-    await prisma.bulkOperationLog.update({
-      where: { id: log.id },
-      data: { revertedAt: now, revertedById: session.userId },
-    });
-  }
+    return count;
+  });
 
   revalidatePath("/bi");
   revalidatePath("/recycle-bin");

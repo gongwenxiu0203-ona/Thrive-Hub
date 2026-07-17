@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { X, Mail, Send } from "lucide-react";
+import { Mail, Send } from "lucide-react";
+import { Modal } from "@/components/ui/Modal";
 
 export function AffiliateEmailModal({
   affiliateName,
@@ -50,16 +51,14 @@ export function AffiliateEmailModal({
   }
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-lg rounded-2xl bg-white shadow-xl">
-        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-          <div className="flex items-center gap-2">
-            <Mail className="h-4 w-4 text-brand-600" />
-            <h2 className="text-sm font-semibold text-slate-900">发送邮件给 {affiliateName}</h2>
-          </div>
-          <button onClick={onClose}><X className="h-5 w-5 text-slate-400 hover:text-slate-700" /></button>
-        </div>
-
+    <Modal
+      open
+      onClose={onClose}
+      title={<span className="flex items-center gap-2"><Mail className="h-4 w-4 text-brand-600" />发送邮件给 {affiliateName}</span>}
+      size="md"
+      closeOnBackdrop={!sending}
+      closeOnEscape={!sending}
+    >
         {done ? (
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100">
@@ -69,7 +68,7 @@ export function AffiliateEmailModal({
             <p className="mt-1 text-xs text-slate-400">已抄送一份到你的发件邮箱留底</p>
           </div>
         ) : (
-          <div className="space-y-4 px-5 py-5">
+          <div className="space-y-4">
             <div>
               <label className="label">发件邮箱（默认你的注册邮箱）</label>
               <input className="input" value={fromEmail} onChange={(e) => setFromEmail(e.target.value)}
@@ -101,7 +100,6 @@ export function AffiliateEmailModal({
             </div>
           </div>
         )}
-      </div>
-    </div>
+    </Modal>
   );
 }

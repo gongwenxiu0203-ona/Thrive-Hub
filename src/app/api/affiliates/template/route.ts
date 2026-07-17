@@ -1,8 +1,14 @@
 import { NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { TEMPLATE_AFFILIATE_FIELDS } from "@/lib/affiliateFields";
+import { getSession } from "@/lib/session";
+import { hasPermissionLevel } from "@/lib/permissionGuard";
+import { resolveUserPermission } from "@/lib/permissionResolver";
 
 export async function GET() {
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!hasPermissionLevel(await resolveUserPermission(session.userId, "affiliates"), "READ")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   // Build header row with exact Excel labels
   const headers = TEMPLATE_AFFILIATE_FIELDS.map((f) => f.label);
 

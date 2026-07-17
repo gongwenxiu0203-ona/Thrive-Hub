@@ -4,13 +4,14 @@ import { useState, useMemo, useTransition } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
-  Plus, X, RefreshCw, TrendingUp, Users, FileText, Target, Pencil, Trash2,
+  Plus, RefreshCw, TrendingUp, Users, FileText, Target, Pencil, Trash2,
   CheckCircle2, AlertTriangle, Award,
 } from "lucide-react";
 import { EmployeeKpiTab } from "./EmployeeKpiTab";
 import type { EmployeeKpiRow } from "@/actions/employeeKpi";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatCard } from "@/components/ui/StatCard";
+import { Modal } from "@/components/ui/Modal";
 import { cn, formatDate } from "@/lib/utils";
 import {
   STAGE_LABELS, STAGE_ORDER, CLIENT_STATUS_LABELS, REVENUE_GRADE_COLORS,
@@ -422,13 +423,8 @@ function SnapshotEditModal({ snapshot, onClose }: { snapshot: SnapshotRow; onClo
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-md rounded-2xl bg-white shadow-xl">
-        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-          <h2 className="text-sm font-semibold text-slate-900">编辑快照（{snapshot.customerName}）</h2>
-          <button onClick={onClose}><X className="h-5 w-5 text-slate-400 hover:text-slate-700" /></button>
-        </div>
-        <div className="space-y-4 px-5 py-5">
+    <Modal open onClose={onClose} title={<>编辑快照（{snapshot.customerName}）</>} size="sm">
+        <div className="space-y-4">
           <div>
             <label className="label">经营等级</label>
             <select className="input" value={grade} onChange={(e) => setGrade(e.target.value)}>
@@ -480,8 +476,7 @@ function SnapshotEditModal({ snapshot, onClose }: { snapshot: SnapshotRow; onClo
             <button onClick={onSave} disabled={pending} className="btn-primary text-sm">{pending ? "保存中…" : "保存"}</button>
           </div>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -711,13 +706,8 @@ function ARCreateModal({ customers, users, onClose }: { customers: Customer[]; u
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 pt-10">
-      <div className="w-full max-w-xl rounded-2xl bg-white shadow-xl">
-        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-          <h2 className="text-sm font-semibold text-slate-900">新增应收账款</h2>
-          <button onClick={onClose}><X className="h-5 w-5 text-slate-400" /></button>
-        </div>
-        <div className="space-y-4 px-5 py-5">
+    <Modal open onClose={onClose} title="新增应收账款" size="md">
+        <div className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <label className="label">发票号 *</label>
@@ -772,8 +762,7 @@ function ARCreateModal({ customers, users, onClose }: { customers: Customer[]; u
             <button onClick={onSubmit} disabled={pending} className="btn-primary text-sm">{pending ? "保存中…" : "新增"}</button>
           </div>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -800,13 +789,8 @@ function AREditModal({ ar, users, onClose }: { ar: ArRow; users: UserOption[]; o
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 pt-10">
-      <div className="w-full max-w-md rounded-2xl bg-white shadow-xl">
-        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-          <h2 className="text-sm font-semibold text-slate-900">编辑 {ar.invoiceNo}</h2>
-          <button onClick={onClose}><X className="h-5 w-5 text-slate-400" /></button>
-        </div>
-        <div className="space-y-4 px-5 py-5">
+    <Modal open onClose={onClose} title={<>编辑 {ar.invoiceNo}</>} size="sm">
+        <div className="space-y-4">
           <div>
             <label className="label">已收金额（{ar.currency}）</label>
             <input type="number" step="0.01" className="input" value={receivedAmount} onChange={(e) => setReceivedAmount(e.target.value)} />
@@ -832,8 +816,7 @@ function AREditModal({ ar, users, onClose }: { ar: ArRow; users: UserOption[]; o
             <button onClick={onSave} disabled={pending} className="btn-primary text-sm">{pending ? "保存中…" : "保存"}</button>
           </div>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -1035,13 +1018,8 @@ function PipelineCreateModal({ users, onClose }: { users: UserOption[]; onClose:
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 pt-10">
-      <div className="w-full max-w-2xl rounded-2xl bg-white shadow-xl">
-        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-          <h2 className="text-sm font-semibold text-slate-900">新增销售漏斗</h2>
-          <button onClick={onClose}><X className="h-5 w-5 text-slate-400" /></button>
-        </div>
-        <div className="space-y-4 px-5 py-5">
+    <Modal open onClose={onClose} title="新增销售漏斗" size="lg">
+        <div className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="sm:col-span-2">
               <label className="label">潜在客户名称 *</label>
@@ -1107,8 +1085,7 @@ function PipelineCreateModal({ users, onClose }: { users: UserOption[]; onClose:
             <button onClick={onSubmit} disabled={pending} className="btn-primary text-sm">{pending ? "保存中…" : "新增"}</button>
           </div>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -1157,13 +1134,8 @@ function PipelineEditModal({ pipeline, users, onClose }: { pipeline: PipelineRow
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 pt-10">
-      <div className="w-full max-w-2xl rounded-2xl bg-white shadow-xl">
-        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-          <h2 className="text-sm font-semibold text-slate-900">编辑：{pipeline.prospectName}</h2>
-          <button onClick={onClose}><X className="h-5 w-5 text-slate-400" /></button>
-        </div>
-        <div className="space-y-4 px-5 py-5">
+    <Modal open onClose={onClose} title={<>编辑：{pipeline.prospectName}</>} size="lg">
+        <div className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="sm:col-span-2">
               <label className="label">客户名称 *</label>
@@ -1199,8 +1171,7 @@ function PipelineEditModal({ pipeline, users, onClose }: { pipeline: PipelineRow
             <button onClick={onSave} disabled={pending} className="btn-primary text-sm">{pending ? "保存中…" : "保存"}</button>
           </div>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 

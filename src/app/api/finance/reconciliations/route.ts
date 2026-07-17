@@ -18,7 +18,7 @@ export async function GET(req: Request) {
     if (customerId) where.customerId = customerId;
 
     const reconciliations = await prisma.customerReconciliation.findMany({
-      where: { AND: [where, access.scope] },
+      where: { AND: [{ deletedAt: null }, where, access.scope] },
       include: {
         customer: { select: { id: true, brandName: true, channelUserId: true } },
         contract: { select: { id: true, contractNo: true, type: true } },
@@ -61,7 +61,12 @@ export async function POST(req: Request) {
 
     // 获取合同信息，快照到对账记录
     const contract = await prisma.contract.findFirst({
-      where: { id: contractId, customerId, customer: access.customerScope },
+      where: {
+        id: contractId,
+        customerId,
+        deletedAt: null,
+        customer: { ...access.customerScope, deletedAt: null },
+      },
     });
     if (!contract) {
       return NextResponse.json({ error: "合同不存在" }, { status: 404 });

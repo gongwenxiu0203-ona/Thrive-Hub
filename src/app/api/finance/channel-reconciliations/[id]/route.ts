@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { isStaff } from "@/lib/permissions";
+import { channelReconciliationScope } from "@/lib/dataScope";
+import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
 
 // PATCH /api/finance/channel-reconciliations/[id] — 编辑分账记录
 // v2: 支持固费/抽佣两侧的金额、比例、日期、截图、推送状态更新
@@ -11,17 +12,15 @@ export async function PATCH(
 ) {
   try {
     const session = await requireSession();
+    await requireFeaturePermission(session, "finance_channel", "EDIT");
     const { id } = await params;
     const body = await req.json();
 
-    const existing = await prisma.channelReconciliation.findUnique({
-      where: { id },
+    const existing = await prisma.channelReconciliation.findFirst({
+      where: { AND: [{ id }, channelReconciliationScope(session, session.role === "ADMIN" ? "all" : "mine")] },
     });
     if (!existing) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
-    }
-    if (!isStaff(session.role) && !(session.role === "CHANNEL" && existing.channelUserId === session.userId)) {
-      return NextResponse.json({ error: "无权限" }, { status: 403 });
     }
 
     const data: Record<string, unknown> = { updatedAt: new Date() };
@@ -122,6 +121,7 @@ export async function PATCH(
     });
     return NextResponse.json(updated);
   } catch (e) {
+    if (e instanceof FeaturePermissionError) return NextResponse.json({ error: "无权限" }, { status: 403 });
     console.error(e);
     return NextResponse.json({ error: "更新失败" }, { status: 500 });
   }
@@ -134,13 +134,14 @@ export async function DELETE(
 ) {
   try {
     const session = await requireSession();
-    if (!isStaff(session.role)) {
-      return NextResponse.json({ error: "无权限" }, { status: 403 });
-    }
+    await requireFeaturePermission(session, "finance_channel", "MANAGE");
     const { id } = await params;
-    await prisma.channelReconciliation.delete({ where: { id } });
+    const existing = await prisma.channelReconciliation.findFirst({ where: { AND: [{ id }, channelReconciliationScope(session, session.role === "ADMIN" ? "all" : "mine")] }, select: { id: true } });
+    if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    await prisma.channelReconciliation.delete({ where: { id: existing.id } });
     return NextResponse.json({ success: true });
   } catch (e) {
+    if (e instanceof FeaturePermissionError) return NextResponse.json({ error: "无权限" }, { status: 403 });
     console.error(e);
     return NextResponse.json({ error: "删除失败" }, { status: 500 });
   }

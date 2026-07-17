@@ -39,5 +39,5 @@ export function scopedReconciliationWhere(
   id: string,
   scope: Prisma.CustomerReconciliationWhereInput,
 ): Prisma.CustomerReconciliationWhereInput {
-  return { AND: [{ id }, scope] };
+  return { AND: [{ id, deletedAt: null }, scope] };
 }

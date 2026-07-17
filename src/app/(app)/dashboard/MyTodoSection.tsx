@@ -122,7 +122,7 @@ export async function MyTodoSection() {
         items={contractsToReview.map((r) => ({
           id: r.id,
           label: r.contract.contractNo,
-          sub: `${r.contract.customer.brandName} · 第 ${r.round} 轮`,
+          sub: `${r.contract.customer?.brandName ?? "—"} · 第 ${r.round} 轮`,
           href: `/contracts/${r.contract.id}`,
         }))}
       />

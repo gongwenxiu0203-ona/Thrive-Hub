@@ -6,6 +6,7 @@ import { randomUUID } from "crypto";
 import { writeFile, readdir, unlink, stat } from "fs/promises";
 import path from "path";
 import os from "os";
+import { hasBiPermission } from "@/lib/biAuthorization";
 
 // Allow up to 5 minutes for large file parsing
 export const maxDuration = 300;
@@ -49,6 +50,9 @@ async function cleanupOldTempFiles() {
 export async function POST(req: Request) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
+  if (!(await hasBiPermission(session.userId, "EDIT"))) {
+    return NextResponse.json({ error: "无权解析或导入 BI 数据" }, { status: 403 });
+  }
 
   let form: FormData;
   try {

@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { isStaff } from "@/lib/permissions";
+import { channelReconciliationScope } from "@/lib/dataScope";
+import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
 
 // POST /api/finance/channel-reconciliations/[id]/push
 // body: { side: "FIXED_FEE" | "COMMISSION" }
@@ -12,17 +13,15 @@ export async function POST(
 ) {
   try {
     const session = await requireSession();
-    if (!isStaff(session.role)) {
-      return NextResponse.json({ error: "无权限" }, { status: 403 });
-    }
+    await requireFeaturePermission(session, "finance_channel", "MANAGE");
     const { id } = await params;
     const { side } = await req.json();
     if (side !== "FIXED_FEE" && side !== "COMMISSION") {
       return NextResponse.json({ error: "side 参数错误" }, { status: 400 });
     }
 
-    const rec = await prisma.channelReconciliation.findUnique({
-      where: { id },
+    const rec = await prisma.channelReconciliation.findFirst({
+      where: { AND: [{ id }, channelReconciliationScope(session, session.role === "ADMIN" ? "all" : "mine")] },
       include: {
         customer: { select: { brandName: true } },
         channelUser: { select: { id: true, name: true } },
@@ -71,6 +70,7 @@ export async function POST(
 
     return NextResponse.json({ success: true });
   } catch (e) {
+    if (e instanceof FeaturePermissionError) return NextResponse.json({ error: "无权限" }, { status: 403 });
     console.error(e);
     return NextResponse.json({ error: "推送失败" }, { status: 500 });
   }

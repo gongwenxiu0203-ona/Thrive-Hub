@@ -12,6 +12,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
+import { Modal } from "@/components/ui/Modal";
 import {
   RECONCILIATION_STATUS_LABELS,
   RECONCILIATION_STATUS_COLORS,
@@ -1006,14 +1007,23 @@ function MonthlyRecordRow({
 
       {/* 删除月度对账确认 */}
       {showDeleteModal && !readOnly && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white shadow-2xl">
-            <div className="border-b border-slate-200 px-6 py-4">
-              <h3 className="text-lg font-semibold text-rose-600">
-                确认删除该月度对账？
-              </h3>
-            </div>
-            <div className="space-y-3 px-6 py-5 text-sm text-slate-700">
+        <Modal
+          open
+          onClose={() => setShowDeleteModal(false)}
+          title="确认删除该月度对账？"
+          size="sm"
+          closeOnBackdrop={!deleting}
+          closeOnEscape={!deleting}
+          footer={(
+            <>
+              <button type="button" className="btn-secondary" onClick={() => setShowDeleteModal(false)} disabled={deleting}>取消</button>
+              <button type="button" className="rounded-lg bg-rose-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-rose-500 disabled:opacity-50" disabled={deleting} onClick={deleteRecord}>
+                {deleting ? "删除中…" : "确认删除"}
+              </button>
+            </>
+          )}
+        >
+            <div className="space-y-3 text-sm text-slate-700">
               <p>
                 即将删除 <strong>{formatDate(rec.periodStart)}</strong> ~{" "}
                 <strong>{formatDate(rec.periodEnd)}</strong> 这条月度对账记录（当前状态：
@@ -1032,26 +1042,7 @@ function MonthlyRecordRow({
                 <strong>7 天内可恢复</strong>，超期将自动永久清理。
               </p>
             </div>
-            <div className="flex justify-end gap-3 border-t border-slate-100 px-6 py-3">
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={() => setShowDeleteModal(false)}
-                disabled={deleting}
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                className="rounded-lg bg-rose-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-rose-500 disabled:opacity-50"
-                disabled={deleting}
-                onClick={deleteRecord}
-              >
-                {deleting ? "删除中…" : "确认删除"}
-              </button>
-            </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   );
@@ -1200,15 +1191,8 @@ function SubmitModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-md rounded-xl bg-white shadow-2xl">
-        <div className="border-b border-slate-200 px-6 py-4">
-          <h2 className="text-lg font-semibold text-slate-900">提交对账</h2>
-          <p className="mt-0.5 text-sm text-slate-500">
-            选择需要确认数据的对方联系人
-          </p>
-        </div>
-        <div className="space-y-4 px-6 py-5">
+    <Modal open onClose={onClose} title="提交对账" description="选择需要确认数据的对方联系人" size="sm" closeOnBackdrop={!loading} closeOnEscape={!loading}>
+        <div className="space-y-4">
           <div>
             <label className="label">提交给</label>
             <select
@@ -1256,8 +1240,7 @@ function SubmitModal({
             </button>
           </div>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -1308,19 +1291,8 @@ function ReviewModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-md rounded-xl bg-white shadow-2xl">
-        <div className="border-b border-slate-200 px-6 py-4">
-          <h2 className="text-lg font-semibold text-slate-900">
-            {action === "APPROVED" ? "✅ 确认对账" : "⚠️ 提出异议"}
-          </h2>
-          {action === "DISPUTED" && (
-            <p className="mt-0.5 text-sm text-slate-500">
-              请填入己方核实数据，单量和销售额可分别有异议
-            </p>
-          )}
-        </div>
-        <div className="space-y-4 px-6 py-5">
+    <Modal open onClose={onClose} title={action === "APPROVED" ? "确认对账" : "提出异议"} description={action === "DISPUTED" ? "请填入己方核实数据，单量和销售额可分别有异议" : undefined} size="sm" closeOnBackdrop={!loading} closeOnEscape={!loading}>
+        <div className="space-y-4">
           {action === "DISPUTED" && (
             <>
               <div>
@@ -1397,8 +1369,7 @@ function ReviewModal({
             </button>
           </div>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -1434,15 +1405,8 @@ function ConfirmModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-md rounded-xl bg-white shadow-2xl">
-        <div className="border-b border-slate-200 px-6 py-4">
-          <h2 className="text-lg font-semibold text-slate-900">最终确认对账</h2>
-          <p className="mt-0.5 text-sm text-slate-500">
-            确认后将锁定数据并生成结算记录，不可修改
-          </p>
-        </div>
-        <div className="space-y-4 px-6 py-5">
+    <Modal open onClose={onClose} title="最终确认对账" description="确认后将锁定数据并生成结算记录，不可修改" size="sm" closeOnBackdrop={!loading} closeOnEscape={!loading}>
+        <div className="space-y-4">
           <div>
             <label className="label">备注（可选）</label>
             <textarea
@@ -1461,8 +1425,7 @@ function ConfirmModal({
             </button>
           </div>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -1511,15 +1474,8 @@ function NewMonthlyModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-md rounded-xl bg-white shadow-2xl">
-        <div className="border-b border-slate-200 px-6 py-4">
-          <h2 className="text-lg font-semibold text-slate-900">新建月度对账</h2>
-          <p className="mt-0.5 text-xs text-slate-500">
-            只需选择对账周期，其他数据将自动从合同基本信息中拉取
-          </p>
-        </div>
-        <form onSubmit={submit} className="space-y-4 px-6 py-5">
+    <Modal open onClose={onClose} title="新建月度对账" description="只需选择对账周期，其他数据将自动从合同基本信息中拉取" size="sm" closeOnBackdrop={!loading} closeOnEscape={!loading}>
+        <form onSubmit={submit} className="space-y-4">
           <div>
             <label className="label">对账类型 *</label>
             <div className="flex gap-2">
@@ -1563,8 +1519,7 @@ function NewMonthlyModal({
             </button>
           </div>
         </form>
-      </div>
-    </div>
+    </Modal>
   );
 }
 

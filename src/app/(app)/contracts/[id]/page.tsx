@@ -34,6 +34,8 @@ import {
   labelOf,
 } from "@/lib/constants";
 import { formatDate, formatDateTime } from "@/lib/utils";
+import { contractScope } from "@/lib/dataScope";
+import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
 
 export default async function ContractDetailPage({
   params,
@@ -42,9 +44,11 @@ export default async function ContractDetailPage({
 }) {
   const session = await requireSession();
   const { id } = await params;
+  try { await requireFeaturePermission(session, "contracts", "READ"); }
+  catch (error) { if (error instanceof FeaturePermissionError) notFound(); throw error; }
 
-  const contract = await prisma.contract.findUnique({
-    where: { id },
+  const contract = await prisma.contract.findFirst({
+    where: { id, ...contractScope(session, session.role === "ADMIN" ? "all" : "mine"), deletedAt: null },
     include: {
       customer: true,
       createdBy: true,
@@ -317,7 +321,7 @@ export default async function ContractDetailPage({
               </>
             )}
             {/* 旧版合同：原有编辑弹窗 */}
-            {!c.fillMethod && contract.status === "IN_PROGRESS" && (
+            {!c.fillMethod && contract.status === "IN_PROGRESS" && contract.customerId && contract.type && (
               <ContractFormModal
                 users={userOptions}
                 currentUserId={session.userId}

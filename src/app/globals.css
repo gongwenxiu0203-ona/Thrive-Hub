@@ -49,6 +49,35 @@ body {
     @apply px-2.5 py-1 text-xs;
   }
 
+  .modal-backdrop {
+    @apply fixed inset-0 z-50 flex items-end justify-center overflow-hidden bg-slate-900/45 sm:items-center sm:p-8;
+  }
+  .modal-panel {
+    @apply flex max-h-[calc(100dvh-1rem)] w-full flex-col overflow-hidden rounded-t-lg border border-[#e7e0ef]
+      bg-white shadow-xl outline-none sm:max-h-[calc(100dvh-4rem)] sm:rounded-lg;
+  }
+  .modal-header {
+    @apply flex shrink-0 items-start justify-between gap-4 border-b border-[#e7e0ef] px-4 py-3 sm:px-5 sm:py-4;
+  }
+  .modal-title {
+    @apply text-base font-semibold leading-6 text-slate-900;
+  }
+  .modal-description {
+    @apply mt-1 text-sm leading-5 text-slate-600;
+  }
+  .modal-close {
+    @apply -mr-2 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-500
+      transition-colors hover:bg-brand-50 hover:text-brand-700 focus-visible:outline-none focus-visible:ring-2
+      focus-visible:ring-brand-300 focus-visible:ring-offset-2 sm:-mr-1 sm:h-9 sm:w-9;
+  }
+  .modal-body {
+    @apply min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-5;
+  }
+  .modal-footer {
+    @apply flex shrink-0 flex-col-reverse gap-2 border-t border-[#e7e0ef] bg-[#faf8ff] px-4 py-3
+      sm:flex-row sm:justify-end sm:px-5;
+  }
+
   .input {
     @apply w-full rounded-md border border-[#dcd4e7] bg-white px-3 py-2 text-sm
       text-slate-800 outline-none transition focus:border-brand-500
@@ -98,6 +127,18 @@ body {
   /* Brand-name first-letter force-uppercase at display time (no data mutation) */
   .capitalize-first::first-letter {
     text-transform: uppercase;
+  }
+}
+
+@media (max-width: 639px) {
+  .btn,
+  .btn-sm {
+    min-height: 44px;
+  }
+
+  .modal-footer > .btn,
+  .modal-footer > button {
+    width: 100%;
   }
 }
 

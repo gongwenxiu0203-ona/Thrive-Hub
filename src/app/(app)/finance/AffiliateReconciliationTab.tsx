@@ -2,7 +2,8 @@
 
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { X, ChevronDown, Upload, ExternalLink } from "lucide-react";
+import { ChevronDown, Upload, ExternalLink } from "lucide-react";
+import { Modal } from "@/components/ui/Modal";
 import { formatDate } from "@/lib/utils";
 
 const PAYMENT_METHODS = ["PayPal", "对公账号", "银行转账"] as const;
@@ -221,19 +222,16 @@ function AffiliateRecModal({
   })();
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white shadow-2xl">
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white px-6 py-4">
-          <div>
-            <h2 className="font-semibold text-slate-900">联盟商对账详情</h2>
-            <p className="text-xs text-slate-500">{rec.affiliateName}{rec.customerName ? ` · ${rec.customerName}` : ""}</p>
-          </div>
-          <button onClick={onClose} className="rounded-lg p-1 hover:bg-slate-100">
-            <X className="h-5 w-5 text-slate-400" />
-          </button>
-        </div>
-
-        <div className="space-y-5 px-6 py-5">
+    <Modal
+      open
+      onClose={onClose}
+      title="联盟商对账详情"
+      description={`${rec.affiliateName}${rec.customerName ? ` · ${rec.customerName}` : ""}`}
+      size="md"
+      closeOnBackdrop={!saving && !uploading}
+      closeOnEscape={!saving && !uploading}
+    >
+        <div className="space-y-5">
           {/* 平台信息（只读） */}
           {plats.length > 0 && (
             <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-3 space-y-2">
@@ -354,8 +352,7 @@ function AffiliateRecModal({
             </button>
           </div>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 

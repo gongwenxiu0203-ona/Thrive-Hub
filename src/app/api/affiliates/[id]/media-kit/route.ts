@@ -6,6 +6,8 @@ import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 import { saveUploadedFile } from "@/lib/upload";
 import { extractFileText } from "@/lib/contractFile";
+import { hasPermissionLevel } from "@/lib/permissionGuard";
+import { resolveUserPermission } from "@/lib/permissionResolver";
 
 type MediaKitItem = {
   id: string;
@@ -41,6 +43,8 @@ export async function POST(
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
 
+  const permission = await resolveUserPermission(session.userId, "affiliates");
+  if (!hasPermissionLevel(permission, "EDIT")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const { id } = await params;
   const form = await req.formData();
   const file = form.get("file");
@@ -104,6 +108,8 @@ export async function PATCH(
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
 
+  const permission = await resolveUserPermission(session.userId, "affiliates");
+  if (!hasPermissionLevel(permission, "EDIT")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const { id } = await params;
   const { itemId, text } = await req.json();
   const affiliate = await prisma.affiliate.findUnique({
@@ -128,6 +134,8 @@ export async function DELETE(
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
 
+  const permission = await resolveUserPermission(session.userId, "affiliates");
+  if (!hasPermissionLevel(permission, "MANAGE")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const { id } = await params;
   const itemId = req.nextUrl.searchParams.get("itemId");
   if (!itemId) return NextResponse.json({ error: "缺少 itemId" }, { status: 400 });
@@ -143,15 +151,24 @@ export async function DELETE(
   const next = items.filter((item) => item.id !== itemId);
 
   if (target?.attachmentId) {
-    const attachment = await prisma.attachment.findUnique({ where: { id: target.attachmentId } });
+    const attachment = await prisma.attachment.findFirst({
+      where: { id: target.attachmentId, entityType: "AFFILIATE", entityId: id },
+    });
     if (attachment) {
+      await prisma.$transaction([
+        prisma.affiliate.update({
+          where: { id },
+          data: { mediaKitItems: JSON.stringify(next) },
+        }),
+        prisma.attachment.delete({ where: { id: attachment.id } }),
+      ]);
       try {
         const fileName = path.basename(attachment.fileUrl);
         await unlink(path.join(process.cwd(), "uploads", fileName));
       } catch {
         // best effort
       }
-      await prisma.attachment.delete({ where: { id: attachment.id } });
+      return NextResponse.json({ ok: true });
     }
   }
 

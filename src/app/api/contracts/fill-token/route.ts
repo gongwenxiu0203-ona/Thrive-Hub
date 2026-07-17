@@ -1,15 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireSession } from "@/lib/session";
+import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { createContractFillToken } from "@/lib/contractFillToken";
+import { contractScope } from "@/lib/dataScope";
+import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
 
 export async function POST(req: NextRequest) {
-  await requireSession();
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
+  try { await requireFeaturePermission(session, "contracts", "EDIT"); }
+  catch (error) {
+    if (error instanceof FeaturePermissionError) return NextResponse.json({ error: "无权生成填写链接" }, { status: 403 });
+    throw error;
+  }
   const { contractId } = await req.json();
   if (!contractId) return NextResponse.json({ error: "缺少合同ID" }, { status: 400 });
 
-  const contract = await prisma.contract.findUnique({
-    where: { id: contractId },
+  const contract = await prisma.contract.findFirst({
+    where: { id: contractId, ...contractScope(session, session.role === "ADMIN" ? "all" : "mine"), deletedAt: null },
     select: { id: true, customerId: true, status: true },
   });
   if (!contract) return NextResponse.json({ error: "合同不存在" }, { status: 404 });

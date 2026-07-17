@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
+import { requireFeaturePermission } from "@/lib/permissionGuard";
 
 // POST /api/affiliates/cleanup
 // Body: { mode: "before_date" | "no_contact" | "by_status", date?: string, status?: string, preview?: boolean }
 export async function POST(req: NextRequest) {
   const session = await requireSession();
+  await requireFeaturePermission(session, "affiliates", "MANAGE");
   if (session.role !== "ADMIN") {
     return NextResponse.json({ error: "Admin only" }, { status: 403 });
   }

@@ -2,12 +2,19 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { extractFileText } from "@/lib/contractFile";
 import { extractContract } from "@/lib/contractExtract";
+import { isStaff } from "@/lib/permissions";
+import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
 
 // Extracts contract review fields. Accepts either:
 //  - multipart form-data with `file`  → extract text from file, then fields
 //  - JSON { text }                    → extract fields from provided text
 export async function POST(req: Request) {
   const session = await getSession();
+  if (session && !isStaff(session.role)) return NextResponse.json({ error: "无权解析合同" }, { status: 403 });
+  if (session) {
+    try { await requireFeaturePermission(session, "contracts", "EDIT"); }
+    catch (error) { if (error instanceof FeaturePermissionError) return NextResponse.json({ error: "无权解析合同" }, { status: 403 }); throw error; }
+  }
   if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
 
   const contentType = req.headers.get("content-type") ?? "";

@@ -5,6 +5,7 @@ import { Send, Settings, Calendar, CheckCircle2, Clock } from "lucide-react";
 import { FEE_CURRENCY_OPTIONS } from "@/lib/constants";
 import { toInputDate, formatDate } from "@/lib/utils";
 import type { PeriodDerived } from "@/lib/channelSplit";
+import { Modal } from "@/components/ui/Modal";
 
 export type CRPeriod = {
   id: string;
@@ -67,18 +68,17 @@ export function ChannelReconciliationDetailModal({
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-3xl rounded-xl bg-white shadow-2xl flex flex-col max-h-[90vh]">
-        <div className="border-b border-slate-200 px-6 py-4 shrink-0">
-          <div className="flex items-start justify-between">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-900">
-                渠道分账详情 — {record.customer.brandName}
-              </h2>
-              <p className="mt-0.5 text-xs text-slate-500">
-                合同 {record.contract?.contractNo ?? "—"} · 渠道商 {record.channelUser.name}
-              </p>
-            </div>
+    <Modal
+      open
+      onClose={onClose}
+      title={`渠道分账详情 — ${record.customer.brandName}`}
+      description={`合同 ${record.contract?.contractNo ?? "—"} · 渠道商 ${record.channelUser.name}`}
+      size="lg"
+      footer={<button onClick={onClose} className="btn-secondary">关闭</button>}
+    >
+      <div className="flex min-h-0 flex-col">
+        <div className="mb-5 shrink-0">
+          <div className="flex items-start justify-end">
             <div className="flex gap-1 rounded-lg bg-slate-100 p-0.5">
               <button
                 onClick={() => setView("setup")}
@@ -105,7 +105,7 @@ export function ChannelReconciliationDetailModal({
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-6 py-5">
+        <div className="flex-1">
           {view === "setup" ? (
             <SetupView record={record} onSaved={onSaved} />
           ) : (
@@ -113,11 +113,8 @@ export function ChannelReconciliationDetailModal({
           )}
         </div>
 
-        <div className="flex justify-end border-t border-slate-100 px-6 py-3 shrink-0">
-          <button onClick={onClose} className="btn-secondary">关闭</button>
-        </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 

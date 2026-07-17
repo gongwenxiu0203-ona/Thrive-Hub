@@ -106,6 +106,7 @@ export default async function ProjectDetailPage({
     prisma.contract.findMany({
       where: {
         deletedAt: null,
+        customerId: { not: null },
         OR: [
           { status: "COMPLETED" },
           project.contractId ? { id: project.contractId } : { id: "__NO_CONTRACT__" },
@@ -262,7 +263,10 @@ export default async function ProjectDetailPage({
               contractId={project.contractId ?? null}
               ownerId={project.owner?.id ?? null}
               customers={editCustomers}
-              contracts={editContracts}
+              contracts={editContracts.map((contract) => ({
+                ...contract,
+                customerId: contract.customerId!,
+              }))}
               users={editUsers}
             />
           </div>

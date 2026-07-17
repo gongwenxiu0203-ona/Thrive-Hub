@@ -2,7 +2,8 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Edit3, Trash2, X } from "lucide-react";
+import { Edit3, Trash2 } from "lucide-react";
+import { Modal } from "@/components/ui/Modal";
 import { updateProjectStatus, softDeleteProject, updateProjectBasicInfo } from "@/actions/projects";
 
 const STATUS_OPTIONS = [
@@ -155,15 +156,8 @@ function ProjectBasicEditModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 pt-10">
-      <div className="w-full max-w-xl rounded-2xl bg-white shadow-xl">
-        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-          <h2 className="text-sm font-semibold text-slate-900">编辑项目基本信息</h2>
-          <button type="button" onClick={onClose} className="rounded p-1 hover:bg-slate-100">
-            <X className="h-4 w-4 text-slate-500" />
-          </button>
-        </div>
-        <div className="space-y-4 px-5 py-5">
+    <Modal open onClose={onClose} title="编辑项目基本信息">
+      <div className="space-y-4">
           <div>
             <label className="label">项目名称 *</label>
             <input className="input" value={draftName} onChange={(e) => setDraftName(e.target.value)} />
@@ -221,8 +215,7 @@ function ProjectBasicEditModal({
               {pending ? "保存中..." : "保存修改"}
             </button>
           </div>
-        </div>
       </div>
-    </div>
+    </Modal>
   );
 }

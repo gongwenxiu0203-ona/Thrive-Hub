@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
+import { salesScope } from "@/lib/dataScope";
+import { hasPermissionLevel } from "@/lib/permissionGuard";
+import { resolveUserPermission } from "@/lib/permissionResolver";
 
 export async function GET(
   req: NextRequest,
@@ -8,6 +11,8 @@ export async function GET(
 ) {
   const auth = await getSession();
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const affiliatePermission = await resolveUserPermission(auth.userId, "affiliates");
+  if (!hasPermissionLevel(affiliatePermission, "READ")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const { id } = await params;
   const affiliate = await prisma.affiliate.findUnique({
@@ -33,7 +38,7 @@ export async function GET(
 
   // Linked sales data
   const salesRecords = await prisma.salesRecord.findMany({
-    where: { affiliateName: affiliate.platformAffiliateName, deletedAt: null },
+    where: { affiliateName: affiliate.platformAffiliateName, deletedAt: null, ...salesScope(auth, "all") },
     orderBy: { orderDate: "desc" },
     take: 500,
   });
@@ -47,6 +52,8 @@ export async function PATCH(
 ) {
   const auth = await getSession();
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const affiliatePermission = await resolveUserPermission(auth.userId, "affiliates");
+  if (!hasPermissionLevel(affiliatePermission, "EDIT")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const { id } = await params;
   const body = await req.json();
@@ -94,6 +101,8 @@ export async function DELETE(
 ) {
   const auth = await getSession();
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const affiliatePermission = await resolveUserPermission(auth.userId, "affiliates");
+  if (!hasPermissionLevel(affiliatePermission, "MANAGE")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const { id } = await params;
   // 软删除：进回收站，7 天内可恢复

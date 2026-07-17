@@ -1,9 +1,16 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
+import { isStaff } from "@/lib/permissions";
+import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
 
 /** 从粘贴文本中用 AI 提取 v4 合同字段 */
 export async function POST(req: Request) {
   const session = await getSession();
+  if (session && !isStaff(session.role)) return NextResponse.json({ error: "无权解析合同" }, { status: 403 });
+  if (session) {
+    try { await requireFeaturePermission(session, "contracts", "EDIT"); }
+    catch (error) { if (error instanceof FeaturePermissionError) return NextResponse.json({ error: "无权解析合同" }, { status: 403 }); throw error; }
+  }
   if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
 
   const body = await req.json().catch(() => ({}));

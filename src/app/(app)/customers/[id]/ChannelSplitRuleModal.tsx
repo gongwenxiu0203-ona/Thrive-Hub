@@ -2,8 +2,9 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Percent, Plus, Trash2, X, Save, Sparkles } from "lucide-react";
+import { Percent, Plus, Trash2, Save, Sparkles } from "lucide-react";
 import { upsertChannelSplitRule, deleteChannelSplitRule } from "@/actions/channelSplit";
+import { Modal } from "@/components/ui/Modal";
 
 type Tier = { gmvMin: number; gmvMax: number | null; rate: number };
 
@@ -134,15 +135,7 @@ export function ChannelSplitRuleModal({
       </button>
 
       {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="card w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-slate-900">渠道商分账规则</h2>
-              <button onClick={() => setOpen(false)} className="rounded p-1 hover:bg-slate-100">
-                <X className="h-4 w-4 text-slate-500" />
-              </button>
-            </div>
-
+        <Modal open onClose={() => setOpen(false)} title="渠道商分账规则" size="lg" closeOnBackdrop={false}>
             {/* Rule type switch */}
             <div className="mb-4 grid grid-cols-2 gap-2">
               <button
@@ -310,8 +303,7 @@ export function ChannelSplitRuleModal({
                 </button>
               </div>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </>
   );

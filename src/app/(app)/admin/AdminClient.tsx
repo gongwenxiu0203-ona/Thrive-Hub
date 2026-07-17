@@ -71,10 +71,13 @@ function InviteButton() {
         <Link className="h-4 w-4" />邀请注册
       </button>
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="card w-full max-w-md p-6">
-            <h2 className="mb-1 text-base font-semibold text-slate-900">邀请注册链接</h2>
-            <p className="mb-4 text-xs text-slate-500">将以下链接发送给需要注册的人员</p>
+        <Modal
+          open={showModal}
+          onClose={() => setShowModal(false)}
+          title={"\u9080\u8bf7\u6ce8\u518c\u94fe\u63a5"}
+          description={"\u5c06\u4ee5\u4e0b\u94fe\u63a5\u53d1\u9001\u7ed9\u9700\u8981\u6ce8\u518c\u7684\u4eba\u5458"}
+          size="sm"
+        >
             <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
               <span className="flex-1 truncate text-sm text-slate-700">{url}</span>
               <button type="button" onClick={copy} className="shrink-0 rounded p-1 hover:bg-slate-200">
@@ -82,11 +85,7 @@ function InviteButton() {
               </button>
             </div>
             {copied && <p className="mt-2 text-xs text-emerald-600">已复制到剪贴板</p>}
-            <div className="mt-4 flex justify-end">
-              <button type="button" className="btn-secondary text-sm" onClick={() => setShowModal(false)}>关闭</button>
-            </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </>
   );
@@ -333,9 +332,14 @@ export function AdminClient({
 
       {/* Create admin modal */}
       {showCreate && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="card w-full max-w-md p-6">
-            <h2 className="mb-4 text-lg font-semibold">新增用户</h2>
+        <Modal
+          open={showCreate}
+          onClose={() => setShowCreate(false)}
+          title={"\u65b0\u589e\u7528\u6237"}
+          size="sm"
+          closeOnBackdrop={!pending}
+          closeOnEscape={!pending}
+        >
             <div className="space-y-3">
               <div>
                 <label className="label">姓名</label>
@@ -411,8 +415,7 @@ export function AdminClient({
                 取消
               </button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       <Modal

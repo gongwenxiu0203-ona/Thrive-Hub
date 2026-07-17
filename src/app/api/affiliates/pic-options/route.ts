@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireSession } from "@/lib/session";
+import { getSession } from "@/lib/session";
+import { hasPermissionLevel } from "@/lib/permissionGuard";
+import { resolveUserPermission } from "@/lib/permissionResolver";
 
 // Returns the "current owner" options for bulk-reassign.
 // Mixes two sources:
@@ -8,7 +10,9 @@ import { requireSession } from "@/lib/session";
 //   2. Free-text owner names uploaded via Excel that aren't yet linked to a User
 //      (id = "name:<text>" so bulk-assign-owner can disambiguate from real ids)
 export async function GET() {
-  await requireSession();
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!hasPermissionLevel(await resolveUserPermission(session.userId, "affiliates"), "READ")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   // 1. Distinct assigned User ids
   const assignedRows = await prisma.affiliate.findMany({

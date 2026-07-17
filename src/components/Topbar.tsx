@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LogOut, ChevronDown, Settings, Bell } from "lucide-react";
+import { LogOut, ChevronDown, Settings, Bell, Menu } from "lucide-react";
 import { logoutAction } from "@/actions/auth";
 import { ROLE_LABELS } from "@/lib/constants";
 import { initials } from "@/lib/utils";
@@ -19,11 +19,13 @@ const PAGE_LABELS = [
   ["/dashboard", "\u5de5\u4f5c\u53f0"],
 ] as const;
 
-export function Topbar({ name, role, email, unreadCount = 0 }: {
+export function Topbar({ name, role, email, unreadCount = 0, menuOpen = false, onMenuOpen }: {
   name: string;
   role: string;
   email: string;
   unreadCount?: number;
+  menuOpen?: boolean;
+  onMenuOpen?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -42,16 +44,28 @@ export function Topbar({ name, role, email, unreadCount = 0 }: {
   }, []);
 
   return (
-    <header className="flex h-16 shrink-0 items-center justify-between gap-4 border-b border-[#e7e0ef] bg-white px-4 sm:px-6">
-      <div className="min-w-0">
-        <p className="truncate text-sm font-semibold text-slate-700">{pageLabel}</p>
-        <p className="hidden text-xs text-slate-400 sm:block">Thraive {"\u5de5\u4f5c\u53f0"}</p>
+    <header className="flex h-16 shrink-0 items-center justify-between gap-2 border-b border-[#e7e0ef] bg-white px-2 sm:gap-4 sm:px-6">
+      <div className="flex min-w-0 items-center gap-1 sm:gap-3">
+        <button
+          type="button"
+          aria-label={"\u6253\u5f00\u5bfc\u822a\u83dc\u5355"}
+          aria-controls="mobile-navigation"
+          aria-expanded={menuOpen}
+          onClick={onMenuOpen}
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-600 hover:bg-brand-50 hover:text-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 md:hidden"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold text-slate-700">{pageLabel}</p>
+          <p className="hidden text-xs text-slate-400 sm:block">Thraive {"\u5de5\u4f5c\u53f0"}</p>
+        </div>
       </div>
       <div className="flex items-center gap-2">
         <Link
           href="/reminders"
           aria-label="\u63d0\u9192"
-          className="relative flex h-9 w-9 items-center justify-center rounded-md text-slate-500 hover:bg-brand-50 hover:text-brand-700"
+          className="relative flex h-11 w-11 items-center justify-center rounded-md text-slate-500 hover:bg-brand-50 hover:text-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600"
         >
           <Bell className="h-5 w-5" />
           {unreadCount > 0 && (
@@ -62,7 +76,7 @@ export function Topbar({ name, role, email, unreadCount = 0 }: {
         </Link>
 
         <div className="relative" ref={ref}>
-          <button type="button" onClick={() => setOpen((value) => !value)} className="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-brand-50">
+          <button type="button" onClick={() => setOpen((value) => !value)} className="flex min-h-11 items-center gap-2 rounded-md px-2 py-1.5 hover:bg-brand-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600">
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-100 text-xs font-semibold text-brand-700">{initials(name)}</div>
             <div className="hidden text-left sm:block">
               <p className="text-sm font-medium text-slate-800">{name}</p>

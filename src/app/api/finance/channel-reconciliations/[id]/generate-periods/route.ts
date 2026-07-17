@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { isStaff } from "@/lib/permissions";
+import { channelReconciliationScope } from "@/lib/dataScope";
+import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
 
 function periodLabel(index: number, type: string, contractStart?: Date | null): string {
   if (!contractStart) return `第${index}期`;
@@ -25,9 +26,7 @@ export async function POST(
 ) {
   try {
     const session = await requireSession();
-    if (!isStaff(session.role)) {
-      return NextResponse.json({ error: "无权限" }, { status: 403 });
-    }
+    await requireFeaturePermission(session, "finance_channel", "MANAGE");
     const { id } = await params;
     const body = await req.json();
     const { totalPeriods, periodType, fixedFeeTotal, commissionTotal } = body;
@@ -36,15 +35,15 @@ export async function POST(
       return NextResponse.json({ error: "期数必须大于0" }, { status: 400 });
     }
 
-    const rec = await prisma.channelReconciliation.findUnique({
-      where: { id },
-      include: { contract: { select: { periodStart: true } } },
+    const rec = await prisma.channelReconciliation.findFirst({
+      where: { AND: [{ id }, channelReconciliationScope(session, session.role === "ADMIN" ? "all" : "mine")] },
+      include: { contract: { select: { startDate: true } } },
     });
     if (!rec) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
     const perFixedFee = fixedFeeTotal ? fixedFeeTotal / totalPeriods : null;
     const perCommission = commissionTotal ? commissionTotal / totalPeriods : null;
-    const contractStart = rec.contract?.periodStart ?? null;
+    const contractStart = rec.contract?.startDate ?? null;
 
     // Update master record config
     await prisma.channelReconciliation.update({
@@ -81,6 +80,7 @@ export async function POST(
     });
     return NextResponse.json(updated);
   } catch (e) {
+    if (e instanceof FeaturePermissionError) return NextResponse.json({ error: "无权限" }, { status: 403 });
     console.error(e);
     return NextResponse.json({ error: "生成失败" }, { status: 500 });
   }

@@ -2,11 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 import { sendMail } from "@/lib/mailer";
+import { hasPermissionLevel } from "@/lib/permissionGuard";
+import { resolveUserPermission } from "@/lib/permissionResolver";
 
 /** 返回默认发件邮箱（操作用户的注册邮箱）*/
 export async function GET() {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
+  if (!hasPermissionLevel(await resolveUserPermission(session.userId, "affiliates"), "READ")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const user = await prisma.user.findUnique({
     where: { id: session.userId },
     select: { email: true, name: true },
@@ -19,6 +22,7 @@ export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
 
+  if (!hasPermissionLevel(await resolveUserPermission(session.userId, "affiliates"), "EDIT")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const body = await req.json().catch(() => ({}));
   const to = String(body.to ?? "").trim();
   const fromEmail = String(body.fromEmail ?? "").trim();

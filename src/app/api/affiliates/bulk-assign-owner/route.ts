@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
+import { hasPermissionLevel } from "@/lib/permissionGuard";
+import { resolveUserPermission } from "@/lib/permissionResolver";
 
 // POST /api/affiliates/bulk-assign-owner
 // Body: { fromPersonInChargeIds: (string|null)[], toPersonInChargeId: string }
@@ -11,6 +13,8 @@ import { getSession } from "@/lib/session";
 export async function POST(req: NextRequest) {
   const auth = await getSession();
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const affiliatePermission = await resolveUserPermission(auth.userId, "affiliates");
+  if (!hasPermissionLevel(affiliatePermission, "MANAGE")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const { fromPersonInChargeIds, toPersonInChargeId } = await req.json();
   if (!toPersonInChargeId) {

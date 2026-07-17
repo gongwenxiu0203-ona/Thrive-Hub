@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Send, Upload, RefreshCw, FileDown, X, History, AlertCircle, Stamp, ExternalLink,
+  Send, Upload, RefreshCw, FileDown, History, AlertCircle, Stamp, ExternalLink,
 } from "lucide-react";
 import {
   generateContractFromTemplate,
@@ -12,6 +12,7 @@ import {
 } from "@/actions/contractWorkflow";
 import { stampContract } from "@/actions/contractStamp";
 import { formatDate } from "@/lib/utils";
+import { Modal } from "@/components/ui/Modal";
 
 export interface ContractVersionRow {
   id: string;
@@ -281,15 +282,7 @@ function SubmitReviewModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="card w-full max-w-md p-6">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-slate-900">提交审核</h2>
-          <button onClick={onClose} className="rounded p-1 hover:bg-slate-100">
-            <X className="h-4 w-4 text-slate-500" />
-          </button>
-        </div>
-
+    <Modal open onClose={onClose} title="提交审核" size="sm" closeOnBackdrop={false}>
         <div className="space-y-4">
           <ChoiceGroup
             title="合同条款是否有修改？"
@@ -345,8 +338,7 @@ function SubmitReviewModal({
             <Send className="h-4 w-4" /> {pending ? "提交中…" : "确认提交"}
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -399,14 +391,7 @@ function StampCompanyModal({
 }) {
   const [sealCompany, setSealCompany] = useState<"FOSHAN" | "HONGKONG">("FOSHAN");
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="card w-full max-w-md p-6">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-slate-900">选择盖章公司</h2>
-          <button onClick={onClose} className="rounded p-1 hover:bg-slate-100">
-            <X className="h-4 w-4 text-slate-500" />
-          </button>
-        </div>
+    <Modal open onClose={onClose} title="选择盖章公司" size="sm" closeOnBackdrop={false}>
         <p className="mb-3 text-sm text-slate-500">
           系统会用当前最新合同版本生成盖章 PDF，并保存为新的归档版本。
         </p>
@@ -446,7 +431,6 @@ function StampCompanyModal({
             <Stamp className="h-4 w-4" /> {pending ? "盖章中…" : "确认盖章"}
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
