@@ -21,6 +21,10 @@ next-env.d.ts
 /prisma/*.db-wal
 /prisma/prisma/
 /prisma/migrations/dev.db*
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
 
@@ -30,6 +34,17 @@ next-env.d.ts
 # ===== 上传文件（用户上传内容不进版本库）=====
 /uploads/*
 !/uploads/.gitkeep
+
+# ===== 合同与印章运行时文件（仅保留目录占位文件）=====
+/public/contract-templates/*
+!/public/contract-templates/.gitkeep
+/public/contracts-generated/*
+!/public/contracts-generated/.gitkeep
+/public/contracts-stamped/*
+!/public/contracts-stamped/.gitkeep
+/public/contracts-test-output/
+/public/seal/*
+!/public/seal/.gitkeep
 
 # ===== 日志 =====
 /logs/
@@ -66,3 +81,6 @@ desktop.ini
 
 # ===== Private runtime files (contract annotations, etc.) =====
 /private/
+
+# ===== 本地 Codex 工具（全局已安装，不随业务代码发布）=====
+/skills/
