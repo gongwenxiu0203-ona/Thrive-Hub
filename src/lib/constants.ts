@@ -20,6 +20,16 @@ export const PROMO_PLATFORMS = ["独立站", "Amazon", "沃尔玛"];
 
 export const PROMOTION_GOALS = ["新品推广", "老品增量", "全店业务增量"];
 
+export const CUSTOMER_AUTHORIZATION_PLATFORMS = [
+  "紫鸟",
+  "战斧",
+  "领星",
+  "Wayward",
+  "Levanta",
+  "pb",
+  "其他",
+] as const;
+
 // ---- Customer: 进度 --------------------------------------------------------
 
 export const CUSTOMER_STATUS_LABELS: Record<string, string> = {
@@ -27,13 +37,16 @@ export const CUSTOMER_STATUS_LABELS: Record<string, string> = {
   DEMO_IN_PROGRESS: "Demo方案制定中",
   DEMO_DONE: "Demo方案已完成",
   INTERNAL_DISCUSSION: "客户内部讨论中",
-  CONTRACT_IN_PROGRESS: "合同推进中",
-  CONTRACT_SIGNED: "合同签署完成",
   COOPERATING: "合作中",
-  COOPERATION_DONE: "合作完成",
-  PENDING: "待定",
+  COOPERATION_DONE: "结束合作",
   NOT_ADVANCED: "未推进合作",
 };
+
+export const CUSTOMER_STATUS_VALUES = Object.keys(CUSTOMER_STATUS_LABELS);
+
+export function isCustomerStatus(value: string): boolean {
+  return CUSTOMER_STATUS_VALUES.includes(value);
+}
 
 // Order used to determine "most advanced" status when deriving automatically.
 export const CUSTOMER_STATUS_ORDER = [
@@ -41,23 +54,18 @@ export const CUSTOMER_STATUS_ORDER = [
   "DEMO_IN_PROGRESS",
   "DEMO_DONE",
   "INTERNAL_DISCUSSION",
-  "CONTRACT_IN_PROGRESS",
-  "CONTRACT_SIGNED",
   "COOPERATING",
   "COOPERATION_DONE",
 ];
 
 export const CUSTOMER_STATUS_COLORS: Record<string, string> = {
-  UNASSIGNED: "bg-slate-100 text-slate-700",
+  UNASSIGNED: "bg-slate-900 text-white",
   DEMO_IN_PROGRESS: "bg-sky-100 text-sky-700",
-  DEMO_DONE: "bg-cyan-100 text-cyan-700",
-  INTERNAL_DISCUSSION: "bg-amber-100 text-amber-700",
-  CONTRACT_IN_PROGRESS: "bg-indigo-100 text-indigo-700",
-  CONTRACT_SIGNED: "bg-violet-100 text-violet-700",
+  DEMO_DONE: "bg-blue-700 text-white",
+  INTERNAL_DISCUSSION: "bg-amber-100 text-amber-800",
   COOPERATING: "bg-emerald-100 text-emerald-700",
-  COOPERATION_DONE: "bg-green-100 text-green-700",
-  PENDING: "bg-orange-100 text-orange-700",
-  NOT_ADVANCED: "bg-rose-100 text-rose-700",
+  COOPERATION_DONE: "bg-slate-700 text-white",
+  NOT_ADVANCED: "bg-pink-100 text-pink-700",
 };
 
 // ---- Customer: Amazon 品类 --------------------------------------------------

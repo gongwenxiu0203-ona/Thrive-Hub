@@ -17,6 +17,66 @@ import { ensureReconciliationForContract } from "@/actions/channelSplit";
 import { contractScope, customerScope } from "@/lib/dataScope";
 import type { PermLevel } from "@/lib/featurePermissions";
 import { requireFeaturePermission } from "@/lib/permissionGuard";
+import { writeAdminAudit } from "@/lib/adminObservability";
+
+const CONTRACT_EDIT_AUDIT_SELECT = {
+  id: true,
+  contractNo: true,
+  status: true,
+  customerId: true,
+  type: true,
+  ownerId: true,
+  reviewerId: true,
+  partyA: true,
+  partyACreditCode: true,
+  partyAAddress: true,
+  partyAContact: true,
+  partyAPhone: true,
+  partyAEmail: true,
+  promoPlatform: true,
+  targetSite: true,
+  startDate: true,
+  endDate: true,
+  feeAmount: true,
+  feeCurrency: true,
+  feeCycle: true,
+  commissionType: true,
+  commissionRate: true,
+  commissionConfig: true,
+  templateId: true,
+  partyBCompany: true,
+} as const;
+
+async function auditCompletedContractEdit(
+  actorId: string,
+  before: Record<string, unknown>,
+) {
+  const after = await prisma.contract.findUnique({
+    where: { id: String(before.id) },
+    select: CONTRACT_EDIT_AUDIT_SELECT,
+  });
+  if (!after) return;
+
+  const beforeRecord = before as Record<string, unknown>;
+  const afterRecord = after as unknown as Record<string, unknown>;
+  const changedFields = Object.keys(afterRecord).filter(
+    (key) => JSON.stringify(beforeRecord[key]) !== JSON.stringify(afterRecord[key]),
+  );
+  if (changedFields.length === 0) return;
+
+  await writeAdminAudit({
+    actorId,
+    action: "UPDATE_COMPLETED_CONTRACT",
+    module: "contracts",
+    targetType: "Contract",
+    targetId: after.id,
+    targetLabel: after.contractNo,
+    summary: `管理员修改已签署合同：${after.contractNo}`,
+    before: beforeRecord,
+    after: afterRecord,
+    metadata: { changedFields },
+  });
+}
 
 async function requireContractsPermission(required: PermLevel) {
   const session = await requireSession();
@@ -157,9 +217,6 @@ export async function createContract(
     },
   });
 
-  // Linking a contract advances the customer's progress.
-  await bumpCustomerStatus(customerId, "CONTRACT_IN_PROGRESS");
-
   revalidatePath("/contracts");
   revalidatePath(`/customers/${customerId}`);
   return { ok: true, contractId: contract.id };
@@ -170,6 +227,14 @@ export async function updateContract(
   fd: FormData,
 ): Promise<ContractSaveResult> {
   const session = await requireContractRow(id, "EDIT");
+  const existing = await prisma.contract.findUnique({
+    where: { id },
+    select: CONTRACT_EDIT_AUDIT_SELECT,
+  });
+  if (!existing) return { ok: false, error: "合同不存在" };
+  if (existing.status === "COMPLETED" && session.role !== "ADMIN") {
+    return { ok: false, error: "已签署完成的合同仅管理员可以修改，请联系管理员" };
+  }
   const contractNo = str(fd, "contractNo");
   const customerId = str(fd, "customerId");
   if (customerId) await requireCustomerRow(customerId, session);
@@ -191,6 +256,9 @@ export async function updateContract(
       reviewerId: str(fd, "reviewerId") || null,
     },
   });
+  if (existing.status === "COMPLETED") {
+    await auditCompletedContractEdit(session.userId, existing as unknown as Record<string, unknown>);
+  }
 
   revalidatePath("/contracts");
   revalidatePath(`/contracts/${id}`);
@@ -406,7 +474,7 @@ export async function markCompleted(id: string) {
   });
   await syncContractProgressToProjects(id, "签署完成");
   if (contract.customerId) {
-    await bumpCustomerStatus(contract.customerId, "CONTRACT_SIGNED");
+    await bumpCustomerStatus(contract.customerId, "COOPERATING");
   }
 
   // Auto-create channel reconciliation for customers with a channel user.
@@ -519,7 +587,6 @@ export async function uploadTransactionalContract(
       extractedBy: null,
     },
   });
-
   await prisma.attachment.create({
     data: {
       fileName: saved.fileName,
@@ -683,9 +750,6 @@ export async function createContractV4(
     return { ok: false, error: "合同编号冲突，请稍后重试" };
   }
 
-  if (!payload.saveAsDraft) {
-    await bumpCustomerStatus(customerId, "CONTRACT_IN_PROGRESS");
-  }
   revalidatePath("/contracts");
   revalidatePath(`/customers/${customerId}`);
   return { ok: true, contractId: contract.id };
@@ -696,6 +760,14 @@ export async function updateContractV4(
   payload: Partial<ContractV4Payload>,
 ): Promise<ContractSaveResult> {
   const session = await requireContractRow(id, "EDIT");
+  const existing = await prisma.contract.findUnique({
+    where: { id },
+    select: CONTRACT_EDIT_AUDIT_SELECT,
+  });
+  if (!existing) return { ok: false, error: "合同不存在" };
+  if (existing.status === "COMPLETED" && session.role !== "ADMIN") {
+    return { ok: false, error: "已签署完成的合同仅管理员可以修改，请联系管理员" };
+  }
   if (payload.customerId) await requireCustomerRow(payload.customerId, session);
   let templateKey = payload.commissionType;
   if (payload.templateId) {
@@ -750,6 +822,9 @@ export async function updateContractV4(
       specialCommissionTerms: payload.specialCommissionTerms ?? undefined,
     },
   });
+  if (existing.status === "COMPLETED") {
+    await auditCompletedContractEdit(session.userId, existing as unknown as Record<string, unknown>);
+  }
   revalidatePath("/contracts");
   revalidatePath(`/contracts/${id}`);
   return { ok: true, contractId: id };

@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChevronDown, ChevronUp, Settings2, Trash2 } from "lucide-react";
@@ -32,7 +32,6 @@ export type CustomerTableRow = {
   category: string | null;
   mainSites: string[];
   targetPlatforms: string[];
-  affiliatePlatforms: string | null;
   status: string;
   rating: string;
   businessOwnerId: string | null;
@@ -54,7 +53,6 @@ type SortKey =
   | "category"
   | "mainSites"
   | "targetPlatforms"
-  | "affiliatePlatforms"
   | "latestContractLabel"
   | "status"
   | "rating"
@@ -68,6 +66,10 @@ type BulkField = "status" | "rating" | "targetPlatforms" | "businessOwnerId" | "
 type BulkMode = "choose" | "update" | "delete";
 
 const RATING_RANK: Record<string, number> = { S: 0, A: 1, B: 2, C: 3, PENDING: 4 };
+const SORT_KEYS: SortKey[] = [
+  "brandName", "category", "mainSites", "targetPlatforms", "latestContractLabel",
+  "status", "rating", "businessOwnerName", "backendOwnerName", "source", "createdAt", "updatedAt",
+];
 const STATUS_RANK = Object.keys(CUSTOMER_STATUS_LABELS).reduce<Record<string, number>>((acc, key, index) => {
   acc[key] = index;
   return acc;
@@ -134,6 +136,7 @@ export function CustomerTableClient({
   isChannel,
   staffUserId,
   channelUserId,
+  sortStorageKey,
   filterControls,
 }: {
   rows: CustomerTableRow[];
@@ -143,12 +146,14 @@ export function CustomerTableClient({
   isChannel: boolean;
   staffUserId?: string;
   channelUserId?: string;
+  sortStorageKey: string;
   filterControls?: ReactNode;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [sort, setSort] = useState<SortState>({ key: "createdAt", direction: "desc" });
+  const [sortLoaded, setSortLoaded] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkMode, setBulkMode] = useState<BulkMode>("choose");
   const [bulkField, setBulkField] = useState<BulkField>("status");
@@ -158,6 +163,28 @@ export function CustomerTableClient({
   const [confirmedDeletes, setConfirmedDeletes] = useState<Set<string>>(new Set());
   const [message, setMessage] = useState<string | null>(null);
   const [reviewFilter, setReviewFilter] = useState<"all" | "pending">("all");
+
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(sortStorageKey) ?? "null") as SortState | null;
+      if (saved && SORT_KEYS.includes(saved.key) && (saved.direction === "asc" || saved.direction === "desc")) {
+        setSort(saved);
+      }
+    } catch {
+      localStorage.removeItem(sortStorageKey);
+    } finally {
+      setSortLoaded(true);
+    }
+  }, [sortStorageKey]);
+
+  useEffect(() => {
+    if (!sortLoaded) return;
+    try {
+      localStorage.setItem(sortStorageKey, JSON.stringify(sort));
+    } catch {
+      // Private browsing or a locked-down browser may disable storage.
+    }
+  }, [sort, sortLoaded, sortStorageKey]);
 
   const sortedRows = useMemo(() => {
     const next = reviewFilter === "pending" ? rows.filter((row) => row.pendingReviewCount > 0) : [...rows];
@@ -313,16 +340,15 @@ export function CustomerTableClient({
                   </th>
                 )}
                 <SortHeader label="品牌/店铺名称" sortKey="brandName" sort={sort} onSort={changeSort} />
-                <th>资料更新</th>
                 <SortHeader label="品类" sortKey="category" sort={sort} onSort={changeSort} />
                 <SortHeader label="主营站点" sortKey="mainSites" sort={sort} onSort={changeSort} />
                 <SortHeader label="当前平台" sortKey="targetPlatforms" sort={sort} onSort={changeSort} />
-                <SortHeader label="历史使用平台" sortKey="affiliatePlatforms" sort={sort} onSort={changeSort} />
                 <SortHeader label="合同进度" sortKey="latestContractLabel" sort={sort} onSort={changeSort} />
                 <SortHeader label="当前进度" sortKey="status" sort={sort} onSort={changeSort} />
                 <SortHeader label="评级" sortKey="rating" sort={sort} onSort={changeSort} />
                 <SortHeader label="商务负责人" sortKey="businessOwnerName" sort={sort} onSort={changeSort} />
                 <SortHeader label="售前方案负责人" sortKey="backendOwnerName" sort={sort} onSort={changeSort} />
+                <th>资料更新</th>
                 <SortHeader label="来源" sortKey="source" sort={sort} onSort={changeSort} />
                 <th>操作</th>
               </tr>
@@ -344,13 +370,6 @@ export function CustomerTableClient({
                       {c.brandName}
                     </Link>
                   </td>
-                  <td>
-                    {c.pendingReviewCount > 0 ? (
-                      <Link href="/admin?tab=intake" className="inline-flex whitespace-nowrap rounded-full bg-amber-100 px-2 py-1 text-xs font-medium text-amber-800 hover:bg-amber-200">
-                        ⚠ 资料待审核 {c.pendingReviewCount}
-                      </Link>
-                    ) : <span className="text-slate-300">—</span>}
-                  </td>
                   <td>{c.category ?? "-"}</td>
                   <td>
                     <span className="text-xs text-slate-500">{c.mainSites.join(" / ") || "-"}</span>
@@ -362,9 +381,6 @@ export function CustomerTableClient({
                       ))}
                       {c.targetPlatforms.length === 0 && "-"}
                     </div>
-                  </td>
-                  <td>
-                    <span className="text-xs text-slate-500">{c.affiliatePlatforms?.trim() || "-"}</span>
                   </td>
                   <td>
                     {c.latestContractId ? (
@@ -387,6 +403,13 @@ export function CustomerTableClient({
                   </td>
                   <td>{c.businessOwnerName ?? "-"}</td>
                   <td>{c.backendOwnerName ?? "-"}</td>
+                  <td>
+                    {c.pendingReviewCount > 0 ? (
+                      <Link href="/admin?tab=intake" className="inline-flex whitespace-nowrap rounded-full bg-amber-100 px-2 py-1 text-xs font-medium text-amber-800 hover:bg-amber-200">
+                        ⚠ 资料待审核 {c.pendingReviewCount}
+                      </Link>
+                    ) : <span className="text-slate-300">—</span>}
+                  </td>
                   <td>
                     <span className="text-xs text-slate-500">{c.source === "INTAKE" ? "客户门户" : "内部录入"}</span>
                   </td>

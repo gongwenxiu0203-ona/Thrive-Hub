@@ -4,13 +4,25 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { MAIN_SITES, PROMO_PLATFORMS } from "@/lib/constants";
+import { MAIN_SITES, PROMO_PLATFORMS, isCustomerStatus } from "@/lib/constants";
 import { sendOwnerAssignmentNotification } from "@/lib/notify";
 import { canDeleteCustomer, isStaff } from "@/lib/permissions";
-import { capitalizeBrandName } from "@/lib/customer";
+import { bumpCustomerStatus, capitalizeBrandName } from "@/lib/customer";
+import { customerScope } from "@/lib/dataScope";
+import { requireFeaturePermission } from "@/lib/permissionGuard";
 
 const LEO_EMAIL = "leo.g@thraiveagency.com";
 const LEDO_EMAIL = "ledo.h@thraiveagency.com";
+
+async function requireCustomerEditSession() {
+  const session = await requireSession();
+  await requireFeaturePermission(session, "customers", "EDIT");
+  return session;
+}
+
+function accessibleCustomerWhere(session: Awaited<ReturnType<typeof requireSession>>) {
+  return customerScope(session, session.role === "ADMIN" ? "all" : "mine");
+}
 
 /** Find a user id by exact email; returns null if missing (silent fallback). */
 async function userIdByEmail(email: string): Promise<string | null> {
@@ -165,6 +177,9 @@ export async function createCustomer(fd: FormData): Promise<SaveResult> {
   const backendOwnerId = str(fd, "backendOwnerId") || null;
   const manualStatus = str(fd, "status") || null;       // 手动选择的合作状态
   const demoDueDate = str(fd, "demoDueDate") || null;    // Demo方案截止日期
+  if (manualStatus && !isCustomerStatus(manualStatus)) {
+    return { ok: false, error: "无效的客户进度" };
+  }
 
   // 如果用户没选商务负责人，默认填充 ledo.h（无法识别时回退到创建人）
   if (!businessOwnerId) {
@@ -184,7 +199,7 @@ export async function createCustomer(fd: FormData): Promise<SaveResult> {
       // 优先使用手动选择的合作状态；否则按是否分配负责人自动判定
       status: manualStatus
         ? manualStatus
-        : businessOwnerId || backendOwnerId
+        : backendOwnerId
           ? "DEMO_IN_PROGRESS"
           : "UNASSIGNED",
     },
@@ -389,15 +404,25 @@ export async function bulkUpdateCustomers(
     backendOwnerId?: string | null;
   },
 ): Promise<SaveResult> {
-  const session = await requireSession();
-  if (!isStaff(session.role)) return { ok: false, error: "无权批量修改客户" };
+  const session = await requireCustomerEditSession();
   const cleanIds = [...new Set(ids.filter(Boolean))];
   if (!cleanIds.length) return { ok: false, error: "请选择要修改的客户" };
+  const accessibleCount = await prisma.customer.count({
+    where: {
+      AND: [
+        { id: { in: cleanIds }, deletedAt: null },
+        accessibleCustomerWhere(session),
+      ],
+    },
+  });
+  if (accessibleCount !== cleanIds.length) return { ok: false, error: "部分客户不存在或无权修改" };
 
   const data: Record<string, unknown> = {};
   if (patch.status !== undefined) {
+    if (!isCustomerStatus(patch.status)) return { ok: false, error: "无效的客户进度" };
     data.status = patch.status;
     data.statusChangedAt = new Date();
+    data.staleReviewDeadlineAt = null;
   }
   if (patch.rating !== undefined) data.rating = patch.rating;
   if (patch.targetPlatforms !== undefined) {
@@ -409,7 +434,12 @@ export async function bulkUpdateCustomers(
   if (Object.keys(data).length === 0) return { ok: false, error: "请选择要批量修改的字段" };
 
   await prisma.customer.updateMany({
-    where: { id: { in: cleanIds }, deletedAt: null },
+    where: {
+      AND: [
+        { id: { in: cleanIds }, deletedAt: null },
+        accessibleCustomerWhere(session),
+      ],
+    },
     data,
   });
   revalidatePath("/customers");
@@ -417,10 +447,16 @@ export async function bulkUpdateCustomers(
 }
 
 export async function updateCustomerStatus(id: string, status: string) {
-  await requireSession();
+  const session = await requireCustomerEditSession();
+  if (!isCustomerStatus(status)) throw new Error("无效的客户进度");
+  const customer = await prisma.customer.findFirst({
+    where: { AND: [{ id, deletedAt: null }, accessibleCustomerWhere(session)] },
+    select: { id: true },
+  });
+  if (!customer) throw new Error("客户不存在或无权修改");
   await prisma.customer.update({
-    where: { id },
-    data: { status, statusChangedAt: new Date() },
+    where: { id: customer.id },
+    data: { status, statusChangedAt: new Date(), staleReviewDeadlineAt: null },
   });
   revalidatePath("/customers");
   revalidatePath(`/customers/${id}`);
@@ -431,18 +467,18 @@ export async function updateCustomerStatus(id: string, status: string) {
  * "客户会议预约" task for that owner.
  */
 export async function setBusinessOwner(customerId: string, userId: string) {
-  const session = await requireSession();
-  const customer = await prisma.customer.findUnique({
-    where: { id: customerId },
+  const session = await requireCustomerEditSession();
+  const customer = await prisma.customer.findFirst({
+    where: { AND: [{ id: customerId, deletedAt: null }, accessibleCustomerWhere(session)] },
   });
-  if (!customer) throw new Error("客户不存在");
+  if (!customer) throw new Error("客户不存在或无权修改");
 
   const newOwnerId = userId || null;
   const isNewAssignment = !!newOwnerId && customer.businessOwnerId !== newOwnerId;
 
   await prisma.customer.update({
     where: { id: customerId },
-    data: { businessOwnerId: newOwnerId },
+    data: { businessOwnerId: newOwnerId, staleReviewDeadlineAt: null },
   });
 
   if (isNewAssignment) {
@@ -480,11 +516,11 @@ export async function setBackendOwner(
   userId: string,
   dueDate: string,
 ) {
-  const session = await requireSession();
-  const customer = await prisma.customer.findUnique({
-    where: { id: customerId },
+  const session = await requireCustomerEditSession();
+  const customer = await prisma.customer.findFirst({
+    where: { AND: [{ id: customerId, deletedAt: null }, accessibleCustomerWhere(session)] },
   });
-  if (!customer) throw new Error("客户不存在");
+  if (!customer) throw new Error("客户不存在或无权修改");
 
   const newOwnerId = userId || null;
   const isNewAssignment = !!newOwnerId && customer.backendOwnerId !== newOwnerId;
@@ -499,6 +535,7 @@ export async function setBackendOwner(
     where: { id: customerId },
     data: {
       backendOwnerId: newOwnerId,
+      staleReviewDeadlineAt: null,
       ...(dueDate ? { demoDueDate: new Date(dueDate) } : {}),
     },
   });
@@ -523,13 +560,8 @@ export async function setBackendOwner(
         newOwnerId,
         effectiveDue,
       );
-      if (customer.status === "UNASSIGNED") {
-        await prisma.customer.update({
-          where: { id: customerId },
-          data: { status: "DEMO_IN_PROGRESS", statusChangedAt: new Date() },
-        });
-      }
     }
+    await bumpCustomerStatus(customerId, "DEMO_IN_PROGRESS");
     await sendOwnerAssignmentNotification({
       ownerId: newOwnerId,
       ownerRole: "backend",

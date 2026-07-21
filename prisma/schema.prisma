@@ -139,6 +139,8 @@ model Customer {
   category        String? // 品类
   status          String    @default("UNASSIGNED") // 见 CUSTOMER_STATUS_LABELS
   statusChangedAt DateTime  @default(now()) // 用于状态超时自动流转
+  staleReviewRequestedAt DateTime? // 创建满 30 天后的进度确认提醒发送时间
+  staleReviewDeadlineAt  DateTime? // 提醒后无人处理时自动转为未推进合作的截止时间
   rating          String    @default("PENDING") // S | A | B | C | PENDING(待评估)
   evaluationData  String? // JSON: { revenueScore, bsrScore, mediaBuyScore, commissionScore, categoryScore, ... }
   businessOwnerId String?

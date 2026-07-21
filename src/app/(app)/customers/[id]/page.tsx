@@ -18,6 +18,7 @@ import { ChannelSplitRuleModal, type ExistingRule } from "./ChannelSplitRuleModa
 import { InternalManagement } from "./InternalManagement";
 import { EvaluationModule, type EvaluationData } from "./EvaluationModule";
 import { CustomerAuthorizationPanel } from "./CustomerAuthorizationPanel";
+import { CollapsibleCustomerSection } from "./CollapsibleCustomerSection";
 import {
   CUSTOMER_STATUS_LABELS,
   CUSTOMER_STATUS_COLORS,
@@ -250,14 +251,9 @@ export default async function CustomerDetailPage({
 
       {/* ── 客户信息 ── */}
       {canViewCustomerInfo && (
-      <div>
-        <div className="mb-4 flex items-center gap-3">
-          <div className="flex h-6 w-6 items-center justify-center rounded-md bg-brand-100 text-xs font-bold text-brand-700">①</div>
-          <h2 className="text-sm font-bold text-slate-700">客户信息</h2>
-          <span className="h-px flex-1 bg-slate-200" />
-        </div>
+      <CollapsibleCustomerSection>
         <CustomerSectionsView data={sectionData} />
-      </div>
+      </CollapsibleCustomerSection>
       )}
 
       {/* ── 内部管理 ── */}

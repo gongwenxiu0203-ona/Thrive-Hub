@@ -207,7 +207,6 @@ export default async function CustomersPage({
       category: c.category,
       mainSites: parseStringArray(c.mainSites),
       targetPlatforms: parseStringArray(c.targetPlatforms),
-      affiliatePlatforms: c.affiliatePlatforms,
       status: c.status,
       rating: c.rating,
       businessOwnerId: c.businessOwnerId,
@@ -254,6 +253,7 @@ export default async function CustomersPage({
         isChannel={isChannel}
         staffUserId={isStaff(session.role) ? session.userId : undefined}
         channelUserId={isChannel ? session.userId : undefined}
+        sortStorageKey={`thrive-customers-sort:${session.userId}`}
         filterControls={
           <>
         <SearchFilter placeholder="搜索品牌 / 联系人 / 邮箱" />

@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
-import { CUSTOMER_STATUS_ORDER } from "@/lib/constants";
+import { CUSTOMER_STATUS_ORDER, isCustomerStatus } from "@/lib/constants";
+import { writeAdminAudit } from "@/lib/adminObservability";
 export { capitalizeBrandName } from "@/lib/brandName";
 
 // ---- JSON field helpers ---------------------------------------------------
@@ -41,68 +42,129 @@ export function parseRecord(
 
 // ---- Status timer rules ---------------------------------------------------
 //
-// Spec:
-//  - DEMO_DONE 超过 14 天未变动 → 推送商务负责人确认 + 转「待定」
-//  - INTERNAL_DISCUSSION 超过 7 天未变动 → 推送商务负责人确认 + 转「待定」
-//  - PENDING 超过 3 天未变动 → 转「未推进合作」
-//
-// Evaluated lazily on list / dashboard load (no external cron required).
+// Evaluated lazily on list / dashboard load. Every transition is claimed with
+// a conditional update so concurrent page loads cannot create duplicate alerts.
 
 const DAY = 24 * 60 * 60 * 1000;
 
 export async function runCustomerStatusChecks(): Promise<void> {
-  const now = Date.now();
-  const candidates = await prisma.customer.findMany({
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    where: { status: { in: ["DEMO_DONE", "INTERNAL_DISCUSSION", "PENDING"] }, deletedAt: null } as any,
-    select: {
-      id: true,
-      status: true,
-      statusChangedAt: true,
-      brandName: true,
-      businessOwnerId: true,
+  const now = new Date();
+  const threeDaysAgo = new Date(now.getTime() - 3 * DAY);
+  const thirtyDaysAgo = new Date(now.getTime() - 30 * DAY);
+  const reviewableStatuses = [
+    "UNASSIGNED",
+    "DEMO_IN_PROGRESS",
+    "DEMO_DONE",
+    "INTERNAL_DISCUSSION",
+  ];
+
+  // Demo submitted for three days without another progress event.
+  const demoDoneCustomers = await prisma.customer.findMany({
+    where: {
+      status: "DEMO_DONE",
+      statusChangedAt: { lte: threeDaysAgo },
+      deletedAt: null,
     },
+    select: { id: true, brandName: true, statusChangedAt: true },
   });
-
-  for (const c of candidates) {
-    const ageDays = (now - new Date(c.statusChangedAt).getTime()) / DAY;
-
-    if (c.status === "DEMO_DONE" && ageDays >= 14) {
-      await transitionToPending(c, "Demo方案已完成超过 14 天未推进");
-    } else if (c.status === "INTERNAL_DISCUSSION" && ageDays >= 7) {
-      await transitionToPending(c, "客户内部讨论中超过 7 天未推进");
-    } else if (c.status === "PENDING" && ageDays >= 3) {
-      await prisma.customer.update({
-        where: { id: c.id },
-        data: { status: "NOT_ADVANCED", statusChangedAt: new Date() },
+  for (const customer of demoDoneCustomers) {
+    const changed = await prisma.customer.updateMany({
+      where: {
+        id: customer.id,
+        status: "DEMO_DONE",
+        statusChangedAt: customer.statusChangedAt,
+        deletedAt: null,
+      },
+      data: { status: "INTERNAL_DISCUSSION", statusChangedAt: now },
+    });
+    if (changed.count === 1) {
+      await writeAdminAudit({
+        action: "AUTO_CUSTOMER_STATUS_CHANGE",
+        module: "customers",
+        targetType: "Customer",
+        targetId: customer.id,
+        targetLabel: customer.brandName,
+        summary: `客户「${customer.brandName}」Demo 方案完成 3 天无新进度，自动转为客户内部讨论中`,
+        before: { status: "DEMO_DONE" },
+        after: { status: "INTERNAL_DISCUSSION" },
+        metadata: { rule: "DEMO_DONE_3_DAYS" },
       });
     }
   }
-}
 
-async function transitionToPending(
-  c: {
-    id: string;
-    brandName: string;
-    businessOwnerId: string | null;
-  },
-  reason: string,
-): Promise<void> {
-  await prisma.customer.update({
-    where: { id: c.id },
-    data: { status: "PENDING", statusChangedAt: new Date() },
+  // A creator ignored the 30-day review reminder for its full grace period.
+  const expiredReviews = await prisma.customer.findMany({
+    where: {
+      status: { in: reviewableStatuses },
+      staleReviewRequestedAt: { not: null },
+      staleReviewDeadlineAt: { lte: now },
+      deletedAt: null,
+    },
+    select: { id: true, brandName: true, status: true, statusChangedAt: true, staleReviewRequestedAt: true },
   });
-  // Notify the business owner to confirm the customer's state.
-  if (c.businessOwnerId) {
-    await prisma.reminder.create({
-      data: {
-        title: `客户状态确认：${c.brandName}`,
-        content: `${reason}，已自动转为「待定」，请确认客户状态。若 3 天内仍无变动将转为「未推进合作」。`,
-        remindDate: new Date(),
-        type: "STATUS_CHECK",
-        targetId: c.businessOwnerId,
-        createdById: c.businessOwnerId,
+  for (const customer of expiredReviews) {
+    if (!customer.staleReviewRequestedAt || customer.statusChangedAt > customer.staleReviewRequestedAt) continue;
+    const changed = await prisma.customer.updateMany({
+      where: {
+        id: customer.id,
+        status: { in: reviewableStatuses },
+        statusChangedAt: customer.statusChangedAt,
+        staleReviewRequestedAt: customer.staleReviewRequestedAt,
+        staleReviewDeadlineAt: { lte: now },
+        deletedAt: null,
       },
+      data: {
+        status: "NOT_ADVANCED",
+        statusChangedAt: now,
+        staleReviewDeadlineAt: null,
+      },
+    });
+    if (changed.count === 1) {
+      await writeAdminAudit({
+        action: "AUTO_CUSTOMER_STATUS_CHANGE",
+        module: "customers",
+        targetType: "Customer",
+        targetId: customer.id,
+        targetLabel: customer.brandName,
+        summary: `客户「${customer.brandName}」30 天进度提醒后 3 天无操作，自动转为未推进合作`,
+        before: { status: customer.status },
+        after: { status: "NOT_ADVANCED" },
+        metadata: { rule: "STALE_REVIEW_3_DAY_GRACE" },
+      });
+    }
+  }
+
+  // Claim each first reminder and create it in the same transaction.
+  const needsReview = await prisma.customer.findMany({
+    where: {
+      status: { in: reviewableStatuses },
+      createdAt: { lte: thirtyDaysAgo },
+      createdById: { not: null },
+      staleReviewRequestedAt: null,
+      deletedAt: null,
+    },
+    select: { id: true, brandName: true, createdById: true },
+  });
+  for (const customer of needsReview) {
+    if (!customer.createdById) continue;
+    const creatorId = customer.createdById;
+    const deadline = new Date(now.getTime() + 3 * DAY);
+    await prisma.$transaction(async (tx) => {
+      const claimed = await tx.customer.updateMany({
+        where: { id: customer.id, staleReviewRequestedAt: null, deletedAt: null },
+        data: { staleReviewRequestedAt: now, staleReviewDeadlineAt: deadline },
+      });
+      if (claimed.count !== 1) return;
+      await tx.reminder.create({
+        data: {
+          title: `客户进度确认：${customer.brandName}`,
+          content: "该客户创建已超过 30 天，请确认是否继续推进。若 3 天内没有调整客户进度，将自动转为「未推进合作」。",
+          remindDate: now,
+          type: "STATUS_CHECK",
+          targetId: creatorId,
+          createdById: creatorId,
+        },
+      });
     });
   }
 }
@@ -116,11 +178,12 @@ export async function bumpCustomerStatus(
   customerId: string,
   toStatus: string,
 ): Promise<void> {
+  if (!isCustomerStatus(toStatus) || toStatus === "COOPERATION_DONE") return;
   const customer = await prisma.customer.findUnique({
     where: { id: customerId },
     select: { status: true },
   });
-  if (!customer) return;
+  if (!customer || customer.status === "COOPERATION_DONE") return;
 
   const currentRank = CUSTOMER_STATUS_ORDER.indexOf(customer.status);
   const nextRank = CUSTOMER_STATUS_ORDER.indexOf(toStatus);
@@ -129,7 +192,11 @@ export async function bumpCustomerStatus(
   if (nextRank > currentRank || currentRank === -1) {
     await prisma.customer.update({
       where: { id: customerId },
-      data: { status: toStatus, statusChangedAt: new Date() },
+      data: {
+        status: toStatus,
+        statusChangedAt: new Date(),
+        staleReviewDeadlineAt: null,
+      },
     });
   }
 }

@@ -6,6 +6,8 @@ import { requireSession } from "@/lib/session";
 import { ContractV4Form } from "./ContractV4Form";
 import { UploadExistingForm } from "./UploadExistingForm";
 import { TransactionalUploadForm } from "./TransactionalUploadForm";
+import { requireFeaturePermission } from "@/lib/permissionGuard";
+import { contractScope } from "@/lib/dataScope";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "新建合同 · Thraive联盟营销系统" };
@@ -36,11 +38,19 @@ export default async function NewContractPage({
   }
 
   if (contractId) {
+    await requireFeaturePermission(session, "contracts", "EDIT");
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    existingContract = await (prisma.contract.findUnique as any)({
-      where: { id: contractId },
+    existingContract = await (prisma.contract.findFirst as any)({
+      where: {
+        id: contractId,
+        ...contractScope(session, session.role === "ADMIN" ? "all" : "mine"),
+        deletedAt: null,
+      },
     });
     if (!existingContract) notFound();
+    if (existingContract.status === "COMPLETED" && session.role !== "ADMIN") {
+      redirect(`/contracts/${existingContract.id}`);
+    }
     if (!customer && existingContract.customerId) {
       customer = await prisma.customer.findUnique({
         where: { id: existingContract.customerId },
@@ -104,7 +114,7 @@ export default async function NewContractPage({
           >
             <Upload className="h-6 w-6 text-brand-600" />
             <p className="text-base font-semibold text-slate-800">上传已有合同</p>
-            <p className="text-sm text-slate-500">直接上传 .docx，系统自动识别甲方与合作信息；字段齐全则一键推送审核。</p>
+            <p className="text-sm text-slate-500">上传已签署的 Word/PDF，映射合同字段并补齐后直接归档。</p>
           </Link>
           <Link
             href="/contracts/new?mode=transactional"
@@ -143,7 +153,7 @@ export default async function NewContractPage({
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-xl font-bold text-slate-900">上传已有合同</h1>
-            <p className="mt-1 text-sm text-slate-500">上传 .docx 后自动识别关键字段，缺失字段会标红提示</p>
+            <p className="mt-1 text-sm text-slate-500">上传已签署的 Word/PDF，缺失字段必须手动补齐后才能创建</p>
           </div>
           <Link
             href={`/contracts/new${customer?.id ? `?customerId=${customer.id}` : ""}`}

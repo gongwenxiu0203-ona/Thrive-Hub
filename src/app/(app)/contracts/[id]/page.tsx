@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/Badge";
 import { FileUploader } from "@/components/FileUploader";
 import { ContractFormModal } from "../ContractFormModal";
 import { ContractActions } from "./ContractActions";
+import { ContactAdminModifyButton } from "./ContactAdminModifyButton";
 import { ContractCompare } from "./ContractCompare";
 import { ContractWorkflowPanel, type ContractVersionRow } from "./ContractWorkflowPanel";
 import {
@@ -294,7 +295,11 @@ export default async function ContractDetailPage({
           </div>
           <div className="flex items-center gap-2">
             {/* V4 合同：编辑 + 下载 */}
-            {c.fillMethod && (contract.status === "IN_PROGRESS" || contract.status === "REJECTED") && (
+            {c.fillMethod && (
+              contract.status === "IN_PROGRESS" ||
+              contract.status === "REJECTED" ||
+              (contract.status === "COMPLETED" && isAdmin)
+            ) && (
               <Link
                 href={`/contracts/new?contractId=${contract.id}`}
                 className="btn-secondary flex items-center gap-1.5 text-sm"
@@ -320,8 +325,9 @@ export default async function ContractDetailPage({
                 </a>
               </>
             )}
+            {contract.status === "COMPLETED" && !isAdmin && <ContactAdminModifyButton />}
             {/* 旧版合同：原有编辑弹窗 */}
-            {!c.fillMethod && contract.status === "IN_PROGRESS" && contract.customerId && contract.type && (
+            {!c.fillMethod && (contract.status === "IN_PROGRESS" || (contract.status === "COMPLETED" && isAdmin)) && contract.customerId && contract.type && (
               <ContractFormModal
                 users={userOptions}
                 currentUserId={session.userId}
@@ -369,7 +375,7 @@ export default async function ContractDetailPage({
             <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
             <div className="flex-1">
               <p className="text-sm font-semibold text-amber-800">
-                本合同为上传已有合同，AI 未识别到以下 {uploadMissing.length} 个关键字段，请补填后再提交审核：
+                本合同为上传已有合同，以下 {uploadMissing.length} 个关键字段尚未补齐：
               </p>
               <ul className="mt-2 grid grid-cols-2 gap-1 text-sm text-amber-700 sm:grid-cols-3">
                 {uploadMissing.map((m) => (

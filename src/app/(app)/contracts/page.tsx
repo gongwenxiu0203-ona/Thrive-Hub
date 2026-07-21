@@ -117,7 +117,7 @@ export default async function ContractsPage({
     prisma.contract.findMany({
       where: { ...contractScope(sess, view), deletedAt: null } as any,
       orderBy: { createdAt: "desc" },
-      include: { customer: true, owner: true, reviewer: true },
+      include: { customer: true, owner: true, reviewer: true, createdBy: true },
     }),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prisma.customer.findMany({
@@ -198,6 +198,7 @@ export default async function ContractsPage({
               <tr className="border-b border-slate-100 bg-slate-50/60">
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">合同编号</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">关联客户</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">甲方公司</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">类型</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">负责人</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">审核人</th>
@@ -205,6 +206,7 @@ export default async function ContractsPage({
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">抽佣</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">状态</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">字段状态</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">创建人</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">创建时间</th>
               </tr>
             </thead>
@@ -233,6 +235,7 @@ export default async function ContractsPage({
                       <span className="text-slate-300">—</span>
                     )}
                   </td>
+                  <td className="px-4 py-3 text-sm text-slate-700">{ct.partyA || <span className="text-slate-300">—</span>}</td>
                   <td className="px-4 py-3">
                     <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
                       {labelOf(CONTRACT_TYPE_LABELS, ct.type)}
@@ -258,6 +261,7 @@ export default async function ContractsPage({
                       </Badge>
                     )}
                   </td>
+                  <td className="px-4 py-3 text-sm text-slate-700">{ct.createdBy?.name ?? <span className="text-slate-300">—</span>}</td>
                   <td className="px-4 py-3 text-xs text-slate-400">{formatDate(ct.createdAt)}</td>
                 </tr>
                 );

@@ -56,8 +56,6 @@ export function UploadExistingForm({
   const [partyBCompany, setPartyBCompany] = useState<"THRAIVE" | "LINGYUE" | "">("THRAIVE");
   const [ownerId, setOwnerId] = useState("");
   const [file, setFile] = useState<File | null>(null);
-  const [uploadArchiveMode, setUploadArchiveMode] = useState<"REVIEW_AND_STAMP" | "SIGNED_ARCHIVE">("REVIEW_AND_STAMP");
-  const isPdfUpload = file?.name.toLowerCase().endsWith(".pdf") ?? false;
 
   function submit() {
     if (submittingRef.current) return;
@@ -74,7 +72,7 @@ export function UploadExistingForm({
         if (templateId) fd.append("templateId", templateId);
         if (partyBCompany) fd.append("partyBCompany", partyBCompany);
         if (ownerId) fd.append("ownerId", ownerId);
-        fd.append("uploadArchiveMode", uploadArchiveMode);
+        fd.append("uploadArchiveMode", "SIGNED_ARCHIVE");
         fd.append("file", file);
         const r = await uploadExistingContract(fd);
         if (!r.ok) { setError(r.error); return; }
@@ -96,7 +94,7 @@ export function UploadExistingForm({
       if (nextTemplateId) fd.append("templateId", nextTemplateId);
       if (partyBCompany) fd.append("partyBCompany", partyBCompany);
       if (ownerId) fd.append("ownerId", ownerId);
-      fd.append("uploadArchiveMode", uploadArchiveMode);
+      fd.append("uploadArchiveMode", "SIGNED_ARCHIVE");
       fd.append("finalizeUpload", "1");
       for (const [key, value] of Object.entries(overrides)) {
         fd.append(`override:${key}`, value);
@@ -188,19 +186,9 @@ export function UploadExistingForm({
         </Section>
 
         <Section title="上传用途">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <ModeCard
-              checked={uploadArchiveMode === "REVIEW_AND_STAMP"}
-              title="上传审核盖章"
-              description="识别字段后按审核、盖章流程推进。"
-              onChange={() => setUploadArchiveMode("REVIEW_AND_STAMP")}
-            />
-            <ModeCard
-              checked={uploadArchiveMode === "SIGNED_ARCHIVE"}
-              title="签署完成存档"
-              description="识别并补齐字段后直接归档入库，不走审核盖章。"
-              onChange={() => setUploadArchiveMode("SIGNED_ARCHIVE")}
-            />
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
+            <p className="text-sm font-semibold text-emerald-800">签署完成存档</p>
+            <p className="mt-1 text-xs text-emerald-700">系统读取 Word/PDF 的文字内容并映射合同字段；缺失字段补齐后才会创建并归档。</p>
           </div>
         </Section>
 
@@ -226,20 +214,10 @@ export function UploadExistingForm({
           </div>
         )}
 
-        {pending && isPdfUpload && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
-            正在识别扫描 PDF。系统需要逐页 OCR，可能需要 1-5 分钟，请不要重复点击或刷新页面。
-          </div>
-        )}
-
         <div className="flex justify-end">
           <button type="button" onClick={submit} disabled={pending || submittingRef.current} className="btn-primary flex items-center gap-1.5 text-sm">
             <Upload className="h-4 w-4" />
-            {pending
-              ? isPdfUpload
-                ? "扫描 PDF OCR 中，请勿重复点击..."
-                : "上传并识别中..."
-              : "上传并识别字段"}
+            {pending ? "上传并识别中..." : "上传并识别字段"}
           </button>
         </div>
       </div>
@@ -355,7 +333,7 @@ function SuccessView({
               </select>
               {needsTemplate && (
                 <p className="mt-1 text-[11px] text-sky-600">
-                  AI 识别到佣金方式：{detectedTemplateKey}，但未匹配到模板，请手动选择。
+                  识别到佣金方式：{detectedTemplateKey}，但未匹配到模板，请手动选择。
                 </p>
               )}
             </div>
@@ -712,28 +690,6 @@ function SupplementFieldInput({
         placeholder={`请输入${field.label}`}
       />
     </div>
-  );
-}
-
-function ModeCard({
-  checked,
-  title,
-  description,
-  onChange,
-}: {
-  checked: boolean;
-  title: string;
-  description: string;
-  onChange: () => void;
-}) {
-  return (
-    <label className="flex cursor-pointer gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm">
-      <input type="radio" className="mt-1" checked={checked} onChange={onChange} />
-      <span>
-        <span className="block font-medium text-slate-700">{title}</span>
-        <span className="text-xs text-slate-500">{description}</span>
-      </span>
-    </label>
   );
 }
 

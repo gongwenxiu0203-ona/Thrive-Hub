@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
+import { CUSTOMER_AUTHORIZATION_PLATFORMS } from "@/lib/constants";
 
 export type AuthorizationInfoResult = { ok: true } | { ok: false; error: string };
 
@@ -44,6 +45,9 @@ export async function saveCustomerAuthorizationInfo(
   const platform = String(fd.get("platform") ?? "").trim();
   const accountInfo = String(fd.get("accountInfo") ?? "").trim();
   if (!platform) return { ok: false, error: "请填写平台" };
+  if (!CUSTOMER_AUTHORIZATION_PLATFORMS.includes(platform as (typeof CUSTOMER_AUTHORIZATION_PLATFORMS)[number])) {
+    return { ok: false, error: "请选择有效的平台" };
+  }
   if (!accountInfo) return { ok: false, error: "请填写具体账号信息" };
 
   if (id) {

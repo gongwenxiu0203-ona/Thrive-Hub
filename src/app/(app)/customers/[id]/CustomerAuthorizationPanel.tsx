@@ -2,11 +2,12 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { KeyRound, Pencil, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, KeyRound, Pencil, Plus, Trash2 } from "lucide-react";
 import {
   deleteCustomerAuthorizationInfo,
   saveCustomerAuthorizationInfo,
 } from "@/actions/customerAuthorizationInfo";
+import { CUSTOMER_AUTHORIZATION_PLATFORMS } from "@/lib/constants";
 
 type AuthInfo = {
   id: string;
@@ -30,6 +31,7 @@ export function CustomerAuthorizationPanel({
   const [editing, setEditing] = useState<AuthInfo | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(true);
 
   function save(fd: FormData) {
     setError(null);
@@ -64,7 +66,15 @@ export function CustomerAuthorizationPanel({
         <div className="flex h-6 w-6 items-center justify-center rounded-md bg-amber-100 text-amber-700">
           <KeyRound className="h-3.5 w-3.5" />
         </div>
-        <h2 className="text-sm font-bold text-slate-700">客户授权信息</h2>
+        <button
+          type="button"
+          className="flex items-center gap-2 text-sm font-bold text-slate-700"
+          onClick={() => setExpanded((value) => !value)}
+          aria-expanded={expanded}
+        >
+          客户授权信息
+          {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+        </button>
         <span className="h-px flex-1 bg-slate-200" />
         {canEdit && (
           <button
@@ -80,7 +90,7 @@ export function CustomerAuthorizationPanel({
         )}
       </div>
 
-      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      {expanded && <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         {items.length === 0 && !showForm ? (
           <p className="py-5 text-center text-sm text-slate-400">暂无客户授权信息</p>
         ) : (
@@ -128,7 +138,12 @@ export function CustomerAuthorizationPanel({
             <input type="hidden" name="id" value={editing?.id ?? ""} />
             <div>
               <label className="label text-xs">平台</label>
-              <input name="platform" className="input" defaultValue={editing?.platform ?? ""} placeholder="例如 Amazon / Levanta / Shopify" />
+              <select name="platform" className="input" defaultValue={editing?.platform ?? ""} required>
+                <option value="" disabled>请选择平台</option>
+                {CUSTOMER_AUTHORIZATION_PLATFORMS.map((platform) => (
+                  <option key={platform} value={platform}>{platform}</option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="label text-xs">具体账号信息</label>
@@ -158,7 +173,7 @@ export function CustomerAuthorizationPanel({
           </form>
         )}
         {error && !showForm && <p className="mt-3 text-sm text-rose-600">{error}</p>}
-      </div>
+      </div>}
     </div>
   );
 }

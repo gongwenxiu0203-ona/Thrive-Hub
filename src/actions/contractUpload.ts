@@ -4,14 +4,12 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { extractDocxContent } from "@/lib/contractDocxExtract";
-import { extractPdfText } from "@/lib/contractPdfExtract";
-import { isContractOcrTimeoutError } from "@/lib/contractOcr";
+import { extractPdfEmbeddedText } from "@/lib/contractPdfExtract";
 import {
   aiExtractContractFields,
   uploadRequiredFields,
 } from "@/lib/contractAiExtract";
 import { contractFileBaseName } from "@/lib/contractFileName";
-import { openReviewRound } from "@/actions/contractReview";
 import { bumpCustomerStatus } from "@/lib/customer";
 import { ensureReconciliationForContract } from "@/actions/channelSplit";
 import { syncContractProgressToProjects } from "@/actions/projects";
@@ -26,7 +24,6 @@ import { customerScope } from "@/lib/dataScope";
 import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
 
 type Result<T = void> = { ok: true; data?: T } | { ok: false; error: string };
-type UploadArchiveMode = "SIGNED_ARCHIVE" | "REVIEW_AND_STAMP";
 type UploadExistingContractData = {
   contractId: string | null;
   missing: { key: string; label: string }[];
@@ -180,7 +177,7 @@ export async function uploadExistingContract(
   const templateId = s(fd, "templateId") || null;
   const partyBCompany = s(fd, "partyBCompany") || null;
   const noPrefix = (s(fd, "contractNoPrefix") as "LYNQ" | "THRAIVE") || "THRAIVE";
-  const uploadArchiveMode = (s(fd, "uploadArchiveMode") as UploadArchiveMode) || "REVIEW_AND_STAMP";
+  const uploadArchiveMode = "SIGNED_ARCHIVE" as const;
   const finalizeUpload = s(fd, "finalizeUpload") === "1";
 
   const file = fd.get("file");
@@ -193,10 +190,9 @@ export async function uploadExistingContract(
   const buf = Buffer.from(await file.arrayBuffer());
   let text = "";
   let sourcePreviewHtml = "";
-  let ocrTimedOut = false;
   try {
     if (ext === "pdf") {
-      text = await extractPdfText(buf);
+      text = await extractPdfEmbeddedText(buf);
       sourcePreviewHtml = textPreviewHtml(text);
     } else {
       const docx = await extractDocxContent(buf);
@@ -204,20 +200,13 @@ export async function uploadExistingContract(
       sourcePreviewHtml = docx.html;
     }
   } catch (error) {
-    if (ext === "pdf" && isContractOcrTimeoutError(error)) {
-      ocrTimedOut = true;
-      text = "";
-      sourcePreviewHtml = textPreviewHtml("扫描 PDF OCR 超过 60 秒未完成，系统已先创建合同草稿，请在合同详情页手动补齐字段。");
-    } else {
-      return {
-        ok: false,
-        error: error instanceof Error
-          ? error.message
-          : "解析合同文件失败：文件可能已损坏或不可识别",
-      };
-    }
+    return {
+      ok: false,
+      error: error instanceof Error
+        ? error.message
+        : "解析合同文件失败：文件可能已损坏或不可识别",
+    };
   }
-  if (!text.trim() && !ocrTimedOut) return { ok: false, error: "合同文件中未识别到文字内容" };
 
   const ai = text.trim() ? await aiExtractContractFields(text) : createAiResult({});
   if (!ai.ok) return { ok: false, error: ai.error };
@@ -283,9 +272,7 @@ export async function uploadExistingContract(
     return valueMissing(v);
   });
   const needsTemplate = !resolvedTemplateId;
-  const createDraftImmediately = ocrTimedOut;
-
-  if ((missing.length > 0 || needsTemplate) && !finalizeUpload && !createDraftImmediately) {
+  if ((missing.length > 0 || needsTemplate) && !finalizeUpload) {
     return {
       ok: true,
       data: {
@@ -304,8 +291,8 @@ export async function uploadExistingContract(
     };
   }
 
-  if (needsTemplate && !createDraftImmediately) return { ok: false, error: "请选择适用的合同模板后再确认" };
-  if (missing.length > 0 && !createDraftImmediately) {
+  if (needsTemplate) return { ok: false, error: "请选择适用的合同模板后再确认" };
+  if (missing.length > 0) {
     return { ok: false, error: `仍有 ${missing.length} 个关键字段未补齐，请先补齐后再确认` };
   }
 
@@ -319,16 +306,16 @@ export async function uploadExistingContract(
           contractNo,
           customerId,
           type,
-          status: uploadArchiveMode === "SIGNED_ARCHIVE" && missing.length === 0 ? "COMPLETED" : "IN_PROGRESS",
+          status: "COMPLETED",
           uploadType: "EXISTING",
           uploadArchiveMode,
-          fillMethod: ocrTimedOut ? "OCR_TIMEOUT" : "AI_EXTRACT",
-          extractedBy: ocrTimedOut ? "OCR_TIMEOUT" : "AI",
+          fillMethod: "AI_EXTRACT",
+          extractedBy: "AI",
           templateId: resolvedTemplateId,
           partyBCompany,
           ownerId,
           reviewerId,
-          contractText: text || "扫描 PDF OCR 超过 60 秒未完成，系统已先创建合同草稿，请手动补齐字段。",
+          contractText: text || "PDF 未包含可提取的文字层，字段由创建人手动补齐。",
           ...persistedMapped,
           commissionType: templateKey,
           commissionRate: primaryRate ?? (typeof mapped.commissionRate === "string" ? mapped.commissionRate : null),
@@ -376,37 +363,23 @@ export async function uploadExistingContract(
     },
   });
 
-  const archived = uploadArchiveMode === "SIGNED_ARCHIVE" && missing.length === 0;
-  if (archived) {
-    await syncContractProgressToProjects(contract.id, "签署完成");
-    await bumpCustomerStatus(customerId, "CONTRACT_SIGNED");
-    const customer = await prisma.customer.findUnique({
-      where: { id: customerId },
-      select: { channelUserId: true },
+  const archived = true;
+  await syncContractProgressToProjects(contract.id, "签署完成");
+  await bumpCustomerStatus(customerId, "COOPERATING");
+  const archiveCustomer = await prisma.customer.findUnique({
+    where: { id: customerId },
+    select: { channelUserId: true },
+  });
+  if (archiveCustomer?.channelUserId) {
+    await ensureReconciliationForContract({
+      contractId: contract.id,
+      customerId,
+      channelUserId: archiveCustomer.channelUserId,
+      createdById: session.userId,
     });
-    if (customer?.channelUserId) {
-      await ensureReconciliationForContract({
-        contractId: contract.id,
-        customerId,
-        channelUserId: customer.channelUserId,
-        createdById: session.userId,
-      });
-    }
-  } else {
-    await bumpCustomerStatus(customerId, "CONTRACT_IN_PROGRESS");
   }
 
-  let autoSubmitted = false;
-  if (uploadArchiveMode !== "SIGNED_ARCHIVE" && missing.length === 0) {
-    const round = await openReviewRound(contract.id);
-    if (round.ok) {
-      await prisma.contract.update({
-        where: { id: contract.id },
-        data: { status: "REVIEWING" },
-      });
-      autoSubmitted = true;
-    }
-  }
+  const autoSubmitted = false;
 
   revalidatePath("/contracts");
   revalidatePath(`/contracts/${contract.id}`);
