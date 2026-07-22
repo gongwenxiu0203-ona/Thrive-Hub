@@ -79,7 +79,7 @@ export async function POST(req: Request) {
   // avoiding the CPU-blocking synchronous parse that caused the "解析中..." hang.
   let sample: { columns: string[]; sampleRows: Row[]; totalRows: number };
   try {
-    sample = parseSheetSample(rawBuffer, 5);
+    sample = parseSheetSample(rawBuffer, 5, file.name);
   } catch {
     return NextResponse.json(
       {

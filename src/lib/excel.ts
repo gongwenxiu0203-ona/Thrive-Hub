@@ -89,6 +89,7 @@ export function parseSheet(buffer: ArrayBuffer): Row[] {
 export function parseSheetSample(
   buffer: ArrayBuffer,
   maxSampleRows = 5,
+  fileName = "",
 ): { columns: string[]; sampleRows: Row[]; totalRows: number } {
   const wb = XLSX.read(buffer, {
     type: "array",
@@ -110,6 +111,15 @@ export function parseSheetSample(
     totalRows = Math.max(0, range.e.r);
   }
 
+  // Unlike XLSX worksheets, CSV input parsed with `sheetRows` has no
+  // `!fullref`: `!ref` only describes the header plus the five sampled rows.
+  // Count logical CSV records directly, respecting quoted embedded newlines,
+  // so the mapping screen can show the real import size without fully parsing
+  // thousands of rows into objects.
+  if (/\.(csv|tsv|txt)$/i.test(fileName)) {
+    totalRows = countDelimitedDataRows(buffer);
+  }
+
   const rows = XLSX.utils.sheet_to_json<Row>(sheet, { defval: "", raw: false });
   if (rows.length === 0) return { columns: [], sampleRows: [], totalRows };
 
@@ -117,6 +127,45 @@ export function parseSheetSample(
   // Fall back to sample length when !ref was unavailable.
   if (totalRows === 0) totalRows = rows.length;
   return { columns, sampleRows: rows.slice(0, maxSampleRows), totalRows };
+}
+
+function countDelimitedDataRows(buffer: ArrayBuffer): number {
+  const bytes = new Uint8Array(buffer);
+  let text: string;
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) {
+    text = new TextDecoder("utf-16le").decode(bytes);
+  } else {
+    text = new TextDecoder("utf-8").decode(bytes);
+  }
+
+  let inQuotes = false;
+  let recordHasContent = false;
+  let logicalRecords = 0;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === '"') {
+      if (inQuotes && text[index + 1] === '"') {
+        index += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      recordHasContent = true;
+      continue;
+    }
+
+    if (!inQuotes && (char === "\r" || char === "\n")) {
+      if (recordHasContent) logicalRecords += 1;
+      recordHasContent = false;
+      if (char === "\r" && text[index + 1] === "\n") index += 1;
+      continue;
+    }
+
+    if (!/\s/.test(char)) recordHasContent = true;
+  }
+
+  if (recordHasContent) logicalRecords += 1;
+  return Math.max(0, logicalRecords - 1); // exclude header record
 }
 
 /** Build an xlsx file buffer from row objects. */

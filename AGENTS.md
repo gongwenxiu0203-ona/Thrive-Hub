@@ -97,6 +97,11 @@
 
 服务器部署的正确顺序（不可跳过任何步骤）：
 
+> **SQLite 锁库红线**：生产环境执行 `npm run build` 会运行 Prisma migration。
+> 在执行服务器构建前，必须先执行 `pm2 stop thrive-hub`，确认应用已停止并释放
+> SQLite 连接。严禁在 PM2 仍为 `online` 时执行生产构建或迁移。构建失败时不得
+> 直接 `pm2 restart` 掩盖错误；应先确认数据库完整性和迁移状态，再决定是否重启。
+
 ```bash
 # 1. 确认本地构建通过
 npm run build
@@ -104,10 +109,22 @@ npm run build
 # 2. 提交并推送代码
 git add ... && git commit && git push
 
-# 3. 服务器端（此命令已包含自动备份）
-cd /root/www && git pull origin master && npm run build && pm2 restart thrive-hub
+# 3. 服务器端先检查备份并拉取代码
+cd /root/www
+tail -n 10 backups/backup.log
+git pull origin master
 
-# 4. 验证服务运行正常
+# 4. 构建前必须停止 PM2，释放 SQLite 数据库连接
+pm2 stop thrive-hub
+pm2 status thrive-hub
+
+# 5. 构建（此命令包含自动备份和 Prisma migrate deploy）
+npm run build
+
+# 6. 仅在构建成功后重启
+pm2 restart thrive-hub --update-env
+
+# 7. 验证服务运行正常
 pm2 status thrive-hub
 curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/login
 ```
