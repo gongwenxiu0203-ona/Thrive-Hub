@@ -234,12 +234,12 @@ function nearChecked(text: string, word: string): boolean {
   return /[☑■✓√]/.test(nearby) || !/[□☐]/.test(nearby.slice(0, 6));
 }
 
-function detectCommissionType(text: string): string {
+function detectCommissionType(text: string): string | undefined {
   if (/特殊佣金机制|特殊佣金/.test(text)) return "SPECIAL";
   if (/阶梯式联盟归因GMV佣金机制|阶梯式区间|阶梯/.test(text)) return "TIERED";
   if (/门槛佣金机制|达到.*门槛|未达到上述/.test(text)) return "THRESHOLD";
   if (/超额联盟归因GMV佣金机制|基准值|超出基准值/.test(text)) return "INCREMENTAL";
-  return "FIXED";
+  return undefined;
 }
 
 function detectSettlementCycle(text: string): string | undefined {

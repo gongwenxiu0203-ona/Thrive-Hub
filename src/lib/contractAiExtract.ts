@@ -12,6 +12,11 @@ const MODEL = "claude-3-5-haiku-20241022";
 // （甲方信用代码/地址/联系人等）未识别可忽略、选择性补足。
 export const UPLOAD_EXTRACT_REQUIRED: { key: string; label: string }[] = [
   { key: "partyAName", label: "甲方公司名称" },
+  { key: "partyACreditCode", label: "甲方统一社会信用代码" },
+  { key: "partyAAddress", label: "甲方地址" },
+  { key: "partyAContact", label: "甲方指定联系人" },
+  { key: "partyAPhone", label: "甲方电话" },
+  { key: "partyAEmail", label: "甲方邮箱" },
   { key: "promoPlatform", label: "销售平台 / 推广平台" },
   { key: "targetSite", label: "目标站点" },
   { key: "startDate", label: "合作开始日期" },
@@ -22,6 +27,7 @@ export const UPLOAD_EXTRACT_REQUIRED: { key: string; label: string }[] = [
   { key: "commissionType", label: "GMV佣金结算方式" },
   { key: "commissionRate", label: "GMV抽佣比例" },
   { key: "gmvSettlementCycle", label: "GMV结算周期" },
+  { key: "coopChannels", label: "合作渠道" },
 ];
 
 // 「上传审核盖章」模式：需识别创建合同时的全部字段（含甲方完整信息），缺失必须补填。
@@ -57,9 +63,7 @@ const COMMISSION_REQUIRED_FIELDS: Record<string, { key: string; label: string }[
   TIERED: [
     { key: "tieredRules", label: "阶梯佣金规则" },
   ],
-  SPECIAL: [
-    { key: "specialCommissionTerms", label: "特殊佣金条款" },
-  ],
+  SPECIAL: [],
   INCREMENTAL: [
     { key: "excessBaseMonths", label: "基准月数" },
     { key: "excessCommissionRate", label: "超额增长部分佣金比例" },

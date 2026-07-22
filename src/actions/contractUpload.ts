@@ -202,7 +202,10 @@ function applyOverrides(mapped: Record<string, unknown>, fd: FormData): Record<s
 
 function valueMissing(value: unknown): boolean {
   if (value == null) return true;
-  if (typeof value === "string") return !value.trim();
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return !trimmed || trimmed === "[]";
+  }
   if (Array.isArray(value)) return value.length === 0;
   return false;
 }
@@ -344,9 +347,12 @@ export async function uploadExistingContract(
     });
   }
   const resolvedTemplateId = resolvedTemplate?.id ?? null;
+  const detectedTemplateKey = typeof mapped.commissionType === "string" && mapped.commissionType.trim()
+    ? normalizeTemplateKey(mapped.commissionType)
+    : "";
   const templateKey = normalizeTemplateKey(
     resolvedTemplate?.templateKey
-      ?? (typeof mapped.commissionType === "string" ? mapped.commissionType : null)
+      ?? detectedTemplateKey
       ?? "FIXED",
   );
   const commissionConfig = commissionConfigFromLegacy({
@@ -388,6 +394,7 @@ export async function uploadExistingContract(
     ...mapped,
     commissionType: templateKey,
     commissionRate: primaryRate ?? mapped.commissionRate,
+    commissionConfig: stringifyCommissionConfig(commissionConfig),
   };
   const requiredFields = uploadRequiredFields(uploadArchiveMode, templateKey);
   const missing = requiredFields.filter((f) => {
@@ -395,7 +402,9 @@ export async function uploadExistingContract(
     return valueMissing(v);
   });
   const needsTemplate = !resolvedTemplateId;
-  if ((missing.length > 0 || needsTemplate) && !finalizeUpload) {
+  // 上传识别只负责预填。即使全部字段均已识别，也必须进入与常规创建一致的
+  // 表单，由员工核对并明确确认后才创建已签署合同。
+  if (!finalizeUpload) {
     return {
       ok: true,
       data: {
@@ -409,7 +418,7 @@ export async function uploadExistingContract(
         sourceTextPreview: text,
         sourcePreviewHtml,
         sourceFileType: ext,
-        detectedTemplateKey: templateKey,
+        detectedTemplateKey,
       },
     };
   }
@@ -521,7 +530,7 @@ export async function uploadExistingContract(
       sourceTextPreview: text,
       sourcePreviewHtml,
       sourceFileType: ext,
-      detectedTemplateKey: templateKey,
+      detectedTemplateKey,
     },
   };
 }

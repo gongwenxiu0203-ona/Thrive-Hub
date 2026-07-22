@@ -4,6 +4,8 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Upload, AlertCircle, CheckCircle2 } from "lucide-react";
 import { uploadExistingContract } from "@/actions/contractUpload";
+import { ContractV4Form } from "./ContractV4Form";
+import type { ContractV4Payload } from "@/actions/contracts";
 import { cn } from "@/lib/utils";
 import {
   CONTRACT_FEE_CURRENCIES,
@@ -123,28 +125,35 @@ export function UploadExistingForm({
     });
   }
 
-  function confirmSupplement(overrides: Record<string, string>, nextTemplateId: string) {
+  async function confirmSupplement(overrides: Record<string, string>, nextTemplateId: string) {
     setError(null);
-    if (!file) { setError("原始文件已丢失，请重新选择合同文件"); return; }
-    startTransition(async () => {
-      const fd = new FormData();
-      fd.append("customerId", customerId);
-      fd.append("contractNoPrefix", contractNoPrefix);
-      fd.append("type", type);
-      if (nextTemplateId) fd.append("templateId", nextTemplateId);
-      if (partyBCompany) fd.append("partyBCompany", partyBCompany);
-      if (ownerId) fd.append("ownerId", ownerId);
-      fd.append("uploadArchiveMode", "SIGNED_ARCHIVE");
-      fd.append("finalizeUpload", "1");
-      for (const [key, value] of Object.entries(overrides)) {
-        fd.append(`override:${key}`, value);
-      }
-      fd.append("file", file);
-      const r = await uploadExistingContract(fd);
-      if (!r.ok) { setError(r.error); return; }
-      setTemplateId(nextTemplateId);
-      setSuccess(r.data!);
-    });
+    if (!file) {
+      const message = "原始文件已丢失，请重新选择合同文件";
+      setError(message);
+      return { ok: false as const, error: message };
+    }
+    const fd = new FormData();
+    fd.append("customerId", overrides.customerId || customerId);
+    fd.append("contractNoPrefix", contractNoPrefix);
+    fd.append("type", overrides.type || type);
+    if (nextTemplateId) fd.append("templateId", nextTemplateId);
+    if (overrides.partyBCompany || partyBCompany) fd.append("partyBCompany", overrides.partyBCompany || partyBCompany);
+    if (overrides.ownerId || ownerId) fd.append("ownerId", overrides.ownerId || ownerId);
+    if (overrides.reviewerId) fd.append("reviewerId", overrides.reviewerId);
+    fd.append("uploadArchiveMode", "SIGNED_ARCHIVE");
+    fd.append("finalizeUpload", "1");
+    for (const [key, value] of Object.entries(overrides)) {
+      fd.append(`override:${key}`, value);
+    }
+    fd.append("file", file);
+    const r = await uploadExistingContract(fd);
+    if (!r.ok) {
+      setError(r.error);
+      return { ok: false as const, error: r.error };
+    }
+    setTemplateId(nextTemplateId);
+    setSuccess(r.data!);
+    return { ok: true as const, contractId: r.data?.contractId ?? undefined };
   }
 
   if (success) {
@@ -163,6 +172,12 @@ export function UploadExistingForm({
         sourceFile={file}
         detectedTemplateKey={success.detectedTemplateKey}
         templates={templates}
+        customers={customers}
+        users={users}
+        customerId={customerId}
+        contractType={type}
+        ownerId={ownerId}
+        partyBCompany={partyBCompany}
         templateId={templateId}
         pending={pending}
         error={error}
@@ -279,6 +294,12 @@ function SuccessView({
   sourceFile,
   detectedTemplateKey,
   templates,
+  customers,
+  users,
+  customerId,
+  contractType,
+  ownerId,
+  partyBCompany,
   templateId,
   pending,
   error,
@@ -298,10 +319,20 @@ function SuccessView({
   sourceFile: File | null;
   detectedTemplateKey: string;
   templates: { id: string; name: string; templateKey: string }[];
+  customers: { id: string; brandName: string }[];
+  users: { id: string; name: string }[];
+  customerId: string;
+  contractType: string;
+  ownerId: string;
+  partyBCompany: string;
   templateId: string;
   pending: boolean;
   error: string | null;
-  onConfirmSupplement: (overrides: Record<string, string>, nextTemplateId: string) => void;
+  onConfirmSupplement: (overrides: Record<string, string>, nextTemplateId: string) => Promise<{
+    ok: boolean;
+    error?: string;
+    contractId?: string;
+  }>;
   onGoToContract: () => void;
 }) {
   const [selectedTemplateId, setSelectedTemplateId] = useState(templateId);
@@ -330,106 +361,46 @@ function SuccessView({
   const paymentAccounts = readRecordArray(fields.__paymentAccounts);
 
   if (needsSupplement) {
+    const matchedTemplateId = selectedTemplateId
+      || templates.find((item) => item.templateKey === detectedTemplateKey)?.id
+      || "";
+    const initialContract = {
+      ...fields,
+      customerId,
+      type: contractType,
+      ownerId,
+      templateId: matchedTemplateId,
+      partyBCompany,
+      commissionType: detectedTemplateKey || fields.commissionType || "",
+    };
+    const submitRecognizedContract = async (payload: ContractV4Payload) => {
+      const mapped: Record<string, string> = {};
+      for (const [key, value] of Object.entries(payload)) {
+        if (value == null) continue;
+        mapped[key === "partyAName" ? "partyA" : key] = String(value);
+      }
+      return onConfirmSupplement(mapped, payload.templateId ?? "");
+    };
     return (
-      <div className="card space-y-5 p-6">
+      <div className="space-y-5">
         <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
           <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
           <div className="flex-1">
             <p className="text-sm font-semibold text-amber-800">识别完成，需要先补齐字段</p>
             <p className="mt-1 text-sm text-amber-700">
-              系统尚未创建合同记录。请对照原文补齐缺失字段，确认后才会创建合同并按所选用途归档或送审。
+              系统尚未创建合同记录。识别到的内容已自动填入下方表单；未识别字段保持为空，按创建合同相同的规则补齐后才会创建并归档。
             </p>
           </div>
         </div>
-
-        <div className="grid gap-5 lg:grid-cols-[1.1fr_1fr]">
-          <div className="min-w-0">
-            <p className="mb-2 text-xs font-semibold text-slate-600">原文对照</p>
-            <SourcePreview
-              file={sourceFile}
-              fileType={sourceFileType}
-              html={sourcePreviewHtml}
-              text={sourceTextPreview}
-            />
-          </div>
-
-          <div className="space-y-3">
-            <ReadonlyComparisonCard
-              title="乙方信息原文对照（只读）"
-              description="仅用于核对上传合同原文，不会覆盖系统内乙方公司与账户配置。"
-              rows={[
-                ["乙方公司", partyBComparison.company],
-                ["统一社会信用代码/商业登记号", partyBComparison.creditCode],
-                ["乙方地址", partyBComparison.address],
-                ["乙方指定联系人", partyBComparison.contact],
-                ["电话", partyBComparison.phone],
-                ["电子邮箱", partyBComparison.email],
-              ]}
-            />
-            <PaymentAccountsCard accounts={paymentAccounts} />
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">
-                适用模板 <span className="text-rose-500">*</span>
-              </label>
-              <select
-                value={selectedTemplateId}
-                onChange={(e) => setSelectedTemplateId(e.target.value)}
-                className="input"
-              >
-                <option value="">请选择适用的合同模板</option>
-                {templates.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                    {t.templateKey === detectedTemplateKey ? "（识别匹配）" : ""}
-                  </option>
-                ))}
-              </select>
-              {needsTemplate && (
-                <p className="mt-1 text-[11px] text-sky-600">
-                  识别到佣金方式：{detectedTemplateKey}，但未匹配到模板，请手动选择。
-                </p>
-              )}
-            </div>
-
-            <div className="space-y-3">
-              <p className="text-xs font-semibold text-slate-600">待补填字段</p>
-              {editableFields.map((field) => (
-                <SupplementFieldInput
-                  key={field.key}
-                  field={field}
-                  value={overrides[field.key] ?? ""}
-                  onChange={(value) => setOverrides((prev) => ({ ...prev, [field.key]: value }))}
-                />
-              ))}
-              {activeTemplateKey === "TIERED" && (
-                <TierEditor value={overrides.tieredRules ?? ""} onChange={(value) => setOverrides((prev) => ({ ...prev, tieredRules: value }))} />
-              )}
-              <CoopChannelEditor value={overrides.coopChannels ?? ""} onChange={(value) => setOverrides((prev) => ({ ...prev, coopChannels: value }))} />
-              <BankAccountEditor value={overrides.partyBBankAccounts ?? ""} onChange={(value) => setOverrides((prev) => ({ ...prev, partyBBankAccounts: value }))} />
-              <ProductEditor value={overrides.productList ?? ""} onChange={(value) => setOverrides((prev) => ({ ...prev, productList: value }))} />
-            </div>
-          </div>
-        </div>
-
-        {error && (
-          <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600">
-            {error}
-          </div>
-        )}
-
-        <div className="flex justify-end gap-2">
-          <button type="button" onClick={() => window.location.reload()} className="btn-secondary text-sm">
-            重新上传
-          </button>
-          <button
-            type="button"
-            disabled={pending}
-            onClick={() => onConfirmSupplement(overrides, selectedTemplateId)}
-            className="btn-primary text-sm"
-          >
-            {pending ? "确认中..." : "补齐并创建合同"}
-          </button>
-        </div>
+        <ContractV4Form
+          customers={customers}
+          users={users}
+          templates={templates}
+          presetCustomerId={customerId}
+          presetCustomerName={customers.find((item) => item.id === customerId)?.brandName}
+          existingContract={initialContract}
+          uploadSubmit={submitRecognizedContract}
+        />
       </div>
     );
   }

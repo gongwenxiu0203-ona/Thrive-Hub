@@ -86,12 +86,17 @@ interface Props {
   currentUserId?: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   existingContract?: any;
+  uploadSubmit?: (payload: ContractV4Payload) => Promise<{
+    ok: boolean;
+    error?: string;
+    contractId?: string;
+  }>;
 }
 
-export function ContractV4Form({ customers, users, templates, presetCustomerId, presetCustomerName, currentUserId, existingContract }: Props) {
+export function ContractV4Form({ customers, users, templates, presetCustomerId, presetCustomerName, currentUserId, existingContract, uploadSubmit }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const isEdit = !!existingContract;
+  const isEdit = !!existingContract && !uploadSubmit;
 
   // ── 填写模式标签页 ────────────────────────────────────────────────────────────
   const [mode, setMode] = useState<"manual" | "ai" | "link">("manual");
@@ -124,8 +129,16 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
     (existingContract?.partyBCompany as PartyBCompanyKey) || ""
   );
   const initialBanks: PartyBBankKey[] = (() => {
-    try { return parsePartyBBanks(JSON.parse(existingContract?.partyBBankAccounts ?? "[]")); }
-    catch { return []; }
+    try {
+      const parsed = parsePartyBBanks(JSON.parse(existingContract?.partyBBankAccounts ?? "[]"));
+      if (parsed.length > 0) return parsed;
+    } catch {
+      // Fall through to the selected company's default account.
+    }
+    const companyKey = existingContract?.partyBCompany as PartyBCompanyKey | undefined;
+    return companyKey && PARTY_B_COMPANIES[companyKey]
+      ? [PARTY_B_COMPANIES[companyKey].defaultBank]
+      : [];
   })();
   const [partyBBankAccounts, setPartyBBankAccounts] = useState<PartyBBankKey[]>(initialBanks);
   // 特殊佣金条款（仅 SPECIAL 模板使用）
@@ -153,7 +166,7 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
 
   // 合作信息 — 销售平台（多选，第一条 + 推广平台 共用）
   const STD_PLATFORMS: readonly string[] = CONTRACT_STANDARD_PLATFORMS;
-  const initialPlatforms = (existingContract?.promoPlatform ?? "亚马逊（Amazon）")
+  const initialPlatforms = (existingContract?.promoPlatform ?? (uploadSubmit ? "" : "亚马逊（Amazon）"))
     .split(",").map((s: string) => s.trim()).filter(Boolean);
   const [platforms, setPlatforms] = useState<string[]>(
     initialPlatforms.filter((p: string) => STD_PLATFORMS.includes(p))
@@ -170,14 +183,14 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
   );
   const [startDate,      setStartDate]      = useState(existingContract?.startDate ? new Date(existingContract.startDate).toISOString().slice(0, 10) : "");
   const [endDate,        setEndDate]        = useState(existingContract?.endDate ? new Date(existingContract.endDate).toISOString().slice(0, 10) : "");
-  const [taxType,        setTaxType]        = useState(existingContract?.taxType ?? "不含税");
-  const [taxBearer,      setTaxBearer]      = useState(existingContract?.taxBearer ?? "甲方");
+  const [taxType,        setTaxType]        = useState(existingContract?.taxType ?? (uploadSubmit ? "" : "不含税"));
+  const [taxBearer,      setTaxBearer]      = useState(existingContract?.taxBearer ?? (uploadSubmit ? "" : "甲方"));
 
   // 费用
-  const [feeCurrency,    setFeeCurrency]    = useState(existingContract?.feeCurrency ?? "美金");
+  const [feeCurrency,    setFeeCurrency]    = useState(existingContract?.feeCurrency ?? (uploadSubmit ? "" : "美金"));
   const [contractType,   setContractType]   = useState(existingContract?.type ?? "BRAND");
   const [feeAmount,      setFeeAmount]      = useState(existingContract?.feeAmount ?? "");
-  const [feeCycle,       setFeeCycle]       = useState(existingContract?.feeCycle ?? "月付");
+  const [feeCycle,       setFeeCycle]       = useState(existingContract?.feeCycle ?? (uploadSubmit ? "" : "月付"));
 
   // 首期服务费：自动计算，不需要手动输入
   const computedFirstPeriodFee = (() => {
@@ -201,7 +214,7 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
   );
   const [excessBaseMonths, setExcessBaseMonths] = useState(existingContract?.excessBaseMonths ?? "");
   const [excessRate,     setExcessRate]     = useState(existingCommissionConfig.incremental?.excessRate ?? existingContract?.excessCommissionRate ?? "");
-  const [gmvCycle,       setGmvCycle]       = useState(existingContract?.gmvSettlementCycle ?? "月度");
+  const [gmvCycle,       setGmvCycle]       = useState(existingContract?.gmvSettlementCycle ?? (uploadSubmit ? "" : "月度"));
   const [specialAttributionRate, setSpecialAttributionRate] = useState(existingCommissionConfig.special?.attributionRate ?? "");
   const [specialCreatorRate, setSpecialCreatorRate] = useState(existingCommissionConfig.special?.creatorRate ?? "");
   const [specialLowThreshold, setSpecialLowThreshold] = useState(existingCommissionConfig.special?.lowGmvThreshold ?? "");
@@ -286,11 +299,18 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
   function validateCoopFields(): string | null {
     if (!customerId) return "请选择关联客户";
     if (!templateId) return "请选择适用的合同模板";
+    if (!partyBCompany) return "请选择乙方签约公司";
+    if (partyBBankAccounts.length === 0) return "请至少选择一个乙方收款账户";
     if (platforms.length === 0 && !otherPlatform.trim()) return "请至少选择一个销售平台";
     if (targetSites.length === 0) return "请至少选择一个目标站点";
     if (!startDate) return "请填写合作开始日期";
     if (!endDate) return "请填写合作结束日期";
+    if (!taxType) return "请选择税费类型";
+    if (!taxBearer.trim()) return "请填写税费承担方";
+    if (!feeCurrency) return "请选择月度服务费货币";
     if (!feeAmount.trim()) return "请填写月度服务费金额";
+    if (!feeCycle) return "请选择固费支付周期";
+    if (!gmvCycle) return "请选择 GMV 结算周期";
     if (activeCommissionType === "FIXED" && !commissionRate.trim()) return "请填写 GMV 抽佣比例";
     if (activeCommissionType === "THRESHOLD" && (!thresholdAmount.trim() || !(thresholdReachedRate || commissionRate).trim() || !thresholdUnreachedRate.trim())) return "请填写 GMV 门槛金额、达标后比例和未达标比例";
     if (activeCommissionType === "TIERED" && tieredRows.some((r) => !r.from.trim() || !r.rate.trim())) return "请填写完整的阶梯区间和佣金比例";
@@ -465,9 +485,11 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
       const payload = buildPayload();
       // 链接模式生成草稿后保存 → 走更新；否则新建/编辑
       const targetId = existingContract?.id ?? createdContractId;
-      const result = targetId
-        ? await updateContractV4(targetId, payload)
-        : await createContractV4(payload);
+      const result = uploadSubmit
+        ? await uploadSubmit(payload)
+        : targetId
+          ? await updateContractV4(targetId, payload)
+          : await createContractV4(payload);
 
       if (!result.ok) { setError(result.error ?? "保存失败"); return; }
       setSuccess(true);
@@ -582,7 +604,7 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
         {/* ── ③ 甲方信息（可手动填写 / AI 识别 / 生成填写链接发给客户填）── */}
         <FormSection title="③ 甲方信息" color="blue">
           {/* AI 识别 + 生成填写链接 内联工具栏 */}
-          <div className="mb-4 space-y-3 rounded-lg border border-blue-100 bg-white p-3">
+          {!uploadSubmit && <div className="mb-4 space-y-3 rounded-lg border border-blue-100 bg-white p-3">
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
@@ -647,7 +669,7 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
                 <p className="text-[11px] text-emerald-700">链接有效期 60 天，可转发给甲方相关人员重复填写；合同进入审核或签署流程后自动失效。</p>
               </div>
             )}
-          </div>
+          </div>}
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="sm:col-span-2">
@@ -756,6 +778,7 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
               <div>
                 <label className="label">税费</label>
                 <select className="input" value={taxType} onChange={e => setTaxType(e.target.value)}>
+                  {uploadSubmit && <option value="">请选择</option>}
                   <option>不含税</option>
                   <option>含税</option>
                 </select>
@@ -773,6 +796,7 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
                 <div>
                   <label className="label text-xs">货币</label>
                   <select className="input" value={feeCurrency} onChange={e => setFeeCurrency(e.target.value)}>
+                    {uploadSubmit && <option value="">请选择</option>}
                     {CONTRACT_FEE_CURRENCIES.map((currency) => (
                       <option key={currency}>{currency}</option>
                     ))}
@@ -1054,7 +1078,7 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
               </button>
             )}
             <button type="submit" disabled={pending} className="btn-primary">
-              {pending ? "保存中…" : (isEdit || createdContractId) ? "保存修改" : "创建合同"}
+              {pending ? "保存中…" : uploadSubmit ? "确认字段并创建合同" : (isEdit || createdContractId) ? "保存修改" : "创建合同"}
             </button>
           </div>
         </div>

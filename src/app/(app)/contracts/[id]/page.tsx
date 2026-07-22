@@ -18,7 +18,8 @@ import {
   type ReviewFieldRow,
 } from "./ReviewerActionsPanel";
 import { REVIEWER_EMAIL } from "@/lib/contractReviewer";
-import { UPLOAD_EXTRACT_REQUIRED } from "@/lib/contractAiExtract";
+import { uploadRequiredFields } from "@/lib/contractAiExtract";
+import { parseCommissionConfig } from "@/lib/contractCommissionConfig";
 import {
   SNAPSHOT_FIELD_KEY,
   collectContractFieldSnapshot,
@@ -172,8 +173,9 @@ export default async function ContractDetailPage({
     !!currentReview;
 
   // 「上传已有合同」的缺失字段：用 contract 表实际列回查（与 AI 抽取结果分离）
+  const uploadCommissionConfig = parseCommissionConfig(c.commissionConfig);
   const uploadValueByKey: Record<string, unknown> = {
-    partyAName: contract.partyA,
+    partyA: contract.partyA,
     partyACreditCode: c.partyACreditCode,
     partyAAddress: c.partyAAddress,
     partyAContact: c.partyAContact,
@@ -183,11 +185,25 @@ export default async function ContractDetailPage({
     endDate: contract.endDate,
     feeAmount: contract.feeAmount,
     feeCurrency: c.feeCurrency,
+    feeCycle: c.feeCycle,
+    promoPlatform: c.promoPlatform,
+    targetSite: c.targetSite,
+    commissionType: c.commissionType,
     commissionRate: contract.commissionRate,
+    gmvSettlementCycle: c.gmvSettlementCycle,
+    thresholdCurrency: c.thresholdCurrency,
+    thresholdAmount: c.thresholdAmount,
+    thresholdReachedRate: uploadCommissionConfig.threshold?.reachedRate,
+    thresholdUnreachedRate: uploadCommissionConfig.threshold?.unreachedRate,
+    tieredRules: c.tieredRules,
+    excessBaseMonths: c.excessBaseMonths,
+    excessCommissionRate: c.excessCommissionRate,
+    specialCommissionTerms: c.specialCommissionTerms,
+    coopChannels: c.coopChannels,
   };
   const uploadMissing =
     c.uploadType === "EXISTING"
-      ? UPLOAD_EXTRACT_REQUIRED.filter((f) => {
+      ? uploadRequiredFields("SIGNED_ARCHIVE", c.commissionType).filter((f) => {
           const v = uploadValueByKey[f.key];
           if (v == null) return true;
           if (typeof v === "string" && !v.trim()) return true;
@@ -584,6 +600,25 @@ export default async function ContractDetailPage({
       <section className="card p-5">
         <h2 className="mb-1 font-semibold text-slate-900">合同文件</h2>
         <p className="mb-4 text-sm text-slate-400">上传合同 PDF 等文件</p>
+        {c.uploadType === "EXISTING" && contract.versions.length > 0 && (() => {
+          const uploadedVersion = contract.versions.find((version) => version.versionNo === 1)
+            ?? contract.versions[contract.versions.length - 1];
+          const uploadedName = decodeURIComponent(uploadedVersion.fileUrl.split("/").pop() ?? "原始上传合同");
+          return (
+            <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-slate-700">{uploadedName}</p>
+                <p className="text-xs text-slate-400">原始上传合同 · 只读</p>
+              </div>
+              <a
+                href={`/api/contracts/version-download/${uploadedVersion.id}`}
+                className="btn-secondary shrink-0 text-xs"
+              >
+                <FileDown className="h-3.5 w-3.5" /> 下载
+              </a>
+            </div>
+          );
+        })()}
         <FileUploader
           entityType="CONTRACT"
           entityId={contract.id}
