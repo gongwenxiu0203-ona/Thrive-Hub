@@ -14,6 +14,7 @@ import { TaskFormModal } from "./TaskFormModal";
 import type { KanbanTask } from "./KanbanBoard";
 import { KanbanBoardWrapper } from "./KanbanBoardWrapper";
 import { ViewAsSelector } from "./ViewAsSelector";
+import { TaskModeTabs } from "./TaskModeTabs";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "任务管理 · Thraive联盟营销系统" };
@@ -38,7 +39,6 @@ export default async function TasksPage({
   const sp = await searchParams;
   const isAdmin = session.role === "ADMIN";
 
-  const ownerFilter = csv(sp, "owner");
   const customerFilter = csv(sp, "customer");
   const priorityFilter = csv(sp, "priority");
   const categoryFilter = csv(sp, "category");
@@ -50,6 +50,7 @@ export default async function TasksPage({
   // Non-admin: always filter to own tasks regardless of params.
   const viewAsId = isAdmin && sp.owner ? sp.owner : session.userId;
   const defaultToCurrentUser = viewAsId === session.userId;
+  const taskMode = sp.mode === "published" ? "published" : "owned";
 
   // 行级权限
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -66,24 +67,55 @@ export default async function TasksPage({
   const [allTasks, customers, users] = await Promise.all([
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prisma.task.findMany({
-      where: { ...taskScope(sess, view), deletedAt: null } as any,
+      where: {
+        ...taskScope(sess, isAdmin && !defaultToCurrentUser ? "all" : view),
+        deletedAt: null,
+      } as any,
       orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
-      include: { customer: true, owner: true, publisher: true },
+      include: {
+        customer: true,
+        owner: true,
+        publisher: true,
+      },
     }),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prisma.customer.findMany({
       where: { ...customerScope(sess, view), deletedAt: null } as any,
       orderBy: { brandName: "asc" },
     }),
-    prisma.user.findMany({ orderBy: { name: "asc" } }),
+    prisma.user.findMany({
+      where: {
+        status: "APPROVED",
+        role: { in: ["ADMIN", "USER"] },
+      },
+      orderBy: { name: "asc" },
+    }),
   ]);
+
+  // Task only stores contractId (no Prisma relation), so resolve contract
+  // labels in one query instead of issuing a query for every card.
+  const contractIds = Array.from(
+    new Set(allTasks.map((task) => task.contractId).filter(Boolean)),
+  ) as string[];
+  const contracts = contractIds.length
+    ? await prisma.contract.findMany({
+        where: { id: { in: contractIds }, deletedAt: null },
+        select: { id: true, contractNo: true },
+      })
+    : [];
+  const contractsById = new Map(
+    contracts.map((contract) => [contract.id, contract]),
+  );
 
   // Client filtering
   const tasks = allTasks
     .filter((t) => {
-      // Always filter to viewAsId (current user or admin-selected user)
-      if (t.ownerId !== viewAsId) return false;
-      if (ownerFilter.length && !ownerFilter.includes(t.ownerId ?? "")) return false;
+      // “我负责的 / 我发起的”均以当前查看成员为准；管理员可切换成员。
+      if (taskMode === "published") {
+        if (t.publisherId !== viewAsId) return false;
+      } else if (t.ownerId !== viewAsId) {
+        return false;
+      }
       if (customerFilter.length && !customerFilter.includes(t.customerId ?? "")) return false;
       if (priorityFilter.length && !priorityFilter.includes(t.priority)) return false;
       if (categoryFilter.length && !categoryFilter.includes(t.category)) return false;
@@ -138,8 +170,20 @@ export default async function TasksPage({
     priority: t.priority,
     returnReason: t.returnReason,
     customerName: t.customer?.brandName ?? null,
+    ownerId: t.ownerId,
     ownerName: t.owner?.name ?? null,
     publisherName: t.publisher?.name ?? null,
+    contractId: t.contractId,
+    contractNo: t.contractId
+      ? contractsById.get(t.contractId)?.contractNo ?? null
+      : null,
+    installmentLabel:
+      t.title.match(/第\s*\d+\s*期/)?.[0].replace(/\s+/g, "") ??
+      t.description?.match(/第\s*\d+\s*期/)?.[0].replace(/\s+/g, "") ??
+      null,
+    canReassign:
+      (session.role === "ADMIN" || session.role === "USER") &&
+      (isAdmin || t.ownerId === session.userId || t.publisherId === session.userId),
     dueDate: t.dueDate ? t.dueDate.toISOString() : null,
     meetingTime: t.meetingTime ? t.meetingTime.toISOString() : null,
     meetingMode: t.meetingMode,
@@ -162,8 +206,8 @@ export default async function TasksPage({
         title="任务管理"
         description={
           defaultToCurrentUser
-            ? `显示我的任务 · 共 ${tasks.length} 项 — 拖拽卡片切换状态`
-            : `查看 ${users.find((u) => u.id === viewAsId)?.name ?? ""} 的任务 · 共 ${tasks.length} 项`
+            ? `${taskMode === "published" ? "显示我发起的任务" : "显示我负责的任务"} · 共 ${tasks.length} 项 — 拖拽卡片切换状态`
+            : `查看 ${users.find((u) => u.id === viewAsId)?.name ?? ""}${taskMode === "published" ? "发起" : "负责"}的任务 · 共 ${tasks.length} 项`
         }
         actions={
           <div className="flex items-center gap-2">
@@ -175,15 +219,10 @@ export default async function TasksPage({
         }
       />
 
+      <TaskModeTabs mode={taskMode} />
+
       <FilterBar>
         <SearchFilter placeholder="搜索任务标题 / 品牌" />
-        {isAdmin && (
-          <MultiSelectFilter
-            paramKey="owner"
-            placeholder="负责人"
-            options={userOptions.map((u) => ({ value: u.id, label: u.name }))}
-          />
-        )}
         <MultiSelectFilter
           paramKey="customer"
           placeholder="关联品牌"

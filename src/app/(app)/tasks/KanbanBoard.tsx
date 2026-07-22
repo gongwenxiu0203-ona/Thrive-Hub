@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   DndContext,
@@ -13,7 +13,12 @@ import {
   type DragStartEvent,
   type DragEndEvent,
 } from "@dnd-kit/core";
-import { CalendarClock, User as UserIcon } from "lucide-react";
+import {
+  CalendarClock,
+  FileText,
+  ReceiptText,
+  User as UserIcon,
+} from "lucide-react";
 import { moveTask } from "@/actions/tasks";
 import type { AttachmentItem } from "@/components/FileUploader";
 import {
@@ -47,6 +52,9 @@ function TaskCard({
   dragging?: boolean;
 }) {
   const dleft = daysUntil(task.dueDate);
+  const isReceivable =
+    task.category === "RECEIVABLE_MONTHLY_FEE" ||
+    task.category === "RECEIVABLE_GMV";
   return (
     <div
       onClick={onOpen}
@@ -69,6 +77,20 @@ function TaskCard({
       <p className="mb-2 text-xs text-slate-400">
         {labelOf(TASK_CATEGORY_LABELS, task.category)}
       </p>
+      {isReceivable && (
+        <div className="mb-2 space-y-1 rounded-md bg-emerald-50 px-2 py-1.5 text-xs text-emerald-800">
+          <p className="flex items-center gap-1 font-medium">
+            <ReceiptText className="h-3 w-3" />
+            {task.installmentLabel ?? "收款待办"}
+          </p>
+          {task.contractNo && (
+            <p className="flex items-center gap-1 text-emerald-700/80">
+              <FileText className="h-3 w-3" />
+              {task.contractNo}
+            </p>
+          )}
+        </div>
+      )}
       <div className="flex items-center justify-between text-xs text-slate-400">
         <span className="flex items-center gap-1">
           <UserIcon className="h-3 w-3" />
@@ -180,6 +202,17 @@ export function KanbanBoard({
       ? initialOpenId
       : null,
   );
+
+  // Server actions refresh the route; mirror refreshed records into the
+  // client board so reassignment/status changes appear without a hard reload.
+  useEffect(() => {
+    setTasks(initialTasks);
+    setOpenId((current) =>
+      current && initialTasks.some((task) => task.id === current)
+        ? current
+        : null,
+    );
+  }, [initialTasks]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),

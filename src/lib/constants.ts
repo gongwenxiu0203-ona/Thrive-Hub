@@ -264,6 +264,8 @@ export const TASK_CATEGORY_LABELS: Record<string, string> = {
   DEMO_PLAN: "Demo方案制定",
   MEETING_BOOKING: "客户会议预约",
   CONTRACT_REVIEW: "合同审核",
+  RECEIVABLE_MONTHLY_FEE: "月费收取",
+  RECEIVABLE_GMV: "GMV 抽佣收取",
 };
 
 export const MEETING_MODE_LABELS: Record<string, string> = {

@@ -364,6 +364,7 @@ model ContractFieldReview {
 
 model Task {
   id           String  @id @default(cuid())
+  automationKey String? @unique // 自动任务幂等键；空值兼容既有人工任务
   title        String
   description  String?
   customerId   String?

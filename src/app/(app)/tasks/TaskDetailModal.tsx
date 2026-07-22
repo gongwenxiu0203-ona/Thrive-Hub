@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   PlayCircle,
@@ -13,6 +14,9 @@ import {
   Link2,
   Plus,
   Trash2,
+  ArrowRightLeft,
+  ReceiptText,
+  ExternalLink,
 } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { Badge } from "@/components/ui/Badge";
@@ -24,6 +28,7 @@ import {
   updateTaskContent,
   updateTaskLinks,
   submitMeetingInfo,
+  reassignTask,
 } from "@/actions/tasks";
 import {
   TASK_STATUS_LABELS,
@@ -47,6 +52,11 @@ export type TaskDetail = {
   priority: string;
   returnReason: string | null;
   customerName: string | null;
+  contractId: string | null;
+  contractNo: string | null;
+  installmentLabel: string | null;
+  canReassign: boolean;
+  ownerId: string | null;
   ownerName: string | null;
   publisherName: string | null;
   dueDate: string | null;
@@ -76,6 +86,13 @@ export function TaskDetailModal({
 
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description ?? "");
+  const [selectedOwnerId, setSelectedOwnerId] = useState(task.ownerId ?? "");
+  const [reassigned, setReassigned] = useState(false);
+
+  useEffect(() => {
+    setSelectedOwnerId(task.ownerId ?? "");
+    setReassigned(false);
+  }, [task.id, task.ownerId]);
 
   const [showReturn, setShowReturn] = useState(false);
   const [returnReason, setReturnReason] = useState("");
@@ -137,6 +154,11 @@ export function TaskDetailModal({
   }
 
   const isMeeting = task.category === "MEETING_BOOKING";
+  const isReceivable =
+    task.category === "RECEIVABLE_MONTHLY_FEE" ||
+    task.category === "RECEIVABLE_GMV";
+  const receivableType =
+    task.category === "RECEIVABLE_MONTHLY_FEE" ? "月费收取" : "GMV 抽佣收取";
 
   return (
     <Modal open={open} onClose={close} title="任务详情" wide>
@@ -193,6 +215,38 @@ export function TaskDetailModal({
           </div>
         )}
 
+        {isReceivable && (
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-4">
+            <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-emerald-900">
+              <ReceiptText className="h-4 w-4" />
+              收款待办
+            </div>
+            <div className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-5">
+              <Meta label="客户" value={task.customerName} />
+              <div>
+                <span className="text-xs text-emerald-700/70">合同</span>
+                {task.contractId && task.contractNo ? (
+                  <Link
+                    href={`/contracts/${task.contractId}`}
+                    className="flex items-center gap-1 font-medium text-brand-700 hover:underline"
+                  >
+                    {task.contractNo}
+                    <ExternalLink className="h-3 w-3" />
+                  </Link>
+                ) : (
+                  <p className="text-slate-700">—</p>
+                )}
+              </div>
+              <Meta label="收款类型" value={receivableType} />
+              <Meta label="期数" value={task.installmentLabel} />
+              <Meta
+                label="应收日"
+                value={task.dueDate ? formatDate(task.dueDate) : null}
+              />
+            </div>
+          </div>
+        )}
+
         {/* 可编辑文本 */}
         <div className="space-y-3">
           <div>
@@ -233,6 +287,63 @@ export function TaskDetailModal({
             value={task.dueDate ? formatDate(task.dueDate) : null}
           />
         </div>
+
+        {task.canReassign && (
+          <div className="rounded-xl border border-slate-200 bg-white p-4">
+            <div className="mb-3 flex items-center gap-2">
+              <ArrowRightLeft className="h-4 w-4 text-brand-600" />
+              <div>
+                <p className="text-sm font-semibold text-slate-800">转派任务 / 代办</p>
+                <p className="text-xs text-slate-500">
+                  仅可转派给已通过审核的内部员工；转派记录会保留在操作日志中。
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+              <div className="flex-1">
+                <label className="label text-xs">新负责人</label>
+                <select
+                  className="input"
+                  value={selectedOwnerId}
+                  onChange={(event) => {
+                    setSelectedOwnerId(event.target.value);
+                    setReassigned(false);
+                  }}
+                >
+                  <option value="">请选择内部员工</option>
+                  {users.map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button
+                type="button"
+                className="btn-primary min-h-10 sm:min-w-28"
+                disabled={
+                  pending ||
+                  !selectedOwnerId ||
+                  selectedOwnerId === task.ownerId
+                }
+                onClick={() =>
+                  run(async () => {
+                    await reassignTask(task.id, selectedOwnerId);
+                    setReassigned(true);
+                  })
+                }
+              >
+                <ArrowRightLeft className="h-4 w-4" />
+                {pending ? "转派中…" : "确认转派"}
+              </button>
+            </div>
+            {reassigned && (
+              <p className="mt-2 text-xs text-emerald-600">
+                已完成转派，可在“我发起的”中继续跟踪进度。
+              </p>
+            )}
+          </div>
+        )}
 
         {/* 客户会议预约：结构化会议信息 */}
         {isMeeting && (

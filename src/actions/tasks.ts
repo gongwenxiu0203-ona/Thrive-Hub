@@ -6,27 +6,89 @@ import { requireSession } from "@/lib/session";
 import { TASK_STATUS_ORDER } from "@/lib/constants";
 import { bumpCustomerStatus } from "@/lib/customer";
 import { sendMeetingInvite } from "@/lib/notify";
+import { requireFeaturePermission } from "@/lib/permissionGuard";
+import { writeAdminAudit } from "@/lib/adminObservability";
+import type { SessionPayload } from "@/lib/auth";
+
+const TASK_WRITE_STATUSES = new Set([
+  "TODO",
+  "IN_PROGRESS",
+  "REVIEW",
+  "DONE",
+  "RETURNED",
+  "CANCELLED",
+]);
 
 function str(fd: FormData, key: string): string {
   return String(fd.get(key) ?? "").trim();
 }
 
+async function requireTaskEditor(): Promise<SessionPayload> {
+  const session = await requireSession();
+  if (
+    session.status !== "APPROVED" ||
+    (session.role !== "ADMIN" && session.role !== "USER")
+  ) {
+    throw new Error("无权修改任务");
+  }
+  await requireFeaturePermission(session, "tasks", "EDIT");
+  return session;
+}
+
+async function requireTaskWriteAccess(taskId: string, session: SessionPayload) {
+  const task = await prisma.task.findFirst({
+    where: {
+      id: taskId,
+      deletedAt: null,
+      ...(session.role === "ADMIN"
+        ? {}
+        : { OR: [{ ownerId: session.userId }, { publisherId: session.userId }] }),
+    },
+    select: {
+      id: true,
+      title: true,
+      ownerId: true,
+      publisherId: true,
+      customerId: true,
+    },
+  });
+  if (!task) throw new Error("任务不存在或无权操作");
+  return task;
+}
+
+async function requireApprovedInternalUsers(userIds: Array<string | null>) {
+  const ids = [...new Set(userIds.filter((id): id is string => Boolean(id)))];
+  if (ids.length === 0) return;
+  const count = await prisma.user.count({
+    where: {
+      id: { in: ids },
+      status: "APPROVED",
+      role: { in: ["ADMIN", "USER"] },
+    },
+  });
+  if (count !== ids.length) throw new Error("任务只能分配给已通过审核的内部员工");
+}
+
 export async function createTask(fd: FormData) {
-  await requireSession();
+  const session = await requireTaskEditor();
   const title = str(fd, "title");
   if (!title) throw new Error("任务标题为必填项");
 
   const status = str(fd, "status") || "TODO";
+  if (!TASK_WRITE_STATUSES.has(status)) throw new Error("无效的任务状态");
   const count = await prisma.task.count({ where: { status } });
   const dueDate = str(fd, "dueDate");
+  const ownerId = str(fd, "ownerId") || null;
+  const publisherId = str(fd, "publisherId") || session.userId;
+  await requireApprovedInternalUsers([ownerId, publisherId]);
 
   await prisma.task.create({
     data: {
       title,
       description: str(fd, "description") || null,
       customerId: str(fd, "customerId") || null,
-      ownerId: str(fd, "ownerId") || null,
-      publisherId: str(fd, "publisherId") || null,
+      ownerId,
+      publisherId,
       priority: str(fd, "priority") || "MID",
       category: str(fd, "category") || "GENERAL",
       status,
@@ -38,10 +100,14 @@ export async function createTask(fd: FormData) {
 }
 
 export async function updateTask(id: string, fd: FormData) {
-  await requireSession();
+  const session = await requireTaskEditor();
+  await requireTaskWriteAccess(id, session);
   const title = str(fd, "title");
   if (!title) throw new Error("任务标题为必填项");
   const dueDate = str(fd, "dueDate");
+  const ownerId = str(fd, "ownerId") || null;
+  const publisherId = str(fd, "publisherId") || null;
+  await requireApprovedInternalUsers([ownerId, publisherId]);
 
   await prisma.task.update({
     where: { id },
@@ -49,8 +115,8 @@ export async function updateTask(id: string, fd: FormData) {
       title,
       description: str(fd, "description") || null,
       customerId: str(fd, "customerId") || null,
-      ownerId: str(fd, "ownerId") || null,
-      publisherId: str(fd, "publisherId") || null,
+      ownerId,
+      publisherId,
       priority: str(fd, "priority") || "MID",
       category: str(fd, "category") || "GENERAL",
       dueDate: dueDate ? new Date(dueDate) : null,
@@ -59,13 +125,66 @@ export async function updateTask(id: string, fd: FormData) {
   revalidatePath("/tasks");
 }
 
+/** Reassign a task while preserving its publisher for progress tracking. */
+export async function reassignTask(taskId: string, newOwnerId: string) {
+  const session = await requireTaskEditor();
+  const authorizedTask = await requireTaskWriteAccess(taskId, session);
+
+  const newOwner = await prisma.user.findFirst({
+      where: {
+        id: newOwnerId,
+        status: "APPROVED",
+        role: { in: ["ADMIN", "USER"] },
+      },
+      select: { id: true, name: true },
+    });
+
+  if (!newOwner) throw new Error("只能转派给已通过审核的内部员工");
+  const task = authorizedTask;
+  if (task.ownerId === newOwner.id) return;
+
+  const previousOwnerId = task.ownerId;
+  await prisma.$transaction(async (tx) => {
+    await tx.task.update({
+      where: { id: task.id },
+      data: { ownerId: newOwner.id },
+    });
+    await tx.reminder.create({
+      data: {
+        title: `收到转派任务：${task.title}`,
+        content: "请前往任务管理查看任务要求并跟踪处理进度。",
+        remindDate: new Date(),
+        type: "FOLLOWUP",
+        targetId: newOwner.id,
+        createdById: session.userId,
+      },
+    });
+  });
+
+  await writeAdminAudit({
+    actorId: session.userId,
+    action: "REASSIGN",
+    module: "TASK",
+    targetType: "Task",
+    targetId: task.id,
+    targetLabel: task.title,
+    summary: `转派任务给 ${newOwner.name}`,
+    before: { ownerId: previousOwnerId },
+    after: { ownerId: newOwner.id },
+  });
+
+  revalidatePath("/tasks");
+  revalidatePath("/dashboard");
+}
+
 /** Lightweight content edit from the task detail panel (title + description). */
 export async function updateTaskContent(
   id: string,
   title: string,
   description: string,
 ) {
-  await requireSession();
+  const session = await requireTaskEditor();
+  await requireTaskWriteAccess(id, session);
   if (!title.trim()) throw new Error("任务标题不能为空");
   await prisma.task.update({
     where: { id },
@@ -75,7 +194,8 @@ export async function updateTaskContent(
 }
 
 export async function deleteTask(id: string) {
-  await requireSession();
+  const session = await requireTaskEditor();
+  await requireTaskWriteAccess(id, session);
   // 软删除：进回收站
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (prisma.task.update as any)({ where: { id }, data: { deletedAt: new Date() } });
@@ -88,13 +208,27 @@ export async function moveTask(
   toStatus: string,
   orderedIds: string[],
 ) {
-  await requireSession();
+  const session = await requireTaskEditor();
+  await requireTaskWriteAccess(taskId, session);
   if (!TASK_STATUS_ORDER.includes(toStatus)) {
     throw new Error("无效的任务状态");
   }
+  const uniqueOrderedIds = [...new Set(orderedIds)];
+  if (uniqueOrderedIds.length > 0 && session.role !== "ADMIN") {
+    const allowedCount = await prisma.task.count({
+      where: {
+        id: { in: uniqueOrderedIds },
+        deletedAt: null,
+        OR: [{ ownerId: session.userId }, { publisherId: session.userId }],
+      },
+    });
+    if (allowedCount !== uniqueOrderedIds.length) {
+      throw new Error("排序列表包含无权操作的任务");
+    }
+  }
   await prisma.$transaction([
     prisma.task.update({ where: { id: taskId }, data: { status: toStatus } }),
-    ...orderedIds.map((id, index) =>
+    ...uniqueOrderedIds.map((id, index) =>
       prisma.task.update({ where: { id }, data: { sortOrder: index } }),
     ),
   ]);
@@ -104,7 +238,9 @@ export async function moveTask(
 
 /** Plain status change used by the detail-panel action buttons. */
 export async function setTaskStatus(id: string, status: string) {
-  await requireSession();
+  const session = await requireTaskEditor();
+  await requireTaskWriteAccess(id, session);
+  if (!TASK_WRITE_STATUSES.has(status)) throw new Error("无效的任务状态");
   await prisma.task.update({
     where: { id },
     data: { status, returnReason: null },
@@ -115,7 +251,8 @@ export async function setTaskStatus(id: string, status: string) {
 
 /** Save external links on a task. */
 export async function updateTaskLinks(id: string, links: { label: string; url: string }[]) {
-  await requireSession();
+  const session = await requireTaskEditor();
+  await requireTaskWriteAccess(id, session);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (prisma.task.update as any)({
     where: { id },
@@ -130,7 +267,9 @@ export async function submitTaskForReview(
   reviewerIds: string[] = [],
   newDueDate?: string,
 ) {
-  const session = await requireSession();
+  const session = await requireTaskEditor();
+  await requireTaskWriteAccess(id, session);
+  await requireApprovedInternalUsers(reviewerIds);
 
   // Fetch full task content for the notification
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -202,7 +341,8 @@ export async function submitTaskForReview(
 
 /** Owner returns the task to its publisher with a reason. */
 export async function returnTask(id: string, reason: string) {
-  const session = await requireSession();
+  const session = await requireTaskEditor();
+  await requireTaskWriteAccess(id, session);
   const task = await prisma.task.update({
     where: { id },
     data: { status: "RETURNED", returnReason: reason.trim() || null },
@@ -237,7 +377,9 @@ export async function submitMeetingInfo(
     attendees: string[];
   },
 ) {
-  const session = await requireSession();
+  const session = await requireTaskEditor();
+  await requireTaskWriteAccess(taskId, session);
+  await requireApprovedInternalUsers(data.attendees);
   if (!data.meetingTime) throw new Error("请填写会议时间");
   if (data.meetingMode === "OFFLINE" && !data.meetingLocation.trim()) {
     throw new Error("线下会议需填写会议地点");
