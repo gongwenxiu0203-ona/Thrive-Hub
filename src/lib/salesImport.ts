@@ -67,10 +67,15 @@ function normalizeRegion(v: string): string {
 function toDate(v: unknown): Date | null {
   if (v === null || v === undefined || v === "") return null;
   if (v instanceof Date) return Number.isFinite(v.getTime()) ? v : null;
-  if (typeof v === "number") {
+  const excelSerial = typeof v === "number"
+    ? v
+    : typeof v === "string" && /^\d{5}(?:\.\d+)?$/.test(v.trim())
+      ? Number(v.trim())
+      : null;
+  if (excelSerial !== null) {
     // Excel serial date
     const epoch = new Date(Date.UTC(1899, 11, 30));
-    const d = new Date(epoch.getTime() + v * 86400000);
+    const d = new Date(epoch.getTime() + excelSerial * 86400000);
     return Number.isFinite(d.getTime()) ? d : null;
   }
   const d = new Date(String(v));
