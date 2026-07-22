@@ -111,6 +111,8 @@ const PROMPT_HEADER = `你是合同信息抽取助手。请从合同正文中抽
   "partyAEmail": "甲方电子邮箱",
   "startDate": "合作开始日期 YYYY-MM-DD",
   "endDate": "合作结束日期 YYYY-MM-DD",
+  "taxType": "税费类型：不含税/含税",
+  "taxBearer": "税费承担方",
   "feeAmount": "月度服务费金额，纯数字字符串",
   "feeCurrency": "费用货币：人民币/美金/USD/RMB/EUR/GBP",
   "feeCycle": "服务费支付周期：月度/季度",
@@ -124,10 +126,19 @@ const PROMPT_HEADER = `你是合同信息抽取助手。请从合同正文中抽
   "excessBaseMonths": "增量佣金基准月数",
   "excessCommissionRate": "增量佣金超额增长部分比例",
   "specialCommissionTerms": "特殊佣金条款原文或摘要",
+  "specialAttributionRate": "Attribution渠道佣金比例",
+  "specialCreatorRate": "Creator Connections佣金比例",
+  "specialLowThreshold": "低GMV门槛",
+  "specialLowBudgetRate": "低GMV推广预算比例",
+  "specialHighThreshold": "高GMV门槛",
+  "specialHighServiceRate": "高GMV服务佣金比例",
+  "specialGmvCurrency": "特殊佣金GMV门槛货币：USD/EUR/GBP/RMB",
   "gmvSettlementCycle": "GMV佣金结算周期：月度/季度",
   "promoPlatform": "推广平台",
   "targetSite": "目标站点",
-  "coopChannels": ["合作渠道key数组，可选 ACC/Attribution/Associates/AmazonLive/Levanta/Impact/Wayward/ArcherAffiliates/PartnerBoost"]
+  "coopChannels": ["合作渠道key数组，可选 ACC/Attribution/Associates/AmazonLive/Levanta/Impact/Wayward/ArcherAffiliates/PartnerBoost"],
+  "productList": [{"name":"商品名称","asin":"ASIN","price":"零售价","trackLink":"优惠码或追踪链接"}],
+  "partyBBankAccounts": ["乙方收款账户key"]
 }
 
 合同文本：

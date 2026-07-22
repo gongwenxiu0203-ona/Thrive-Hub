@@ -22,6 +22,11 @@ import {
 import { writePrivateContractFile } from "@/lib/contractFileStorage";
 import { customerScope } from "@/lib/dataScope";
 import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
+import {
+  CONTRACT_FEE_CURRENCIES,
+  CONTRACT_FEE_CYCLES,
+  CONTRACT_GMV_CYCLES,
+} from "@/lib/contractFormOptions";
 
 type Result<T = void> = { ok: true; data?: T } | { ok: false; error: string };
 type UploadExistingContractData = {
@@ -63,15 +68,15 @@ function mapExtractedToContract(fields: Record<string, unknown>): Record<string,
     if (typeof v === "string") return v.trim() || null;
     return v;
   };
-  const date = (k: string) => {
-    const v = get(k);
-    if (typeof v !== "string") return null;
-    const d = new Date(v);
-    return Number.isNaN(d.getTime()) ? null : d;
-  };
   const coop = Array.isArray(fields.coopChannels)
     ? JSON.stringify(fields.coopChannels.filter((x) => typeof x === "string"))
-    : null;
+    : get("coopChannels");
+  const products = Array.isArray(fields.productList)
+    ? JSON.stringify(fields.productList.filter((item) => item && typeof item === "object"))
+    : get("productList");
+  const partyBBanks = Array.isArray(fields.partyBBankAccounts)
+    ? JSON.stringify(fields.partyBBankAccounts.filter((x) => typeof x === "string"))
+    : get("partyBBankAccounts");
   return {
     partyA: get("partyAName"),
     partyACreditCode: get("partyACreditCode"),
@@ -79,8 +84,12 @@ function mapExtractedToContract(fields: Record<string, unknown>): Record<string,
     partyAContact: get("partyAContact"),
     partyAPhone: get("partyAPhone"),
     partyAEmail: get("partyAEmail"),
-    startDate: date("startDate"),
-    endDate: date("endDate"),
+    // Keep extracted dates raw until overrides have been applied. Both paths
+    // must pass through normalizeContractDates before reaching Prisma.
+    startDate: get("startDate"),
+    endDate: get("endDate"),
+    taxType: get("taxType"),
+    taxBearer: get("taxBearer"),
     feeAmount: get("feeAmount"),
     feeCurrency: get("feeCurrency"),
     feeCycle: get("feeCycle"),
@@ -94,18 +103,99 @@ function mapExtractedToContract(fields: Record<string, unknown>): Record<string,
     excessBaseMonths: get("excessBaseMonths"),
     excessCommissionRate: get("excessCommissionRate"),
     specialCommissionTerms: get("specialCommissionTerms"),
+    specialAttributionRate: get("specialAttributionRate"),
+    specialCreatorRate: get("specialCreatorRate"),
+    specialLowThreshold: get("specialLowThreshold"),
+    specialLowBudgetRate: get("specialLowBudgetRate"),
+    specialHighThreshold: get("specialHighThreshold"),
+    specialHighServiceRate: get("specialHighServiceRate"),
+    specialGmvCurrency: get("specialGmvCurrency"),
     gmvSettlementCycle: get("gmvSettlementCycle"),
     promoPlatform: get("promoPlatform"),
     targetSite: get("targetSite"),
     coopChannels: coop,
+    productList: products,
+    partyBBankAccounts: partyBBanks,
   };
+}
+
+function parseContractDate(value: unknown): Date | null | "INVALID" {
+  if (value == null || value === "") return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? "INVALID" : value;
+  if (typeof value !== "string") return "INVALID";
+
+  const raw = value.trim();
+  if (!raw) return null;
+  // Contract form dates use YYYY-MM-DD. Strict validation avoids JavaScript
+  // silently rolling invalid values such as 2026-02-30 into another month.
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+  if (!match) return "INVALID";
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (
+    parsed.getUTCFullYear() !== year
+    || parsed.getUTCMonth() !== month - 1
+    || parsed.getUTCDate() !== day
+  ) return "INVALID";
+  return parsed;
+}
+
+function normalizeContractDates(mapped: Record<string, unknown>):
+  | { ok: true; fields: Record<string, unknown> }
+  | { ok: false; error: string } {
+  const fields = { ...mapped };
+  for (const [key, label] of [
+    ["startDate", "合作开始日期"],
+    ["endDate", "合作结束日期"],
+  ] as const) {
+    const parsed = parseContractDate(fields[key]);
+    if (parsed === "INVALID") {
+      return { ok: false, error: `${label}格式无效，请使用 YYYY-MM-DD 格式并填写真实日期` };
+    }
+    fields[key] = parsed;
+  }
+  return { ok: true, fields };
+}
+
+function validateMappedContractFields(mapped: Record<string, unknown>): string | null {
+  const allowed = (key: string, values: readonly string[], label: string) => {
+    const value = mapped[key];
+    return value && !values.includes(String(value)) ? `${label}选项无效，请重新选择` : null;
+  };
+  const optionError = allowed("feeCurrency", CONTRACT_FEE_CURRENCIES, "固定服务费货币")
+    ?? allowed("feeCycle", CONTRACT_FEE_CYCLES, "固费支付周期")
+    ?? allowed("gmvSettlementCycle", CONTRACT_GMV_CYCLES, "GMV结算周期");
+  if (optionError) return optionError;
+  if (mapped.taxType && !["不含税", "含税"].includes(String(mapped.taxType))) return "税费类型选项无效，请重新选择";
+
+  for (const [key, label] of [
+    ["commissionRate", "GMV抽佣比例"],
+    ["thresholdReachedRate", "达标后抽佣比例"],
+    ["thresholdUnreachedRate", "未达标抽佣比例"],
+    ["excessCommissionRate", "超额增长佣金比例"],
+  ] as const) {
+    if (mapped[key] == null || mapped[key] === "") continue;
+    const number = Number(String(mapped[key]).replace(/%/g, ""));
+    if (!Number.isFinite(number) || number < 0 || number > 100) return `${label}必须是 0 到 100 之间的数字`;
+  }
+  for (const [key, label] of [["feeAmount", "月度服务费金额"], ["thresholdAmount", "GMV门槛金额"]] as const) {
+    if (mapped[key] == null || mapped[key] === "") continue;
+    const number = Number(mapped[key]);
+    if (!Number.isFinite(number) || number < 0) return `${label}必须是非负数字`;
+  }
+  const start = mapped.startDate;
+  const end = mapped.endDate;
+  if (start instanceof Date && end instanceof Date && start > end) return "合作开始日期不能晚于合作结束日期";
+  return null;
 }
 
 function applyOverrides(mapped: Record<string, unknown>, fd: FormData): Record<string, unknown> {
   const next = { ...mapped };
   for (const key of Object.keys(next)) {
-    const override = s(fd, `override:${key}`);
-    if (override) next[key] = override;
+    const formKey = `override:${key}`;
+    if (fd.has(formKey)) next[key] = s(fd, formKey) || null;
   }
   return next;
 }
@@ -118,7 +208,18 @@ function valueMissing(value: unknown): boolean {
 }
 
 function contractCreateFields(mapped: Record<string, unknown>): Record<string, unknown> {
-  const { thresholdReachedRate: _reached, thresholdUnreachedRate: _unreached, ...persisted } = mapped;
+  const {
+    thresholdReachedRate: _reached,
+    thresholdUnreachedRate: _unreached,
+    specialAttributionRate: _specialAttributionRate,
+    specialCreatorRate: _specialCreatorRate,
+    specialLowThreshold: _specialLowThreshold,
+    specialLowBudgetRate: _specialLowBudgetRate,
+    specialHighThreshold: _specialHighThreshold,
+    specialHighServiceRate: _specialHighServiceRate,
+    specialGmvCurrency: _specialGmvCurrency,
+    ...persisted
+  } = mapped;
   return persisted;
 }
 
@@ -219,13 +320,22 @@ export async function uploadExistingContract(
 
   const ownerId = s(fd, "ownerId") || session.userId;
   const reviewerId = s(fd, "reviewerId") || null;
-  const mapped = applyOverrides(mapExtractedToContract(ai.fields as Record<string, unknown>), fd);
+  const withOverrides = applyOverrides(mapExtractedToContract(ai.fields as Record<string, unknown>), fd);
+  const normalizedDates = normalizeContractDates(withOverrides);
+  if (!normalizedDates.ok) return normalizedDates;
+  const mapped = normalizedDates.fields;
+  const mappedError = validateMappedContractFields(mapped);
+  if (mappedError) return { ok: false, error: mappedError };
+
+  const ownerExists = await prisma.user.findFirst({ where: { id: ownerId, status: "APPROVED" }, select: { id: true } });
+  if (!ownerExists) return { ok: false, error: "合同负责人不存在或账号不可用，请重新选择" };
 
   // 适用模板：① 用户手选优先；② 否则按 AI 识别出的佣金结算方式自动匹配同类型
   // 模板（命中则自动选用）；③ 仍无则 templateId 为 null，需在补填环节手动选择。
   let resolvedTemplate = templateId
-    ? await prisma.contractTemplate.findUnique({ where: { id: templateId }, select: { id: true, templateKey: true } })
+    ? await prisma.contractTemplate.findFirst({ where: { id: templateId, deletedAt: null }, select: { id: true, templateKey: true } })
     : null;
+  if (templateId && !resolvedTemplate) return { ok: false, error: "所选合同模板不存在或已停用，请重新选择" };
   if (!resolvedTemplate && typeof mapped.commissionType === "string" && mapped.commissionType.trim()) {
     resolvedTemplate = await prisma.contractTemplate.findFirst({
       where: { templateKey: normalizeTemplateKey(mapped.commissionType), deletedAt: null },
@@ -254,6 +364,19 @@ export async function uploadExistingContract(
       ...commissionConfig.threshold,
       reachedRate: String(mapped.thresholdReachedRate ?? commissionConfig.threshold?.reachedRate ?? ""),
       unreachedRate: String(mapped.thresholdUnreachedRate ?? commissionConfig.threshold?.unreachedRate ?? ""),
+    };
+  }
+  if (templateKey === "SPECIAL") {
+    commissionConfig.special = {
+      ...commissionConfig.special,
+      attributionRate: String(mapped.specialAttributionRate ?? commissionConfig.special?.attributionRate ?? ""),
+      creatorRate: String(mapped.specialCreatorRate ?? commissionConfig.special?.creatorRate ?? ""),
+      lowGmvThresholdCurrency: String(mapped.specialGmvCurrency ?? commissionConfig.special?.lowGmvThresholdCurrency ?? "USD"),
+      highGmvThresholdCurrency: String(mapped.specialGmvCurrency ?? commissionConfig.special?.highGmvThresholdCurrency ?? "USD"),
+      lowGmvThreshold: String(mapped.specialLowThreshold ?? commissionConfig.special?.lowGmvThreshold ?? ""),
+      lowGmvBudgetRate: String(mapped.specialLowBudgetRate ?? commissionConfig.special?.lowGmvBudgetRate ?? ""),
+      highGmvThreshold: String(mapped.specialHighThreshold ?? commissionConfig.special?.highGmvThreshold ?? ""),
+      highGmvServiceRate: String(mapped.specialHighServiceRate ?? commissionConfig.special?.highGmvServiceRate ?? ""),
     };
   }
   const primaryRate = primaryRateFromCommissionConfig(commissionConfig);

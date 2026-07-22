@@ -74,7 +74,10 @@ async function auditCompletedContractEdit(
     summary: `管理员修改已签署合同：${after.contractNo}`,
     before: beforeRecord,
     after: afterRecord,
-    metadata: { changedFields },
+    metadata: {
+      changedFields,
+      ...(changedFields.includes("customerId") ? { oldCustomerNeedsManualReview: true } : {}),
+    },
   });
 }
 
@@ -246,22 +249,62 @@ export async function updateContract(
   });
   if (dup) return { ok: false, error: "合同编号已存在" };
 
-  await prisma.contract.update({
-    where: { id },
-    data: {
-      contractNo,
-      customerId,
-      ...contractFieldsFromForm(fd),
-      ownerId: str(fd, "ownerId") || null,
-      reviewerId: str(fd, "reviewerId") || null,
-    },
-  });
+  const customerChanged = customerId !== existing.customerId;
+  const customerDependencyPrefix = "该合同已关联下游数据，不能直接修改客户";
+  try {
+    await prisma.$transaction(async (tx) => {
+      if (customerChanged) {
+        const [projectCount, reconciliationCount, channelReconciliationCount] = await Promise.all([
+          tx.project.count({ where: { contractId: id } }),
+          tx.customerReconciliation.count({ where: { contractId: id } }),
+          tx.channelReconciliation.count({ where: { contractId: id } }),
+        ]);
+        if (projectCount > 0 || reconciliationCount > 0 || channelReconciliationCount > 0) {
+          throw new Error(
+            `${customerDependencyPrefix}（项目 ${projectCount} 条、客户对账 ${reconciliationCount} 条、渠道对账 ${channelReconciliationCount} 条）。请先处理关联记录。`,
+          );
+        }
+      }
+      await tx.contract.update({
+        where: { id },
+        data: {
+          contractNo,
+          customerId,
+          ...(customerChanged ? { externalFillToken: null, externalFillExpiry: null } : {}),
+          ...contractFieldsFromForm(fd),
+          ownerId: str(fd, "ownerId") || null,
+          reviewerId: str(fd, "reviewerId") || null,
+        },
+      });
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith(customerDependencyPrefix)) {
+      return { ok: false, error: error.message };
+    }
+    throw error;
+  }
   if (existing.status === "COMPLETED") {
     await auditCompletedContractEdit(session.userId, existing as unknown as Record<string, unknown>);
+    if (customerChanged) await bumpCustomerStatus(customerId, "COOPERATING");
+  } else if (customerChanged) {
+    await writeAdminAudit({
+      actorId: session.userId,
+      action: "UPDATE_CONTRACT_CUSTOMER",
+      module: "contracts",
+      targetType: "Contract",
+      targetId: id,
+      targetLabel: contractNo,
+      summary: `修改合同关联客户：${contractNo}；原客户状态需人工复核`,
+      before: { customerId: existing.customerId },
+      after: { customerId },
+      metadata: { oldCustomerNeedsManualReview: true },
+    });
   }
 
   revalidatePath("/contracts");
   revalidatePath(`/contracts/${id}`);
+  if (existing.customerId) revalidatePath(`/customers/${existing.customerId}`);
+  revalidatePath(`/customers/${customerId}`);
   return { ok: true, contractId: id };
 }
 
@@ -768,7 +811,12 @@ export async function updateContractV4(
   if (existing.status === "COMPLETED" && session.role !== "ADMIN") {
     return { ok: false, error: "已签署完成的合同仅管理员可以修改，请联系管理员" };
   }
-  if (payload.customerId) await requireCustomerRow(payload.customerId, session);
+  const nextCustomerId = payload.customerId?.trim();
+  if (!nextCustomerId) return { ok: false, error: "请选择关联客户" };
+  await requireCustomerRow(nextCustomerId, session);
+
+  const customerChanged = nextCustomerId !== existing.customerId;
+  const customerDependencyPrefix = "该合同已关联下游数据，不能直接修改客户";
   let templateKey = payload.commissionType;
   if (payload.templateId) {
     const selectedTemplate = await prisma.contractTemplate.findUnique({
@@ -784,9 +832,27 @@ export async function updateContractV4(
   });
   const primaryCommissionRate = primaryRateFromCommissionConfig(commissionConfig);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (prisma.contract.update as any)({
-    where: { id },
-    data: {
+  try {
+    await prisma.$transaction(async (tx) => {
+      if (customerChanged) {
+        const [projectCount, reconciliationCount, channelReconciliationCount] = await Promise.all([
+          tx.project.count({ where: { contractId: id } }),
+          tx.customerReconciliation.count({ where: { contractId: id } }),
+          tx.channelReconciliation.count({ where: { contractId: id } }),
+        ]);
+        if (projectCount > 0 || reconciliationCount > 0 || channelReconciliationCount > 0) {
+          throw new Error(
+            `${customerDependencyPrefix}（项目 ${projectCount} 条、客户对账 ${reconciliationCount} 条、渠道对账 ${channelReconciliationCount} 条）。请先处理关联记录。`,
+          );
+        }
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (tx.contract.update as any)({
+        where: { id },
+        data: {
+      customerId: nextCustomerId,
+      ...(customerChanged ? { externalFillToken: null, externalFillExpiry: null } : {}),
       partyA: payload.partyAName,
       partyACreditCode: payload.partyACreditCode ?? undefined,
       partyALegalRep: null,
@@ -820,13 +886,35 @@ export async function updateContractV4(
       ...(payload.partyBCompany !== undefined ? resolvePartyB(payload.partyBCompany) : {}),
       partyBBankAccounts: payload.partyBBankAccounts ?? undefined,
       specialCommissionTerms: payload.specialCommissionTerms ?? undefined,
-    },
-  });
+        },
+      });
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith(customerDependencyPrefix)) {
+      return { ok: false, error: error.message };
+    }
+    throw error;
+  }
   if (existing.status === "COMPLETED") {
     await auditCompletedContractEdit(session.userId, existing as unknown as Record<string, unknown>);
+    if (customerChanged) await bumpCustomerStatus(nextCustomerId, "COOPERATING");
+  } else if (customerChanged) {
+    await writeAdminAudit({
+      actorId: session.userId,
+      action: "UPDATE_CONTRACT_CUSTOMER",
+      module: "contracts",
+      targetType: "Contract",
+      targetId: id,
+      targetLabel: existing.contractNo,
+      summary: `修改合同关联客户：${existing.contractNo}`,
+      before: { customerId: existing.customerId },
+      after: { customerId: nextCustomerId },
+    });
   }
   revalidatePath("/contracts");
   revalidatePath(`/contracts/${id}`);
+  if (existing.customerId) revalidatePath(`/customers/${existing.customerId}`);
+  revalidatePath(`/customers/${nextCustomerId}`);
   return { ok: true, contractId: id };
 }
 

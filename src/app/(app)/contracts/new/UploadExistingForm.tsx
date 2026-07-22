@@ -4,19 +4,59 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Upload, AlertCircle, CheckCircle2 } from "lucide-react";
 import { uploadExistingContract } from "@/actions/contractUpload";
-
-const CURRENCY_CHOICES = ["美金", "人民币", "欧元", "英镑"];
-const CYCLE_CHOICES = ["月度", "季度"];
-const FEE_CYCLE_CHOICES = ["月付", "季度预付"];
+import { cn } from "@/lib/utils";
+import {
+  CONTRACT_FEE_CURRENCIES,
+  CONTRACT_FEE_CYCLES,
+  CONTRACT_GMV_CYCLES,
+  CONTRACT_COOP_CHANNELS,
+  CONTRACT_STANDARD_PLATFORMS,
+  CONTRACT_TARGET_SITES,
+} from "@/lib/contractFormOptions";
+import { CURRENCY_OPTIONS } from "@/lib/contractCommissionConfig";
 
 const PERCENT_KEYS = new Set([
   "commissionRate",
   "thresholdReachedRate",
   "thresholdUnreachedRate",
   "excessCommissionRate",
+  "specialAttributionRate",
+  "specialCreatorRate",
+  "specialLowBudgetRate",
+  "specialHighServiceRate",
 ]);
 
 const LONG_TEXT_KEYS = new Set(["tieredRules", "specialCommissionTerms"]);
+
+const SUPPLEMENT_GROUPS = [
+  { title: "甲方信息", fields: [
+    ["partyA", "甲方签约主体公司名称"], ["partyACreditCode", "统一社会信用代码"],
+    ["partyAAddress", "甲方地址"], ["partyAContact", "甲方指定联系人"],
+    ["partyAPhone", "联系电话"], ["partyAEmail", "电子邮箱"],
+  ] },
+  { title: "合作信息", fields: [
+    ["promoPlatform", "销售平台 / 推广平台"], ["targetSite", "目标站点"],
+    ["startDate", "合作开始日期"], ["endDate", "合作结束日期"],
+    ["taxType", "税费类型"], ["taxBearer", "税费承担方"],
+  ] },
+  { title: "固定服务费", fields: [
+    ["feeCurrency", "月度服务费货币"], ["feeAmount", "月度服务费金额"], ["feeCycle", "固费支付周期"],
+  ] },
+  { title: "GMV 佣金", fields: [
+    ["commissionRate", "GMV抽佣比例"], ["thresholdCurrency", "GMV门槛币种"],
+    ["thresholdAmount", "GMV门槛金额"], ["thresholdReachedRate", "达标后抽佣比例"],
+    ["thresholdUnreachedRate", "未达标抽佣比例"], ["excessBaseMonths", "基准月数"],
+    ["excessCommissionRate", "超额增长部分佣金比例"], ["specialCommissionTerms", "特殊佣金条款"],
+    ["specialGmvCurrency", "特殊佣金GMV门槛货币"], ["specialAttributionRate", "Attribution渠道佣金比例"],
+    ["specialCreatorRate", "Creator Connections佣金比例"], ["specialLowThreshold", "低GMV门槛"],
+    ["specialLowBudgetRate", "低GMV推广预算比例"], ["specialHighThreshold", "高GMV门槛"],
+    ["specialHighServiceRate", "高GMV服务佣金比例"],
+    ["gmvSettlementCycle", "GMV结算周期"],
+  ] },
+] as const;
+
+type ProductRow = { name: string; asin: string; price: string; trackLink: string };
+type TierRow = { from: string; to: string; rate: string };
 
 export interface UploadExistingFormProps {
   customers: { id: string; brandName: string }[];
@@ -267,12 +307,25 @@ function SuccessView({
   const [selectedTemplateId, setSelectedTemplateId] = useState(templateId);
   const [overrides, setOverrides] = useState<Record<string, string>>(() => {
     const initial: Record<string, string> = {};
-    for (const field of missing) {
-      const value = fields[field.key];
-      initial[field.key] = Array.isArray(value) ? value.join(",") : String(value ?? "");
+    for (const group of SUPPLEMENT_GROUPS) {
+      for (const [key] of group.fields) {
+        const value = fields[key];
+        initial[key] = Array.isArray(value) || (value && typeof value === "object")
+          ? JSON.stringify(value)
+          : String(value ?? "");
+      }
+    }
+    for (const key of ["tieredRules", "coopChannels", "productList", "partyBBankAccounts"]) {
+      const value = fields[key];
+      initial[key] = Array.isArray(value) || (value && typeof value === "object")
+        ? JSON.stringify(value)
+        : String(value ?? "");
     }
     return initial;
   });
+  const activeTemplateKey = templates.find((item) => item.id === selectedTemplateId)?.templateKey
+    ?? detectedTemplateKey;
+  const editableFields = SUPPLEMENT_GROUPS.flatMap((group) => group.fields.map(([key, label]) => ({ key, label })));
   const partyBComparison = readRecord(fields.__partyBComparison);
   const paymentAccounts = readRecordArray(fields.__paymentAccounts);
 
@@ -340,7 +393,7 @@ function SuccessView({
 
             <div className="space-y-3">
               <p className="text-xs font-semibold text-slate-600">待补填字段</p>
-              {missing.map((field) => (
+              {editableFields.map((field) => (
                 <SupplementFieldInput
                   key={field.key}
                   field={field}
@@ -348,6 +401,12 @@ function SuccessView({
                   onChange={(value) => setOverrides((prev) => ({ ...prev, [field.key]: value }))}
                 />
               ))}
+              {activeTemplateKey === "TIERED" && (
+                <TierEditor value={overrides.tieredRules ?? ""} onChange={(value) => setOverrides((prev) => ({ ...prev, tieredRules: value }))} />
+              )}
+              <CoopChannelEditor value={overrides.coopChannels ?? ""} onChange={(value) => setOverrides((prev) => ({ ...prev, coopChannels: value }))} />
+              <BankAccountEditor value={overrides.partyBBankAccounts ?? ""} onChange={(value) => setOverrides((prev) => ({ ...prev, partyBBankAccounts: value }))} />
+              <ProductEditor value={overrides.productList ?? ""} onChange={(value) => setOverrides((prev) => ({ ...prev, productList: value }))} />
             </div>
           </div>
         </div>
@@ -578,6 +637,59 @@ function readRecordArray(value: unknown): Record<string, unknown>[] {
     : [];
 }
 
+function parseJsonArray<T>(value: string, fallback: T[]): T[] {
+  try {
+    const parsed = JSON.parse(value || "[]");
+    return Array.isArray(parsed) ? parsed as T[] : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function CoopChannelEditor({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const selected = parseJsonArray<string>(value, value.split(/[,，]/).map((item) => item.trim()).filter(Boolean));
+  const toggle = (key: string) => onChange(JSON.stringify(selected.includes(key) ? selected.filter((item) => item !== key) : [...selected, key]));
+  return (
+    <div className="space-y-2 rounded-lg border border-slate-200 p-3">
+      <p className="text-xs font-semibold text-slate-700">合作渠道（可多选）</p>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {CONTRACT_COOP_CHANNELS.map((channel) => (
+          <label key={channel.key} className={cn("flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm", selected.includes(channel.key) ? "border-brand-300 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-600")}>
+            <input type="checkbox" checked={selected.includes(channel.key)} onChange={() => toggle(channel.key)} />
+            {channel.label}
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BankAccountEditor({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const selected = parseJsonArray<string>(value, []);
+  const options = [{ key: "FOSHAN", label: "佛山公司账户" }, { key: "HONGKONG", label: "香港公司账户" }];
+  return (
+    <div className="space-y-2 rounded-lg border border-slate-200 p-3">
+      <p className="text-xs font-semibold text-slate-700">乙方收款账户（可多选）</p>
+      <div className="flex flex-wrap gap-2">{options.map((account) => <label key={account.key} className={cn("cursor-pointer rounded-lg border px-3 py-2 text-sm", selected.includes(account.key) ? "border-brand-300 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-600")}><input className="mr-2" type="checkbox" checked={selected.includes(account.key)} onChange={() => onChange(JSON.stringify(selected.includes(account.key) ? selected.filter((item) => item !== account.key) : [...selected, account.key]))} />{account.label}</label>)}</div>
+    </div>
+  );
+}
+
+function TierEditor({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  let currency = "USD";
+  let rows: TierRow[] = [{ from: "0", to: "", rate: "" }];
+  try { const parsed = JSON.parse(value || "{}"); currency = String(parsed.currency || "USD"); if (Array.isArray(parsed.tiers) && parsed.tiers.length) rows = parsed.tiers; } catch { /* editable fallback */ }
+  const commit = (nextRows: TierRow[], nextCurrency = currency) => onChange(JSON.stringify({ currency: nextCurrency, tiers: nextRows }));
+  return <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50/40 p-3"><p className="text-xs font-semibold text-slate-700">阶梯佣金规则</p><select className="input max-w-xs" value={currency} onChange={(e) => commit(rows, e.target.value)}>{CURRENCY_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>{rows.map((row, index) => <div key={index} className="grid gap-2 sm:grid-cols-[1fr_1fr_1fr_auto]"><input className="input" value={row.from} placeholder="起始 GMV" onChange={(e) => commit(rows.map((item, i) => i === index ? { ...item, from: e.target.value } : item))} /><input className="input" value={row.to} placeholder="结束 GMV（留空=以上）" onChange={(e) => commit(rows.map((item, i) => i === index ? { ...item, to: e.target.value } : item))} /><input className="input" value={row.rate} placeholder="佣金比例 %" onChange={(e) => commit(rows.map((item, i) => i === index ? { ...item, rate: e.target.value.replace(/[^0-9.]/g, "") } : item))} /><button type="button" className="btn-secondary text-xs" disabled={rows.length === 1} onClick={() => commit(rows.filter((_, i) => i !== index))}>删除</button></div>)}<button type="button" className="btn-secondary text-xs" onClick={() => commit([...rows, { from: "", to: "", rate: "" }])}>+ 新增阶梯</button></div>;
+}
+
+function ProductEditor({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const rows = parseJsonArray<ProductRow>(value, [{ name: "", asin: "", price: "", trackLink: "" }]);
+  const normalized = rows.length ? rows : [{ name: "", asin: "", price: "", trackLink: "" }];
+  const commit = (next: ProductRow[]) => onChange(JSON.stringify(next));
+  return <div className="space-y-3 rounded-lg border border-slate-200 p-3"><p className="text-xs font-semibold text-slate-700">推广商品清单</p>{normalized.map((row, index) => <div key={index} className="grid gap-2 sm:grid-cols-[1.2fr_1fr_1fr_1.4fr_auto]">{([['name','商品名称'],['asin','ASIN'],['price','零售价'],['trackLink','优惠码或追踪链接']] as const).map(([key, placeholder]) => <input key={key} className="input" value={row[key] ?? ""} placeholder={placeholder} onChange={(e) => commit(normalized.map((item, i) => i === index ? { ...item, [key]: e.target.value } : item))} />)}<button type="button" className="btn-secondary text-xs" disabled={normalized.length === 1} onClick={() => commit(normalized.filter((_, i) => i !== index))}>删除</button></div>)}<button type="button" className="btn-secondary text-xs" onClick={() => commit([...normalized, { name: "", asin: "", price: "", trackLink: "" }])}>+ 新增商品</button></div>;
+}
+
 function SupplementFieldInput({
   field,
   value,
@@ -607,29 +719,34 @@ function SupplementFieldInput({
   }
 
   if (key === "feeCurrency" || key === "thresholdCurrency") {
+    const currencies = key === "feeCurrency"
+      ? CONTRACT_FEE_CURRENCIES.map((currency) => ({ value: currency, label: currency }))
+      : CURRENCY_OPTIONS;
     return (
       <div>
         {commonLabel}
         <select className="input" value={value} onChange={(e) => onChange(e.target.value)}>
           <option value="">请选择币种</option>
-          {CURRENCY_CHOICES.map((currency) => (
-            <option key={currency} value={currency}>{currency}</option>
+          {currencies.map((currency) => (
+            <option key={currency.value} value={currency.value}>{currency.label}</option>
           ))}
         </select>
       </div>
     );
   }
 
+  if (key === "taxType" || key === "specialGmvCurrency") {
+    const choices = key === "taxType"
+      ? ["不含税", "含税"]
+      : CURRENCY_OPTIONS.map((item) => item.value);
+    return <div>{commonLabel}<select className="input" value={value} onChange={(e) => onChange(e.target.value)}><option value="">请选择</option>{choices.map((choice) => <option key={choice} value={choice}>{choice}</option>)}</select></div>;
+  }
+
   if (key === "feeCycle") {
     return (
       <div>
         {commonLabel}
-        <select className="input" value={value} onChange={(e) => onChange(e.target.value)}>
-          <option value="">请选择固费支付周期</option>
-          {FEE_CYCLE_CHOICES.map((cycle) => (
-            <option key={cycle} value={cycle}>{cycle}</option>
-          ))}
-        </select>
+        <ChoicePills choices={CONTRACT_FEE_CYCLES} value={value} onChange={onChange} tone="brand" />
       </div>
     );
   }
@@ -638,12 +755,35 @@ function SupplementFieldInput({
     return (
       <div>
         {commonLabel}
-        <select className="input" value={value} onChange={(e) => onChange(e.target.value)}>
-          <option value="">请选择 GMV 结算周期</option>
-          {CYCLE_CHOICES.map((cycle) => (
-            <option key={cycle} value={cycle}>{cycle}</option>
-          ))}
-        </select>
+        <ChoicePills choices={CONTRACT_GMV_CYCLES} value={value} onChange={onChange} tone="amber" />
+      </div>
+    );
+  }
+
+  if (key === "promoPlatform") {
+    return (
+      <div>
+        {commonLabel}
+        <MultiChoiceWithOther
+          choices={CONTRACT_STANDARD_PLATFORMS}
+          value={value}
+          onChange={onChange}
+          otherPlaceholder="其他平台（手动填写）"
+        />
+      </div>
+    );
+  }
+
+  if (key === "targetSite") {
+    return (
+      <div>
+        {commonLabel}
+        <MultiChoiceWithOther
+          choices={CONTRACT_TARGET_SITES}
+          value={value}
+          onChange={onChange}
+          otherPlaceholder="其他站点（手动填写）"
+        />
       </div>
     );
   }
@@ -688,6 +828,93 @@ function SupplementFieldInput({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={`请输入${field.label}`}
+      />
+    </div>
+  );
+}
+
+function ChoicePills({
+  choices,
+  value,
+  onChange,
+  tone,
+}: {
+  choices: readonly string[];
+  value: string;
+  onChange: (value: string) => void;
+  tone: "brand" | "amber";
+}) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {choices.map((choice) => {
+        const selected = value === choice;
+        return (
+          <button
+            key={choice}
+            type="button"
+            onClick={() => onChange(choice)}
+            className={cn(
+              "rounded-lg border px-3 py-1.5 text-sm transition-colors",
+              selected && tone === "brand" && "border-brand-500 bg-brand-50 text-brand-700",
+              selected && tone === "amber" && "border-amber-500 bg-amber-50 text-amber-700",
+              !selected && "border-slate-200 bg-white text-slate-600 hover:border-slate-300",
+            )}
+          >
+            {choice}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function MultiChoiceWithOther({
+  choices,
+  value,
+  onChange,
+  otherPlaceholder,
+}: {
+  choices: readonly string[];
+  value: string;
+  onChange: (value: string) => void;
+  otherPlaceholder: string;
+}) {
+  const values = value.split(/[,，]/).map((item) => item.trim()).filter(Boolean);
+  const selected = values.filter((item) => choices.includes(item as never));
+  const other = values.find((item) => !choices.includes(item as never)) ?? "";
+
+  function commit(nextSelected: string[], nextOther: string) {
+    onChange([...nextSelected, nextOther.trim()].filter(Boolean).join(", "));
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {choices.map((choice) => {
+        const active = selected.includes(choice);
+        return (
+          <button
+            key={choice}
+            type="button"
+            onClick={() => commit(
+              active ? selected.filter((item) => item !== choice) : [...selected, choice],
+              other,
+            )}
+            className={cn(
+              "rounded-lg border px-3 py-1.5 text-sm transition-colors",
+              active
+                ? "border-brand-500 bg-brand-50 text-brand-700"
+                : "border-slate-200 bg-white text-slate-600 hover:border-slate-300",
+            )}
+          >
+            {choice}
+          </button>
+        );
+      })}
+      <input
+        className="input h-[34px] w-44 text-sm"
+        value={other}
+        onChange={(event) => commit(selected, event.target.value)}
+        placeholder={otherPlaceholder}
       />
     </div>
   );

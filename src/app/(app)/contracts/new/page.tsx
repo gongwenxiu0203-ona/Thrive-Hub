@@ -7,7 +7,7 @@ import { ContractV4Form } from "./ContractV4Form";
 import { UploadExistingForm } from "./UploadExistingForm";
 import { TransactionalUploadForm } from "./TransactionalUploadForm";
 import { requireFeaturePermission } from "@/lib/permissionGuard";
-import { contractScope } from "@/lib/dataScope";
+import { contractScope, customerScope } from "@/lib/dataScope";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "新建合同 · Thraive联盟营销系统" };
@@ -29,9 +29,13 @@ export default async function NewContractPage({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let existingContract: any = null;
 
-  if (customerId) {
-    customer = await prisma.customer.findUnique({
-      where: { id: customerId },
+  if (customerId && !contractId) {
+    customer = await prisma.customer.findFirst({
+      where: {
+        id: customerId,
+        ...customerScope(session, session.role === "ADMIN" ? "all" : "mine"),
+        deletedAt: null,
+      },
       select: { id: true, brandName: true },
     });
     if (!customer) notFound();
@@ -51,16 +55,27 @@ export default async function NewContractPage({
     if (existingContract.status === "COMPLETED" && session.role !== "ADMIN") {
       redirect(`/contracts/${existingContract.id}`);
     }
-    if (!customer && existingContract.customerId) {
-      customer = await prisma.customer.findUnique({
-        where: { id: existingContract.customerId },
+    if (existingContract.customerId) {
+      customer = await prisma.customer.findFirst({
+        where: {
+          id: existingContract.customerId,
+          ...customerScope(session, session.role === "ADMIN" ? "all" : "mine"),
+          deletedAt: null,
+        },
         select: { id: true, brandName: true },
       });
     }
   }
 
   const [customers, users, templates] = await Promise.all([
-    prisma.customer.findMany({ select: { id: true, brandName: true }, orderBy: { brandName: "asc" } }),
+    prisma.customer.findMany({
+      where: {
+        ...customerScope(session, session.role === "ADMIN" ? "all" : "mine"),
+        deletedAt: null,
+      },
+      select: { id: true, brandName: true },
+      orderBy: { brandName: "asc" },
+    }),
     prisma.user.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } }),
     prisma.contractTemplate.findMany({
       where: { deletedAt: null },

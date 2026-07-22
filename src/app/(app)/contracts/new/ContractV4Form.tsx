@@ -23,6 +23,13 @@ import {
   stringifyCommissionConfig,
   type TieredCommissionRule,
 } from "@/lib/contractCommissionConfig";
+import {
+  CONTRACT_FEE_CURRENCIES,
+  CONTRACT_FEE_CYCLES,
+  CONTRACT_GMV_CYCLES,
+  CONTRACT_STANDARD_PLATFORMS,
+  CONTRACT_TARGET_SITES,
+} from "@/lib/contractFormOptions";
 
 type Customer = { id: string; brandName: string };
 type UserOption = { id: string; name: string };
@@ -40,8 +47,6 @@ const COOP_CHANNELS = [
   { key: "ArcherAffiliates", label: "Archer Affiliates",                           group: "第三方联盟平台" },
   { key: "PrivateSocial",  label: "私域/社媒/流量渠道（Facebook/Telegram/Discord等）", group: "社媒渠道" },
 ] as const;
-
-const TARGET_SITES = ["美国站", "英国站", "德国站", "法国", "西班牙", "加拿大", "澳洲", "日本"];
 
 const COMMISSION_TYPES = Object.entries(COMMISSION_METHOD_LABELS).map(([value, label]) => ({ value, label }));
 
@@ -147,7 +152,7 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
   }
 
   // 合作信息 — 销售平台（多选，第一条 + 推广平台 共用）
-  const STD_PLATFORMS = ["亚马逊（Amazon）", "独立站", "沃尔玛（Walmart）"];
+  const STD_PLATFORMS: readonly string[] = CONTRACT_STANDARD_PLATFORMS;
   const initialPlatforms = (existingContract?.promoPlatform ?? "亚马逊（Amazon）")
     .split(",").map((s: string) => s.trim()).filter(Boolean);
   const [platforms, setPlatforms] = useState<string[]>(
@@ -475,7 +480,7 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
       {/* ── 主表单（手动填写 + 甲方信息区可触发 AI 识别 / 生成填写链接） ── */}
       <form onSubmit={onSubmit} className="space-y-5">
         {/* 关联客户 */}
-        {!presetCustomerId && (
+        {(!presetCustomerId || isEdit) && (
           <div className="card p-5 space-y-4">
             <div>
               <label className="label">关联客户 <span className="text-rose-500">*</span></label>
@@ -513,7 +518,7 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
             <TemplatePicker templates={templates} value={templateId} onChange={setTemplateId} />
           </div>
         )}
-        {presetCustomerId && (
+        {presetCustomerId && !isEdit && (
           <div className="card p-5 space-y-4">
             <div>
               <p className="label">关联客户</p>
@@ -717,7 +722,7 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
             <div>
               <label className="label">目标站点（可多选）</label>
               <div className="flex flex-wrap gap-2">
-                {TARGET_SITES.map(site => (
+                {CONTRACT_TARGET_SITES.map(site => (
                   <label key={site}
                     className={cn(
                       "flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm transition-colors",
@@ -768,8 +773,9 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
                 <div>
                   <label className="label text-xs">货币</label>
                   <select className="input" value={feeCurrency} onChange={e => setFeeCurrency(e.target.value)}>
-                    <option>人民币</option>
-                    <option>美金</option>
+                    {CONTRACT_FEE_CURRENCIES.map((currency) => (
+                      <option key={currency}>{currency}</option>
+                    ))}
                   </select>
                 </div>
                 <div>
@@ -792,7 +798,7 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
               <div>
                 <label className="label text-xs">固费支付周期</label>
                 <div className="flex gap-2">
-                  {["月付", "季度预付"].map(c => (
+                  {CONTRACT_FEE_CYCLES.map(c => (
                     <label key={c} className={cn(
                       "flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm",
                       feeCycle === c ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-600"
@@ -944,7 +950,7 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
               <div>
                 <label className="label text-xs">GMV 结算周期</label>
                 <div className="flex gap-2">
-                  {["月度", "季度"].map(c => (
+                  {CONTRACT_GMV_CYCLES.map(c => (
                     <label key={c} className={cn(
                       "flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm",
                       gmvCycle === c ? "border-amber-500 bg-amber-50 text-amber-700" : "border-slate-200 text-slate-600"

@@ -323,12 +323,12 @@ export function ContractFormModal({
             </div>
             <div>
               <label className="label">关联客户 *</label>
-              {presetCustomerId || isEdit ? (
+              {presetCustomerId && !isEdit ? (
                 <>
                   <input
                     type="hidden"
                     name="customerId"
-                    value={presetCustomerId ?? contract?.customerId ?? ""}
+                    value={presetCustomerId}
                   />
                   <input
                     className="input bg-slate-50"
@@ -337,7 +337,7 @@ export function ContractFormModal({
                       customers?.find(
                         (c) =>
                           c.id ===
-                          (presetCustomerId ?? contract?.customerId),
+                          presetCustomerId,
                       )?.brandName ??
                       "已关联客户"
                     }
@@ -349,7 +349,7 @@ export function ContractFormModal({
                   name="customerId"
                   className="input"
                   required
-                  defaultValue=""
+                  defaultValue={contract?.customerId ?? ""}
                 >
                   <option value="">请从客户管理中选择</option>
                   {customers?.map((c) => (

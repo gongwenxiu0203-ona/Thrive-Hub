@@ -35,7 +35,7 @@ import {
   labelOf,
 } from "@/lib/constants";
 import { formatDate, formatDateTime } from "@/lib/utils";
-import { contractScope } from "@/lib/dataScope";
+import { contractScope, customerScope } from "@/lib/dataScope";
 import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
 
 export default async function ContractDetailPage({
@@ -94,12 +94,20 @@ export default async function ContractDetailPage({
     }
   }
 
-  const [users, files] = await Promise.all([
+  const [users, files, customers] = await Promise.all([
     prisma.user.findMany({ orderBy: { name: "asc" } }),
     prisma.attachment.findMany({
       where: { entityType: "CONTRACT", entityId: id },
       orderBy: { createdAt: "desc" },
       include: { uploadedBy: true },
+    }),
+    prisma.customer.findMany({
+      where: {
+        ...customerScope(session, session.role === "ADMIN" ? "all" : "mine"),
+        deletedAt: null,
+      },
+      select: { id: true, brandName: true },
+      orderBy: { brandName: "asc" },
     }),
   ]);
 
@@ -330,6 +338,7 @@ export default async function ContractDetailPage({
             {!c.fillMethod && (contract.status === "IN_PROGRESS" || (contract.status === "COMPLETED" && isAdmin)) && contract.customerId && contract.type && (
               <ContractFormModal
                 users={userOptions}
+                customers={customers}
                 currentUserId={session.userId}
                 contract={{
                   id: contract.id,
