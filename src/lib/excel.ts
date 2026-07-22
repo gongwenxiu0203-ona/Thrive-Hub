@@ -2,6 +2,40 @@ import * as XLSX from "xlsx";
 
 export type Row = Record<string, string | number | boolean | null>;
 
+function isBinaryWorkbook(buffer: ArrayBuffer): boolean {
+  const bytes = new Uint8Array(buffer);
+  const isZip = bytes[0] === 0x50 && bytes[1] === 0x4b;
+  const isOle = bytes[0] === 0xd0 && bytes[1] === 0xcf
+    && bytes[2] === 0x11 && bytes[3] === 0xe0;
+  return isZip || isOle;
+}
+
+function decodeDelimitedText(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) {
+    return new TextDecoder("utf-16le").decode(bytes);
+  }
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) {
+    return new TextDecoder("utf-16be").decode(bytes);
+  }
+  try {
+    // Most platform exports are UTF-8 without a BOM. Fatal decoding lets us
+    // distinguish them from legacy Chinese ANSI/GBK exports.
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return new TextDecoder("gb18030").decode(bytes);
+  }
+}
+
+function readWorkbook(
+  buffer: ArrayBuffer,
+  options: { sheetRows?: number } = {},
+) {
+  return isBinaryWorkbook(buffer)
+    ? XLSX.read(buffer, { type: "array", ...options })
+    : XLSX.read(decodeDelimitedText(buffer), { type: "string", ...options });
+}
+
 /**
  * Detect if a raw 2D array represents a vertical intake-form layout:
  *   Column A = field label, Column B = value (one customer, N rows).
@@ -53,7 +87,7 @@ function transposeVertical(raw: unknown[][]): Row {
  *    - Vertical form format: col A = field label, col B = value (single customer)
  */
 export function parseSheet(buffer: ArrayBuffer): Row[] {
-  const wb = XLSX.read(buffer, { type: "array" });
+  const wb = readWorkbook(buffer);
   const sheetName = wb.SheetNames[0];
   if (!sheetName) return [];
   const sheet = wb.Sheets[sheetName];
@@ -91,8 +125,7 @@ export function parseSheetSample(
   maxSampleRows = 5,
   fileName = "",
 ): { columns: string[]; sampleRows: Row[]; totalRows: number } {
-  const wb = XLSX.read(buffer, {
-    type: "array",
+  const wb = readWorkbook(buffer, {
     sheetRows: maxSampleRows + 1, // +1 to include the header row
   });
   const sheetName = wb.SheetNames[0];
