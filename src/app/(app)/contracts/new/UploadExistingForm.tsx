@@ -70,6 +70,11 @@ export interface UploadExistingFormProps {
   presetCustomerId?: string;
 }
 
+function uploadRequestError(error: unknown): string {
+  console.error("[contract-upload] request failed", error);
+  return "上传识别请求失败，页面可能在系统更新前已打开。请刷新页面后重新选择文件再试。";
+}
+
 export function UploadExistingForm({
   customers,
   users,
@@ -122,6 +127,8 @@ export function UploadExistingForm({
         const r = await uploadExistingContract(fd);
         if (!r.ok) { setError(r.error); return; }
         setSuccess(r.data!);
+      } catch (error) {
+        setError(uploadRequestError(error));
       } finally {
         submittingRef.current = false;
       }
@@ -149,14 +156,20 @@ export function UploadExistingForm({
       fd.append(`override:${key}`, value);
     }
     fd.append("file", file);
-    const r = await uploadExistingContract(fd);
-    if (!r.ok) {
-      setError(r.error);
-      return { ok: false as const, error: r.error };
+    try {
+      const r = await uploadExistingContract(fd);
+      if (!r.ok) {
+        setError(r.error);
+        return { ok: false as const, error: r.error };
+      }
+      setTemplateId(nextTemplateId);
+      setSuccess(r.data!);
+      return { ok: true as const, contractId: r.data?.contractId ?? undefined };
+    } catch (error) {
+      const message = uploadRequestError(error);
+      setError(message);
+      return { ok: false as const, error: message };
     }
-    setTemplateId(nextTemplateId);
-    setSuccess(r.data!);
-    return { ok: true as const, contractId: r.data?.contractId ?? undefined };
   }
 
   if (success) {

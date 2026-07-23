@@ -166,7 +166,7 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
 
   // 合作信息 — 销售平台（多选，第一条 + 推广平台 共用）
   const STD_PLATFORMS: readonly string[] = CONTRACT_STANDARD_PLATFORMS;
-  const initialPlatforms = (existingContract?.promoPlatform ?? (uploadSubmit ? "" : "亚马逊（Amazon）"))
+  const initialPlatforms = String(existingContract?.promoPlatform ?? (uploadSubmit ? "" : "亚马逊（Amazon）"))
     .split(",").map((s: string) => s.trim()).filter(Boolean);
   const [platforms, setPlatforms] = useState<string[]>(
     initialPlatforms.filter((p: string) => STD_PLATFORMS.includes(p))
@@ -179,7 +179,7 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
   // 合并为逗号分隔字符串供 payload / DOCX 使用
   const promoPlatform = [...platforms, otherPlatform.trim()].filter(Boolean).join(",");
   const [targetSites,    setTargetSites]    = useState<string[]>(
-    existingContract?.targetSite ? existingContract.targetSite.split(",").map((s: string) => s.trim()).filter(Boolean) : []
+    existingContract?.targetSite ? String(existingContract.targetSite).split(",").map((s: string) => s.trim()).filter(Boolean) : []
   );
   const [startDate,      setStartDate]      = useState(existingContract?.startDate ? new Date(existingContract.startDate).toISOString().slice(0, 10) : "");
   const [endDate,        setEndDate]        = useState(existingContract?.endDate ? new Date(existingContract.endDate).toISOString().slice(0, 10) : "");
@@ -189,7 +189,7 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
   // 费用
   const [feeCurrency,    setFeeCurrency]    = useState(existingContract?.feeCurrency ?? (uploadSubmit ? "" : "美金"));
   const [contractType,   setContractType]   = useState(existingContract?.type ?? "BRAND");
-  const [feeAmount,      setFeeAmount]      = useState(existingContract?.feeAmount ?? "");
+  const [feeAmount,      setFeeAmount]      = useState(String(existingContract?.feeAmount ?? ""));
   const [feeCycle,       setFeeCycle]       = useState(existingContract?.feeCycle ?? (uploadSubmit ? "" : "月付"));
 
   // 首期服务费：自动计算，不需要手动输入
