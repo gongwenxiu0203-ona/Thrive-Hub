@@ -215,12 +215,16 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
   const [excessBaseMonths, setExcessBaseMonths] = useState(existingContract?.excessBaseMonths ?? "");
   const [excessRate,     setExcessRate]     = useState(existingCommissionConfig.incremental?.excessRate ?? existingContract?.excessCommissionRate ?? "");
   const [gmvCycle,       setGmvCycle]       = useState(existingContract?.gmvSettlementCycle ?? (uploadSubmit ? "" : "月度"));
-  const [specialAttributionRate, setSpecialAttributionRate] = useState(existingCommissionConfig.special?.attributionRate ?? "");
-  const [specialCreatorRate, setSpecialCreatorRate] = useState(existingCommissionConfig.special?.creatorRate ?? "");
-  const [specialLowThreshold, setSpecialLowThreshold] = useState(existingCommissionConfig.special?.lowGmvThreshold ?? "");
-  const [specialLowBudgetRate, setSpecialLowBudgetRate] = useState(existingCommissionConfig.special?.lowGmvBudgetRate ?? "");
-  const [specialHighThreshold, setSpecialHighThreshold] = useState(existingCommissionConfig.special?.highGmvThreshold ?? "");
-  const [specialHighServiceRate, setSpecialHighServiceRate] = useState(existingCommissionConfig.special?.highGmvServiceRate ?? "");
+  const [specialTotalCommissionRate, setSpecialTotalCommissionRate] = useState(
+    existingCommissionConfig.special?.totalCommissionRate
+      ?? existingCommissionConfig.special?.attributionRate
+      ?? ""
+  );
+  const [specialSalesCommissionRate, setSpecialSalesCommissionRate] = useState(
+    existingCommissionConfig.special?.salesCommissionRate
+      ?? existingCommissionConfig.special?.creatorRate
+      ?? ""
+  );
   const [specialGmvCurrency, setSpecialGmvCurrency] = useState(existingCommissionConfig.special?.lowGmvThresholdCurrency ?? "USD");
 
   // 推广信息
@@ -315,6 +319,8 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
     if (activeCommissionType === "THRESHOLD" && (!thresholdAmount.trim() || !(thresholdReachedRate || commissionRate).trim() || !thresholdUnreachedRate.trim())) return "请填写 GMV 门槛金额、达标后比例和未达标比例";
     if (activeCommissionType === "TIERED" && tieredRows.some((r) => !r.from.trim() || !r.rate.trim())) return "请填写完整的阶梯区间和佣金比例";
     if (activeCommissionType === "INCREMENTAL" && (!excessBaseMonths.trim() || !excessRate.trim())) return "请填写增量佣金的基准月数及比例";
+    if (activeCommissionType === "SPECIAL" && !specialTotalCommissionRate.trim()) return "请填写总包佣金";
+    if (activeCommissionType === "SPECIAL" && !specialCommissionTerms.trim()) return "请填写特殊佣金规则";
     if (channels.length === 0) return "请至少确认一个合作渠道";
     // 推广商品清单可为空（非必填）；填写或上传后会自动同步到合同文件
     return null;
@@ -414,15 +420,11 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
         excessRate,
       },
       special: {
-        attributionRate: specialAttributionRate,
-        creatorRate: specialCreatorRate,
+        totalCommissionRate: specialTotalCommissionRate,
+        salesCommissionRate: specialSalesCommissionRate,
         stockPublisherConfirmDays: "10",
         lowGmvThresholdCurrency: specialGmvCurrency,
-        lowGmvThreshold: specialLowThreshold,
-        lowGmvBudgetRate: specialLowBudgetRate,
         highGmvThresholdCurrency: specialGmvCurrency,
-        highGmvThreshold: specialHighThreshold,
-        highGmvServiceRate: specialHighServiceRate,
         rawText: specialCommissionTerms,
       },
     };
@@ -583,23 +585,6 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
           partyBBankAccounts={partyBBankAccounts}
           onToggleBank={toggleBank}
         />
-
-        {/* SPECIAL 模板：阶梯/特殊佣金条款专用文本框 */}
-        {isSpecialTemplate && (
-          <div className="card p-5 space-y-3">
-            <p className="text-sm font-semibold text-slate-700">特殊佣金条款</p>
-            <p className="text-xs text-slate-500">
-              填写后将写入合同项目确认书的佣金机制段。其他模板默认按 GMV/阶梯/门槛/增量结构生成，无需填此项。
-            </p>
-            <textarea
-              className="input"
-              rows={4}
-              value={specialCommissionTerms}
-              onChange={(e) => setSpecialCommissionTerms(e.target.value)}
-              placeholder="例：本协议项下…（自定义佣金安排说明）"
-            />
-          </div>
-        )}
 
         {/* ── ③ 甲方信息（可手动填写 / AI 识别 / 生成填写链接发给客户填）── */}
         <FormSection title="③ 甲方信息" color="blue">
@@ -922,8 +907,8 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
 
               {activeCommissionType === "SPECIAL" && (
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="sm:col-span-2">
-                    <label className="label text-xs">GMV 门槛货币</label>
+                  <div>
+                    <label className="label text-xs">币种</label>
                     <select className="input" value={specialGmvCurrency} onChange={e => setSpecialGmvCurrency(e.target.value)}>
                       {CURRENCY_OPTIONS.map((c) => (
                         <option key={c.value} value={c.value}>{c.label}</option>
@@ -931,28 +916,22 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
                     </select>
                   </div>
                   <div>
-                    <label className="label text-xs">Attribution 渠道佣金比例</label>
-                    <PercentInput value={specialAttributionRate} onChange={setSpecialAttributionRate} placeholder="如：8" />
+                    <label className="label text-xs">总包佣金</label>
+                    <PercentInput value={specialTotalCommissionRate} onChange={setSpecialTotalCommissionRate} placeholder="如：10" />
                   </div>
                   <div>
-                    <label className="label text-xs">Creator Connections 佣金比例</label>
-                    <PercentInput value={specialCreatorRate} onChange={setSpecialCreatorRate} placeholder="如：10" />
+                    <label className="label text-xs">销售佣金比例（可为空）</label>
+                    <PercentInput value={specialSalesCommissionRate} onChange={setSpecialSalesCommissionRate} placeholder="对账后可手动补足" />
                   </div>
-                  <div>
-                    <label className="label text-xs">低 GMV 门槛</label>
-                    <input className="input" value={specialLowThreshold} onChange={e => setSpecialLowThreshold(e.target.value)} placeholder="如：10000" />
-                  </div>
-                  <div>
-                    <label className="label text-xs">低 GMV 推广预算比例</label>
-                    <PercentInput value={specialLowBudgetRate} onChange={setSpecialLowBudgetRate} placeholder="如：15" />
-                  </div>
-                  <div>
-                    <label className="label text-xs">高 GMV 门槛</label>
-                    <input className="input" value={specialHighThreshold} onChange={e => setSpecialHighThreshold(e.target.value)} placeholder="如：10000" />
-                  </div>
-                  <div>
-                    <label className="label text-xs">高 GMV 服务佣金比例</label>
-                    <PercentInput value={specialHighServiceRate} onChange={setSpecialHighServiceRate} placeholder="如：8" />
+                  <div className="sm:col-span-2">
+                    <label className="label text-xs">特殊佣金规则</label>
+                    <textarea
+                      className="input min-h-28"
+                      rows={4}
+                      value={specialCommissionTerms}
+                      onChange={(e) => setSpecialCommissionTerms(e.target.value)}
+                      placeholder="请输入特殊佣金的计算、确认及结算规则"
+                    />
                   </div>
                 </div>
               )}

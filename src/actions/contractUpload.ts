@@ -103,6 +103,8 @@ function mapExtractedToContract(fields: Record<string, unknown>): Record<string,
     excessBaseMonths: get("excessBaseMonths"),
     excessCommissionRate: get("excessCommissionRate"),
     specialCommissionTerms: get("specialCommissionTerms"),
+    specialTotalCommissionRate: get("specialTotalCommissionRate"),
+    specialSalesCommissionRate: get("specialSalesCommissionRate"),
     specialAttributionRate: get("specialAttributionRate"),
     specialCreatorRate: get("specialCreatorRate"),
     specialLowThreshold: get("specialLowThreshold"),
@@ -216,6 +218,8 @@ function contractCreateFields(mapped: Record<string, unknown>): Record<string, u
     thresholdUnreachedRate: _unreached,
     specialAttributionRate: _specialAttributionRate,
     specialCreatorRate: _specialCreatorRate,
+    specialTotalCommissionRate: _specialTotalCommissionRate,
+    specialSalesCommissionRate: _specialSalesCommissionRate,
     specialLowThreshold: _specialLowThreshold,
     specialLowBudgetRate: _specialLowBudgetRate,
     specialHighThreshold: _specialHighThreshold,
@@ -316,7 +320,11 @@ export async function uploadExistingContract(
   if (!ai.ok) return { ok: false, error: ai.error };
 
   const customer = await prisma.customer.findFirst({
-    where: { id: customerId, ...customerScope(session, session.role === "ADMIN" ? "all" : "mine") },
+    where: {
+      id: customerId,
+      ...customerScope(session, session.role === "ADMIN" ? "all" : "mine"),
+      deletedAt: null,
+    },
     select: { id: true, brandName: true },
   });
   if (!customer) return { ok: false, error: "客户不存在" };
@@ -375,6 +383,20 @@ export async function uploadExistingContract(
   if (templateKey === "SPECIAL") {
     commissionConfig.special = {
       ...commissionConfig.special,
+      totalCommissionRate: String(
+        mapped.specialTotalCommissionRate
+          ?? mapped.specialAttributionRate
+          ?? commissionConfig.special?.totalCommissionRate
+          ?? commissionConfig.special?.attributionRate
+          ?? "",
+      ),
+      salesCommissionRate: String(
+        mapped.specialSalesCommissionRate
+          ?? mapped.specialCreatorRate
+          ?? commissionConfig.special?.salesCommissionRate
+          ?? commissionConfig.special?.creatorRate
+          ?? "",
+      ),
       attributionRate: String(mapped.specialAttributionRate ?? commissionConfig.special?.attributionRate ?? ""),
       creatorRate: String(mapped.specialCreatorRate ?? commissionConfig.special?.creatorRate ?? ""),
       lowGmvThresholdCurrency: String(mapped.specialGmvCurrency ?? commissionConfig.special?.lowGmvThresholdCurrency ?? "USD"),

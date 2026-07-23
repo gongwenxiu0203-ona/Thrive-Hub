@@ -24,6 +24,8 @@ const PERCENT_KEYS = new Set([
   "excessCommissionRate",
   "specialAttributionRate",
   "specialCreatorRate",
+  "specialTotalCommissionRate",
+  "specialSalesCommissionRate",
   "specialLowBudgetRate",
   "specialHighServiceRate",
 ]);
@@ -48,7 +50,8 @@ const SUPPLEMENT_GROUPS = [
     ["commissionRate", "GMV抽佣比例"], ["thresholdCurrency", "GMV门槛币种"],
     ["thresholdAmount", "GMV门槛金额"], ["thresholdReachedRate", "达标后抽佣比例"],
     ["thresholdUnreachedRate", "未达标抽佣比例"], ["excessBaseMonths", "基准月数"],
-    ["excessCommissionRate", "超额增长部分佣金比例"], ["specialCommissionTerms", "特殊佣金条款"],
+    ["excessCommissionRate", "超额增长部分佣金比例"], ["specialCommissionTerms", "特殊佣金规则"],
+    ["specialTotalCommissionRate", "总包佣金"], ["specialSalesCommissionRate", "销售佣金比例"],
     ["specialGmvCurrency", "特殊佣金GMV门槛货币"], ["specialAttributionRate", "Attribution渠道佣金比例"],
     ["specialCreatorRate", "Creator Connections佣金比例"], ["specialLowThreshold", "低GMV门槛"],
     ["specialLowBudgetRate", "低GMV推广预算比例"], ["specialHighThreshold", "高GMV门槛"],
@@ -364,8 +367,26 @@ function SuccessView({
     const matchedTemplateId = selectedTemplateId
       || templates.find((item) => item.templateKey === detectedTemplateKey)?.id
       || "";
+    // AI providers occasionally return multi-value fields as arrays even
+    // though the regular contract form consumes comma-separated strings.
+    // Normalize the upload boundary so ContractV4Form never calls `.split`
+    // on an array and crashes the client after a successful extraction.
+    const formText = (value: unknown) => Array.isArray(value)
+      ? value.map((item) => String(item ?? "").trim()).filter(Boolean).join(",")
+      : String(value ?? "");
     const initialContract = {
       ...fields,
+      promoPlatform: formText(fields.promoPlatform),
+      targetSite: formText(fields.targetSite),
+      coopChannels: typeof fields.coopChannels === "string"
+        ? fields.coopChannels
+        : JSON.stringify(Array.isArray(fields.coopChannels) ? fields.coopChannels : []),
+      productList: typeof fields.productList === "string"
+        ? fields.productList
+        : JSON.stringify(Array.isArray(fields.productList) ? fields.productList : []),
+      partyBBankAccounts: typeof fields.partyBBankAccounts === "string"
+        ? fields.partyBBankAccounts
+        : JSON.stringify(Array.isArray(fields.partyBBankAccounts) ? fields.partyBBankAccounts : []),
       customerId,
       type: contractType,
       ownerId,

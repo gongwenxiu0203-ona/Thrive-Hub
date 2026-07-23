@@ -47,6 +47,8 @@ export interface CommissionConfig {
     excessRate?: string;
   };
   special?: {
+    totalCommissionRate?: string;
+    salesCommissionRate?: string;
     attributionRate?: string;
     creatorRate?: string;
     stockPublisherConfirmDays?: string;
@@ -154,6 +156,12 @@ export function primaryRateFromCommissionConfig(config: CommissionConfig): strin
   if (key === "FIXED") return config.fixed?.rate ?? "";
   if (key === "THRESHOLD") return config.threshold?.reachedRate ?? "";
   if (key === "INCREMENTAL") return config.incremental?.excessRate ?? "";
-  if (key === "SPECIAL") return config.special?.attributionRate ?? config.special?.creatorRate ?? "";
+  if (key === "SPECIAL") {
+    return config.special?.totalCommissionRate
+      ?? config.special?.salesCommissionRate
+      ?? config.special?.attributionRate
+      ?? config.special?.creatorRate
+      ?? "";
+  }
   return "";
 }
