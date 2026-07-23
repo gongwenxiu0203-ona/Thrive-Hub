@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Upload, AlertCircle, CheckCircle2 } from "lucide-react";
-import { uploadExistingContract } from "@/actions/contractUpload";
+import type { Result, UploadExistingContractData } from "@/actions/contractUpload";
 import { ContractV4Form } from "./ContractV4Form";
 import type { ContractV4Payload } from "@/actions/contracts";
 import { cn } from "@/lib/utils";
@@ -72,7 +72,24 @@ export interface UploadExistingFormProps {
 
 function uploadRequestError(error: unknown): string {
   console.error("[contract-upload] request failed", error);
-  return "上传识别请求失败，页面可能在系统更新前已打开。请刷新页面后重新选择文件再试。";
+  return "上传识别请求失败，请检查网络后重试。文件仍保留在当前页面，无需重新选择。";
+}
+
+async function uploadExistingContract(fd: FormData): Promise<Result<UploadExistingContractData>> {
+  const response = await fetch("/api/contracts/upload-existing", {
+    method: "POST",
+    body: fd,
+    cache: "no-store",
+  });
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) {
+    throw new Error(`Unexpected upload response (${response.status})`);
+  }
+  const result = await response.json() as Result<UploadExistingContractData>;
+  if (!response.ok && result.ok) {
+    throw new Error(`Upload request failed (${response.status})`);
+  }
+  return result;
 }
 
 export function UploadExistingForm({

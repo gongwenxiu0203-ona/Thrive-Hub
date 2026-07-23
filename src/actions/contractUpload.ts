@@ -28,8 +28,8 @@ import {
   CONTRACT_GMV_CYCLES,
 } from "@/lib/contractFormOptions";
 
-type Result<T = void> = { ok: true; data?: T } | { ok: false; error: string };
-type UploadExistingContractData = {
+export type Result<T = void> = { ok: true; data?: T } | { ok: false; error: string };
+export type UploadExistingContractData = {
   contractId: string | null;
   missing: { key: string; label: string }[];
   autoSubmitted: boolean;
@@ -308,11 +308,14 @@ export async function uploadExistingContract(
       sourcePreviewHtml = docx.html;
     }
   } catch (error) {
+    console.error("[contract-upload] failed to parse source document", {
+      fileName: file.name,
+      fileType: ext,
+      error,
+    });
     return {
       ok: false,
-      error: error instanceof Error
-        ? error.message
-        : "解析合同文件失败：文件可能已损坏或不可识别",
+      error: "解析合同文件失败：文件可能已损坏、格式不兼容或不包含可识别内容",
     };
   }
 
