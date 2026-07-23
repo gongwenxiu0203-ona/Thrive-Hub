@@ -27,6 +27,7 @@ export type ReceivableTaskRunResult = {
   createdTasks: number;
   existingTasks: number;
   skippedFutureTasks: number;
+  skippedPastTasks: number;
   issues: ReceivableTaskRunIssue[];
 };
 
@@ -64,6 +65,17 @@ function nextMonthFifth(date: Date): Date {
 
 function dateKey(date: Date): string {
   return date.toISOString().slice(0, 10);
+}
+
+export function classifyReceivableDueDate(
+  dueDate: Date,
+  runDate = new Date(),
+): "PAST" | "TODAY" | "FUTURE" {
+  const dueKey = dateKey(fromCalendarDate(calendarDate(dueDate)));
+  const todayKey = dateKey(fromCalendarDate(shanghaiCalendarDate(runDate)));
+  if (dueKey < todayKey) return "PAST";
+  if (dueKey > todayKey) return "FUTURE";
+  return "TODAY";
 }
 
 function displayDate(date: Date): string {
@@ -192,10 +204,9 @@ function automationKey(contractId: string, kind: ReceivableTaskKind, dueDate: Da
 }
 
 /**
- * Creates all collection tasks due on or before `throughDate`. This makes the
- * daily job self-healing after downtime. The unique automation key guarantees
- * idempotency and the update branch deliberately does not overwrite a manual
- * owner reassignment.
+ * Creates only collection tasks due on the Shanghai calendar date represented
+ * by `throughDate`. Past periods are intentionally not backfilled and future
+ * periods remain pending. The unique automation key guarantees idempotency.
  */
 export async function generateReceivableTasks(
   throughDate = new Date(),
@@ -221,6 +232,7 @@ export async function generateReceivableTasks(
     createdTasks: 0,
     existingTasks: 0,
     skippedFutureTasks: 0,
+    skippedPastTasks: 0,
     issues: [],
   };
 
@@ -257,6 +269,10 @@ export async function generateReceivableTasks(
       for (let index = 0; index < schedule.dueDates.length; index += 1) {
         const dueDate = schedule.dueDates[index];
         result.eligibleTasks += 1;
+        if (dueDate.getTime() < today.getTime()) {
+          result.skippedPastTasks += 1;
+          continue;
+        }
         if (dueDate.getTime() > today.getTime()) {
           result.skippedFutureTasks += 1;
           continue;

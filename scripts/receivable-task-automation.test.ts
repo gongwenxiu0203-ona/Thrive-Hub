@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   buildGmvDueDates,
   buildMonthlyFeeDueDates,
+  classifyReceivableDueDate,
 } from "../src/lib/receivableTaskAutomation";
 
 const isoDates = (dates: Date[]) => dates.map((date) => date.toISOString().slice(0, 10));
@@ -55,4 +56,11 @@ test("a one-day contract still has one GMV collection date next month", () => {
     )),
     ["2027-01-05"],
   );
+});
+
+test("receivable generation classifies dates using the Shanghai calendar day", () => {
+  const runAt = new Date("2026-07-22T16:30:00.000Z"); // 2026-07-23 00:30 in Shanghai
+  assert.equal(classifyReceivableDueDate(new Date("2026-07-22T00:00:00.000Z"), runAt), "PAST");
+  assert.equal(classifyReceivableDueDate(new Date("2026-07-23T00:00:00.000Z"), runAt), "TODAY");
+  assert.equal(classifyReceivableDueDate(new Date("2026-07-24T00:00:00.000Z"), runAt), "FUTURE");
 });
