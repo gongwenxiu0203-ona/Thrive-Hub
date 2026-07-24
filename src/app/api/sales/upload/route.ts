@@ -142,6 +142,7 @@ export async function POST(req: Request) {
           })
         : Promise.resolve(null),
       prisma.affiliate.findMany({
+        where: { deletedAt: null },
         select: {
           platformAffiliateName: true,
           internalAffiliateName: true,
@@ -304,7 +305,7 @@ export async function POST(req: Request) {
       const uniqueNames = [...new Set(records.map((r) => r.affiliateName as string).filter(Boolean))];
       if (uniqueNames.length > 0) {
         const existing = await prisma.affiliate.findMany({
-          where: { platformAffiliateName: { in: uniqueNames } },
+          where: { platformAffiliateName: { in: uniqueNames }, deletedAt: null },
           select: { platformAffiliateName: true },
         });
         const existingSet = new Set(existing.map((a) => a.platformAffiliateName));

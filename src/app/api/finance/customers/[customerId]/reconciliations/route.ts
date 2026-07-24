@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { customerScope, reconciliationScope } from "@/lib/dataScope";
 import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
+import { RECONCILIATION_FEATURE } from "@/lib/reconciliationAccess";
 
 // DELETE /api/finance/customers/[customerId]/reconciliations
 // 删除该客户的全部月度对账记录（含级联的 settlements/reviews）
@@ -12,7 +13,7 @@ export async function DELETE(
 ) {
   try {
     const session = await requireSession();
-    await requireFeaturePermission(session, "finance_customer", "MANAGE");
+    await requireFeaturePermission(session, RECONCILIATION_FEATURE, "MANAGE");
     const { customerId } = await params;
 
     const view = session.role === "ADMIN" ? "all" : "mine";

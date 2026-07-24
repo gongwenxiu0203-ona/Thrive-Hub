@@ -121,3 +121,21 @@ export const ROLE_LABELS_FOR_PERM: Record<string, string> = {
 export const FEATURE_BY_KEY = new Map(
   FEATURES.map((feature) => [feature.key, feature]),
 );
+
+/**
+ * Temporary compatibility for guards that still pass a pre-granular module
+ * key. New authorization code should use the leaf key on the right directly.
+ */
+export const LEGACY_FEATURE_ALIASES: Record<string, string> = {
+  dashboard: "dashboard.view",
+  customers: "customers.records",
+  contracts: "contracts.records",
+  tasks: "tasks.board",
+  bi: "bi.view",
+  affiliates: "affiliates.records",
+  finance_customer: "finance.customer_reconciliation",
+  finance_channel: "finance.channel_reconciliation",
+  reminders: "reminders.records",
+  intake: "intake.links",
+  admin: "admin.users",
+};

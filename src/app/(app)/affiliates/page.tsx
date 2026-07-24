@@ -10,6 +10,7 @@ async function loadOptions() {
   const [affiliates, users, customers, salesBrands] = await Promise.all([
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (prisma.affiliate.findMany as any)({
+      where: { deletedAt: null },
       select: {
         platformAffiliateName: true,
         source: true,
@@ -26,8 +27,15 @@ async function loadOptions() {
         personInCharge: { select: { name: true } },
       },
     }),
-    prisma.user.findMany({ select: { id: true, name: true } }),
-    prisma.customer.findMany({ select: { id: true, brandName: true }, orderBy: { brandName: "asc" } }),
+    prisma.user.findMany({
+      where: { status: "APPROVED" },
+      select: { id: true, name: true },
+    }),
+    prisma.customer.findMany({
+      where: { deletedAt: null },
+      select: { id: true, brandName: true },
+      orderBy: { brandName: "asc" },
+    }),
     // 往期合作数据里的品牌（销售记录 distinct brand）
     prisma.salesRecord.findMany({ where: { deletedAt: null }, select: { brand: true }, distinct: ["brand"] }),
   ]);

@@ -69,6 +69,15 @@ async function requireApprovedInternalUsers(userIds: Array<string | null>) {
   if (count !== ids.length) throw new Error("任务只能分配给已通过审核的内部员工");
 }
 
+async function requireActiveCustomer(customerId: string | null) {
+  if (!customerId) return;
+  const customer = await prisma.customer.findFirst({
+    where: { id: customerId, deletedAt: null },
+    select: { id: true },
+  });
+  if (!customer) throw new Error("所选客户不存在或已删除");
+}
+
 export async function createTask(fd: FormData) {
   const session = await requireTaskEditor();
   const title = str(fd, "title");
@@ -80,13 +89,15 @@ export async function createTask(fd: FormData) {
   const dueDate = str(fd, "dueDate");
   const ownerId = str(fd, "ownerId") || null;
   const publisherId = str(fd, "publisherId") || session.userId;
+  const customerId = str(fd, "customerId") || null;
   await requireApprovedInternalUsers([ownerId, publisherId]);
+  await requireActiveCustomer(customerId);
 
   await prisma.task.create({
     data: {
       title,
       description: str(fd, "description") || null,
-      customerId: str(fd, "customerId") || null,
+      customerId,
       ownerId,
       publisherId,
       priority: str(fd, "priority") || "MID",
@@ -107,14 +118,16 @@ export async function updateTask(id: string, fd: FormData) {
   const dueDate = str(fd, "dueDate");
   const ownerId = str(fd, "ownerId") || null;
   const publisherId = str(fd, "publisherId") || null;
+  const customerId = str(fd, "customerId") || null;
   await requireApprovedInternalUsers([ownerId, publisherId]);
+  await requireActiveCustomer(customerId);
 
   await prisma.task.update({
     where: { id },
     data: {
       title,
       description: str(fd, "description") || null,
-      customerId: str(fd, "customerId") || null,
+      customerId,
       ownerId,
       publisherId,
       priority: str(fd, "priority") || "MID",

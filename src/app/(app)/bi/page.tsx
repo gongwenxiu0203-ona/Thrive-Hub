@@ -153,6 +153,7 @@ async function getDashboardAffiliates(): Promise<DashboardAffiliate[]> {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const value = await (prisma.affiliate.findMany as any)({
+    where: { deletedAt: null },
     select: {
       platformAffiliateName: true,
       internalAffiliateName: true,
@@ -195,6 +196,7 @@ async function getBiFilterContext(baseWhere: Prisma.SalesRecordWhereInput): Prom
     prisma.salesRecord.groupBy({ where: baseWhere, by: ["parentAsin"] }),
     prisma.salesRecord.groupBy({ where: baseWhere, by: ["storeProductLabel"] }),
     prisma.affiliate.findMany({
+      where: { deletedAt: null },
       select: { platformAffiliateName: true, affiliateType: true },
     }),
   ]);
@@ -266,6 +268,7 @@ export default async function BIPage({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const channelCustomers = await (prisma.customer.findMany as any)({
       where: {
+        deletedAt: null,
         OR: [
           { createdById: session.userId },
           { channelUserId: session.userId },

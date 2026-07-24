@@ -141,7 +141,7 @@ export default async function CustomersPage({
 
   const [customers, users, pendingIntakes] = await Promise.all([
     loadCustomers({ ...scope, deletedAt: null }),
-    prisma.user.findMany({ orderBy: { name: "asc" } }),
+    prisma.user.findMany({ where: { status: "APPROVED" }, orderBy: { name: "asc" } }),
     session.role === "ADMIN" ? prisma.customerIntakeSubmission.findMany({ where: { status: "PENDING" }, orderBy: { submittedAt: "desc" } }) : Promise.resolve([]),
   ]);
   const pendingByCustomer = new Map<string, number>();

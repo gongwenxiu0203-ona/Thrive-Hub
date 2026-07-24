@@ -34,12 +34,35 @@ function validateWorkContent(payload: WorkLogPayload): string | null {
   return null;
 }
 
+async function validateActiveReferences(payload: WorkLogPayload): Promise<string | null> {
+  const projectIds = [...new Set(payload.projectIds.filter(Boolean))];
+  if (projectIds.length) {
+    const activeProjectCount = await prisma.project.count({
+      where: { id: { in: projectIds }, deletedAt: null },
+    });
+    if (activeProjectCount !== projectIds.length) return "所选项目中包含已删除或不存在的项目";
+  }
+
+  const affiliateIds = [...new Set(
+    (payload.bdProgress ?? []).map((item) => item.affiliateId).filter(Boolean),
+  )];
+  if (affiliateIds.length) {
+    const activeAffiliateCount = await prisma.affiliate.count({
+      where: { id: { in: affiliateIds }, deletedAt: null },
+    });
+    if (activeAffiliateCount !== affiliateIds.length) return "所选联盟商中包含已删除或不存在的联盟商";
+  }
+  return null;
+}
+
 /** 创建工作日志（日志时间自动生成）*/
 export async function createWorkLog(payload: WorkLogPayload): Promise<WorkLogSaveResult> {
   const session = await requireSession();
   if (!isStaff(session.role)) return { ok: false, error: "无权操作" };
   const err = validateWorkContent(payload);
   if (err) return { ok: false, error: err };
+  const referenceError = await validateActiveReferences(payload);
+  if (referenceError) return { ok: false, error: referenceError };
 
   const bd = (payload.bdProgress ?? []).filter((b) => b.affiliateName && b.progress.trim());
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -69,6 +92,8 @@ export async function updateWorkLog(id: string, payload: WorkLogPayload): Promis
   }
   const err = validateWorkContent(payload);
   if (err) return { ok: false, error: err };
+  const referenceError = await validateActiveReferences(payload);
+  if (referenceError) return { ok: false, error: referenceError };
 
   const bd = (payload.bdProgress ?? []).filter((b) => b.affiliateName && b.progress.trim());
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

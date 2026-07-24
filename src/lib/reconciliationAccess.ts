@@ -4,7 +4,7 @@ import type { PermLevel } from "@/lib/featurePermissions";
 import { reconciliationScope, customerScope, type ViewScope } from "@/lib/dataScope";
 import { requireFeaturePermission, resolveSafeViewScope } from "@/lib/permissionGuard";
 
-export const RECONCILIATION_FEATURE = "finance_customer";
+export const RECONCILIATION_FEATURE = "finance.customer_reconciliation";
 
 type ReconciliationSession = Pick<SessionPayload, "userId" | "role" | "brandName">;
 

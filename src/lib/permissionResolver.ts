@@ -4,6 +4,7 @@ import {
   DEFAULT_ROLE_PERMISSIONS,
   FEATURE_BY_KEY,
   FEATURES,
+  LEGACY_FEATURE_ALIASES,
   PermLevel,
 } from "@/lib/featurePermissions";
 
@@ -12,13 +13,20 @@ export async function resolveUserPermission(
   userId: string,
   feature: string,
 ): Promise<PermLevel> {
+  const canonicalFeature = LEGACY_FEATURE_ALIASES[feature] ?? feature;
   // 1) 用户覆盖
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const override = await (prisma as any).userPermissionOverride.findUnique({
     where: { userId_feature: { userId, feature } },
   });
   if (override) return override.level as PermLevel;
-  const legacyKey = FEATURE_BY_KEY.get(feature)?.legacyKey;
+  if (canonicalFeature !== feature) {
+    const canonicalOverride = await (prisma as any).userPermissionOverride.findUnique({
+      where: { userId_feature: { userId, feature: canonicalFeature } },
+    });
+    if (canonicalOverride) return canonicalOverride.level as PermLevel;
+  }
+  const legacyKey = FEATURE_BY_KEY.get(canonicalFeature)?.legacyKey;
   if (legacyKey) {
     const legacyOverride = await (prisma as any).userPermissionOverride.findUnique({
       where: { userId_feature: { userId, feature: legacyKey } },
@@ -39,6 +47,12 @@ export async function resolveUserPermission(
     where: { role_feature: { role: user.role, feature } },
   });
   if (roleSetting) return roleSetting.level as PermLevel;
+  if (canonicalFeature !== feature) {
+    const canonicalRoleSetting = await (prisma as any).rolePermission.findUnique({
+      where: { role_feature: { role: user.role, feature: canonicalFeature } },
+    });
+    if (canonicalRoleSetting) return canonicalRoleSetting.level as PermLevel;
+  }
   if (legacyKey) {
     const legacyRoleSetting = await (prisma as any).rolePermission.findUnique({
       where: { role_feature: { role: user.role, feature: legacyKey } },
@@ -48,7 +62,7 @@ export async function resolveUserPermission(
 
   // 4) 兜底：默认配置
   return (
-    DEFAULT_ROLE_PERMISSIONS[user.role]?.[feature] ?? "NONE"
+    DEFAULT_ROLE_PERMISSIONS[user.role]?.[canonicalFeature] ?? "NONE"
   );
 }
 

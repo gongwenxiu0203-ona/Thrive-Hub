@@ -9,6 +9,12 @@ import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
 import { createIntegratedProject, createOneOffProject } from "@/actions/projects";
 import { formatDate, cn } from "@/lib/utils";
+import {
+  PROJECT_PROMO_PLATFORM_OPTIONS,
+  PROJECT_TARGET_SITE_OPTIONS,
+  ProjectMultiSelect,
+  composeIntegratedProjectName,
+} from "./ProjectMarketingFields";
 
 // 单次合作阶段标签
 export const ONEOFF_STAGE_LABELS: Record<string, string> = {
@@ -303,9 +309,14 @@ function CreateProjectModal({
   const [contractId, setContractId] = useState("");
   const [ownerId, setOwnerId] = useState(currentUserId);
   const [name, setName] = useState("");
+  const [nameTouched, setNameTouched] = useState(false);
+  const [promoPlatforms, setPromoPlatforms] = useState<string[]>([]);
+  const [targetSites, setTargetSites] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const customer = customers.find((c) => c.id === customerId);
+  const defaultName = composeIntegratedProjectName(customer?.brandName ?? "", promoPlatforms, targetSites);
+  const displayedName = nameTouched ? name : defaultName;
   // 该客户名下的合同
   const customerContracts = contracts.filter((c) => c.customerId === customerId);
 
@@ -317,7 +328,9 @@ function CreateProjectModal({
         customerId,
         contractId: contractId || undefined,
         ownerId: ownerId || undefined,
-        name,
+        name: nameTouched ? name : "",
+        promoPlatforms,
+        targetSites,
       });
       if (!result.ok) { setError(result.error ?? "创建失败"); return; }
       onClose();
@@ -370,10 +383,36 @@ function CreateProjectModal({
               <p className="mt-1 text-[11px] text-slate-400">默认创建人，可手动修改；项目 GMV 目标默认取此人</p>
             </div>
           </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <ProjectMultiSelect
+              label="推广平台（可多选）"
+              options={PROJECT_PROMO_PLATFORM_OPTIONS}
+              value={promoPlatforms}
+              onChange={setPromoPlatforms}
+              placeholder="请选择推广平台"
+            />
+            <ProjectMultiSelect
+              label="目标站点（可多选）"
+              options={PROJECT_TARGET_SITE_OPTIONS}
+              value={targetSites}
+              onChange={setTargetSites}
+              placeholder="请选择目标站点"
+            />
+          </div>
           <div>
-            <label className="label">项目名称（可选）</label>
-            <input className="input" value={name} onChange={(e) => setName(e.target.value)}
-              placeholder={customer ? `默认：${customer.brandName} 联盟营销` : "默认使用客户品牌名"} />
+            <label className="label">项目名称</label>
+            <input
+              className="input"
+              value={displayedName}
+              onChange={(e) => {
+                setNameTouched(true);
+                setName(e.target.value);
+              }}
+              placeholder="选择客户、推广平台和目标站点后自动生成"
+            />
+            <p className="mt-1 text-[11px] text-slate-400">
+              默认按“关联客户 · 推广平台 · 目标站点”生成，也可以手动修改
+            </p>
           </div>
           {error && (
             <div className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-sm text-rose-600">{error}</div>

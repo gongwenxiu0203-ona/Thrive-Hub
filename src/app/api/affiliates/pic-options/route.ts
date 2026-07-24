@@ -16,7 +16,7 @@ export async function GET() {
 
   // 1. Distinct assigned User ids
   const assignedRows = await prisma.affiliate.findMany({
-    where: { personInChargeId: { not: null } },
+    where: { personInChargeId: { not: null }, deletedAt: null },
     select: { personInChargeId: true },
     distinct: ["personInChargeId"],
   });
@@ -35,6 +35,7 @@ export async function GET() {
     where: {
       personInChargeId: null,
       personInChargeName: { not: null },
+      deletedAt: null,
     },
     select: { personInChargeName: true },
     distinct: ["personInChargeName"],

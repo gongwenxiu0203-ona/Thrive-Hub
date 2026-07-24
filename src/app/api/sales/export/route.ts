@@ -30,7 +30,7 @@ export async function GET(req: Request) {
   let typeAffiliateNames: string[] | undefined;
   if (types.length) {
     const affiliates = await prisma.affiliate.findMany({
-      where: { affiliateType: { in: types } },
+      where: { affiliateType: { in: types }, deletedAt: null },
       select: { platformAffiliateName: true },
     });
     typeAffiliateNames = affiliates.map((item) => item.platformAffiliateName.trim()).filter(Boolean);

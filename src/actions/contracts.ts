@@ -697,8 +697,8 @@ export async function createContractV4(
   if (!partyAName && !isExternalDraft) return { ok: false, error: "甲方公司名称为必填项" };
   if (requiresTemplate && !payload.templateId) return { ok: false, error: "请选择适用的合同模板" };
   const selectedTemplate = payload.templateId
-    ? await prisma.contractTemplate.findUnique({
-      where: { id: payload.templateId },
+    ? await prisma.contractTemplate.findFirst({
+      where: { id: payload.templateId, deletedAt: null },
       select: { templateKey: true },
     })
     : null;
@@ -819,8 +819,8 @@ export async function updateContractV4(
   const customerDependencyPrefix = "该合同已关联下游数据，不能直接修改客户";
   let templateKey = payload.commissionType;
   if (payload.templateId) {
-    const selectedTemplate = await prisma.contractTemplate.findUnique({
-      where: { id: payload.templateId },
+    const selectedTemplate = await prisma.contractTemplate.findFirst({
+      where: { id: payload.templateId, deletedAt: null },
       select: { templateKey: true },
     });
     if (!selectedTemplate) return { ok: false, error: "合同模板不存在或已删除" };

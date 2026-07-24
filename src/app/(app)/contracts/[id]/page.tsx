@@ -96,7 +96,7 @@ export default async function ContractDetailPage({
   }
 
   const [users, files, customers] = await Promise.all([
-    prisma.user.findMany({ orderBy: { name: "asc" } }),
+    prisma.user.findMany({ where: { status: "APPROVED" }, orderBy: { name: "asc" } }),
     prisma.attachment.findMany({
       where: { entityType: "CONTRACT", entityId: id },
       orderBy: { createdAt: "desc" },

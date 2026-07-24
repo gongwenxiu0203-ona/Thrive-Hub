@@ -237,6 +237,24 @@ export async function createAR(payload: {
   if (!payload.invoiceDate) return { ok: false, error: "请选择开票日期" };
   if (!payload.dueDate) return { ok: false, error: "请选择应收到期日" };
   if (!(payload.invoiceAmount > 0)) return { ok: false, error: "发票金额需大于 0" };
+  if (payload.customerId) {
+    const customer = await prisma.customer.findFirst({
+      where: { id: payload.customerId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!customer) return { ok: false, error: "所选客户不存在或已删除" };
+  }
+  if (payload.followOwnerId) {
+    const owner = await prisma.user.findFirst({
+      where: {
+        id: payload.followOwnerId,
+        status: "APPROVED",
+        role: { in: ["ADMIN", "USER"] },
+      },
+      select: { id: true },
+    });
+    if (!owner) return { ok: false, error: "所选跟进负责人不可用" };
+  }
 
   const exchangeRate = payload.exchangeRate && payload.exchangeRate > 0
     ? payload.exchangeRate

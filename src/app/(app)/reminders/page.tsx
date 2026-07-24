@@ -41,7 +41,7 @@ export default async function RemindersPage({
       orderBy: [{ isRead: "asc" }, { remindDate: "asc" }],
       include: { target: true, createdBy: true },
     }),
-    prisma.user.findMany({ orderBy: { name: "asc" } }),
+    prisma.user.findMany({ where: { status: "APPROVED" }, orderBy: { name: "asc" } }),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prisma.reminder.count({ where: { targetId: session.userId, isRead: false, deletedAt: null } as any }),
   ]);

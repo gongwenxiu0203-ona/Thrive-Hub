@@ -81,7 +81,7 @@ async function salesWhereFromFilterParams(
   let typeAffNames: string[] | undefined;
   if (types.length) {
     const affLibrary = await prisma.affiliate.findMany({
-      where: { affiliateType: { in: types } },
+      where: { affiliateType: { in: types }, deletedAt: null },
       select: { platformAffiliateName: true },
     });
     typeAffNames = affLibrary.map((a) => a.platformAffiliateName.trim()).filter(Boolean);

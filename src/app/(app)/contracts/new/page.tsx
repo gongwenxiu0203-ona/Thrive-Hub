@@ -76,7 +76,11 @@ export default async function NewContractPage({
       select: { id: true, brandName: true },
       orderBy: { brandName: "asc" },
     }),
-    prisma.user.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    prisma.user.findMany({
+      where: { status: "APPROVED" },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    }),
     prisma.contractTemplate.findMany({
       where: { deletedAt: null },
       select: { id: true, name: true, templateKey: true },

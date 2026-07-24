@@ -21,8 +21,8 @@ export default async function AffiliateDetailPage({
   const session = await requireSession();
   const { id } = await params;
 
-  const affiliate = await prisma.affiliate.findUnique({
-    where: { id },
+  const affiliate = await prisma.affiliate.findFirst({
+    where: { id, deletedAt: null },
     include: {
       personInCharge: { select: { id: true, name: true, email: true } },
       coopReviews: { orderBy: { createdAt: "desc" } },
@@ -34,7 +34,11 @@ export default async function AffiliateDetailPage({
   // Linked accounts (same internalAffiliateName)
   const linkedAccounts = affiliate.internalAffiliateName
     ? await prisma.affiliate.findMany({
-        where: { internalAffiliateName: affiliate.internalAffiliateName, id: { not: id } },
+        where: {
+          internalAffiliateName: affiliate.internalAffiliateName,
+          id: { not: id },
+          deletedAt: null,
+        },
         select: { id: true, platformAffiliateName: true, developmentStatus: true },
       })
     : [];
@@ -63,9 +67,13 @@ export default async function AffiliateDetailPage({
   }));
 
   // Users for edit form + coop review
-  const users = await prisma.user.findMany({ select: { id: true, name: true } });
+  const users = await prisma.user.findMany({
+    where: { status: "APPROVED" },
+    select: { id: true, name: true },
+  });
   // Customers for coop review
   const customers = await prisma.customer.findMany({
+    where: { deletedAt: null },
     select: { id: true, brandName: true, businessOwnerId: true, backendOwnerId: true },
     orderBy: { brandName: "asc" },
   });

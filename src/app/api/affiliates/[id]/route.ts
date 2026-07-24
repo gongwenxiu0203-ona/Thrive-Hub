@@ -15,8 +15,8 @@ export async function GET(
   if (!hasPermissionLevel(affiliatePermission, "READ")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const { id } = await params;
-  const affiliate = await prisma.affiliate.findUnique({
-    where: { id },
+  const affiliate = await prisma.affiliate.findFirst({
+    where: { id, deletedAt: null },
     include: {
       personInCharge: { select: { id: true, name: true, email: true } },
       coopReviews: { orderBy: { createdAt: "desc" } },
@@ -31,6 +31,7 @@ export async function GET(
       where: {
         internalAffiliateName: affiliate.internalAffiliateName,
         id: { not: id },
+        deletedAt: null,
       },
       select: { id: true, platformAffiliateName: true },
     });

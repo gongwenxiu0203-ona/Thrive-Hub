@@ -22,6 +22,23 @@ export async function POST(
     coopModes,  // string[]
   } = body;
 
+  const activeAffiliate = await prisma.affiliate.findFirst({
+    where: { id, deletedAt: null },
+    select: { id: true },
+  });
+  if (!activeAffiliate) {
+    return NextResponse.json({ error: "联盟商不存在或已删除" }, { status: 404 });
+  }
+  if (customerId) {
+    const activeCustomer = await prisma.customer.findFirst({
+      where: { id: customerId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!activeCustomer) {
+      return NextResponse.json({ error: "客户不存在或已删除" }, { status: 400 });
+    }
+  }
+
   // Create review record
   const review = await prisma.affiliateCoopReview.create({
     data: {

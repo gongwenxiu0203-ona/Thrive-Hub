@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
   });
 
   // Load existing affiliate names for dedup check
-  const existing = await prisma.affiliate.findMany();
+  const existing = await prisma.affiliate.findMany({ where: { deletedAt: null } });
 
   const dataRows = rows.slice(1); // skip header
   const results: {

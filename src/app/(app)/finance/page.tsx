@@ -9,6 +9,9 @@ import {
   parseViewScope,
 } from "@/lib/dataScope";
 import { FinanceClient } from "./FinanceClient";
+import { resolveUserPermission } from "@/lib/permissionResolver";
+import { hasPermissionLevel } from "@/lib/permissionGuard";
+import { RECONCILIATION_FEATURE } from "@/lib/reconciliationAccess";
 
 export default async function FinancePage({
   searchParams,
@@ -16,6 +19,10 @@ export default async function FinancePage({
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const session = await requireSession();
+  const customerReconciliationPermission = await resolveUserPermission(
+    session.userId,
+    RECONCILIATION_FEATURE,
+  );
   const sp = await searchParams;
   const view = parseViewScope(sp);
 
@@ -104,7 +111,10 @@ export default async function FinancePage({
     prisma.customer.findMany({
       where: {
         AND: [
-          { contracts: { some: { status: "COMPLETED" } } },
+          {
+            deletedAt: null,
+            contracts: { some: { status: "COMPLETED", deletedAt: null } },
+          },
           custScope as any,
         ],
       },
@@ -114,7 +124,7 @@ export default async function FinancePage({
         businessOwnerId: true,
         contactPhone: true,
         contracts: {
-          where: { status: "COMPLETED" },
+          where: { status: "COMPLETED", deletedAt: null },
           select: {
             id: true,
             contractNo: true,
@@ -127,13 +137,14 @@ export default async function FinancePage({
     }),
 
     prisma.user.findMany({
-      where: { role: "CHANNEL" },
+      where: { role: "CHANNEL", status: "APPROVED" },
       select: { id: true, name: true },
       orderBy: { name: "asc" },
     }),
 
     // 所有用户（用于新建对账时选择负责人，需带邮箱）
     prisma.user.findMany({
+      where: { status: "APPROVED" },
       select: { id: true, name: true, email: true },
       orderBy: { name: "asc" },
     }),
@@ -197,7 +208,10 @@ export default async function FinancePage({
       canToggleScope={isStaff(session.role)}
       currentView={view}
       isChannel={session.role === "CHANNEL"}
-      canManageCustomerReconciliations={isStaff(session.role)}
+      canManageCustomerReconciliations={hasPermissionLevel(
+        customerReconciliationPermission,
+        "MANAGE",
+      )}
       canCreateChannelReconciliations={isStaff(session.role)}
       canViewAffiliateReconciliations={isStaff(session.role)}
     />

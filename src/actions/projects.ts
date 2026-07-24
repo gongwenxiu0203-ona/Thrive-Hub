@@ -7,6 +7,29 @@ import { isStaff } from "@/lib/permissions";
 
 export type ProjectSaveResult = { ok: boolean; error?: string; projectId?: string };
 
+function normalizeProjectMultiValues(values: string[] | undefined, label: string) {
+  const normalized = Array.from(new Set(
+    (values ?? []).map((value) => value.trim()).filter(Boolean),
+  ));
+  if (normalized.length > 20) throw new Error(`${label}最多选择 20 项`);
+  if (normalized.some((value) => value.length > 80)) {
+    throw new Error(`${label}单项不能超过 80 个字符`);
+  }
+  return normalized;
+}
+
+function composeIntegratedProjectName(
+  customerName: string,
+  promoPlatforms: string[],
+  targetSites: string[],
+) {
+  return [
+    customerName.trim(),
+    promoPlatforms.join("、"),
+    targetSites.join("、"),
+  ].filter(Boolean).join(" · ");
+}
+
 /**
  * 整合合作：选关联客户（可多项目）+ 关联合同（可选）创建项目。
  * 商务负责人自动取客户负责人；Strategy AM 默认创建人（可手动改）。
@@ -16,19 +39,33 @@ export async function createIntegratedProject(payload: {
   contractId?: string;
   ownerId?: string;
   name?: string;
+  promoPlatforms?: string[];
+  targetSites?: string[];
 }): Promise<ProjectSaveResult> {
   const session = await requireSession();
   if (!isStaff(session.role)) return { ok: false, error: "无权创建项目" };
   if (!payload.customerId) return { ok: false, error: "请选择关联客户" };
 
-  const customer = await prisma.customer.findUnique({ where: { id: payload.customerId } });
+  const customer = await prisma.customer.findFirst({
+    where: { id: payload.customerId, deletedAt: null },
+  });
   if (!customer) return { ok: false, error: "客户不存在" };
+  let promoPlatforms: string[];
+  let targetSites: string[];
+  try {
+    promoPlatforms = normalizeProjectMultiValues(payload.promoPlatforms, "推广平台");
+    targetSites = normalizeProjectMultiValues(payload.targetSites, "目标站点");
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "项目字段格式错误" };
+  }
 
   // 关联合同（可选）：若选了，校验属于该客户
   let contractNo = "";
   let contractStatus = "";
   if (payload.contractId) {
-    const contract = await prisma.contract.findUnique({ where: { id: payload.contractId } });
+    const contract = await prisma.contract.findFirst({
+      where: { id: payload.contractId, deletedAt: null, customer: { deletedAt: null } },
+    });
     if (!contract) return { ok: false, error: "合同不存在" };
     if (contract.customerId !== payload.customerId) {
       return { ok: false, error: "所选合同不属于该客户" };
@@ -41,10 +78,13 @@ export async function createIntegratedProject(payload: {
   const project = await (prisma.project.create as any)({
     data: {
       type: "INTEGRATED",
-      name: payload.name?.trim() || `${customer.brandName} 联盟营销`,
+      name: payload.name?.trim()
+        || composeIntegratedProjectName(customer.brandName, promoPlatforms, targetSites),
       customerId: payload.customerId,
       contractId: payload.contractId || null,
       ownerId: payload.ownerId || session.userId, // Strategy AM 默认创建人
+      promoPlatforms: JSON.stringify(promoPlatforms),
+      targetSites: JSON.stringify(targetSites),
       createdById: session.userId,
     },
   });
@@ -74,6 +114,8 @@ export async function updateProjectBasicInfo(payload: {
   customerId?: string | null;
   contractId?: string | null;
   ownerId?: string | null;
+  promoPlatforms?: string[];
+  targetSites?: string[];
 }): Promise<ProjectSaveResult> {
   const session = await requireSession();
   if (!isStaff(session.role)) return { ok: false, error: "无权修改项目" };
@@ -96,7 +138,7 @@ export async function updateProjectBasicInfo(payload: {
   if (payload.customerId !== undefined) {
     if (payload.customerId) {
       const customer = await prisma.customer.findUnique({
-        where: { id: payload.customerId },
+        where: { id: payload.customerId, deletedAt: null },
         select: { id: true },
       });
       if (!customer) return { ok: false, error: "客户不存在" };
@@ -110,10 +152,25 @@ export async function updateProjectBasicInfo(payload: {
     data.ownerId = payload.ownerId || null;
   }
 
+  try {
+    if (payload.promoPlatforms !== undefined) {
+      data.promoPlatforms = JSON.stringify(
+        normalizeProjectMultiValues(payload.promoPlatforms, "推广平台"),
+      );
+    }
+    if (payload.targetSites !== undefined) {
+      data.targetSites = JSON.stringify(
+        normalizeProjectMultiValues(payload.targetSites, "目标站点"),
+      );
+    }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "项目字段格式错误" };
+  }
+
   if (payload.contractId !== undefined) {
     if (payload.contractId) {
-      const contract = await prisma.contract.findUnique({
-        where: { id: payload.contractId },
+      const contract = await prisma.contract.findFirst({
+        where: { id: payload.contractId, deletedAt: null, customer: { deletedAt: null } },
         select: { id: true, customerId: true, contractNo: true, status: true },
       });
       if (!contract) return { ok: false, error: "合同不存在" };
@@ -287,6 +344,13 @@ export async function createOneOffProject(payload: {
   if (!isStaff(session.role)) return { ok: false, error: "无权创建项目" };
   if (!payload.name.trim()) return { ok: false, error: "请填写项目名称" };
   if (!payload.demand.trim()) return { ok: false, error: "请填写需求描述" };
+  if (payload.customerId) {
+    const customer = await prisma.customer.findFirst({
+      where: { id: payload.customerId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!customer) return { ok: false, error: "所选客户不存在或已删除" };
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const project = await (prisma.project.create as any)({

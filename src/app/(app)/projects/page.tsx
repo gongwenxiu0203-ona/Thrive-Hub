@@ -34,7 +34,12 @@ export default async function ProjectsPage() {
     }),
     // 可关联的合同：签署完成的合同（一个客户可多项目，不再限制一合同一项目）
     prisma.contract.findMany({
-      where: { status: "COMPLETED", customerId: { not: null } },
+      where: {
+        status: "COMPLETED",
+        deletedAt: null,
+        customerId: { not: null },
+        customer: { deletedAt: null },
+      },
       select: {
         id: true,
         contractNo: true,
@@ -48,6 +53,7 @@ export default async function ProjectsPage() {
   // 关联客户（含商务负责人，自动带出）+ Strategy AM 候选用户
   const [customers, users] = await Promise.all([
     prisma.customer.findMany({
+      where: { deletedAt: null },
       select: { id: true, brandName: true, businessOwner: { select: { name: true } } },
       orderBy: { brandName: "asc" },
     }),

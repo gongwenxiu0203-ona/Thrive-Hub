@@ -124,7 +124,7 @@ export default async function ContractsPage({
       where: { ...customerScope(sess, view), deletedAt: null } as any,
       orderBy: { brandName: "asc" },
     }),
-    prisma.user.findMany({ orderBy: { name: "asc" } }),
+    prisma.user.findMany({ where: { status: "APPROVED" }, orderBy: { name: "asc" } }),
   ]);
 
   // Client-side filtering for multi-select support

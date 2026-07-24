@@ -25,6 +25,19 @@ import { COMMISSION_TYPE_LABELS, CONTRACT_STATUS_COLORS, CONTRACT_STATUS_LABELS,
 
 export const dynamic = "force-dynamic";
 
+function parseStringList(value: unknown): string[] {
+  if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string");
+  if (typeof value !== "string" || !value.trim()) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+      : [];
+  } catch {
+    return value.split(/[，,]/).map((item) => item.trim()).filter(Boolean);
+  }
+}
+
 export default async function ProjectDetailPage({
   params,
   searchParams,
@@ -96,6 +109,8 @@ export default async function ProjectDetailPage({
 
   const isOneOff = project.type === "ONE_OFF";
   const brandName: string = project.customer?.brandName ?? "";
+  const promoPlatforms = parseStringList(project.promoPlatforms);
+  const targetSites = parseStringList(project.targetSites);
 
   const [editCustomers, editContracts, editUsers] = await Promise.all([
     prisma.customer.findMany({
@@ -262,6 +277,8 @@ export default async function ProjectDetailPage({
               customerId={project.customerId ?? null}
               contractId={project.contractId ?? null}
               ownerId={project.owner?.id ?? null}
+              promoPlatforms={promoPlatforms}
+              targetSites={targetSites}
               customers={editCustomers}
               contracts={editContracts.map((contract) => ({
                 ...contract,
@@ -295,6 +312,22 @@ export default async function ProjectDetailPage({
             ) : <span className="text-sm text-slate-400">—</span>}
           </HeaderStat>
         </div>
+        {!isOneOff && (
+          <div className="grid gap-4 border-t border-slate-100 bg-slate-50/60 px-6 py-4 sm:grid-cols-2">
+            <div>
+              <p className="text-[11px] font-medium text-slate-400">推广平台</p>
+              <p className="mt-1 text-sm font-medium text-slate-700">
+                {promoPlatforms.length ? promoPlatforms.join("、") : "未设置"}
+              </p>
+            </div>
+            <div>
+              <p className="text-[11px] font-medium text-slate-400">目标站点</p>
+              <p className="mt-1 text-sm font-medium text-slate-700">
+                {targetSites.length ? targetSites.join("、") : "未设置"}
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── 单次合作：需求 + 流程 ── */}

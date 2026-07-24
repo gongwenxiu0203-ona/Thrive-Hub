@@ -17,12 +17,12 @@ export default async function CustomerReconciliationPage({
 
   const [customer, reconciliations, users] = await Promise.all([
     // 客户基本信息 + 合同 + 联系人
-    prisma.customer.findUnique({
-      where: { id: customerId },
+    prisma.customer.findFirst({
+      where: { id: customerId, deletedAt: null },
       include: {
         businessOwner: { select: { id: true, name: true, email: true } },
         contracts: {
-          where: { status: "COMPLETED" },
+          where: { status: "COMPLETED", deletedAt: null },
           select: {
             id: true,
             contractNo: true,
@@ -91,6 +91,7 @@ export default async function CustomerReconciliationPage({
 
     // 所有用户（用于「提交给」选择器）
     prisma.user.findMany({
+      where: { status: "APPROVED" },
       select: { id: true, name: true, role: true },
       orderBy: { name: "asc" },
     }),

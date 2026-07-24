@@ -5,6 +5,11 @@ import { useRouter } from "next/navigation";
 import { Edit3, Trash2 } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { updateProjectStatus, softDeleteProject, updateProjectBasicInfo } from "@/actions/projects";
+import {
+  PROJECT_PROMO_PLATFORM_OPTIONS,
+  PROJECT_TARGET_SITE_OPTIONS,
+  ProjectMultiSelect,
+} from "../ProjectMarketingFields";
 
 const STATUS_OPTIONS = [
   { value: "ACTIVE", label: "进行中" },
@@ -25,6 +30,8 @@ export function ProjectHeaderActions({
   customerId,
   contractId,
   ownerId,
+  promoPlatforms,
+  targetSites,
   customers,
   contracts,
   users,
@@ -36,6 +43,8 @@ export function ProjectHeaderActions({
   customerId: string | null;
   contractId: string | null;
   ownerId: string | null;
+  promoPlatforms: string[];
+  targetSites: string[];
   customers: CustomerOption[];
   contracts: ContractOption[];
   users: UserOption[];
@@ -93,6 +102,8 @@ export function ProjectHeaderActions({
           customerId={customerId}
           contractId={contractId}
           ownerId={ownerId}
+          promoPlatforms={promoPlatforms}
+          targetSites={targetSites}
           customers={customers}
           contracts={contracts}
           users={users}
@@ -110,6 +121,8 @@ function ProjectBasicEditModal({
   customerId,
   contractId,
   ownerId,
+  promoPlatforms,
+  targetSites,
   customers,
   contracts,
   users,
@@ -121,6 +134,8 @@ function ProjectBasicEditModal({
   customerId: string | null;
   contractId: string | null;
   ownerId: string | null;
+  promoPlatforms: string[];
+  targetSites: string[];
   customers: CustomerOption[];
   contracts: ContractOption[];
   users: UserOption[];
@@ -133,6 +148,8 @@ function ProjectBasicEditModal({
   const [draftCustomerId, setDraftCustomerId] = useState(customerId ?? "");
   const [draftContractId, setDraftContractId] = useState(contractId ?? "");
   const [draftOwnerId, setDraftOwnerId] = useState(ownerId ?? "");
+  const [draftPromoPlatforms, setDraftPromoPlatforms] = useState([...promoPlatforms]);
+  const [draftTargetSites, setDraftTargetSites] = useState([...targetSites]);
   const isIntegrated = type === "INTEGRATED";
   const customerContracts = contracts.filter((c) => c.customerId === draftCustomerId);
 
@@ -145,6 +162,8 @@ function ProjectBasicEditModal({
         customerId: draftCustomerId || null,
         contractId: isIntegrated ? draftContractId || null : undefined,
         ownerId: isIntegrated ? draftOwnerId || null : undefined,
+        promoPlatforms: isIntegrated ? draftPromoPlatforms : undefined,
+        targetSites: isIntegrated ? draftTargetSites : undefined,
       });
       if (!result.ok) {
         setError(result.error ?? "保存失败");
@@ -205,6 +224,22 @@ function ProjectBasicEditModal({
                     <option key={user.id} value={user.id}>{user.name}</option>
                   ))}
                 </select>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <ProjectMultiSelect
+                  label="推广平台（可多选）"
+                  options={PROJECT_PROMO_PLATFORM_OPTIONS}
+                  value={draftPromoPlatforms}
+                  onChange={setDraftPromoPlatforms}
+                  placeholder="请选择推广平台"
+                />
+                <ProjectMultiSelect
+                  label="目标站点（可多选）"
+                  options={PROJECT_TARGET_SITE_OPTIONS}
+                  value={draftTargetSites}
+                  onChange={setDraftTargetSites}
+                  placeholder="请选择目标站点"
+                />
               </div>
             </>
           )}

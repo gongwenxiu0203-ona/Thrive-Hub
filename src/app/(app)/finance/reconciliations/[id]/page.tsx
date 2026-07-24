@@ -47,6 +47,7 @@ export default async function ReconciliationDetailPage({
       },
     }),
     prisma.user.findMany({
+      where: { status: "APPROVED" },
       select: { id: true, name: true, role: true },
       orderBy: { name: "asc" },
     }),

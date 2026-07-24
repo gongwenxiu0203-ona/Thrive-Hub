@@ -83,7 +83,10 @@ export default async function CustomerDetailPage({
     if (customerAny.evaluationData) evalData = JSON.parse(customerAny.evaluationData);
   } catch { /* ignore */ }
 
-  const users = await prisma.user.findMany({ orderBy: { name: "asc" } });
+  const users = await prisma.user.findMany({
+    where: { status: "APPROVED" },
+    orderBy: { name: "asc" },
+  });
 
   const userOptions = users.map((u) => ({ id: u.id, name: u.name }));
   const channelOptions = users

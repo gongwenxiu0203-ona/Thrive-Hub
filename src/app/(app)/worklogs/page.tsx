@@ -25,6 +25,7 @@ export default async function WorkLogsPage() {
       orderBy: { createdAt: "desc" },
     }),
     prisma.affiliate.findMany({
+      where: { deletedAt: null },
       select: { id: true, platformAffiliateName: true },
       orderBy: { platformAffiliateName: "asc" },
     }),

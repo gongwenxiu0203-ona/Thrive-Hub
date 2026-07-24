@@ -31,7 +31,7 @@ export async function GET(req: NextRequest) {
   const months       = Math.max(1, Math.min(24, parseInt(sp.get("months") ?? "6", 10)));
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const where: any = {};
+  const where: any = { deletedAt: null };
   if (q) where.OR = [
     { platformAffiliateName: { contains: q } },
     { internalAffiliateName: { contains: q } },
