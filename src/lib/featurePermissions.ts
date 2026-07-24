@@ -1,6 +1,4 @@
-// 系统全部功能模块清单 + 默认角色权限
-// 权限等级：NONE(无权访问) < READ(只读) < EDIT(可编辑) < MANAGE(可管理/删除/审批)
-
+// 系统功能权限目录。分区和模块只负责展示；真正持久化和鉴权的是叶子 feature key。
 export type PermLevel = "NONE" | "READ" | "EDIT" | "MANAGE";
 
 export const PERM_LEVELS: PermLevel[] = ["NONE", "READ", "EDIT", "MANAGE"];
@@ -19,79 +17,96 @@ export const PERM_LEVEL_COLORS: Record<PermLevel, string> = {
   MANAGE: "bg-emerald-100 text-emerald-700",
 };
 
-/** 系统功能模块清单 */
-export const FEATURES: { key: string; label: string; description?: string }[] = [
-  { key: "dashboard", label: "工作台", description: "首页 / 概览" },
-  { key: "customers", label: "客户管理", description: "客户档案、合作进度、跟进" },
-  { key: "tasks", label: "任务管理", description: "看板、Demo 制定、会议预约、合同审核任务" },
-  { key: "contracts", label: "合同管理", description: "合同创建、字段级审核、签署完成" },
-  { key: "finance_customer", label: "财务对账·客户对账", description: "月度对账、固费抽佣计算、确认流程" },
-  { key: "finance_channel", label: "财务对账·渠道分账", description: "渠道商分账、推送凭证" },
-  { key: "reminders", label: "提醒管理", description: "站内提醒、跟进通知" },
-  { key: "bi", label: "推广数据 BI", description: "销售数据、归因、报表" },
-  { key: "affiliates", label: "联盟资源库", description: "联盟商档案、合作状态、批量管理" },
-  { key: "intake", label: "客户门户表单", description: "客户提交合作需求的对外表单" },
-  { key: "admin", label: "管理员面板", description: "用户审核、权限分配、邀请注册" },
+export type FeatureDefinition = {
+  key: string;
+  label: string;
+  group: string;
+  module: string;
+  description?: string;
+  legacyKey?: string;
+};
+
+export const FEATURE_GROUPS = [
+  "工作流",
+  "数据与资源",
+  "财务与经营",
+  "协作与门户",
+  "系统管理",
+] as const;
+
+export const FEATURES: FeatureDefinition[] = [
+  { key: "dashboard.view", label: "工作台概览", group: "工作流", module: "工作台", legacyKey: "dashboard" },
+  { key: "customers.records", label: "客户档案", group: "工作流", module: "客户管理", legacyKey: "customers" },
+  { key: "customers.followup", label: "合作进度与跟进", group: "工作流", module: "客户管理", legacyKey: "customers" },
+  { key: "contracts.records", label: "合同档案", group: "工作流", module: "合同管理", legacyKey: "contracts" },
+  { key: "contracts.create_upload", label: "新建与上传合同", group: "工作流", module: "合同管理", legacyKey: "contracts" },
+  { key: "contracts.reviews", label: "合同审核", group: "工作流", module: "合同管理", legacyKey: "contracts" },
+  { key: "contracts.templates", label: "合同模板", group: "工作流", module: "合同管理", legacyKey: "contracts" },
+  { key: "contracts.signing", label: "签署与归档", group: "工作流", module: "合同管理", legacyKey: "contracts" },
+  { key: "projects.records", label: "项目档案", group: "工作流", module: "项目管理", legacyKey: "tasks" },
+  { key: "projects.kpi", label: "项目 KPI", group: "工作流", module: "项目管理", legacyKey: "tasks" },
+  { key: "tasks.board", label: "任务看板", group: "工作流", module: "任务与工作记录", legacyKey: "tasks" },
+  { key: "worklogs.records", label: "工作记录", group: "工作流", module: "任务与工作记录", legacyKey: "tasks" },
+
+  { key: "bi.view", label: "数据查看与报表", group: "数据与资源", module: "推广数据 BI", legacyKey: "bi" },
+  { key: "bi.import", label: "数据上传与导入", group: "数据与资源", module: "推广数据 BI", legacyKey: "bi" },
+  { key: "bi.export", label: "数据导出", group: "数据与资源", module: "推广数据 BI", legacyKey: "bi" },
+  { key: "bi.manage", label: "批量操作与数据清理", group: "数据与资源", module: "推广数据 BI", legacyKey: "bi" },
+  { key: "affiliates.records", label: "联盟资源档案", group: "数据与资源", module: "联盟资源库", legacyKey: "affiliates" },
+  { key: "affiliates.reviews", label: "合作审核", group: "数据与资源", module: "联盟资源库", legacyKey: "affiliates" },
+  { key: "affiliates.batches", label: "批量导入与分配", group: "数据与资源", module: "联盟资源库", legacyKey: "affiliates" },
+  { key: "affiliates.media", label: "媒体包与附件", group: "数据与资源", module: "联盟资源库", legacyKey: "affiliates" },
+
+  { key: "finance.customer_reconciliation", label: "客户对账", group: "财务与经营", module: "财务对账", legacyKey: "finance_customer" },
+  { key: "finance.channel_reconciliation", label: "渠道分账", group: "财务与经营", module: "财务对账", legacyKey: "finance_channel" },
+  { key: "finance.affiliate_reconciliation", label: "联盟商对账与付款", group: "财务与经营", module: "财务对账", legacyKey: "finance_channel" },
+  { key: "operations.revenue", label: "客户收入总表", group: "财务与经营", module: "经营管理", legacyKey: "finance_customer" },
+  { key: "operations.customer_count", label: "客户数统计", group: "财务与经营", module: "经营管理", legacyKey: "finance_customer" },
+  { key: "operations.accounts_receivable", label: "应收账款", group: "财务与经营", module: "经营管理", legacyKey: "finance_customer" },
+  { key: "operations.invoices", label: "Invoice 开具", group: "财务与经营", module: "经营管理", legacyKey: "finance_customer" },
+  { key: "operations.sales_pipeline", label: "销售漏斗", group: "财务与经营", module: "经营管理", legacyKey: "finance_customer" },
+  { key: "operations.employee_kpi", label: "员工 KPI", group: "财务与经营", module: "经营管理", legacyKey: "finance_customer" },
+
+  { key: "reminders.records", label: "提醒与通知", group: "协作与门户", module: "提醒管理", legacyKey: "reminders" },
+  { key: "intake.links", label: "客户门户链接", group: "协作与门户", module: "客户门户", legacyKey: "intake" },
+  { key: "intake.review", label: "信息收集审核", group: "协作与门户", module: "客户门户", legacyKey: "intake" },
+
+  { key: "admin.users", label: "用户管理", group: "系统管理", module: "管理员面板", legacyKey: "admin" },
+  { key: "admin.registration_review", label: "注册与待审核用户", group: "系统管理", module: "管理员面板", legacyKey: "admin" },
+  { key: "admin.permissions", label: "权限分配", group: "系统管理", module: "管理员面板", legacyKey: "admin" },
+  { key: "admin.data_quality", label: "数据质量", group: "系统管理", module: "管理员面板", legacyKey: "admin" },
+  { key: "admin.audit", label: "操作审计", group: "系统管理", module: "管理员面板", legacyKey: "admin" },
+  { key: "admin.api_access", label: "API 访问记录", group: "系统管理", module: "管理员面板", legacyKey: "admin" },
 ];
 
-/** 角色默认权限（沿用现有 ROLE_BLOCKED_ROUTES 派生而来） */
+const allFeatures = (level: PermLevel) =>
+  Object.fromEntries(FEATURES.map((feature) => [feature.key, level]));
+
+const userDefaults = allFeatures("EDIT");
+for (const feature of FEATURES.filter((item) => item.group === "系统管理")) {
+  userDefaults[feature.key] = "NONE";
+}
+userDefaults["intake.links"] = "READ";
+userDefaults["intake.review"] = "READ";
+
+const brandDefaults = allFeatures("NONE");
+brandDefaults["bi.view"] = "READ";
+brandDefaults["reminders.records"] = "READ";
+
+const channelDefaults = allFeatures("NONE");
+channelDefaults["customers.records"] = "READ";
+channelDefaults["contracts.records"] = "EDIT";
+channelDefaults["contracts.create_upload"] = "EDIT";
+channelDefaults["finance.customer_reconciliation"] = "READ";
+channelDefaults["finance.channel_reconciliation"] = "EDIT";
+channelDefaults["bi.view"] = "READ";
+channelDefaults["reminders.records"] = "READ";
+
 export const DEFAULT_ROLE_PERMISSIONS: Record<string, Record<string, PermLevel>> = {
-  // 管理员：全部 MANAGE
-  ADMIN: {
-    dashboard: "MANAGE",
-    customers: "MANAGE",
-    tasks: "MANAGE",
-    contracts: "MANAGE",
-    finance_customer: "MANAGE",
-    finance_channel: "MANAGE",
-    reminders: "MANAGE",
-    bi: "MANAGE",
-    affiliates: "MANAGE",
-    intake: "MANAGE",
-    admin: "MANAGE",
-  },
-  // 内部员工：除管理员面板外全部 EDIT
-  USER: {
-    dashboard: "EDIT",
-    customers: "EDIT",
-    tasks: "EDIT",
-    contracts: "EDIT",
-    finance_customer: "EDIT",
-    finance_channel: "EDIT",
-    reminders: "EDIT",
-    bi: "EDIT",
-    affiliates: "EDIT",
-    intake: "READ",
-    admin: "NONE",
-  },
-  // 品牌方：仅看 BI + 提醒
-  BRAND: {
-    dashboard: "NONE",
-    customers: "NONE",
-    tasks: "NONE",
-    contracts: "NONE",
-    finance_customer: "NONE",
-    finance_channel: "NONE",
-    reminders: "READ",
-    bi: "READ",
-    affiliates: "NONE",
-    intake: "NONE",
-    admin: "NONE",
-  },
-  // 渠道商：看客户/提醒/BI
-  CHANNEL: {
-    dashboard: "NONE",
-    customers: "READ",
-    tasks: "NONE",
-    contracts: "EDIT",
-    finance_customer: "READ",
-    finance_channel: "EDIT",
-    reminders: "READ",
-    bi: "READ",
-    affiliates: "NONE",
-    intake: "NONE",
-    admin: "NONE",
-  },
+  ADMIN: allFeatures("MANAGE"),
+  USER: userDefaults,
+  BRAND: brandDefaults,
+  CHANNEL: channelDefaults,
 };
 
 export const ALL_ROLES = ["ADMIN", "USER", "BRAND", "CHANNEL"] as const;
@@ -102,3 +117,7 @@ export const ROLE_LABELS_FOR_PERM: Record<string, string> = {
   BRAND: "品牌方",
   CHANNEL: "渠道商",
 };
+
+export const FEATURE_BY_KEY = new Map(
+  FEATURES.map((feature) => [feature.key, feature]),
+);

@@ -81,6 +81,7 @@ model User {
   intakeSubmissionsShared            CustomerIntakeSubmission[]  @relation("IntakeSharedBy")
   intakeSubmissionsAsChannel         CustomerIntakeSubmission[]  @relation("IntakeChannel")
   intakeSubmissionsReviewed          CustomerIntakeSubmission[]  @relation("IntakeReviewer")
+  invoicesCreated                    Invoice[]                   @relation("InvoiceCreator")
 }
 
 // 角色级权限配置（每个角色 + 功能 = 一个等级）
@@ -173,6 +174,7 @@ model Customer {
   projects                 Project[]
   revenueSnapshots         ClientRevenueSnapshot[]
   accountsReceivable       AccountsReceivable[]
+  invoices                 Invoice[]
   splitRule                ChannelSplitRule?
   authorizationInfos       CustomerAuthorizationInfo[]
   intakeSubmissions        CustomerIntakeSubmission[] @relation("IntakeTargetCustomer")
@@ -344,6 +346,8 @@ model Contract {
   reconciliations        CustomerReconciliation[]
   channelReconciliations ChannelReconciliation[]  @relation("ContractChannelReconciliations")
   projects               Project[]
+  invoices               Invoice[]
+  invoiceLinks           InvoiceContract[]
 }
 
 model ContractFieldReview {
@@ -356,7 +360,7 @@ model ContractFieldReview {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  contract Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  contract Contract @relation(fields: [contractId], references: [id], onDelete: Restrict)
   reviewer User?    @relation(fields: [reviewerId], references: [id])
 
   @@unique([contractId, fieldName])
@@ -1202,11 +1206,92 @@ model AccountsReceivable {
 
   customer    Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
   followOwner User?     @relation("ARFollowOwner", fields: [followOwnerId], references: [id], onDelete: SetNull)
+  invoices    Invoice[]
 
   @@index([customerId])
   @@index([status])
   @@index([riskLevel])
   @@index([dueDate])
+}
+
+// Invoice records preserve customer, bank-account, and line-item snapshots so
+// later contract/customer edits do not rewrite historical issued documents.
+model Invoice {
+  id                   String    @id @default(cuid())
+  invoiceNo            String    @unique
+  customerId           String?
+  contractId           String?
+  accountsReceivableId String?
+  createdById          String?
+  invoiceDate          DateTime
+  dueDate              DateTime
+  periodType           String // MONTH | DATE_RANGE
+  periodLabel          String
+  feeType              String // MONTHLY_FEE | SALES_COMMISSION | MIXED
+  clientName           String
+  clientAddress        String?
+  currency             String    @default("USD")
+  totalAmount          Float     @default(0)
+  bankAccountKey       String?
+  bankSnapshot         String    @default("{}") // JSON snapshot of beneficiary/bank/SWIFT/account
+  terms                 String?
+  status                String    @default("DRAFT") // DRAFT | ISSUED | VOID
+  pdfUrl                String?
+  deletedAt             DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  customer           Customer?           @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  contract           Contract?           @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  accountsReceivable AccountsReceivable? @relation(fields: [accountsReceivableId], references: [id], onDelete: SetNull)
+  createdBy          User?               @relation("InvoiceCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  items              InvoiceItem[]
+  contractLinks      InvoiceContract[]
+
+  @@index([customerId])
+  @@index([contractId])
+  @@index([accountsReceivableId])
+  @@index([createdById])
+  @@index([invoiceDate])
+  @@index([status])
+  @@index([deletedAt])
+}
+
+model InvoiceContract {
+  id        String   @id @default(cuid())
+  invoiceId String
+  contractId String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  invoice  Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  contract Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  @@unique([invoiceId, contractId])
+  @@index([invoiceId, sortOrder])
+  @@index([contractId])
+}
+
+model InvoiceItem {
+  id                String   @id @default(cuid())
+  invoiceId         String
+  feeType           String   @default("MONTHLY_FEE") // MONTHLY_FEE | SALES_COMMISSION
+  description       String
+  promoPlatform     String?
+  targetSite        String?
+  affiliatePlatform String?
+  quantity          Float    @default(1)
+  unitPrice         Float
+  amount            Float
+  sortOrder         Int      @default(0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@index([feeType])
+  @@index([sortOrder])
 }
 
 // 销售漏斗（独立建模，不复用 Project.stage —— Project.stage 是项目流程）

@@ -15,6 +15,7 @@ const PAGE_LABELS = [
   ["/bi", "\u63a8\u5e7f\u6570\u636e BI"],
   ["/affiliates", "\u8054\u76df\u8d44\u6e90\u5e93"],
   ["/finance", "\u8d22\u52a1\u5bf9\u8d26"],
+  ["/invoices", "Invoice \u5f00\u5177"],
   ["/operations", "\u7ecf\u8425\u7ba1\u7406"],
   ["/dashboard", "\u5de5\u4f5c\u53f0"],
 ] as const;

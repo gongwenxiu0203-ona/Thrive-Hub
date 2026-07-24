@@ -27,6 +27,7 @@ export async function GET() {
       for (const f of FEATURES) {
         result[role][f.key] =
           map.get(`${role}::${f.key}`) ??
+          (f.legacyKey ? map.get(`${role}::${f.legacyKey}`) : undefined) ??
           DEFAULT_ROLE_PERMISSIONS[role]?.[f.key] ??
           "NONE";
       }

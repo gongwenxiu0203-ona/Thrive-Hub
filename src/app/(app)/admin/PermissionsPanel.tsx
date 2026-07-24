@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect, useTransition } from "react";
+import { Fragment, useState, useEffect, useTransition } from "react";
 import { Badge } from "@/components/ui/Badge";
 import {
   FEATURES,
+  FEATURE_GROUPS,
   PERM_LEVELS,
   PERM_LEVEL_LABELS,
   PERM_LEVEL_COLORS,
@@ -116,12 +117,31 @@ function RolePermissionsTab() {
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
-          {FEATURES.map((f) => (
-            <tr key={f.key} className="hover:bg-slate-50">
+          {FEATURES.map((f, index) => (
+            <Fragment key={f.key}>
+              {(index === 0 || FEATURES[index - 1].group !== f.group) && (
+                <tr className="bg-brand-50/70">
+                  <td colSpan={ALL_ROLES.length + 1} className="px-4 py-2 text-xs font-semibold text-brand-700">
+                    {FEATURE_GROUPS.includes(f.group as (typeof FEATURE_GROUPS)[number])
+                      ? f.group
+                      : "其他"}
+                  </td>
+                </tr>
+              )}
+              {(index === 0
+                || FEATURES[index - 1].group !== f.group
+                || FEATURES[index - 1].module !== f.module) && (
+                <tr className="bg-slate-50/70">
+                  <td colSpan={ALL_ROLES.length + 1} className="px-4 py-2 text-xs font-medium text-slate-600">
+                    {f.module}
+                  </td>
+                </tr>
+              )}
+            <tr className="hover:bg-slate-50">
               <td className="px-4 py-3">
-                <div className="font-medium text-slate-900">{f.label}</div>
+                <div className="pl-3 font-medium text-slate-900">{f.label}</div>
                 {f.description && (
-                  <div className="text-xs text-slate-400">{f.description}</div>
+                  <div className="pl-3 text-xs text-slate-400">{f.description}</div>
                 )}
               </td>
               {ALL_ROLES.map((r) => {
@@ -150,6 +170,7 @@ function RolePermissionsTab() {
                 );
               })}
             </tr>
+            </Fragment>
           ))}
         </tbody>
       </table>
@@ -305,13 +326,30 @@ function UserPermissionEditor({ user }: { user: UserRecord }) {
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
-          {FEATURES.map((f) => {
+          {FEATURES.map((f, index) => {
             const lv = effective[f.key] ?? "NONE";
             const isOverride = overrideKeys.has(f.key);
             return (
-              <tr key={f.key} className="hover:bg-slate-50">
+              <Fragment key={f.key}>
+                {(index === 0 || FEATURES[index - 1].group !== f.group) && (
+                  <tr className="bg-brand-50/70">
+                    <td colSpan={4} className="px-4 py-2 text-xs font-semibold text-brand-700">
+                      {f.group}
+                    </td>
+                  </tr>
+                )}
+                {(index === 0
+                  || FEATURES[index - 1].group !== f.group
+                  || FEATURES[index - 1].module !== f.module) && (
+                    <tr className="bg-slate-50/70">
+                      <td colSpan={4} className="px-4 py-2 text-xs font-medium text-slate-600">
+                        {f.module}
+                      </td>
+                    </tr>
+                )}
+              <tr className="hover:bg-slate-50">
                 <td className="px-4 py-2">
-                  <div className="font-medium text-slate-800">{f.label}</div>
+                  <div className="pl-3 font-medium text-slate-800">{f.label}</div>
                   {f.description && (
                     <div className="text-xs text-slate-400">
                       {f.description}
@@ -354,6 +392,7 @@ function UserPermissionEditor({ user }: { user: UserRecord }) {
                   )}
                 </td>
               </tr>
+              </Fragment>
             );
           })}
         </tbody>

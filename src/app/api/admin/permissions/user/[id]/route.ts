@@ -5,7 +5,6 @@ import { resolveUserPermissionsMap } from "@/lib/permissionResolver";
 import {
   FEATURES,
   PERM_LEVELS,
-  DEFAULT_ROLE_PERMISSIONS,
 } from "@/lib/featurePermissions";
 
 // GET /api/admin/permissions/user/[id] — 返回该用户的实际权限（已应用覆盖）
@@ -29,13 +28,18 @@ export async function GET(
     const overrides = await (prisma as any).userPermissionOverride.findMany({
       where: { userId: id },
     });
-    const overrideKeys = new Set(
+    const rawOverrideKeys = new Set(
       overrides.map((o: { feature: string }) => o.feature),
     );
+    const overrideKeys = FEATURES
+      .filter((feature) =>
+        rawOverrideKeys.has(feature.key)
+        || Boolean(feature.legacyKey && rawOverrideKeys.has(feature.legacyKey)))
+      .map((feature) => feature.key);
     return NextResponse.json({
       user,
       effective,
-      overrideKeys: [...overrideKeys],
+      overrideKeys,
     });
   } catch {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -68,23 +72,6 @@ export async function POST(
 
     if (!PERM_LEVELS.includes(level)) {
       return NextResponse.json({ error: "无效权限等级" }, { status: 400 });
-    }
-
-    // 如果设置的等级 == 角色默认值，直接删除覆盖（保持表干净）
-    const user = await prisma.user.findUnique({
-      where: { id },
-      select: { role: true },
-    });
-    const defaultLevel = user
-      ? DEFAULT_ROLE_PERMISSIONS[user.role]?.[feature] ?? "NONE"
-      : "NONE";
-
-    if (level === defaultLevel) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (prisma as any).userPermissionOverride
-        .delete({ where: { userId_feature: { userId: id, feature } } })
-        .catch(() => null);
-      return NextResponse.json({ success: true, removed: true });
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

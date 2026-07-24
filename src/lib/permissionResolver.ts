@@ -2,6 +2,7 @@
 import { prisma } from "@/lib/prisma";
 import {
   DEFAULT_ROLE_PERMISSIONS,
+  FEATURE_BY_KEY,
   FEATURES,
   PermLevel,
 } from "@/lib/featurePermissions";
@@ -17,6 +18,13 @@ export async function resolveUserPermission(
     where: { userId_feature: { userId, feature } },
   });
   if (override) return override.level as PermLevel;
+  const legacyKey = FEATURE_BY_KEY.get(feature)?.legacyKey;
+  if (legacyKey) {
+    const legacyOverride = await (prisma as any).userPermissionOverride.findUnique({
+      where: { userId_feature: { userId, feature: legacyKey } },
+    });
+    if (legacyOverride) return legacyOverride.level as PermLevel;
+  }
 
   // 2) 该用户角色
   const user = await prisma.user.findUnique({
@@ -31,6 +39,12 @@ export async function resolveUserPermission(
     where: { role_feature: { role: user.role, feature } },
   });
   if (roleSetting) return roleSetting.level as PermLevel;
+  if (legacyKey) {
+    const legacyRoleSetting = await (prisma as any).rolePermission.findUnique({
+      where: { role_feature: { role: user.role, feature: legacyKey } },
+    });
+    if (legacyRoleSetting) return legacyRoleSetting.level as PermLevel;
+  }
 
   // 4) 兜底：默认配置
   return (
@@ -76,7 +90,9 @@ export async function resolveUserPermissionsMap(
   for (const f of FEATURES) {
     result[f.key] =
       overrideMap.get(f.key) ??
+      (f.legacyKey ? overrideMap.get(f.legacyKey) : undefined) ??
       roleMap.get(f.key) ??
+      (f.legacyKey ? roleMap.get(f.legacyKey) : undefined) ??
       DEFAULT_ROLE_PERMISSIONS[user.role]?.[f.key] ??
       "NONE";
   }
@@ -98,7 +114,10 @@ export async function getRolePermissions(
   const result: Record<string, PermLevel> = {};
   for (const f of FEATURES) {
     result[f.key] =
-      map.get(f.key) ?? DEFAULT_ROLE_PERMISSIONS[role]?.[f.key] ?? "NONE";
+      map.get(f.key) ??
+      (f.legacyKey ? map.get(f.legacyKey) : undefined) ??
+      DEFAULT_ROLE_PERMISSIONS[role]?.[f.key] ??
+      "NONE";
   }
   return result;
 }

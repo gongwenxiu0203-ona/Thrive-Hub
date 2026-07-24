@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Plus, RefreshCw, TrendingUp, Users, FileText, Target, Pencil, Trash2,
-  CheckCircle2, AlertTriangle, Award,
+  CheckCircle2, AlertTriangle, Award, ReceiptText,
 } from "lucide-react";
 import { EmployeeKpiTab } from "./EmployeeKpiTab";
 import type { EmployeeKpiRow } from "@/actions/employeeKpi";
@@ -169,6 +169,24 @@ export function OperationsClient({
           { key: "revenue", label: "客户收入总表", icon: TrendingUp },
           { key: "count", label: "客户数统计", icon: Users },
           { key: "ar", label: "应收账款", icon: FileText },
+        ] as const).map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setTabUrl(t.key)}
+            className={cn(
+              "tab-trigger",
+              tab === t.key
+                ? "tab-trigger-active"
+                : "",
+            )}
+          >
+            <t.icon className="h-4 w-4" /> {t.label}
+          </button>
+        ))}
+        <Link href="/invoices" className="tab-trigger">
+          <ReceiptText className="h-4 w-4" /> Invoice 开具
+        </Link>
+        {([
           { key: "pipeline", label: "销售漏斗", icon: Target },
           { key: "kpi", label: "员工 KPI", icon: Award },
         ] as const).map((t) => (
