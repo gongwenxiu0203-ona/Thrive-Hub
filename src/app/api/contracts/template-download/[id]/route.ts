@@ -19,7 +19,7 @@ export async function GET(
     return NextResponse.json({ error: "无权下载合同模板" }, { status: 403 });
   }
   try {
-    await requireFeaturePermission(session, "contracts", "MANAGE");
+    await requireFeaturePermission(session, "contracts.templates", "MANAGE");
   } catch (error) {
     if (error instanceof FeaturePermissionError) {
       return NextResponse.json({ error: "无权下载合同模板" }, { status: 403 });

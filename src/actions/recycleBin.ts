@@ -33,7 +33,7 @@ export async function restoreItem(type: RecycleType, id: string) {
       where = { AND: [{ id }, customerScope(session, view)] };
       break;
     case "contract":
-      await requireFeaturePermission(session, "contracts", "MANAGE");
+      await requireFeaturePermission(session, "contracts.records", "MANAGE");
       where = { AND: [{ id }, contractScope(session, view)] };
       break;
     case "affiliate":

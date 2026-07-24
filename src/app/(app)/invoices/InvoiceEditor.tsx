@@ -72,6 +72,39 @@ const AFFILIATE_PLATFORM_OPTIONS = [
   "Awin",
 ] as const;
 
+const PROMO_PLATFORM_ALIASES: Record<string, string> = {
+  amazon: "亚马逊（Amazon）",
+  亚马逊: "亚马逊（Amazon）",
+  dtc: "独立站（DTC）",
+  独立站: "独立站（DTC）",
+  walmart: "沃尔玛（Walmart）",
+  沃尔玛: "沃尔玛（Walmart）",
+};
+
+const TARGET_SITE_ALIASES: Record<string, string> = {
+  us: "美国站",
+  usa: "美国站",
+  美国: "美国站",
+  ca: "加拿大",
+  canada: "加拿大",
+  de: "德国站",
+  germany: "德国站",
+  uk: "英国站",
+  gb: "英国站",
+  france: "法国站",
+  fr: "法国站",
+  spain: "西班牙",
+  es: "西班牙",
+  italy: "意大利",
+  it: "意大利",
+  netherlands: "荷兰",
+  nl: "荷兰",
+  australia: "澳洲",
+  au: "澳洲",
+  japan: "日本",
+  jp: "日本",
+};
+
 function localDate(date = new Date()) {
   const shifted = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
   return shifted.toISOString().slice(0, 10);
@@ -127,6 +160,35 @@ function parseMultiValue(value: string | null | undefined) {
 
 function joinMultiValues(values: Array<string | null | undefined>) {
   return unique(values).join(MULTI_VALUE_SEPARATOR);
+}
+
+function normalizeOptionKey(value: string) {
+  return value.trim().toLocaleLowerCase().replace(/\s+/g, "");
+}
+
+function matchContractValues(
+  values: Array<string | null | undefined>,
+  options: readonly string[],
+  aliases: Record<string, string> = {},
+) {
+  const optionByKey = new Map(options.map((option) => [normalizeOptionKey(option), option]));
+  const matched: string[] = [];
+  const unmatched: string[] = [];
+
+  for (const rawValue of unique(values)) {
+    const key = normalizeOptionKey(rawValue);
+    const option = optionByKey.get(key) ?? aliases[key];
+    if (option && options.includes(option)) {
+      matched.push(option);
+    } else {
+      unmatched.push(rawValue);
+    }
+  }
+
+  return {
+    matched: unique(matched),
+    unmatched: unique(unmatched),
+  };
 }
 
 function composeDescription({
@@ -244,18 +306,23 @@ export function InvoiceEditor({
     0,
   );
 
-  const promoCandidates = unique([
-    ...selectedContracts.flatMap((contract) => contract.platforms),
-    ...PROMO_PLATFORM_OPTIONS,
-  ]);
-  const targetCandidates = unique([
-    ...selectedContracts.flatMap((contract) => contract.targetSites),
-    ...TARGET_SITE_OPTIONS,
-  ]);
-  const affiliateCandidates = unique([
-    ...selectedContracts.flatMap((contract) => contract.affiliatePlatforms),
-    ...AFFILIATE_PLATFORM_OPTIONS,
-  ]);
+  const contractPromoValues = matchContractValues(
+    selectedContracts.flatMap((contract) => contract.platforms),
+    PROMO_PLATFORM_OPTIONS,
+    PROMO_PLATFORM_ALIASES,
+  );
+  const contractTargetValues = matchContractValues(
+    selectedContracts.flatMap((contract) => contract.targetSites),
+    TARGET_SITE_OPTIONS,
+    TARGET_SITE_ALIASES,
+  );
+  const contractAffiliateValues = matchContractValues(
+    selectedContracts.flatMap((contract) => contract.affiliatePlatforms),
+    AFFILIATE_PLATFORM_OPTIONS,
+  );
+  const promoCandidates = [...PROMO_PLATFORM_OPTIONS];
+  const targetCandidates = [...TARGET_SITE_OPTIONS];
+  const affiliateCandidates = [...AFFILIATE_PLATFORM_OPTIONS];
 
   function rebuildDescriptions(
     nextItems: EditorItem[],
@@ -333,9 +400,20 @@ export function InvoiceEditor({
       setBankAccountKey(firstBank?.key ?? "");
       setBankSnapshot(firstBank ?? null);
     }
-    const platforms = joinMultiValues(contracts.flatMap((contract) => contract.platforms));
-    const sites = joinMultiValues(contracts.flatMap((contract) => contract.targetSites));
-    const affiliates = joinMultiValues(contracts.flatMap((contract) => contract.affiliatePlatforms));
+    const platforms = joinMultiValues(matchContractValues(
+      contracts.flatMap((contract) => contract.platforms),
+      PROMO_PLATFORM_OPTIONS,
+      PROMO_PLATFORM_ALIASES,
+    ).matched);
+    const sites = joinMultiValues(matchContractValues(
+      contracts.flatMap((contract) => contract.targetSites),
+      TARGET_SITE_OPTIONS,
+      TARGET_SITE_ALIASES,
+    ).matched);
+    const affiliates = joinMultiValues(matchContractValues(
+      contracts.flatMap((contract) => contract.affiliatePlatforms),
+      AFFILIATE_PLATFORM_OPTIONS,
+    ).matched);
     setItems((current) => current.map((item) => {
       const nextItem = {
         ...item,
@@ -369,9 +447,9 @@ export function InvoiceEditor({
     setItems((current) => {
       const item = {
         ...newItem(current.length),
-        promoPlatform: joinMultiValues(selectedContracts.flatMap((contract) => contract.platforms)),
-        targetSite: joinMultiValues(selectedContracts.flatMap((contract) => contract.targetSites)),
-        affiliatePlatform: joinMultiValues(selectedContracts.flatMap((contract) => contract.affiliatePlatforms)),
+        promoPlatform: joinMultiValues(contractPromoValues.matched),
+        targetSite: joinMultiValues(contractTargetValues.matched),
+        affiliatePlatform: joinMultiValues(contractAffiliateValues.matched),
       };
       return [...current, ...rebuildDescriptions([item], true)];
     });
@@ -745,6 +823,7 @@ export function InvoiceEditor({
                         options={promoCandidates}
                         placeholder="请选择推广平台"
                         customPlaceholder="手动输入其他推广平台"
+                        unmatchedContractValues={contractPromoValues.unmatched}
                       />
                     </Field>
                     <Field label="目标站点">
@@ -754,6 +833,7 @@ export function InvoiceEditor({
                         options={targetCandidates}
                         placeholder="请选择目标站点"
                         customPlaceholder="手动输入其他目标站点"
+                        unmatchedContractValues={contractTargetValues.unmatched}
                       />
                     </Field>
                     <Field label="联盟平台">
@@ -763,6 +843,7 @@ export function InvoiceEditor({
                         options={affiliateCandidates}
                         placeholder="请选择联盟平台"
                         customPlaceholder="手动输入其他联盟平台"
+                        unmatchedContractValues={contractAffiliateValues.unmatched}
                       />
                     </Field>
                     <div className="grid grid-cols-2 gap-2">
@@ -992,12 +1073,14 @@ function MultiEditableSelect({
   options,
   placeholder,
   customPlaceholder,
+  unmatchedContractValues = [],
   onChange,
 }: {
   value: string;
   options: string[];
   placeholder: string;
   customPlaceholder: string;
+  unmatchedContractValues?: string[];
   onChange: (value: string) => void;
 }) {
   const [customValue, setCustomValue] = useState("");
@@ -1020,60 +1103,69 @@ function MultiEditableSelect({
   }
 
   return (
-    <details className="group relative">
-      <summary className="input flex cursor-pointer list-none items-center justify-between gap-2">
-        <span className={selected.length ? "truncate text-slate-700" : "text-slate-400"}>
-          {selected.length ? selected.join("、") : placeholder}
-        </span>
-        <span className="shrink-0 text-xs text-slate-400 transition-transform group-open:rotate-180">▼</span>
-      </summary>
-      <div className="absolute z-30 mt-1 w-full min-w-60 space-y-2 rounded-lg border border-[#dcd4e7] bg-white p-3 shadow-lg">
-        <div className="max-h-52 space-y-1 overflow-y-auto">
-          {options.map((option) => (
-            <label
-              key={option}
-              className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-[#faf8ff]"
-            >
+    <div>
+      <details className="group relative">
+        <summary className="input flex cursor-pointer list-none items-center justify-between gap-2">
+          <span className={selected.length ? "truncate text-slate-700" : "text-slate-400"}>
+            {selected.length ? selected.join("、") : placeholder}
+          </span>
+          <span className="shrink-0 text-xs text-slate-400 transition-transform group-open:rotate-180">▼</span>
+        </summary>
+        <div className="absolute z-30 mt-1 w-full min-w-60 space-y-2 rounded-lg border border-[#dcd4e7] bg-white p-3 shadow-lg">
+          <div className="max-h-52 space-y-1 overflow-y-auto">
+            {options.map((option) => (
+              <label
+                key={option}
+                className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-[#faf8ff]"
+              >
+                <input
+                  type="checkbox"
+                  checked={selected.includes(option)}
+                  onChange={() => toggle(option)}
+                />
+                <span>{option}</span>
+              </label>
+            ))}
+            {customSelected.map((option) => (
+              <label
+                key={option}
+                className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-[#faf8ff]"
+              >
+                <input type="checkbox" checked onChange={() => toggle(option)} />
+                <span>{option}（手动新增）</span>
+              </label>
+            ))}
+          </div>
+          <div className="border-t border-[#eee8f5] pt-2">
+            <div className="mb-1 text-xs font-medium text-slate-500">其他（手动新增）</div>
+            <div className="flex gap-2">
               <input
-                type="checkbox"
-                checked={selected.includes(option)}
-                onChange={() => toggle(option)}
+                className="input min-w-0 flex-1"
+                value={customValue}
+                onChange={(event) => setCustomValue(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    addCustomValue();
+                  }
+                }}
+                placeholder={customPlaceholder}
               />
-              <span>{option}</span>
-            </label>
-          ))}
-          {customSelected.map((option) => (
-            <label
-              key={option}
-              className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-[#faf8ff]"
-            >
-              <input type="checkbox" checked onChange={() => toggle(option)} />
-              <span>{option}（手动新增）</span>
-            </label>
-          ))}
-        </div>
-        <div className="border-t border-[#eee8f5] pt-2">
-          <div className="mb-1 text-xs font-medium text-slate-500">其他（手动新增）</div>
-          <div className="flex gap-2">
-            <input
-              className="input min-w-0 flex-1"
-              value={customValue}
-              onChange={(event) => setCustomValue(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  addCustomValue();
-                }
-              }}
-              placeholder={customPlaceholder}
-            />
-            <Button size="sm" onClick={addCustomValue} disabled={!customValue.trim()}>
-              添加
-            </Button>
+              <Button size="sm" onClick={addCustomValue} disabled={!customValue.trim()}>
+                添加
+              </Button>
+            </div>
           </div>
         </div>
-      </div>
-    </details>
+      </details>
+      {unmatchedContractValues.length > 0 && (
+        <div className="mt-1.5 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs leading-5 text-amber-800">
+          合同包含未匹配值：
+          <span className="font-semibold">{unmatchedContractValues.join("、")}</span>
+          。未自动加入；如需使用，请在“其他（手动新增）”中添加。
+        </div>
+      )}
+    </div>
   );
 }
 

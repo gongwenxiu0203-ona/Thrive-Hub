@@ -46,7 +46,7 @@ export default async function ContractDetailPage({
 }) {
   const session = await requireSession();
   const { id } = await params;
-  try { await requireFeaturePermission(session, "contracts", "READ"); }
+  try { await requireFeaturePermission(session, "contracts.records", "READ"); }
   catch (error) { if (error instanceof FeaturePermissionError) notFound(); throw error; }
 
   const contract = await prisma.contract.findFirst({

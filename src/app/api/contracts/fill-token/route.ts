@@ -8,7 +8,7 @@ import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissi
 export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
-  try { await requireFeaturePermission(session, "contracts", "EDIT"); }
+  try { await requireFeaturePermission(session, "contracts.create_upload", "EDIT"); }
   catch (error) {
     if (error instanceof FeaturePermissionError) return NextResponse.json({ error: "无权生成填写链接" }, { status: 403 });
     throw error;

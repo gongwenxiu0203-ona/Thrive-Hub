@@ -273,7 +273,7 @@ export async function uploadExistingContract(
 ): Promise<Result<UploadExistingContractData>> {
   const session = await requireSession();
   try {
-    await requireFeaturePermission(session, "contracts", "EDIT");
+    await requireFeaturePermission(session, "contracts.create_upload", "EDIT");
   } catch (error) {
     if (error instanceof FeaturePermissionError) return { ok: false, error: "无权创建合同" };
     throw error;
@@ -562,6 +562,6 @@ export async function uploadExistingContract(
 
 export async function getUploadRequiredFields() {
   const session = await requireSession();
-  await requireFeaturePermission(session, "contracts", "EDIT");
+  await requireFeaturePermission(session, "contracts.create_upload", "EDIT");
   return uploadRequiredFields("SIGNED_ARCHIVE");
 }

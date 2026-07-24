@@ -33,7 +33,7 @@ export async function uploadSeal(fd: FormData): Promise<Result<{ fileUrl: string
   const session = await requireSession();
   if (!isStaff(session.role)) return { ok: false, error: "无权上传公章" };
   try {
-    await requireFeaturePermission(session, "contracts", "MANAGE");
+    await requireFeaturePermission(session, "contracts.signing", "MANAGE");
   } catch (error) {
     if (error instanceof FeaturePermissionError) {
       return { ok: false, error: "无权上传公章" };

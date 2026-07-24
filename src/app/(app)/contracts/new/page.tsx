@@ -42,7 +42,7 @@ export default async function NewContractPage({
   }
 
   if (contractId) {
-    await requireFeaturePermission(session, "contracts", "EDIT");
+    await requireFeaturePermission(session, "contracts.create_upload", "EDIT");
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     existingContract = await (prisma.contract.findFirst as any)({
       where: {

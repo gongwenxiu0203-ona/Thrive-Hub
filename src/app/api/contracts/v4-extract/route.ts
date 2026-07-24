@@ -8,7 +8,7 @@ export async function POST(req: Request) {
   const session = await getSession();
   if (session && !isStaff(session.role)) return NextResponse.json({ error: "无权解析合同" }, { status: 403 });
   if (session) {
-    try { await requireFeaturePermission(session, "contracts", "EDIT"); }
+    try { await requireFeaturePermission(session, "contracts.create_upload", "EDIT"); }
     catch (error) { if (error instanceof FeaturePermissionError) return NextResponse.json({ error: "无权解析合同" }, { status: 403 }); throw error; }
   }
   if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });

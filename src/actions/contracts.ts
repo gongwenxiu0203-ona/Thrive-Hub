@@ -83,7 +83,7 @@ async function auditCompletedContractEdit(
 
 async function requireContractsPermission(required: PermLevel) {
   const session = await requireSession();
-  await requireFeaturePermission(session, "contracts", required);
+  await requireFeaturePermission(session, "contracts.records", required);
   return session;
 }
 

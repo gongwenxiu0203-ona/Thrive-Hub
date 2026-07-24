@@ -27,7 +27,7 @@ export async function GET(
   const format = (req.nextUrl.searchParams.get("format") ?? "docx").toLowerCase();
 
   try {
-    await requireFeaturePermission(session, "contracts", "READ");
+    await requireFeaturePermission(session, "contracts.records", "READ");
   } catch (error) {
     if (error instanceof FeaturePermissionError) {
       return NextResponse.json({ error: "无权访问合同" }, { status: 403 });

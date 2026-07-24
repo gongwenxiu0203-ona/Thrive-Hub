@@ -18,7 +18,7 @@ async function authorize() {
     return NextResponse.json({ error: "无权管理乙方签名" }, { status: 403 });
   }
   try {
-    await requireFeaturePermission(session, "contracts", "MANAGE");
+    await requireFeaturePermission(session, "contracts.signing", "MANAGE");
     return null;
   } catch (error) {
     if (error instanceof FeaturePermissionError) {

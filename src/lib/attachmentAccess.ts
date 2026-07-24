@@ -75,7 +75,7 @@ export async function requireAttachmentEntityAccess(
       break;
     }
     case "CONTRACT": {
-      await requireFeaturePermission(session, "contracts", required);
+      await requireFeaturePermission(session, "contracts.records", required);
       const contract = await prisma.contract.findFirst({
         where: {
           id: entityId,

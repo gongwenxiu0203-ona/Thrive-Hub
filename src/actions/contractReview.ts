@@ -17,7 +17,7 @@ import { requireFeaturePermission } from "@/lib/permissionGuard";
 
 async function requireReviewAccess(contractId: string) {
   const session = await requireSession();
-  await requireFeaturePermission(session, "contracts", "EDIT");
+  await requireFeaturePermission(session, "contracts.reviews", "EDIT");
   const contract = await prisma.contract.findFirst({
     where: { id: contractId, ...contractScope(session, session.role === "ADMIN" ? "all" : "mine"), deletedAt: null },
     select: { id: true },

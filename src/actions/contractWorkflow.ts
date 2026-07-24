@@ -32,7 +32,7 @@ export async function generateContractFromTemplate(
 ): Promise<Result<{ versionNo: number; fileUrl: string }>> {
   const session = await requireSession();
   try {
-    await requireFeaturePermission(session, "contracts", "EDIT");
+    await requireFeaturePermission(session, "contracts.signing", "EDIT");
   } catch (error) {
     if (error instanceof FeaturePermissionError) return { ok: false, error: "无权编辑合同" };
     throw error;
@@ -79,7 +79,7 @@ export async function generateContractFromTemplate(
 export async function submitForReviewUseCurrent(contractId: string): Promise<Result> {
   const session = await requireSession();
   try {
-    await requireFeaturePermission(session, "contracts", "EDIT");
+    await requireFeaturePermission(session, "contracts.signing", "EDIT");
   } catch (error) {
     if (error instanceof FeaturePermissionError) return { ok: false, error: "无权编辑合同" };
     throw error;
@@ -113,7 +113,7 @@ export async function submitForReviewUseCurrent(contractId: string): Promise<Res
 export async function submitForReviewUploadNew(fd: FormData): Promise<Result<{ versionNo: number }>> {
   const session = await requireSession();
   try {
-    await requireFeaturePermission(session, "contracts", "EDIT");
+    await requireFeaturePermission(session, "contracts.signing", "EDIT");
   } catch (error) {
     if (error instanceof FeaturePermissionError) return { ok: false, error: "无权编辑合同" };
     throw error;

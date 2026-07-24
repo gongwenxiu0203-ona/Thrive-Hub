@@ -21,7 +21,7 @@ export async function GET(
     return NextResponse.json({ error: "无权查看公章" }, { status: 403 });
   }
   try {
-    await requireFeaturePermission(session, "contracts", "MANAGE");
+    await requireFeaturePermission(session, "contracts.signing", "MANAGE");
   } catch (error) {
     if (error instanceof FeaturePermissionError) {
       return NextResponse.json({ error: "无权查看公章" }, { status: 403 });
