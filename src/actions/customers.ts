@@ -14,10 +14,25 @@ import { requireFeaturePermission } from "@/lib/permissionGuard";
 const LEO_EMAIL = "leo.g@thraiveagency.com";
 const LEDO_EMAIL = "ledo.h@thraiveagency.com";
 
-async function requireCustomerEditSession() {
+async function requireCustomerPermission(
+  feature: "customers.records" | "customers.followup",
+  required: "EDIT" | "MANAGE" = "EDIT",
+) {
   const session = await requireSession();
-  await requireFeaturePermission(session, "customers", "EDIT");
+  await requireFeaturePermission(session, feature, required);
   return session;
+}
+
+async function requireCustomerEditSession() {
+  return requireCustomerPermission("customers.records");
+}
+
+async function requireCustomerFollowupSession() {
+  return requireCustomerPermission("customers.followup");
+}
+
+async function requireCustomerManageSession() {
+  return requireCustomerPermission("customers.records", "MANAGE");
 }
 
 function accessibleCustomerWhere(session: Awaited<ReturnType<typeof requireSession>>) {
@@ -135,7 +150,7 @@ function collectCustomerData(fd: FormData) {
 
 /** Quick create — only the brand/shop name is required. */
 export async function quickCreateCustomer(name: string): Promise<SaveResult> {
-  const session = await requireSession();
+  const session = await requireCustomerEditSession();
   const brandName = capitalizeBrandName(name);
   if (!brandName) {
     return {
@@ -164,7 +179,7 @@ export async function quickCreateCustomer(name: string): Promise<SaveResult> {
 }
 
 export async function createCustomer(fd: FormData): Promise<SaveResult> {
-  const session = await requireSession();
+  const session = await requireCustomerEditSession();
   const data = collectCustomerData(fd);
   if (!data.brandName) {
     return {
@@ -223,7 +238,7 @@ export async function updateCustomer(
   id: string,
   fd: FormData,
 ): Promise<SaveResult> {
-  const session = await requireSession();
+  const session = await requireCustomerEditSession();
   const data = collectCustomerData(fd);
   if (!data.brandName) {
     return {
@@ -255,7 +270,7 @@ export async function updateCustomer(
 }
 
 export async function deleteCustomer(id: string) {
-  const session = await requireSession();
+  const session = await requireCustomerManageSession();
   if (!canDeleteCustomer(session.role)) throw new Error("无权删除客户");
   // 软删除：标记 deletedAt，进回收站，7 天内可恢复，到期物理清理。
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -269,7 +284,7 @@ export async function deleteCustomer(id: string) {
 
 /** Manual status change — also resets the timer clock. */
 export async function getCustomerDeleteImpact(id: string): Promise<CustomerDeleteImpact> {
-  const session = await requireSession();
+  const session = await requireCustomerManageSession();
   if (!canDeleteCustomer(session.role)) throw new Error("无权删除客户");
 
   const customer = await prisma.customer.findUnique({
@@ -317,7 +332,7 @@ export async function getCustomerDeleteImpact(id: string): Promise<CustomerDelet
 }
 
 export async function getBulkCustomerDeleteImpact(ids: string[]): Promise<CustomerDeleteImpact[]> {
-  const session = await requireSession();
+  const session = await requireCustomerManageSession();
   if (!canDeleteCustomer(session.role)) throw new Error("无权删除客户");
   const cleanIds = [...new Set(ids.filter(Boolean))];
   if (!cleanIds.length) return [];
@@ -325,7 +340,7 @@ export async function getBulkCustomerDeleteImpact(ids: string[]): Promise<Custom
 }
 
 export async function deleteCustomerWithRelations(id: string) {
-  const session = await requireSession();
+  const session = await requireCustomerManageSession();
   if (!canDeleteCustomer(session.role)) throw new Error("无权删除客户");
   const now = new Date();
 
@@ -359,7 +374,7 @@ export async function deleteCustomerWithRelations(id: string) {
 }
 
 export async function bulkDeleteCustomersWithRelations(ids: string[]): Promise<SaveResult> {
-  const session = await requireSession();
+  const session = await requireCustomerManageSession();
   if (!canDeleteCustomer(session.role)) return { ok: false, error: "无权删除客户" };
   const cleanIds = [...new Set(ids.filter(Boolean))];
   if (!cleanIds.length) return { ok: false, error: "请选择要删除的客户" };
@@ -405,6 +420,13 @@ export async function bulkUpdateCustomers(
   },
 ): Promise<SaveResult> {
   const session = await requireCustomerEditSession();
+  if (
+    patch.status !== undefined ||
+    patch.businessOwnerId !== undefined ||
+    patch.backendOwnerId !== undefined
+  ) {
+    await requireFeaturePermission(session, "customers.followup", "EDIT");
+  }
   const cleanIds = [...new Set(ids.filter(Boolean))];
   if (!cleanIds.length) return { ok: false, error: "请选择要修改的客户" };
   const accessibleCount = await prisma.customer.count({
@@ -447,7 +469,7 @@ export async function bulkUpdateCustomers(
 }
 
 export async function updateCustomerStatus(id: string, status: string) {
-  const session = await requireCustomerEditSession();
+  const session = await requireCustomerFollowupSession();
   if (!isCustomerStatus(status)) throw new Error("无效的客户进度");
   const customer = await prisma.customer.findFirst({
     where: { AND: [{ id, deletedAt: null }, accessibleCustomerWhere(session)] },
@@ -467,7 +489,7 @@ export async function updateCustomerStatus(id: string, status: string) {
  * "客户会议预约" task for that owner.
  */
 export async function setBusinessOwner(customerId: string, userId: string) {
-  const session = await requireCustomerEditSession();
+  const session = await requireCustomerFollowupSession();
   const customer = await prisma.customer.findFirst({
     where: { AND: [{ id: customerId, deletedAt: null }, accessibleCustomerWhere(session)] },
   });
@@ -516,7 +538,7 @@ export async function setBackendOwner(
   userId: string,
   dueDate: string,
 ) {
-  const session = await requireCustomerEditSession();
+  const session = await requireCustomerFollowupSession();
   const customer = await prisma.customer.findFirst({
     where: { AND: [{ id: customerId, deletedAt: null }, accessibleCustomerWhere(session)] },
   });
@@ -580,7 +602,14 @@ export async function saveEvaluation(
   evalData: object | null,
   grade: string,
 ) {
-  await requireSession();
+  const session = await requireCustomerEditSession();
+  const customer = await prisma.customer.findFirst({
+    where: {
+      AND: [{ id: customerId, deletedAt: null }, accessibleCustomerWhere(session)],
+    },
+    select: { id: true },
+  });
+  if (!customer) throw new Error("客户不存在或无权修改");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (prisma.customer.update as any)({
     where: { id: customerId },
@@ -594,7 +623,14 @@ export async function saveEvaluation(
 
 /** Assign (or clear) the channel user for this customer. */
 export async function setChannelUser(customerId: string, userId: string) {
-  await requireSession();
+  const session = await requireCustomerEditSession();
+  const customer = await prisma.customer.findFirst({
+    where: {
+      AND: [{ id: customerId, deletedAt: null }, accessibleCustomerWhere(session)],
+    },
+    select: { id: true },
+  });
+  if (!customer) throw new Error("客户不存在或无权修改");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (prisma.customer.update as any)({
     where: { id: customerId },
@@ -659,8 +695,15 @@ export async function setupFinanceCustomerOwner(
   businessOwnerId: string,
   contactPhone: string,
 ): Promise<SaveResult> {
-  await requireSession();
+  const session = await requireCustomerFollowupSession();
   if (!customerId) return { ok: false, error: "缺少 customerId" };
+  const customer = await prisma.customer.findFirst({
+    where: {
+      AND: [{ id: customerId, deletedAt: null }, accessibleCustomerWhere(session)],
+    },
+    select: { id: true },
+  });
+  if (!customer) return { ok: false, error: "客户不存在或无权修改" };
   await prisma.customer.update({
     where: { id: customerId },
     data: {

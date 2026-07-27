@@ -50,6 +50,7 @@ type ChannelRecSummary = {
 };
 
 export function InternalManagement({
+  canEdit: _canEdit,
   customerId,
   customerName,
   status,
@@ -63,6 +64,7 @@ export function InternalManagement({
   backendTasks,
   channelRec,
 }: {
+  canEdit: boolean;
   customerId: string;
   customerName: string;
   status: string;
@@ -102,7 +104,7 @@ export function InternalManagement({
           <select
             className="input flex-1"
             value={status}
-            disabled={pending}
+            disabled={pending || !_canEdit}
             onChange={(e) => run(() => updateCustomerStatus(customerId, e.target.value))}
           >
             {Object.entries(CUSTOMER_STATUS_LABELS).map(([k, v]) => (
@@ -127,7 +129,7 @@ export function InternalManagement({
         <select
           className="input"
           value={channelUserId ?? ""}
-          disabled={pending}
+          disabled={pending || !_canEdit}
           onChange={(e) => run(() => setChannelUser(customerId, e.target.value))}
         >
           <option value="">— 未分配 —</option>
@@ -187,7 +189,7 @@ export function InternalManagement({
         <select
           className="input"
           value={businessOwnerId ?? ""}
-          disabled={pending}
+          disabled={pending || !_canEdit}
           onChange={(e) => run(() => setBusinessOwner(customerId, e.target.value))}
         >
           <option value="">— 未分配 —</option>
@@ -200,12 +202,14 @@ export function InternalManagement({
         <div>
           <div className="mb-2 flex items-center justify-between">
             <p className="text-xs font-medium text-slate-500">关联合同</p>
-            <Link
-              href={`/contracts/new?customerId=${customerId}`}
-              className="btn-primary btn-sm flex items-center gap-1"
-            >
-              <Plus className="h-3 w-3" /> 新增合同
-            </Link>
+            {_canEdit && (
+              <Link
+                href={`/contracts/new?customerId=${customerId}`}
+                className="btn-primary btn-sm flex items-center gap-1"
+              >
+                <Plus className="h-3 w-3" /> 新增合同
+              </Link>
+            )}
           </div>
           {contracts.length === 0 ? (
             <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-400">
@@ -252,6 +256,7 @@ export function InternalManagement({
             className="input"
             value={demoDue}
             min={toInputDate(new Date())}
+            disabled={pending || !_canEdit}
             onChange={(e) => {
               const v = e.target.value;
               setDemoDue(v);
@@ -266,7 +271,7 @@ export function InternalManagement({
         <select
           className="input"
           value={backendOwnerId ?? ""}
-          disabled={pending}
+          disabled={pending || !_canEdit}
           onChange={(e) => run(() => setBackendOwner(customerId, e.target.value, demoDue))}
         >
           <option value="">— 未分配 —</option>

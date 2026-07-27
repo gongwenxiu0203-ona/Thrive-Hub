@@ -47,7 +47,7 @@ function validateInput(input: SplitRuleInput): string | null {
 export async function upsertChannelSplitRule(input: SplitRuleInput): Promise<Result<{ id: string }>> {
   const session = await requireSession();
   try {
-    await requireFeaturePermission(session, "finance_channel", "EDIT");
+    await requireFeaturePermission(session, "finance.channel_reconciliation", "EDIT");
   } catch (error) {
     if (error instanceof FeaturePermissionError) return { ok: false, error: "无权操作" };
     throw error;
@@ -102,7 +102,7 @@ export async function upsertChannelSplitRule(input: SplitRuleInput): Promise<Res
 export async function deleteChannelSplitRule(customerId: string): Promise<Result> {
   const session = await requireSession();
   try {
-    await requireFeaturePermission(session, "finance_channel", "MANAGE");
+    await requireFeaturePermission(session, "finance.channel_reconciliation", "MANAGE");
   } catch (error) {
     if (error instanceof FeaturePermissionError) return { ok: false, error: "无权删除分账规则" };
     throw error;
@@ -123,7 +123,7 @@ export async function ensureReconciliationForContract(args: {
   createdById: string;
 }): Promise<Result<{ reconciliationId: string }>> {
   const session = await requireSession();
-  await requireFeaturePermission(session, "finance_channel", "EDIT");
+  await requireFeaturePermission(session, "finance.channel_reconciliation", "EDIT");
   const { contractId, customerId, channelUserId } = args;
   const relation = await prisma.contract.findFirst({
     where: {
@@ -233,7 +233,7 @@ export async function ensureChannelDueDateReminders(
   derivedPeriods: PeriodDerived[]
 ): Promise<void> {
   const session = await requireSession();
-  await requireFeaturePermission(session, "finance_channel", "READ");
+  await requireFeaturePermission(session, "finance.channel_reconciliation", "READ");
   const reconciliation = await prisma.channelReconciliation.findFirst({
     where: {
       id: reconciliationId,

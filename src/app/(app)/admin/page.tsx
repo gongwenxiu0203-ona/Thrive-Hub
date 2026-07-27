@@ -1,43 +1,56 @@
 import { requireAdmin } from "@/lib/session";
+import { resolveUserPermissionsMap } from "@/lib/permissionResolver";
+import { hasPermissionLevel } from "@/lib/permissionGuard";
+import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { AdminClient } from "./AdminClient";
 
 export const metadata = { title: "管理员面板 · Thraive联盟营销系统" };
 
 export default async function AdminPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
-  await requireAdmin();
+  const session = await requireAdmin();
+  const permissions = await resolveUserPermissionsMap(session.userId);
+  const canRead = (feature: string) => hasPermissionLevel(permissions[feature] ?? "NONE", "READ");
+  const canSeeUsers = canRead("admin.users") || canRead("admin.registration_review") || canRead("admin.permissions");
+  const canSeeQuality = canRead("admin.data_quality");
+  const canSeeAudit = canRead("admin.audit");
+  const canSeeApi = canRead("admin.api_access");
+  const canSeeIntake = canRead("intake.review");
+  if (!canSeeUsers && !canSeeQuality && !canSeeAudit && !canSeeApi && !canSeeIntake) {
+    redirect("/dashboard");
+  }
   const sp = await searchParams;
 
   const [users, contractsWithoutCustomer, contractsWithMissingFields, unlinkedSales, untypedAffiliates, projectsWithoutCustomer, auditLogs, apiLogs, apiFailureCount] = await Promise.all([
-    prisma.user.findMany({
+    canSeeUsers ? prisma.user.findMany({
       orderBy: { createdAt: "desc" },
       select: {
         id: true, name: true, email: true, role: true, status: true, brandName: true, uniqueCode: true, invitedById: true,
         invitedBy: { select: { id: true, name: true, email: true } }, createdAt: true,
       },
-    }),
-    prisma.contract.count({ where: { deletedAt: null, type: { not: "TRANSACTIONAL" }, customerId: null } }),
-    prisma.contract.count({
+    }) : Promise.resolve([]),
+    canSeeQuality ? prisma.contract.count({ where: { deletedAt: null, type: { not: "TRANSACTIONAL" }, customerId: null } }) : Promise.resolve(0),
+    canSeeQuality ? prisma.contract.count({
       where: {
         deletedAt: null,
         type: { not: "TRANSACTIONAL" },
         OR: [{ partyA: null }, { accountingPeriod: null }, { feeAmount: null }, { commissionRate: null }],
       },
-    }),
-    prisma.salesRecord.count({ where: { deletedAt: null, customerId: null } }),
-    prisma.affiliate.count({ where: { deletedAt: null, OR: [{ affiliateType: null }, { affiliateType: "" }] } }),
-    prisma.project.count({ where: { deletedAt: null, customerId: null } }),
-    prisma.adminAuditLog.findMany({
+    }) : Promise.resolve(0),
+    canSeeQuality ? prisma.salesRecord.count({ where: { deletedAt: null, customerId: null } }) : Promise.resolve(0),
+    canSeeQuality ? prisma.affiliate.count({ where: { deletedAt: null, OR: [{ affiliateType: null }, { affiliateType: "" }] } }) : Promise.resolve(0),
+    canSeeQuality ? prisma.project.count({ where: { deletedAt: null, customerId: null } }) : Promise.resolve(0),
+    canSeeAudit ? prisma.adminAuditLog.findMany({
       take: 50,
       orderBy: { createdAt: "desc" },
       include: { actor: { select: { name: true } } },
-    }),
-    prisma.apiAccessLog.findMany({
+    }) : Promise.resolve([]),
+    canSeeApi ? prisma.apiAccessLog.findMany({
       take: 50,
       orderBy: { createdAt: "desc" },
       include: { actor: { select: { name: true } } },
-    }),
-    prisma.apiAccessLog.count({ where: { outcome: "ERROR", createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } } }),
+    }) : Promise.resolve([]),
+    canSeeApi ? prisma.apiAccessLog.count({ where: { outcome: "ERROR", createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } } }) : Promise.resolve(0),
   ]);
 
   const usersWithExtra = users.map((user) => ({
@@ -59,7 +72,8 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
 
   return <AdminClient
     initialUsers={usersWithExtra}
-    initialTab={sp.tab === "intake" ? "intake" : "overview"}
+    initialTab={sp.tab === "intake" && canSeeIntake ? "intake" : "overview"}
+    permissions={permissions}
     overview={{ totalUsers: users.length, pendingUsers: users.filter((user) => user.status === "PENDING").length, auditCount: auditLogs.length, apiFailureCount }}
     qualityIssues={qualityIssues}
     auditLogs={auditLogs.map((log) => ({ id: log.id, actorName: log.actor?.name ?? null, action: log.action, module: log.module, targetLabel: log.targetLabel, summary: log.summary, status: log.status, createdAt: log.createdAt.toISOString() }))}

@@ -11,7 +11,7 @@ export async function GET(
 ) {
   const auth = await getSession();
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const affiliatePermission = await resolveUserPermission(auth.userId, "affiliates");
+  const affiliatePermission = await resolveUserPermission(auth.userId, "affiliates.records");
   if (!hasPermissionLevel(affiliatePermission, "READ")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const { id } = await params;
@@ -53,7 +53,7 @@ export async function PATCH(
 ) {
   const auth = await getSession();
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const affiliatePermission = await resolveUserPermission(auth.userId, "affiliates");
+  const affiliatePermission = await resolveUserPermission(auth.userId, "affiliates.records");
   if (!hasPermissionLevel(affiliatePermission, "EDIT")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const { id } = await params;
@@ -102,7 +102,7 @@ export async function DELETE(
 ) {
   const auth = await getSession();
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const affiliatePermission = await resolveUserPermission(auth.userId, "affiliates");
+  const affiliatePermission = await resolveUserPermission(auth.userId, "affiliates.records");
   if (!hasPermissionLevel(affiliatePermission, "MANAGE")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const { id } = await params;

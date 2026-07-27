@@ -12,7 +12,7 @@ export async function PATCH(
 ) {
   try {
     const session = await requireSession();
-    await requireFeaturePermission(session, "finance_customer", "EDIT");
+    await requireFeaturePermission(session, "finance.customer_reconciliation", "EDIT");
     const { id } = await params;
     const body = await req.json();
 

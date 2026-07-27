@@ -11,7 +11,8 @@ import {
 import { FinanceClient } from "./FinanceClient";
 import { resolveUserPermission } from "@/lib/permissionResolver";
 import { hasPermissionLevel } from "@/lib/permissionGuard";
-import { RECONCILIATION_FEATURE } from "@/lib/reconciliationAccess";
+import type { PermLevel } from "@/lib/featurePermissions";
+import { redirect } from "next/navigation";
 
 export default async function FinancePage({
   searchParams,
@@ -19,15 +20,31 @@ export default async function FinancePage({
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const session = await requireSession();
-  const customerReconciliationPermission = await resolveUserPermission(
-    session.userId,
-    RECONCILIATION_FEATURE,
-  );
+  const [customerPermission, channelPermission, affiliatePermission] =
+    await Promise.all([
+      resolveUserPermission(session.userId, "finance.customer_reconciliation"),
+      resolveUserPermission(session.userId, "finance.channel_reconciliation"),
+      resolveUserPermission(session.userId, "finance.affiliate_reconciliation"),
+    ]);
+  const can = (permission: PermLevel, required: PermLevel) =>
+    hasPermissionLevel(permission, required);
+  const canViewCustomer = can(customerPermission, "READ");
+  const canEditCustomer = can(customerPermission, "EDIT");
+  const canManageCustomer = can(customerPermission, "MANAGE");
+  const canViewChannel = can(channelPermission, "READ");
+  const canEditChannel = can(channelPermission, "EDIT");
+  const canManageChannel = can(channelPermission, "MANAGE");
+  const canViewAffiliate = can(affiliatePermission, "READ");
+  const canEditAffiliate = can(affiliatePermission, "EDIT");
+  const canManageAffiliate = can(affiliatePermission, "MANAGE");
+  if (!canViewCustomer && !canViewChannel && !canViewAffiliate) {
+    redirect("/dashboard");
+  }
   const sp = await searchParams;
   const view = parseViewScope(sp);
 
   // 懒清理：仅内部员工触发
-  if (isStaff(session.role)) {
+  if (isStaff(session.role) && canManageCustomer) {
     await purgeExpiredTrashedReconciliations();
   }
 
@@ -43,7 +60,7 @@ export default async function FinancePage({
   const [reconciliations, trashedReconciliations, channelReconciliations, customers, channelUsers, allUsers, affiliateReconciliations] = await Promise.all([
     // 未删除的对账记录（带行级权限）
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prisma.customerReconciliation.findMany({
+    canViewCustomer ? prisma.customerReconciliation.findMany({
       where: { AND: [{ deletedAt: null }, recScope as any] },
       include: {
         customer: {
@@ -60,11 +77,11 @@ export default async function FinancePage({
         },
       },
       orderBy: { periodStart: "desc" },
-    }),
+    }) : Promise.resolve([]),
 
     // 已软删除的对账记录（用于"已删除"Tab，带行级权限）
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prisma.customerReconciliation.findMany({
+    canManageCustomer ? prisma.customerReconciliation.findMany({
       where: { AND: [{ deletedAt: { not: null } }, recScope as any] },
       include: {
         customer: {
@@ -77,10 +94,10 @@ export default async function FinancePage({
         createdBy: { select: { id: true, name: true } },
       },
       orderBy: { deletedAt: "desc" },
-    }),
+    }) : Promise.resolve([]),
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prisma.channelReconciliation.findMany({
+    canViewChannel ? prisma.channelReconciliation.findMany({
       where: chRecScope as any,
       include: {
         customer: { select: { id: true, brandName: true } },
@@ -104,11 +121,11 @@ export default async function FinancePage({
         periods: { orderBy: { periodIndex: "asc" } },
       },
       orderBy: { createdAt: "desc" },
-    }),
+    }) : Promise.resolve([]),
 
     // 有已签署完成合同的客户列表（用于新建对账，带行级权限）
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prisma.customer.findMany({
+    canEditCustomer ? prisma.customer.findMany({
       where: {
         AND: [
           {
@@ -134,34 +151,34 @@ export default async function FinancePage({
         },
       },
       orderBy: { brandName: "asc" },
-    }),
+    }) : Promise.resolve([]),
 
-    prisma.user.findMany({
+    canEditChannel ? prisma.user.findMany({
       where: { role: "CHANNEL", status: "APPROVED" },
       select: { id: true, name: true },
       orderBy: { name: "asc" },
-    }),
+    }) : Promise.resolve([]),
 
     // 所有用户（用于新建对账时选择负责人，需带邮箱）
-    prisma.user.findMany({
+    canEditCustomer ? prisma.user.findMany({
       where: { status: "APPROVED" },
       select: { id: true, name: true, email: true },
       orderBy: { name: "asc" },
-    }),
+    }) : Promise.resolve([]),
 
     // 联盟商对账记录
-    prisma.affiliateReconciliation.findMany({
+    canViewAffiliate ? prisma.affiliateReconciliation.findMany({
       include: {
         submitter: { select: { id: true, name: true } },
       },
       orderBy: { createdAt: "desc" },
-    }),
+    }) : Promise.resolve([]),
   ]);
 
   // 为渠道商新建分账查询：已确认的客户对账记录（按客户分组，带行级权限）
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const confirmedCustomerReconciliations =
-    await prisma.customerReconciliation.findMany({
+  const confirmedCustomerReconciliations = canEditChannel
+    ? await prisma.customerReconciliation.findMany({
       where: {
         AND: [
           { status: "CONFIRMED", deletedAt: null },
@@ -192,7 +209,8 @@ export default async function FinancePage({
         },
       },
       orderBy: { periodStart: "desc" },
-    });
+    })
+    : [];
 
   return (
     <FinanceClient
@@ -208,12 +226,15 @@ export default async function FinancePage({
       canToggleScope={isStaff(session.role)}
       currentView={view}
       isChannel={session.role === "CHANNEL"}
-      canManageCustomerReconciliations={hasPermissionLevel(
-        customerReconciliationPermission,
-        "MANAGE",
-      )}
-      canCreateChannelReconciliations={isStaff(session.role)}
-      canViewAffiliateReconciliations={isStaff(session.role)}
+      canViewCustomerReconciliations={canViewCustomer}
+      canEditCustomerReconciliations={canEditCustomer}
+      canManageCustomerReconciliations={canManageCustomer}
+      canViewChannelReconciliations={canViewChannel}
+      canEditChannelReconciliations={canEditChannel}
+      canManageChannelReconciliations={canManageChannel}
+      canViewAffiliateReconciliations={canViewAffiliate}
+      canEditAffiliateReconciliations={canEditAffiliate}
+      canManageAffiliateReconciliations={canManageAffiliate}
     />
   );
 }

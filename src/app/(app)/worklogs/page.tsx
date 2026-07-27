@@ -1,7 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { redirect } from "next/navigation";
-import { isStaff } from "@/lib/permissions";
+import { resolveUserPermission } from "@/lib/permissionResolver";
+import { hasPermissionLevel } from "@/lib/permissionGuard";
 import WorkLogsClient from "./WorkLogsClient";
 
 export const dynamic = "force-dynamic";
@@ -9,12 +10,17 @@ export const metadata = { title: "工作日志 · Thraive联盟营销系统" };
 
 export default async function WorkLogsPage() {
   const session = await requireSession();
-  if (!isStaff(session.role)) redirect("/dashboard");
+  const permission = await resolveUserPermission(session.userId, "worklogs.records");
+  if (!hasPermissionLevel(permission, "READ")) redirect("/dashboard");
+  const canManage = hasPermissionLevel(permission, "MANAGE");
 
   const [logs, projects, affiliates] = await Promise.all([
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (prisma.workLog.findMany as any)({
-      where: { deletedAt: null },
+      where: {
+        deletedAt: null,
+        ...(canManage ? {} : { authorId: session.userId }),
+      },
       include: { author: { select: { id: true, name: true } } },
       orderBy: { logDate: "desc" },
     }),
@@ -64,6 +70,8 @@ export default async function WorkLogsPage() {
       affiliates={affiliates.map((a) => ({ id: a.id, name: a.platformAffiliateName }))}
       currentUserId={session.userId}
       isAdmin={session.role === "ADMIN"}
+      canEdit={hasPermissionLevel(permission, "EDIT")}
+      canManage={canManage}
     />
   );
 }

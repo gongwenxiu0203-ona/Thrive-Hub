@@ -143,6 +143,7 @@ type Props = {
   currentUserId: string;
   users: User[];
   readOnly?: boolean;
+  canManage?: boolean;
 };
 
 // ── currency symbol ───────────────────────────────────────────────────────────
@@ -188,6 +189,7 @@ export function CustomerReconciliationDetailClient({
   currentUserId,
   users,
   readOnly = false,
+  canManage = false,
 }: Props) {
   const [showNewModal, setShowNewModal] = useState(false);
   const router = useRouter();
@@ -227,6 +229,7 @@ export function CustomerReconciliationDetailClient({
                 currentUserId={currentUserId}
                 users={users}
                 readOnly={readOnly}
+                canManage={canManage}
                 onRefresh={() => startTransition(() => router.refresh())}
               />
             ))}
@@ -429,6 +432,7 @@ function MonthlyRecordRow({
   currentUserId,
   users,
   readOnly,
+  canManage,
   onRefresh,
 }: {
   rec: Rec;
@@ -436,6 +440,7 @@ function MonthlyRecordRow({
   currentUserId: string;
   users: User[];
   readOnly: boolean;
+  canManage: boolean;
   onRefresh: () => void;
 }) {
   const [expanded, setExpanded] = useState(defaultOpen);
@@ -508,7 +513,7 @@ function MonthlyRecordRow({
   }
 
   async function deleteRecord() {
-    if (readOnly) return;
+    if (!canManage) return;
     setDeleting(true);
     try {
       const res = await fetch(`/api/finance/reconciliations/${rec.id}`, {
@@ -563,7 +568,7 @@ function MonthlyRecordRow({
             </span>
           )}
         </button>
-        {!readOnly && (
+        {canManage && (
           <button
             type="button"
             className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-600"
@@ -1006,7 +1011,7 @@ function MonthlyRecordRow({
       )}
 
       {/* 删除月度对账确认 */}
-      {showDeleteModal && !readOnly && (
+      {showDeleteModal && canManage && (
         <Modal
           open
           onClose={() => setShowDeleteModal(false)}

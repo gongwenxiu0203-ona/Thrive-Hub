@@ -23,6 +23,8 @@ type ContractOption = { id: string; contractNo: string; customerId: string };
 type UserOption = { id: string; name: string };
 
 export function ProjectHeaderActions({
+  canEdit,
+  canManage,
   projectId,
   status,
   type,
@@ -36,6 +38,8 @@ export function ProjectHeaderActions({
   contracts,
   users,
 }: {
+  canEdit: boolean;
+  canManage: boolean;
   projectId: string;
   status: string;
   type: string;
@@ -70,7 +74,7 @@ export function ProjectHeaderActions({
 
   return (
     <div className="flex items-center gap-2">
-      <select
+      {canEdit && <select
         className="rounded-lg border-0 bg-white/20 px-3 py-1.5 text-sm font-medium text-white backdrop-blur-sm [&>option]:text-slate-800"
         value={status}
         disabled={pending}
@@ -79,22 +83,22 @@ export function ProjectHeaderActions({
         {STATUS_OPTIONS.map((o) => (
           <option key={o.value} value={o.value}>{o.label}</option>
         ))}
-      </select>
-      <button
+      </select>}
+      {canEdit && <button
         onClick={() => setEditing(true)}
         disabled={pending}
         className="flex items-center gap-1.5 rounded-lg bg-white/20 px-3 py-1.5 text-sm font-medium text-white backdrop-blur-sm hover:bg-white/30"
       >
         <Edit3 className="h-4 w-4" /> 编辑
-      </button>
-      <button
+      </button>}
+      {canManage && <button
         onClick={onDelete}
         disabled={pending}
         className="flex items-center gap-1.5 rounded-lg bg-white/20 px-3 py-1.5 text-sm font-medium text-white backdrop-blur-sm hover:bg-rose-500/80"
       >
         <Trash2 className="h-4 w-4" /> 删除
-      </button>
-      {editing && (
+      </button>}
+      {canEdit && editing && (
         <ProjectBasicEditModal
           projectId={projectId}
           type={type}

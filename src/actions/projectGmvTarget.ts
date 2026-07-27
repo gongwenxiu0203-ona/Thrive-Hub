@@ -3,8 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { isStaff, projectScope } from "@/lib/dataScope";
+import { projectScope } from "@/lib/dataScope";
 import type { SessionPayload } from "@/lib/auth";
+import { requireFeaturePermission } from "@/lib/permissionGuard";
 
 type Result<T = void> = { ok: true; data?: T } | { ok: false; error: string };
 
@@ -75,7 +76,7 @@ export async function setProjectGmvTarget(
   payload: ProjectGmvTargetInput,
 ): Promise<Result<{ targetId: string }>> {
   const session = await requireSession();
-  if (!isStaff(session.role)) return { ok: false, error: "无权设置项目 GMV 目标" };
+  await requireFeaturePermission(session, "projects.kpi", "EDIT");
 
   const { projectId, month, currency, monthlyTarget, channels } = payload;
   if (!projectId) return { ok: false, error: "缺少项目 id" };
@@ -147,7 +148,7 @@ export async function setProjectGmvTarget(
 /** Delete a single (projectId, month) target row + cascade channels. */
 export async function deleteProjectGmvTarget(targetId: string): Promise<Result> {
   const session = await requireSession();
-  if (!isStaff(session.role)) return { ok: false, error: "无权删除项目 GMV 目标" };
+  await requireFeaturePermission(session, "projects.kpi", "MANAGE");
   const row = await prisma.projectGmvTarget.findUnique({
     where: { id: targetId },
     select: { projectId: true },

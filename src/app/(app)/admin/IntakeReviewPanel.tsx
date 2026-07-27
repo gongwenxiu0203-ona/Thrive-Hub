@@ -53,7 +53,7 @@ function show(value: unknown) {
   return String(value ?? "—") || "—";
 }
 
-export function IntakeReviewPanel() {
+export function IntakeReviewPanel({ canWrite }: { canWrite: boolean }) {
   const [items, setItems] = useState<Submission[]>([]);
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
   const [selected, setSelected] = useState<Submission | null>(null);
@@ -204,8 +204,12 @@ export function IntakeReviewPanel() {
             <label className="label mt-5" htmlFor="review-note">审核备注</label>
             <textarea id="review-note" className="input min-h-20" value={reviewNote} onChange={(event) => setReviewNote(event.target.value)} maxLength={2000} placeholder="可选：记录合并、拒绝或字段取舍原因" />
             <div className="mt-5 flex justify-end gap-2">
-              <button className="btn-secondary text-rose-700" disabled={busy} onClick={() => void action("reject")}>拒绝</button>
-              <button className="btn-primary" disabled={busy || fields.size === 0} onClick={() => void action("approve")}>{mergeCustomerId ? "应用并合并" : "应用所选字段"}</button>
+              {canWrite && (
+                <>
+                  <button className="btn-secondary text-rose-700" disabled={busy} onClick={() => void action("reject")}>拒绝</button>
+                  <button className="btn-primary" disabled={busy || fields.size === 0} onClick={() => void action("approve")}>{mergeCustomerId ? "应用并合并" : "应用所选字段"}</button>
+                </>
+              )}
             </div>
         </Modal>
       )}

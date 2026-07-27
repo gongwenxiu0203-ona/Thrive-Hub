@@ -6,6 +6,10 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
 import { formatDate } from "@/lib/utils";
+import {
+  PERM_LEVELS,
+  type PermLevel,
+} from "@/lib/featurePermissions";
 import { PermissionsPanel } from "./PermissionsPanel";
 import { IntakeReviewPanel } from "./IntakeReviewPanel";
 import {
@@ -126,6 +130,7 @@ export function AdminClient({
   qualityIssues,
   auditLogs,
   apiLogs,
+  permissions,
 }: {
   initialUsers: UserRecord[];
   initialTab: "intake" | "overview";
@@ -133,9 +138,23 @@ export function AdminClient({
   qualityIssues: DataQualityIssue[];
   auditLogs: AuditLogRow[];
   apiLogs: ApiAccessLogRow[];
+  permissions: Record<string, PermLevel>;
 }) {
+  const hasAtLeast = (feature: string, required: PermLevel) =>
+    PERM_LEVELS.indexOf(permissions[feature] ?? "NONE") >=
+    PERM_LEVELS.indexOf(required);
+  const readableTabs: AdminTab[] = [
+    ...(hasAtLeast("intake.review", "READ") ? ["intake" as const] : []),
+    ...(hasAtLeast("admin.users", "READ") ? ["overview" as const, "all" as const] : []),
+    ...(hasAtLeast("admin.registration_review", "READ") ? ["pending" as const] : []),
+    ...(hasAtLeast("admin.permissions", "READ") ? ["permissions" as const] : []),
+    ...(hasAtLeast("admin.data_quality", "READ") ? ["quality" as const] : []),
+    ...(hasAtLeast("admin.audit", "READ") ? ["audit" as const] : []),
+    ...(hasAtLeast("admin.api_access", "READ") ? ["api" as const] : []),
+  ];
+  const safeInitialTab = readableTabs.includes(initialTab) ? initialTab : readableTabs[0] ?? "overview";
   const [users, setUsers] = useState<UserRecord[]>(initialUsers);
-  const [tab, setTab] = useState<AdminTab>(initialTab);
+  const [tab, setTab] = useState<AdminTab>(safeInitialTab);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editRole, setEditRole] = useState("");
   const [editStatus, setEditStatus] = useState("");
@@ -155,6 +174,12 @@ export function AdminClient({
 
   const pendingUsers = users.filter((u) => u.status === "PENDING");
   const displayed = tab === "pending" ? pendingUsers : tab === "all" ? users : [];
+  const canInvite = hasAtLeast("admin.registration_review", "EDIT");
+  const canEditUsers = hasAtLeast("admin.users", "EDIT");
+  const canManageUsers = hasAtLeast("admin.users", "MANAGE");
+  const canReviewRegistrations = hasAtLeast("admin.registration_review", "EDIT");
+  const canEditPermissions = hasAtLeast("admin.permissions", "EDIT");
+  const canReviewIntake = hasAtLeast("intake.review", "EDIT");
 
   async function refreshUsers() {
     const res = await fetch("/api/admin/users");
@@ -318,14 +343,14 @@ export function AdminClient({
         description="用户管理、注册审核与权限配置"
         actions={
           <>
-            <InviteButton />
-            <button
+            {canInvite && <InviteButton />}
+            {canManageUsers && <button
               type="button"
               className="btn-primary"
               onClick={() => setShowCreate(true)}
             >
               + 新增管理员
-            </button>
+            </button>}
           </>
         }
       />
@@ -496,81 +521,47 @@ export function AdminClient({
 
       {/* Tabs */}
       <div className="tab-strip overflow-x-auto">
-        <button type="button" onClick={() => setTab("intake")} className={tab === "intake" ? "tab-trigger tab-trigger-active" : "tab-trigger"}>信息收集审核</button>
-        <button
-          type="button"
-          onClick={() => setTab("overview")}
-          className={tab === "overview" ? "tab-trigger tab-trigger-active" : "tab-trigger"}
-        >
-          {"\u7ba1\u7406\u6982\u89c8"}
-        </button>
-        <button
-          type="button"
-          onClick={() => setTab("pending")}
-          className={`rounded-t-lg px-4 py-2 text-sm font-medium transition-colors ${
-            tab === "pending"
-              ? "border-b-2 border-brand-600 text-brand-700"
-              : "text-slate-500 hover:text-slate-800"
-          }`}
-        >
-          待审核
-          {pendingUsers.length > 0 && (
-            <span className="ml-1.5 rounded-full bg-amber-500 px-1.5 py-0.5 text-xs text-white">
-              {pendingUsers.length}
-            </span>
-          )}
-        </button>
-        <button
-          type="button"
-          onClick={() => setTab("all")}
-          className={`rounded-t-lg px-4 py-2 text-sm font-medium transition-colors ${
-            tab === "all"
-              ? "border-b-2 border-brand-600 text-brand-700"
-              : "text-slate-500 hover:text-slate-800"
-          }`}
-        >
-          全部用户 ({users.length})
-        </button>
-        <button
-          type="button"
-          onClick={() => setTab("permissions")}
-          className={`rounded-t-lg px-4 py-2 text-sm font-medium transition-colors ${
-            tab === "permissions"
-              ? "border-b-2 border-brand-600 text-brand-700"
-              : "text-slate-500 hover:text-slate-800"
-          }`}
-        >
-          权限分配
-        </button>
-        <button
-          type="button"
-          onClick={() => setTab("quality")}
-          className={tab === "quality" ? "tab-trigger tab-trigger-active" : "tab-trigger"}
-        >
-          {"\u6570\u636e\u8d28\u91cf"}
-        </button>
-        <button
-          type="button"
-          onClick={() => setTab("audit")}
-          className={tab === "audit" ? "tab-trigger tab-trigger-active" : "tab-trigger"}
-        >
-          {"\u64cd\u4f5c\u5ba1\u8ba1"}
-        </button>
-        <button
-          type="button"
-          onClick={() => setTab("api")}
-          className={tab === "api" ? "tab-trigger tab-trigger-active" : "tab-trigger"}
-        >
-          {"API \u8bbf\u95ee"}
-        </button>
+        {hasAtLeast("intake.review", "READ") && (
+          <button type="button" onClick={() => setTab("intake")} className={tab === "intake" ? "tab-trigger tab-trigger-active" : "tab-trigger"}>信息收集审核</button>
+        )}
+        {hasAtLeast("admin.users", "READ") && (
+          <button type="button" onClick={() => setTab("overview")} className={tab === "overview" ? "tab-trigger tab-trigger-active" : "tab-trigger"}>
+            {"\u7ba1\u7406\u6982\u89c8"}
+          </button>
+        )}
+        {hasAtLeast("admin.registration_review", "READ") && (
+          <button type="button" onClick={() => setTab("pending")} className={tab === "pending" ? "tab-trigger tab-trigger-active" : "tab-trigger"}>
+            待审核
+            {pendingUsers.length > 0 && (
+              <span className="ml-1.5 rounded-full bg-amber-500 px-1.5 py-0.5 text-xs text-white">{pendingUsers.length}</span>
+            )}
+          </button>
+        )}
+        {hasAtLeast("admin.users", "READ") && (
+          <button type="button" onClick={() => setTab("all")} className={tab === "all" ? "tab-trigger tab-trigger-active" : "tab-trigger"}>
+            全部用户 ({users.length})
+          </button>
+        )}
+        {hasAtLeast("admin.permissions", "READ") && (
+          <button type="button" onClick={() => setTab("permissions")} className={tab === "permissions" ? "tab-trigger tab-trigger-active" : "tab-trigger"}>权限分配</button>
+        )}
+        {hasAtLeast("admin.data_quality", "READ") && (
+          <button type="button" onClick={() => setTab("quality")} className={tab === "quality" ? "tab-trigger tab-trigger-active" : "tab-trigger"}>{"\u6570\u636e\u8d28\u91cf"}</button>
+        )}
+        {hasAtLeast("admin.audit", "READ") && (
+          <button type="button" onClick={() => setTab("audit")} className={tab === "audit" ? "tab-trigger tab-trigger-active" : "tab-trigger"}>{"\u64cd\u4f5c\u5ba1\u8ba1"}</button>
+        )}
+        {hasAtLeast("admin.api_access", "READ") && (
+          <button type="button" onClick={() => setTab("api")} className={tab === "api" ? "tab-trigger tab-trigger-active" : "tab-trigger"}>{"API \u8bbf\u95ee"}</button>
+        )}
       </div>
 
-      {tab === "overview" && <AdminOverviewPanel overview={overview} issues={qualityIssues} auditLogs={auditLogs} apiLogs={apiLogs} />}
-      {tab === "intake" && <IntakeReviewPanel />}
-      {tab === "permissions" && <PermissionsPanel users={users} />}
-      {tab === "quality" && <DataQualityPanel issues={qualityIssues} />}
-      {tab === "audit" && <AuditLogPanel logs={auditLogs} />}
-      {tab === "api" && <ApiAccessPanel logs={apiLogs} />}
+      {tab === "overview" && hasAtLeast("admin.users", "READ") && <AdminOverviewPanel overview={overview} issues={qualityIssues} auditLogs={auditLogs} apiLogs={apiLogs} />}
+      {tab === "intake" && hasAtLeast("intake.review", "READ") && <IntakeReviewPanel canWrite={canReviewIntake} />}
+      {tab === "permissions" && hasAtLeast("admin.permissions", "READ") && <PermissionsPanel users={users} canEdit={canEditPermissions} />}
+      {tab === "quality" && hasAtLeast("admin.data_quality", "READ") && <DataQualityPanel issues={qualityIssues} />}
+      {tab === "audit" && hasAtLeast("admin.audit", "READ") && <AuditLogPanel logs={auditLogs} />}
+      {tab === "api" && hasAtLeast("admin.api_access", "READ") && <ApiAccessPanel logs={apiLogs} />}
 
       {error && !showCreate && (
         <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">
@@ -712,7 +703,7 @@ export function AdminClient({
                           </>
                         ) : (
                           <>
-                            {tab === "pending" && (
+                            {tab === "pending" && canReviewRegistrations && (
                               <>
                                 <button
                                   type="button"
@@ -732,21 +723,21 @@ export function AdminClient({
                                 </button>
                               </>
                             )}
-                            <button
+                            {canEditUsers && <button
                               type="button"
                               className="btn-secondary btn-sm text-xs"
                               onClick={() => startEdit(u)}
                             >
                               编辑
-                            </button>
-                            <button
+                            </button>}
+                            {canManageUsers && <button
                               type="button"
                               className="rounded px-2 py-1 text-xs text-rose-600 hover:bg-rose-50 transition-colors"
                               onClick={() => openRemoval(u)}
                               disabled={pending}
                             >
                               移除用户
-                            </button>
+                            </button>}
                           </>
                         )}
                       </div>

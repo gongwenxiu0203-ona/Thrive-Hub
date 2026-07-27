@@ -49,7 +49,7 @@ export async function requireAttachmentEntityAccess(
   switch (entityType) {
     case "CUSTOMER":
     case "CUSTOMER_DEMO": {
-      await requireFeaturePermission(session, "customers", required);
+      await requireFeaturePermission(session, "customers.records", required);
       const customer = await prisma.customer.findFirst({
         where: {
           id: entityId,
@@ -62,7 +62,7 @@ export async function requireAttachmentEntityAccess(
       break;
     }
     case "TASK": {
-      await requireFeaturePermission(session, "tasks", required);
+      await requireFeaturePermission(session, "tasks.board", required);
       const task = await prisma.task.findFirst({
         where: {
           id: entityId,
@@ -88,7 +88,7 @@ export async function requireAttachmentEntityAccess(
       break;
     }
     case "AFFILIATE": {
-      await requireFeaturePermission(session, "affiliates", required);
+      await requireFeaturePermission(session, "affiliates.media", required);
       const affiliate = await prisma.affiliate.findFirst({
         where: { id: entityId, deletedAt: null },
         select: { id: true },

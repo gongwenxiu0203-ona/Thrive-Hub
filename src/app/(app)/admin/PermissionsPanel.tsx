@@ -22,7 +22,7 @@ type UserRecord = {
 
 type Tab = "role" | "user";
 
-export function PermissionsPanel({ users }: { users: UserRecord[] }) {
+export function PermissionsPanel({ users, canEdit }: { users: UserRecord[]; canEdit: boolean }) {
   const [tab, setTab] = useState<Tab>("role");
 
   return (
@@ -52,13 +52,13 @@ export function PermissionsPanel({ users }: { users: UserRecord[] }) {
         </button>
       </div>
 
-      {tab === "role" ? <RolePermissionsTab /> : <UserPermissionsTab users={users} />}
+      {tab === "role" ? <RolePermissionsTab canEdit={canEdit} /> : <UserPermissionsTab users={users} canEdit={canEdit} />}
     </div>
   );
 }
 
 // ── 角色权限 Tab ──────────────────────────────────────────────────────────────
-function RolePermissionsTab() {
+function RolePermissionsTab({ canEdit }: { canEdit: boolean }) {
   const [data, setData] = useState<Record<string, Record<string, PermLevel>>>({});
   const [loading, setLoading] = useState(true);
   const [, startTransition] = useTransition();
@@ -156,6 +156,7 @@ function RolePermissionsTab() {
                           : "border-slate-200"
                       }`}
                       value={lv}
+                      disabled={!canEdit}
                       onChange={(e) =>
                         setLevel(r, f.key, e.target.value as PermLevel)
                       }
@@ -179,7 +180,7 @@ function RolePermissionsTab() {
 }
 
 // ── 用户权限 Tab ──────────────────────────────────────────────────────────────
-function UserPermissionsTab({ users }: { users: UserRecord[] }) {
+function UserPermissionsTab({ users, canEdit }: { users: UserRecord[]; canEdit: boolean }) {
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const filtered = users
@@ -234,7 +235,7 @@ function UserPermissionsTab({ users }: { users: UserRecord[] }) {
       {/* 用户权限详情 */}
       <div className="lg:col-span-2">
         {selected ? (
-          <UserPermissionEditor user={selected} />
+          <UserPermissionEditor user={selected} canEdit={canEdit} />
         ) : (
           <div className="card flex h-full items-center justify-center p-8 text-slate-400">
             从左侧选择用户配置个性化权限
@@ -245,7 +246,7 @@ function UserPermissionsTab({ users }: { users: UserRecord[] }) {
   );
 }
 
-function UserPermissionEditor({ user }: { user: UserRecord }) {
+function UserPermissionEditor({ user, canEdit }: { user: UserRecord; canEdit: boolean }) {
   const [effective, setEffective] = useState<Record<string, PermLevel>>({});
   const [overrideKeys, setOverrideKeys] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -360,6 +361,7 @@ function UserPermissionEditor({ user }: { user: UserRecord }) {
                   <select
                     className="rounded border border-slate-200 px-2 py-1 text-xs"
                     value={lv}
+                    disabled={!canEdit}
                     onChange={(e) =>
                       update(f.key, e.target.value as PermLevel)
                     }
@@ -381,7 +383,7 @@ function UserPermissionEditor({ user }: { user: UserRecord }) {
                   )}
                 </td>
                 <td className="px-3 py-2 text-center">
-                  {isOverride && (
+                  {isOverride && canEdit && (
                     <button
                       type="button"
                       onClick={() => reset(f.key)}

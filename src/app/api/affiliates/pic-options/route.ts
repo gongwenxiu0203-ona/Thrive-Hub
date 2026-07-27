@@ -12,7 +12,7 @@ import { resolveUserPermission } from "@/lib/permissionResolver";
 export async function GET() {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!hasPermissionLevel(await resolveUserPermission(session.userId, "affiliates"), "READ")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!hasPermissionLevel(await resolveUserPermission(session.userId, "affiliates.records"), "READ")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   // 1. Distinct assigned User ids
   const assignedRows = await prisma.affiliate.findMany({

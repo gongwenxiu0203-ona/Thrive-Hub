@@ -5,8 +5,15 @@ import {
   FEATURE_BY_KEY,
   FEATURES,
   LEGACY_FEATURE_ALIASES,
+  PERM_LEVELS,
   PermLevel,
 } from "@/lib/featurePermissions";
+
+function validLevel(value: unknown): PermLevel | undefined {
+  return typeof value === "string" && PERM_LEVELS.includes(value as PermLevel)
+    ? (value as PermLevel)
+    : undefined;
+}
 
 /** 解析用户对某功能的权限（优先级：用户覆盖 > DB 角色配置 > 默认值） */
 export async function resolveUserPermission(
@@ -16,22 +23,18 @@ export async function resolveUserPermission(
   const canonicalFeature = LEGACY_FEATURE_ALIASES[feature] ?? feature;
   // 1) 用户覆盖
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const override = await (prisma as any).userPermissionOverride.findUnique({
-    where: { userId_feature: { userId, feature } },
+  const canonicalOverride = await (prisma as any).userPermissionOverride.findUnique({
+    where: { userId_feature: { userId, feature: canonicalFeature } },
   });
-  if (override) return override.level as PermLevel;
-  if (canonicalFeature !== feature) {
-    const canonicalOverride = await (prisma as any).userPermissionOverride.findUnique({
-      where: { userId_feature: { userId, feature: canonicalFeature } },
-    });
-    if (canonicalOverride) return canonicalOverride.level as PermLevel;
-  }
+  const canonicalOverrideLevel = validLevel(canonicalOverride?.level);
+  if (canonicalOverrideLevel) return canonicalOverrideLevel;
   const legacyKey = FEATURE_BY_KEY.get(canonicalFeature)?.legacyKey;
   if (legacyKey) {
     const legacyOverride = await (prisma as any).userPermissionOverride.findUnique({
       where: { userId_feature: { userId, feature: legacyKey } },
     });
-    if (legacyOverride) return legacyOverride.level as PermLevel;
+    const legacyOverrideLevel = validLevel(legacyOverride?.level);
+    if (legacyOverrideLevel) return legacyOverrideLevel;
   }
 
   // 2) 该用户角色
@@ -43,21 +46,17 @@ export async function resolveUserPermission(
 
   // 3) DB 中的角色配置（可能覆盖默认值）
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const roleSetting = await (prisma as any).rolePermission.findUnique({
-    where: { role_feature: { role: user.role, feature } },
+  const canonicalRoleSetting = await (prisma as any).rolePermission.findUnique({
+    where: { role_feature: { role: user.role, feature: canonicalFeature } },
   });
-  if (roleSetting) return roleSetting.level as PermLevel;
-  if (canonicalFeature !== feature) {
-    const canonicalRoleSetting = await (prisma as any).rolePermission.findUnique({
-      where: { role_feature: { role: user.role, feature: canonicalFeature } },
-    });
-    if (canonicalRoleSetting) return canonicalRoleSetting.level as PermLevel;
-  }
+  const canonicalRoleLevel = validLevel(canonicalRoleSetting?.level);
+  if (canonicalRoleLevel) return canonicalRoleLevel;
   if (legacyKey) {
     const legacyRoleSetting = await (prisma as any).rolePermission.findUnique({
       where: { role_feature: { role: user.role, feature: legacyKey } },
     });
-    if (legacyRoleSetting) return legacyRoleSetting.level as PermLevel;
+    const legacyRoleLevel = validLevel(legacyRoleSetting?.level);
+    if (legacyRoleLevel) return legacyRoleLevel;
   }
 
   // 4) 兜底：默认配置
@@ -90,14 +89,14 @@ export async function resolveUserPermissionsMap(
   const overrideMap = new Map<string, PermLevel>(
     overrides.map((o: { feature: string; level: string }) => [
       o.feature,
-      o.level as PermLevel,
-    ]),
+      validLevel(o.level),
+    ]).filter((entry: [string, PermLevel | undefined]): entry is [string, PermLevel] => Boolean(entry[1])),
   );
   const roleMap = new Map<string, PermLevel>(
     roleSettings.map((r: { feature: string; level: string }) => [
       r.feature,
-      r.level as PermLevel,
-    ]),
+      validLevel(r.level),
+    ]).filter((entry: [string, PermLevel | undefined]): entry is [string, PermLevel] => Boolean(entry[1])),
   );
 
   const result: Record<string, PermLevel> = {};
@@ -122,8 +121,8 @@ export async function getRolePermissions(
   const map = new Map<string, PermLevel>(
     list.map((r: { feature: string; level: string }) => [
       r.feature,
-      r.level as PermLevel,
-    ]),
+      validLevel(r.level),
+    ]).filter((entry: [string, PermLevel | undefined]): entry is [string, PermLevel] => Boolean(entry[1])),
   );
   const result: Record<string, PermLevel> = {};
   for (const f of FEATURES) {

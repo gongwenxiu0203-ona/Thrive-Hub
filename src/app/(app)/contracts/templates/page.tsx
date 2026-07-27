@@ -15,7 +15,7 @@ export const metadata = { title: "合同模板库 · Thraive联盟营销系统" 
 
 export default async function ContractTemplatesPage() {
   const session = await requireSession();
-  const contractPermission = await resolveUserPermission(session.userId, "contracts");
+  const contractPermission = await resolveUserPermission(session.userId, "contracts.templates");
 
   const [templates, hasFoshanSeal, hasHongkongSeal] = await Promise.all([
     prisma.contractTemplate.findMany({

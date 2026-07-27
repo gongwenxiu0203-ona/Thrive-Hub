@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { isStaff } from "@/lib/permissions";
+import { requireFeaturePermission } from "@/lib/permissionGuard";
 
 export type ProjectSaveResult = { ok: boolean; error?: string; projectId?: string };
 
@@ -43,7 +43,7 @@ export async function createIntegratedProject(payload: {
   targetSites?: string[];
 }): Promise<ProjectSaveResult> {
   const session = await requireSession();
-  if (!isStaff(session.role)) return { ok: false, error: "无权创建项目" };
+  await requireFeaturePermission(session, "projects.records", "EDIT");
   if (!payload.customerId) return { ok: false, error: "请选择关联客户" };
 
   const customer = await prisma.customer.findFirst({
@@ -118,7 +118,7 @@ export async function updateProjectBasicInfo(payload: {
   targetSites?: string[];
 }): Promise<ProjectSaveResult> {
   const session = await requireSession();
-  if (!isStaff(session.role)) return { ok: false, error: "无权修改项目" };
+  await requireFeaturePermission(session, "projects.records", "EDIT");
   if (!payload.projectId) return { ok: false, error: "缺少项目 id" };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -250,7 +250,7 @@ export async function addProjectEntry(
   kind: "DAILY" | "DATA" | "BD" = "DAILY",
 ): Promise<ProjectSaveResult> {
   const session = await requireSession();
-  if (!isStaff(session.role)) return { ok: false, error: "无权操作" };
+  await requireFeaturePermission(session, "projects.records", "EDIT");
   const text = content.trim();
   if (!text) return { ok: false, error: "请填写进度内容" };
 
@@ -265,7 +265,7 @@ export async function addProjectEntry(
 /** 从工作日志拉取本项目相关内容到时间流（去重：已拉取过的日志跳过）*/
 export async function importWorkLogEntries(projectId: string): Promise<{ ok: boolean; imported: number; error?: string }> {
   const session = await requireSession();
-  if (!isStaff(session.role)) return { ok: false, imported: 0, error: "无权操作" };
+  await requireFeaturePermission(session, "projects.records", "EDIT");
 
   // 找关联了本项目的工作日志
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -309,7 +309,7 @@ export async function importWorkLogEntries(projectId: string): Promise<{ ok: boo
 /** 更新项目状态 */
 export async function updateProjectStatus(projectId: string, status: string) {
   const session = await requireSession();
-  if (!isStaff(session.role)) throw new Error("无权操作");
+  await requireFeaturePermission(session, "projects.records", "EDIT");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (prisma.project.update as any)({
     where: { id: projectId },
@@ -341,7 +341,7 @@ export async function createOneOffProject(payload: {
   coopInfo?: string;
 }): Promise<ProjectSaveResult> {
   const session = await requireSession();
-  if (!isStaff(session.role)) return { ok: false, error: "无权创建项目" };
+  await requireFeaturePermission(session, "projects.records", "EDIT");
   if (!payload.name.trim()) return { ok: false, error: "请填写项目名称" };
   if (!payload.demand.trim()) return { ok: false, error: "请填写需求描述" };
   if (payload.customerId) {
@@ -372,7 +372,7 @@ export async function createOneOffProject(payload: {
 /** 提交给站内用户（站内提醒通知；邮件暂不实现）*/
 export async function submitProjectTo(projectId: string, toUserId: string): Promise<ProjectSaveResult> {
   const session = await requireSession();
-  if (!isStaff(session.role)) return { ok: false, error: "无权操作" };
+  await requireFeaturePermission(session, "projects.records", "EDIT");
   if (!toUserId) return { ok: false, error: "请选择提交对象" };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -408,7 +408,7 @@ export async function submitProjectTo(projectId: string, toUserId: string): Prom
 /** 确认价格 */
 export async function confirmProjectPrice(projectId: string, price: string): Promise<ProjectSaveResult> {
   const session = await requireSession();
-  if (!isStaff(session.role)) return { ok: false, error: "无权操作" };
+  await requireFeaturePermission(session, "projects.records", "EDIT");
   if (!price.trim()) return { ok: false, error: "请填写确认价格" };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (prisma.project.update as any)({
@@ -431,7 +431,7 @@ export async function submitProjectInfo(
   },
 ): Promise<ProjectSaveResult> {
   const session = await requireSession();
-  if (!isStaff(session.role)) return { ok: false, error: "无权操作" };
+  await requireFeaturePermission(session, "projects.records", "EDIT");
   if (!data.lowestPrice?.trim()) return { ok: false, error: "请填写最低折后价" };
   if (data.hasCode && !data.code?.trim()) return { ok: false, error: "已选择设置 code，请填写 code 码" };
   if (data.hasCode && (!data.startDate || !data.endDate)) return { ok: false, error: "请填写 code 起止时间" };
@@ -455,7 +455,7 @@ export async function uploadCoopInfoTable(
   data: { headers: string[]; rows: string[][] },
 ): Promise<ProjectSaveResult> {
   const session = await requireSession();
-  if (!isStaff(session.role)) return { ok: false, error: "无权操作" };
+  await requireFeaturePermission(session, "projects.records", "EDIT");
   if (!data.headers.length) return { ok: false, error: "未识别到表格表头" };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (prisma.project.update as any)({
@@ -473,7 +473,7 @@ export async function sendAffiliateEmailStep(
   data: { affiliateName: string; senderEmail?: string; receiverEmail?: string },
 ): Promise<ProjectSaveResult> {
   const session = await requireSession();
-  if (!isStaff(session.role)) return { ok: false, error: "无权操作" };
+  await requireFeaturePermission(session, "projects.records", "EDIT");
   if (!data.affiliateName) return { ok: false, error: "请选择联盟商" };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (prisma.project.update as any)({
@@ -489,7 +489,7 @@ export async function sendAffiliateEmailStep(
 /** 沟通备注（时间流追加一条沟通记录）*/
 export async function addProjectNote(projectId: string, note: string): Promise<ProjectSaveResult> {
   const session = await requireSession();
-  if (!isStaff(session.role)) return { ok: false, error: "无权操作" };
+  await requireFeaturePermission(session, "projects.records", "EDIT");
   if (!note.trim()) return { ok: false, error: "请填写沟通内容" };
   await addNode(projectId, session.userId, `沟通：${note.trim()}`);
   revalidatePath(`/projects/${projectId}`);
@@ -499,7 +499,7 @@ export async function addProjectNote(projectId: string, note: string): Promise<P
 /** 确认是否合作 */
 export async function decideProjectCoop(projectId: string, result: "COOPERATE" | "DECLINED"): Promise<ProjectSaveResult> {
   const session = await requireSession();
-  if (!isStaff(session.role)) return { ok: false, error: "无权操作" };
+  await requireFeaturePermission(session, "projects.records", "EDIT");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (prisma.project.update as any)({
     where: { id: projectId },
@@ -517,7 +517,7 @@ export async function settleProject(
   rows: { person: string; parentAsin: string; serviceFee: string }[],
 ): Promise<ProjectSaveResult> {
   const session = await requireSession();
-  if (!isStaff(session.role)) return { ok: false, error: "无权操作" };
+  await requireFeaturePermission(session, "projects.records", "EDIT");
   const valid = rows.filter((r) => r.person || r.parentAsin || r.serviceFee);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (prisma.project.update as any)({
@@ -532,7 +532,7 @@ export async function settleProject(
 /** 软删除项目（进回收站，7 天可恢复）*/
 export async function softDeleteProject(projectId: string) {
   const session = await requireSession();
-  if (!isStaff(session.role)) throw new Error("无权删除项目");
+  await requireFeaturePermission(session, "projects.records", "MANAGE");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (prisma.project.update as any)({
     where: { id: projectId },

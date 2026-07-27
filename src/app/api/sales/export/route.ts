@@ -18,13 +18,13 @@ import {
 export async function GET(req: Request) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
-  if (!(await hasBiPermission(session.userId, "READ"))) {
+  if (!(await hasBiPermission(session.userId, "bi.export", "READ"))) {
     return NextResponse.json({ error: "无权导出 BI 数据" }, { status: 403 });
   }
 
   const url = new URL(req.url);
   const sp = Object.fromEntries(url.searchParams.entries()) as SalesRecordFilterParams;
-  const view = await resolveSafeViewScope(session, "bi", sp.scope);
+  const view = await resolveSafeViewScope(session, "bi.export", sp.scope);
   const base: Prisma.SalesRecordWhereInput = { deletedAt: null, batch: { deletedAt: null } };
   const types = csvFilterValues(sp, "types").filter((value) => value !== EMPTY_FILTER_VALUE);
   let typeAffiliateNames: string[] | undefined;

@@ -29,7 +29,7 @@ export async function restoreItem(type: RecycleType, id: string) {
   let where: Record<string, unknown> = { id };
   switch (type) {
     case "customer":
-      await requireFeaturePermission(session, "customers", "MANAGE");
+      await requireFeaturePermission(session, "customers.records", "MANAGE");
       where = { AND: [{ id }, customerScope(session, view)] };
       break;
     case "contract":
@@ -37,26 +37,26 @@ export async function restoreItem(type: RecycleType, id: string) {
       where = { AND: [{ id }, contractScope(session, view)] };
       break;
     case "affiliate":
-      await requireFeaturePermission(session, "affiliates", "MANAGE");
+      await requireFeaturePermission(session, "affiliates.records", "MANAGE");
       break;
     case "task":
-      await requireFeaturePermission(session, "tasks", "MANAGE");
+      await requireFeaturePermission(session, "tasks.board", "MANAGE");
       where = { AND: [{ id }, taskScope(session, view)] };
       break;
     case "reminder":
-      await requireFeaturePermission(session, "reminders", "MANAGE");
+      await requireFeaturePermission(session, "reminders.records", "MANAGE");
       where = { id, targetId: session.userId };
       break;
     case "salesRecord":
-      await requireFeaturePermission(session, "bi", "MANAGE");
+      await requireFeaturePermission(session, "bi.manage", "MANAGE");
       where = { AND: [{ id }, salesScope(session, view)] };
       break;
     case "salesBatch":
-      await requireFeaturePermission(session, "bi", "MANAGE");
+      await requireFeaturePermission(session, "bi.manage", "MANAGE");
       where = { id, OR: [{ uploaderId: session.userId }, { customer: customerScope(session, view) }] };
       break;
     case "project":
-      await requireFeaturePermission(session, "dashboard", "MANAGE");
+      await requireFeaturePermission(session, "projects.records", "MANAGE");
       where = { AND: [{ id }, projectScope(session, view)] };
       break;
     case "workLog":

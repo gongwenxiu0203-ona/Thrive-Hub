@@ -10,7 +10,7 @@ export async function POST(
 ) {
   const auth = await getSession();
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!hasPermissionLevel(await resolveUserPermission(auth.userId, "affiliates"), "EDIT")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!hasPermissionLevel(await resolveUserPermission(auth.userId, "affiliates.reviews"), "EDIT")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const { id } = await params;
   const body = await req.json();
@@ -133,7 +133,7 @@ export async function GET(
 ) {
   const auth = await getSession();
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!hasPermissionLevel(await resolveUserPermission(auth.userId, "affiliates"), "READ")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!hasPermissionLevel(await resolveUserPermission(auth.userId, "affiliates.reviews"), "READ")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const { id } = await params;
   const reviews = await prisma.affiliateCoopReview.findMany({
     where: { affiliateId: id },

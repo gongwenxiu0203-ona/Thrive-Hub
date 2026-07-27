@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { Sidebar } from "@/components/Sidebar";
 import { Topbar } from "@/components/Topbar";
+import type { PermLevel } from "@/lib/featurePermissions";
 
 type AppShellProps = {
   children: React.ReactNode;
@@ -12,9 +13,11 @@ type AppShellProps = {
   email: string;
   userId: string;
   unreadCount: number;
+  canViewReminders: boolean;
+  permissions: Record<string, PermLevel>;
 };
 
-export function AppShell({ children, name, role, email, userId, unreadCount }: AppShellProps) {
+export function AppShell({ children, name, role, email, userId, unreadCount, canViewReminders, permissions }: AppShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const pathname = usePathname();
 
@@ -39,7 +42,13 @@ export function AppShell({ children, name, role, email, userId, unreadCount }: A
 
   return (
     <div className="flex h-dvh min-h-0 overflow-hidden bg-[#fbfaff]">
-      <Sidebar role={role} userId={userId} mobileOpen={sidebarOpen} onMobileClose={() => setSidebarOpen(false)} />
+      <Sidebar
+        role={role}
+        userId={userId}
+        permissions={permissions}
+        mobileOpen={sidebarOpen}
+        onMobileClose={() => setSidebarOpen(false)}
+      />
 
       {sidebarOpen && (
         <button
@@ -56,6 +65,7 @@ export function AppShell({ children, name, role, email, userId, unreadCount }: A
           role={role}
           email={email}
           unreadCount={unreadCount}
+          canViewReminders={canViewReminders}
           menuOpen={sidebarOpen}
           onMenuOpen={() => setSidebarOpen(true)}
         />

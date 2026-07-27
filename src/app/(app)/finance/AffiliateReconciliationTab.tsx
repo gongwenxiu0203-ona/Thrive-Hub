@@ -37,7 +37,13 @@ export type AffiliateRec = {
   createdAt: string | Date;
 };
 
-export function AffiliateReconciliationTab({ records }: { records: AffiliateRec[] }) {
+export function AffiliateReconciliationTab({
+  records,
+  canEdit = true,
+}: {
+  records: AffiliateRec[];
+  canEdit?: boolean;
+}) {
   const [selected, setSelected] = useState<AffiliateRec | null>(null);
   const router = useRouter();
 
@@ -111,6 +117,8 @@ export function AffiliateReconciliationTab({ records }: { records: AffiliateRec[
                     <td className="px-4 py-2.5">
                       <button
                         onClick={() => setSelected(r)}
+                        disabled={!canEdit}
+                        aria-disabled={!canEdit}
                         className="rounded border border-brand-200 px-2.5 py-1 text-xs text-brand-600 hover:bg-brand-50"
                       >
                         {r.status === "pending" ? "填写信息" : "查看/编辑"}

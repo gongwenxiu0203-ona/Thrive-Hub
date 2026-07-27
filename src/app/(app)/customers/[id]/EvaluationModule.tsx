@@ -127,10 +127,12 @@ function DimensionCard({ index, title, score, maxScore, children }: {
 }
 
 export function EvaluationModule({
+  canEdit,
   customerId,
   initialData,
   initialRating,
 }: {
+  canEdit: boolean;
   customerId: string;
   initialData: EvaluationData | null;
   initialRating: string;
@@ -178,6 +180,7 @@ export function EvaluationModule({
 
   // Reusable action bar — rendered at both top and bottom
   function ActionBar() {
+    if (!canEdit) return null;
     if (mode === "view") {
       return (
         <div className="flex items-center gap-2">

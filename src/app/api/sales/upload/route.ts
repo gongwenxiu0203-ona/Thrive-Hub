@@ -64,11 +64,7 @@ export async function POST(req: Request) {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
 
-    if (session.role !== "ADMIN" && session.role !== "USER") {
-      return NextResponse.json({ error: "仅内部员工可导入 BI 数据" }, { status: 403 });
-    }
-
-    if (!(await hasBiPermission(session.userId, "EDIT"))) {
+    if (!(await hasBiPermission(session.userId, "bi.import", "EDIT"))) {
       return NextResponse.json({ error: "无权导入 BI 数据" }, { status: 403 });
     }
 

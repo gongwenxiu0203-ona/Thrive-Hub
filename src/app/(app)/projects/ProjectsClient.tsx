@@ -76,12 +76,14 @@ export default function ProjectsClient({
   customers = [],
   users = [],
   currentUserId = "",
+  canEdit = false,
 }: {
   projects: ProjectRow[];
   availableContracts: ContractOption[];
   customers?: CustomerOption[];
   users?: UserOption[];
   currentUserId?: string;
+  canEdit?: boolean;
 }) {
   const [tab, setTab] = useState<"INTEGRATED" | "ONE_OFF">("INTEGRATED");
   const [showCreate, setShowCreate] = useState(false);
@@ -94,7 +96,7 @@ export default function ProjectsClient({
       <PageHeader
         title="项目管理"
         description="联盟营销：合同签署完成后创建项目跟进；单次合作：需求驱动的流程化合作"
-        actions={
+        actions={canEdit ? (
           tab === "INTEGRATED" ? (
             <button className="btn-primary" onClick={() => setShowCreate(true)}>
               <Plus className="h-4 w-4" /> 新建联盟营销项目
@@ -104,7 +106,7 @@ export default function ProjectsClient({
               <Plus className="h-4 w-4" /> 新建单次合作
             </button>
           )
-        }
+        ) : undefined}
       />
 
       {/* Tab 切换 */}
@@ -201,7 +203,7 @@ export default function ProjectsClient({
         </div>
       )}
 
-      {showCreate && (
+      {canEdit && showCreate && (
         <CreateProjectModal
           contracts={availableContracts}
           customers={customers}
@@ -210,7 +212,7 @@ export default function ProjectsClient({
           onClose={() => setShowCreate(false)}
         />
       )}
-      {showCreateOneOff && (
+      {canEdit && showCreateOneOff && (
         <CreateOneOffModal
           customers={customers}
           onClose={() => setShowCreateOneOff(false)}

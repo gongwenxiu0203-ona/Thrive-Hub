@@ -3,13 +3,23 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { isStaff } from "@/lib/permissions";
+import type { PermLevel } from "@/lib/featurePermissions";
+import { hasPermissionLevel } from "@/lib/permissionGuard";
+import { resolveUserPermission } from "@/lib/permissionResolver";
 import {
   calcRevenueGrade, calcArStatus, calcArRiskLevel,
   probabilityForStage, currentMonthKey, monthRange,
 } from "@/lib/financeOperations";
 
 export type SaveResult = { ok: boolean; error?: string; id?: string };
+
+async function canOperate(
+  userId: string,
+  feature: "operations.revenue" | "operations.accounts_receivable" | "operations.sales_pipeline",
+  required: Exclude<PermLevel, "NONE">,
+) {
+  return hasPermissionLevel(await resolveUserPermission(userId, feature), required);
+}
 
 // =============================================================================
 // Client Revenue Snapshot
@@ -86,7 +96,7 @@ export async function generateMonthlySnapshot(
   exchangeRateOverride?: number,
 ): Promise<{ ok: boolean; created: number; updated: number; error?: string }> {
   const session = await requireSession();
-  if (!isStaff(session.role)) return { ok: false, created: 0, updated: 0, error: "无权操作" };
+  if (!(await canOperate(session.userId, "operations.revenue", "EDIT"))) return { ok: false, created: 0, updated: 0, error: "无权操作" };
 
   const month = monthInput || currentMonthKey();
   const { start, end } = monthRange(month);
@@ -196,7 +206,7 @@ export async function updateSnapshot(
   },
 ): Promise<SaveResult> {
   const session = await requireSession();
-  if (!isStaff(session.role)) return { ok: false, error: "无权操作" };
+  if (!(await canOperate(session.userId, "operations.revenue", "EDIT"))) return { ok: false, error: "无权操作" };
   await prisma.clientRevenueSnapshot.update({
     where: { id },
     data: patch as Record<string, unknown>,
@@ -207,7 +217,7 @@ export async function updateSnapshot(
 
 export async function deleteSnapshot(id: string): Promise<SaveResult> {
   const session = await requireSession();
-  if (session.role !== "ADMIN") return { ok: false, error: "仅管理员可删除客户收入记录" };
+  if (!(await canOperate(session.userId, "operations.revenue", "MANAGE"))) return { ok: false, error: "无权删除客户收入记录" };
   await prisma.clientRevenueSnapshot.delete({ where: { id } });
   revalidatePath("/operations");
   revalidatePath("/dashboard");
@@ -232,7 +242,7 @@ export async function createAR(payload: {
   remark?: string | null;
 }): Promise<SaveResult> {
   const session = await requireSession();
-  if (!isStaff(session.role)) return { ok: false, error: "无权操作" };
+  if (!(await canOperate(session.userId, "operations.accounts_receivable", "EDIT"))) return { ok: false, error: "无权操作" };
   if (!payload.invoiceNo?.trim()) return { ok: false, error: "请填写发票号" };
   if (!payload.invoiceDate) return { ok: false, error: "请选择开票日期" };
   if (!payload.dueDate) return { ok: false, error: "请选择应收到期日" };
@@ -304,7 +314,7 @@ export async function updateAR(
   },
 ): Promise<SaveResult> {
   const session = await requireSession();
-  if (!isStaff(session.role)) return { ok: false, error: "无权操作" };
+  if (!(await canOperate(session.userId, "operations.accounts_receivable", "EDIT"))) return { ok: false, error: "无权操作" };
   const existing = await prisma.accountsReceivable.findUnique({ where: { id } });
   if (!existing) return { ok: false, error: "记录不存在" };
 
@@ -338,7 +348,7 @@ export async function updateAR(
 
 export async function deleteAR(id: string): Promise<SaveResult> {
   const session = await requireSession();
-  if (session.role !== "ADMIN") return { ok: false, error: "仅管理员可删除应收账款" };
+  if (!(await canOperate(session.userId, "operations.accounts_receivable", "MANAGE"))) return { ok: false, error: "无权删除应收账款" };
   await prisma.accountsReceivable.delete({ where: { id } });
   revalidatePath("/operations");
   return { ok: true, id };
@@ -347,7 +357,7 @@ export async function deleteAR(id: string): Promise<SaveResult> {
 /** Bulk recalculate status + riskLevel for every AR row using today as the reference date. */
 export async function refreshArRisks(): Promise<{ ok: boolean; updated: number }> {
   const session = await requireSession();
-  if (!isStaff(session.role)) return { ok: false, updated: 0 };
+  if (!(await canOperate(session.userId, "operations.accounts_receivable", "EDIT"))) return { ok: false, updated: 0 };
   const all = await prisma.accountsReceivable.findMany();
   let updated = 0;
   for (const a of all) {
@@ -388,7 +398,7 @@ export async function createPipeline(payload: {
   remark?: string | null;
 }): Promise<SaveResult> {
   const session = await requireSession();
-  if (!isStaff(session.role)) return { ok: false, error: "无权操作" };
+  if (!(await canOperate(session.userId, "operations.sales_pipeline", "EDIT"))) return { ok: false, error: "无权操作" };
   if (!payload.prospectName?.trim()) return { ok: false, error: "请填写潜在客户名称" };
   const stage = payload.stage || "LEAD";
   const probability = probabilityForStage(stage);
@@ -417,7 +427,7 @@ export async function createPipeline(payload: {
 
 export async function updatePipelineStage(id: string, stage: string): Promise<SaveResult> {
   const session = await requireSession();
-  if (!isStaff(session.role)) return { ok: false, error: "无权操作" };
+  if (!(await canOperate(session.userId, "operations.sales_pipeline", "EDIT"))) return { ok: false, error: "无权操作" };
   await prisma.salesPipeline.update({
     where: { id },
     data: { stage, probability: probabilityForStage(stage) },
@@ -445,7 +455,7 @@ export async function updatePipeline(
   },
 ): Promise<SaveResult> {
   const session = await requireSession();
-  if (!isStaff(session.role)) return { ok: false, error: "无权操作" };
+  if (!(await canOperate(session.userId, "operations.sales_pipeline", "EDIT"))) return { ok: false, error: "无权操作" };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const data: any = { ...patch };
   if (patch.stage) data.probability = probabilityForStage(patch.stage);
@@ -462,7 +472,7 @@ export async function updatePipeline(
 
 export async function deletePipeline(id: string): Promise<SaveResult> {
   const session = await requireSession();
-  if (session.role !== "ADMIN") return { ok: false, error: "仅管理员可删除销售漏斗" };
+  if (!(await canOperate(session.userId, "operations.sales_pipeline", "MANAGE"))) return { ok: false, error: "无权删除销售漏斗" };
   await prisma.salesPipeline.delete({ where: { id } });
   revalidatePath("/operations");
   return { ok: true, id };

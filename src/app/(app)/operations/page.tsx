@@ -6,8 +6,19 @@ import { customerScope, projectScope } from "@/lib/dataScope";
 import { currentMonthKey, monthRange } from "@/lib/financeOperations";
 import { OperationsClient } from "./OperationsClient";
 import { getEmployeeKpiByMonth } from "@/actions/employeeKpi";
+import { resolveUserPermission } from "@/lib/permissionResolver";
+import { hasPermissionLevel } from "@/lib/permissionGuard";
+import type { PermLevel } from "@/lib/featurePermissions";
 
 export const dynamic = "force-dynamic";
+const TAB_FEATURES = {
+  revenue: "operations.revenue",
+  count: "operations.customer_count",
+  ar: "operations.accounts_receivable",
+  pipeline: "operations.sales_pipeline",
+  kpi: "operations.employee_kpi",
+} as const;
+type OperationsTab = keyof typeof TAB_FEATURES;
 export const metadata = { title: "经营管理 · Thraive联盟营销系统" };
 
 export default async function FinanceOperationsPage({
@@ -18,10 +29,41 @@ export default async function FinanceOperationsPage({
   const session = await requireSession();
   if (!isStaff(session.role)) redirect("/finance");
   const sp = await searchParams;
+  const permissionEntries = await Promise.all(
+    Object.entries({
+      ...TAB_FEATURES,
+      invoices: "operations.invoices",
+    }).map(async ([key, feature]) => [
+      key,
+      await resolveUserPermission(session.userId, feature),
+    ] as const),
+  );
+  const permissions = Object.fromEntries(permissionEntries) as Record<
+    OperationsTab | "invoices",
+    PermLevel
+  >;
+  const readableTabs = (Object.keys(TAB_FEATURES) as OperationsTab[]).filter(
+    (tab) => hasPermissionLevel(permissions[tab], "READ"),
+  );
+  if (readableTabs.length === 0 && !hasPermissionLevel(permissions.invoices, "READ")) {
+    redirect("/dashboard");
+  }
 
   const month = sp.month || currentMonthKey();
   const { start: monthStart, end: monthEnd } = monthRange(month);
-  const initialTab = (sp.tab as "revenue" | "count" | "ar" | "pipeline" | "kpi") || "revenue";
+  const requestedTab = sp.tab as OperationsTab | undefined;
+  const initialTab = requestedTab && readableTabs.includes(requestedTab)
+    ? requestedTab
+    : readableTabs[0];
+  if (!initialTab) redirect("/invoices");
+  if (requestedTab && requestedTab !== initialTab) {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(sp)) {
+      if (value !== undefined) params.set(key, value);
+    }
+    params.set("tab", initialTab);
+    redirect(`/operations?${params.toString()}`);
+  }
   const kpiAmOwnerId = sp.amOwnerId || "";
   const kpiCustomerId = sp.customerId || "";
   const kpiProjectId = sp.projectId || "";
@@ -29,9 +71,10 @@ export default async function FinanceOperationsPage({
   const isAdmin = session.role === "ADMIN";
   const kpiDefaultsAll = isAdmin && initialTab === "kpi" && sp.scope !== "mine";
   const scopeView: "mine" | "all" = sp.scope === "all" || kpiDefaultsAll ? "all" : "mine";
+  const needsSnapshots = initialTab === "revenue" || initialTab === "count";
 
   const [snapshots, reconciliations, ars, pipelines, customers, users] = await Promise.all([
-    prisma.clientRevenueSnapshot.findMany({
+    needsSnapshots ? prisma.clientRevenueSnapshot.findMany({
       where: { month },
       include: {
         customer: {
@@ -50,8 +93,8 @@ export default async function FinanceOperationsPage({
         bdOwner: { select: { id: true, name: true } },
       },
       orderBy: { monthlyTotalIncome: "desc" },
-    }),
-    prisma.customerReconciliation.findMany({
+    }) : Promise.resolve([]),
+    initialTab === "revenue" ? prisma.customerReconciliation.findMany({
       where: {
         deletedAt: null,
         status: "CONFIRMED",
@@ -63,28 +106,28 @@ export default async function FinanceOperationsPage({
         finalSalesAmount: true,
         actualSalesAmount: true,
       },
-    }),
-    prisma.accountsReceivable.findMany({
+    }) : Promise.resolve([]),
+    initialTab === "ar" ? prisma.accountsReceivable.findMany({
       include: {
         customer: { select: { id: true, brandName: true } },
         followOwner: { select: { id: true, name: true } },
       },
       orderBy: { dueDate: "asc" },
-    }),
-    prisma.salesPipeline.findMany({
+    }) : Promise.resolve([]),
+    initialTab === "pipeline" ? prisma.salesPipeline.findMany({
       include: { bdOwner: { select: { id: true, name: true } } },
       orderBy: { createdAt: "desc" },
-    }),
-    prisma.customer.findMany({
+    }) : Promise.resolve([]),
+    initialTab === "ar" ? prisma.customer.findMany({
       where: { deletedAt: null },
       select: { id: true, brandName: true },
       orderBy: { brandName: "asc" },
-    }),
-    prisma.user.findMany({
+    }) : Promise.resolve([]),
+    (initialTab === "ar" || initialTab === "pipeline" || initialTab === "kpi") ? prisma.user.findMany({
       where: { role: { in: ["ADMIN", "USER"] }, status: "APPROVED" },
       select: { id: true, name: true },
       orderBy: { name: "asc" },
-    }),
+    }) : Promise.resolve([]),
   ]);
 
   const reconciledGmvByCustomer = new Map<string, number>();
@@ -141,7 +184,9 @@ export default async function FinanceOperationsPage({
   const countSummary = {
     newCount: allMonthSnapshots.filter((s) => s.clientStatus === "NEW").length,
     activeCount: allMonthSnapshots.filter((s) => s.clientStatus === "ACTIVE" || s.clientStatus === "NEW").length,
-    cumulativeCount: await prisma.customer.count({ where: { deletedAt: null, contracts: { some: { status: { in: ["SIGNING", "COMPLETED"] } } } } }),
+    cumulativeCount: initialTab === "count"
+      ? await prisma.customer.count({ where: { deletedAt: null, contracts: { some: { status: { in: ["SIGNING", "COMPLETED"] } } } } })
+      : 0,
     churnedCount: allMonthSnapshots.filter((s) => s.clientStatus === "CHURNED").length,
     pausedCount: allMonthSnapshots.filter((s) => s.clientStatus === "PAUSED").length,
     gradeS: allMonthSnapshots.filter((s) => s.revenueGrade === "S").length,
@@ -154,7 +199,7 @@ export default async function FinanceOperationsPage({
     <OperationsClient
       initialTab={initialTab}
       month={month}
-      snapshots={snapshots.map((s) => ({
+      snapshots={(initialTab === "revenue" ? snapshots : []).map((s) => ({
         id: s.id,
         customerId: s.customerId,
         customerName: s.customer?.brandName ?? "（已删除客户）",
@@ -224,6 +269,7 @@ export default async function FinanceOperationsPage({
       kpiProjectId={kpiProjectId}
       kpiProjects={kpiProjects}
       kpiCustomers={kpiCustomers}
+      permissions={permissions}
     />
   );
 }

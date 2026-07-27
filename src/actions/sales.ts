@@ -70,7 +70,9 @@ async function createSalesBulkLog({
 }
 
 async function requireBi(userId: string, level: "EDIT" | "MANAGE") {
-  if (!(await hasBiPermission(userId, level))) throw new Error("无权执行该 BI 操作");
+  if (!(await hasBiPermission(userId, "bi.manage", level))) {
+    throw new Error("无权执行该 BI 操作");
+  }
 }
 
 async function salesWhereFromFilterParams(

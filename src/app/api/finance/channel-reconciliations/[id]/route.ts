@@ -12,7 +12,7 @@ export async function PATCH(
 ) {
   try {
     const session = await requireSession();
-    await requireFeaturePermission(session, "finance_channel", "EDIT");
+    await requireFeaturePermission(session, "finance.channel_reconciliation", "EDIT");
     const { id } = await params;
     const body = await req.json();
 
@@ -134,7 +134,7 @@ export async function DELETE(
 ) {
   try {
     const session = await requireSession();
-    await requireFeaturePermission(session, "finance_channel", "MANAGE");
+    await requireFeaturePermission(session, "finance.channel_reconciliation", "MANAGE");
     const { id } = await params;
     const existing = await prisma.channelReconciliation.findFirst({ where: { AND: [{ id }, channelReconciliationScope(session, session.role === "ADMIN" ? "all" : "mine")] }, select: { id: true } });
     if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });

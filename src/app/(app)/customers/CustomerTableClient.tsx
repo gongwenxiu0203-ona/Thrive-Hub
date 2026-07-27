@@ -132,7 +132,8 @@ export function CustomerTableClient({
   rows,
   users,
   isStaff,
-  canDeleteCustomers,
+  canEditRecords,
+  canManageRecords,
   isChannel,
   staffUserId,
   channelUserId,
@@ -142,13 +143,15 @@ export function CustomerTableClient({
   rows: CustomerTableRow[];
   users: UserOption[];
   isStaff: boolean;
-  canDeleteCustomers: boolean;
+  canEditRecords: boolean;
+  canManageRecords: boolean;
   isChannel: boolean;
   staffUserId?: string;
   channelUserId?: string;
   sortStorageKey: string;
   filterControls?: ReactNode;
 }) {
+  const canBulkOperate = canEditRecords || canManageRecords;
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -314,7 +317,7 @@ export function CustomerTableClient({
           <option value="all">全部资料状态</option>
           <option value="pending">有资料待审核</option>
         </select>
-        {isStaff && (
+        {canBulkOperate && (
           <button
             type="button"
             className="btn-secondary ml-auto"
@@ -334,7 +337,7 @@ export function CustomerTableClient({
           <table className="data">
             <thead>
               <tr>
-                {isStaff && (
+                {canBulkOperate && (
                   <th className="w-10">
                     <input type="checkbox" checked={allChecked} onChange={(e) => toggleAll(e.target.checked)} />
                   </th>
@@ -356,7 +359,7 @@ export function CustomerTableClient({
             <tbody>
               {sortedRows.map((c) => (
                 <tr key={c.id} className={selected.has(c.id) ? "bg-brand-50/70" : undefined}>
-                  {isStaff && (
+                  {canBulkOperate && (
                     <td>
                       <input
                         type="checkbox"
@@ -434,11 +437,13 @@ export function CustomerTableClient({
 
           {bulkMode === "choose" && (
             <div className="grid gap-3 sm:grid-cols-2">
-              <button type="button" className="rounded-lg border border-slate-200 p-4 text-left hover:border-brand-300 hover:bg-brand-50" onClick={() => setBulkMode("update")}>
-                <p className="font-semibold text-slate-800">批量修改</p>
-                <p className="mt-1 text-xs text-slate-500">修改当前进度、评级、目标推广平台、负责人。</p>
-              </button>
-              {canDeleteCustomers && (
+              {canEditRecords && (
+                <button type="button" className="rounded-lg border border-slate-200 p-4 text-left hover:border-brand-300 hover:bg-brand-50" onClick={() => setBulkMode("update")}>
+                  <p className="font-semibold text-slate-800">批量修改</p>
+                  <p className="mt-1 text-xs text-slate-500">修改当前进度、评级、目标推广平台、负责人。</p>
+                </button>
+              )}
+              {canManageRecords && (
                 <button type="button" className="rounded-lg border border-rose-200 p-4 text-left text-rose-700 hover:bg-rose-50" onClick={loadDeleteImpacts}>
                   <p className="font-semibold">批量删除</p>
                   <p className="mt-1 text-xs">进入关联数据逐项确认后删除。</p>

@@ -7,7 +7,7 @@ import { requireFeaturePermission } from "@/lib/permissionGuard";
 // Body: { mode: "before_date" | "no_contact" | "by_status", date?: string, status?: string, preview?: boolean }
 export async function POST(req: NextRequest) {
   const session = await requireSession();
-  await requireFeaturePermission(session, "affiliates", "MANAGE");
+  await requireFeaturePermission(session, "affiliates.records", "MANAGE");
   if (session.role !== "ADMIN") {
     return NextResponse.json({ error: "Admin only" }, { status: 403 });
   }

@@ -20,11 +20,12 @@ const PAGE_LABELS = [
   ["/dashboard", "\u5de5\u4f5c\u53f0"],
 ] as const;
 
-export function Topbar({ name, role, email, unreadCount = 0, menuOpen = false, onMenuOpen }: {
+export function Topbar({ name, role, email, unreadCount = 0, canViewReminders = false, menuOpen = false, onMenuOpen }: {
   name: string;
   role: string;
   email: string;
   unreadCount?: number;
+  canViewReminders?: boolean;
   menuOpen?: boolean;
   onMenuOpen?: () => void;
 }) {
@@ -63,7 +64,7 @@ export function Topbar({ name, role, email, unreadCount = 0, menuOpen = false, o
         </div>
       </div>
       <div className="flex items-center gap-2">
-        <Link
+        {canViewReminders && <Link
           href="/reminders"
           aria-label="\u63d0\u9192"
           className="relative flex h-11 w-11 items-center justify-center rounded-md text-slate-500 hover:bg-brand-50 hover:text-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600"
@@ -74,7 +75,7 @@ export function Topbar({ name, role, email, unreadCount = 0, menuOpen = false, o
               {unreadCount > 99 ? "99+" : unreadCount}
             </span>
           )}
-        </Link>
+        </Link>}
 
         <div className="relative" ref={ref}>
           <button type="button" onClick={() => setOpen((value) => !value)} className="flex min-h-11 items-center gap-2 rounded-md px-2 py-1.5 hover:bg-brand-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600">

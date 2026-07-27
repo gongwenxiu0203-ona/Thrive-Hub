@@ -28,6 +28,8 @@ import {
 } from "@/lib/constants";
 import { formatDate } from "@/lib/utils";
 import { isStaff } from "@/lib/permissions";
+import { hasPermissionLevel, requireFeaturePermission } from "@/lib/permissionGuard";
+import { resolveUserPermission } from "@/lib/permissionResolver";
 
 export default async function CustomerDetailPage({
   params,
@@ -35,6 +37,13 @@ export default async function CustomerDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const session = await requireSession();
+  const [recordsPermission, followupPermission] = await Promise.all([
+    requireFeaturePermission(session, "customers.records", "READ"),
+    resolveUserPermission(session.userId, "customers.followup"),
+  ]);
+  const canEditRecords = hasPermissionLevel(recordsPermission, "EDIT");
+  const canManageRecords = hasPermissionLevel(recordsPermission, "MANAGE");
+  const canEditFollowup = hasPermissionLevel(followupPermission, "EDIT");
   const { id } = await params;
 
   const [customer, channelRec, splitRule, pendingIntakeCount] = await Promise.all([
@@ -92,8 +101,8 @@ export default async function CustomerDetailPage({
   const channelOptions = users
     .filter((u) => u.role === "CHANNEL")
     .map((u) => ({ id: u.id, name: u.name, email: u.email }));
-  const canEditCustomerInfo = isStaff(session.role) || session.role === "CHANNEL";
-  const canViewCustomerInfo = canEditCustomerInfo;
+  const canViewCustomerInfo = isStaff(session.role) || session.role === "CHANNEL";
+  const canEditCustomerInfo = canEditRecords && canViewCustomerInfo;
   const canAccessAuthorizationInfo =
     session.role === "ADMIN" ||
     [
@@ -214,7 +223,7 @@ export default async function CustomerDetailPage({
                   includeInternal={isStaff(session.role)}
                 />
               )}
-              {session.role === "ADMIN" && <DeleteCustomerButton id={customer.id} />}
+              {session.role === "ADMIN" && canManageRecords && <DeleteCustomerButton id={customer.id} />}
             </div>
           </div>
         </div>
@@ -263,7 +272,7 @@ export default async function CustomerDetailPage({
       {canAccessAuthorizationInfo && (
         <CustomerAuthorizationPanel
           customerId={customer.id}
-          canEdit={canAccessAuthorizationInfo}
+          canEdit={canAccessAuthorizationInfo && canEditRecords}
           items={(customerAny.authorizationInfos ?? []).map((item: any) => ({
             id: item.id,
             platform: item.platform,
@@ -285,6 +294,7 @@ export default async function CustomerDetailPage({
 
         <div className="grid gap-4 lg:grid-cols-2">
           <InternalManagement
+            canEdit={canEditFollowup}
             customerId={customer.id}
             customerName={customer.brandName}
             status={customer.status}
@@ -315,6 +325,7 @@ export default async function CustomerDetailPage({
           {session.role !== "CHANNEL" && (
             <div className="sticky top-4">
               <EvaluationModule
+                canEdit={canEditFollowup}
                 customerId={customer.id}
                 initialData={evalData}
                 initialRating={customer.rating}

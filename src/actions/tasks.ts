@@ -23,7 +23,9 @@ function str(fd: FormData, key: string): string {
   return String(fd.get(key) ?? "").trim();
 }
 
-async function requireTaskEditor(): Promise<SessionPayload> {
+async function requireTaskPermission(
+  required: "EDIT" | "MANAGE" = "EDIT",
+): Promise<SessionPayload> {
   const session = await requireSession();
   if (
     session.status !== "APPROVED" ||
@@ -31,8 +33,12 @@ async function requireTaskEditor(): Promise<SessionPayload> {
   ) {
     throw new Error("无权修改任务");
   }
-  await requireFeaturePermission(session, "tasks", "EDIT");
+  await requireFeaturePermission(session, "tasks.board", required);
   return session;
+}
+
+async function requireTaskEditor(): Promise<SessionPayload> {
+  return requireTaskPermission("EDIT");
 }
 
 async function requireTaskWriteAccess(taskId: string, session: SessionPayload) {
@@ -207,7 +213,7 @@ export async function updateTaskContent(
 }
 
 export async function deleteTask(id: string) {
-  const session = await requireTaskEditor();
+  const session = await requireTaskPermission("MANAGE");
   await requireTaskWriteAccess(id, session);
   // 软删除：进回收站
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

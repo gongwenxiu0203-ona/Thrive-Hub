@@ -11,7 +11,7 @@ export async function PATCH(
 ) {
   try {
     const session = await requireSession();
-    await requireFeaturePermission(session, "finance_channel", "EDIT");
+    await requireFeaturePermission(session, "finance.channel_reconciliation", "EDIT");
     const { id, periodId } = await params;
     const body = await req.json();
 

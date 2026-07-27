@@ -8,6 +8,8 @@ import { REMINDER_TYPE_LABELS } from "@/lib/constants";
 import { ReminderFormModal } from "./ReminderFormModal";
 import { ReminderItem } from "./ReminderItem";
 import { MarkAllReadButton } from "./MarkAllReadButton";
+import { hasPermissionLevel } from "@/lib/permissionGuard";
+import { resolveUserPermission } from "@/lib/permissionResolver";
 
 export const metadata = { title: "提醒管理 · Thraive联盟营销系统" };
 
@@ -21,6 +23,10 @@ export default async function RemindersPage({
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const session = await requireSession();
+  const permission = await resolveUserPermission(session.userId, "reminders.records");
+  if (!hasPermissionLevel(permission, "READ")) return null;
+  const canEdit = hasPermissionLevel(permission, "EDIT");
+  const canManage = hasPermissionLevel(permission, "MANAGE");
   const sp = await searchParams;
 
   const typeFilter = csv(sp, "type");
@@ -41,7 +47,9 @@ export default async function RemindersPage({
       orderBy: [{ isRead: "asc" }, { remindDate: "asc" }],
       include: { target: true, createdBy: true },
     }),
-    prisma.user.findMany({ where: { status: "APPROVED" }, orderBy: { name: "asc" } }),
+    canEdit
+      ? prisma.user.findMany({ where: { status: "APPROVED" }, orderBy: { name: "asc" } })
+      : Promise.resolve([]),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prisma.reminder.count({ where: { targetId: session.userId, isRead: false, deletedAt: null } as any }),
   ]);
@@ -71,8 +79,8 @@ export default async function RemindersPage({
         description="设置关键节点提醒，到期通知相关人员"
         actions={
           <>
-            {unreadCount > 0 && <MarkAllReadButton count={unreadCount} />}
-            <ReminderFormModal users={userOptions} />
+            {canEdit && unreadCount > 0 && <MarkAllReadButton count={unreadCount} />}
+            {canEdit && <ReminderFormModal users={userOptions} canDelete={false} />}
           </>
         }
       />
@@ -125,7 +133,9 @@ export default async function RemindersPage({
               }}
               targetName={r.target.name}
               creatorName={r.createdBy.name}
-              canManage={r.createdById === session.userId || session.role === "ADMIN"}
+              canEdit={canEdit}
+              canModify={canEdit && (r.createdById === session.userId || session.role === "ADMIN")}
+              canManage={canManage && (r.createdById === session.userId || session.role === "ADMIN")}
               users={userOptions}
             />
           ))}

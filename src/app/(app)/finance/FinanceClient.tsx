@@ -102,9 +102,16 @@ type Props = {
   canToggleScope?: boolean;
   currentView?: "mine" | "all";
   isChannel?: boolean;
+  canViewCustomerReconciliations?: boolean;
+  canEditCustomerReconciliations?: boolean;
   canManageCustomerReconciliations?: boolean;
+  canViewChannelReconciliations?: boolean;
+  canEditChannelReconciliations?: boolean;
+  canManageChannelReconciliations?: boolean;
   canCreateChannelReconciliations?: boolean;
   canViewAffiliateReconciliations?: boolean;
+  canEditAffiliateReconciliations?: boolean;
+  canManageAffiliateReconciliations?: boolean;
 };
 
 type Tab = "customers" | "trash" | "channels" | "affiliates";
@@ -291,14 +298,20 @@ export function FinanceClient({
   canToggleScope = false,
   currentView = "mine",
   isChannel: _isChannel = false,
+  canViewCustomerReconciliations = true,
+  canEditCustomerReconciliations = true,
   canManageCustomerReconciliations = true,
+  canViewChannelReconciliations = true,
+  canEditChannelReconciliations = true,
+  canManageChannelReconciliations: _canManageChannelReconciliations = true,
   canCreateChannelReconciliations = true,
   canViewAffiliateReconciliations = true,
+  canEditAffiliateReconciliations = true,
+  canManageAffiliateReconciliations: _canManageAffiliateReconciliations = true,
 }: Props) {
-  const [tab, setTab] = useState<Tab>("customers");
   const router = useRouter();
 
-  const tabs: { key: Tab; label: string; count?: number }[] = [
+  const allTabs: { key: Tab; label: string; count?: number }[] = [
     { key: "customers", label: "客户对账及结算" },
     { key: "channels", label: "渠道商对账及结算" },
     ...(canViewAffiliateReconciliations
@@ -314,6 +327,13 @@ export function FinanceClient({
         ]
       : []),
   ];
+  const tabs = allTabs.filter((item) => {
+    if (item.key === "customers") return canViewCustomerReconciliations;
+    if (item.key === "channels") return canViewChannelReconciliations;
+    if (item.key === "affiliates") return canViewAffiliateReconciliations;
+    return canManageCustomerReconciliations;
+  });
+  const [tab, setTab] = useState<Tab>(tabs[0]?.key ?? "customers");
 
   return (
     <div className="space-y-6">
@@ -330,7 +350,7 @@ export function FinanceClient({
         </div>
         <div className="flex items-center gap-2">
           {canToggleScope && <ScopeToggle />}
-          {tab === "customers" && canManageCustomerReconciliations && (
+          {tab === "customers" && canEditCustomerReconciliations && (
             <NewReconciliationModal
               customers={customers}
               users={allUsers}
@@ -338,7 +358,7 @@ export function FinanceClient({
               onCreated={() => router.refresh()}
             />
           )}
-          {tab === "channels" && canCreateChannelReconciliations && (
+          {tab === "channels" && canEditChannelReconciliations && canCreateChannelReconciliations && (
             <NewChannelReconciliationModal
               confirmedRecs={confirmedCustomerReconciliations}
               channelUsers={channelUsers}
@@ -378,7 +398,7 @@ export function FinanceClient({
         </nav>
       </div>
 
-      {tab === "customers" && (
+      {tab === "customers" && canViewCustomerReconciliations && (
         <CustomerReconciliationTab
           reconciliations={reconciliations}
           canManage={canManageCustomerReconciliations}
@@ -387,14 +407,17 @@ export function FinanceClient({
       {tab === "trash" && canManageCustomerReconciliations && (
         <TrashTab trashed={trashedReconciliations} />
       )}
-      {tab === "channels" && (
+      {tab === "channels" && canViewChannelReconciliations && (
         <ChannelReconciliationTab
           channelReconciliations={channelReconciliations}
           channelUsers={channelUsers}
         />
       )}
       {tab === "affiliates" && canViewAffiliateReconciliations && (
-        <AffiliateReconciliationTab records={affiliateReconciliations} />
+        <AffiliateReconciliationTab
+          records={affiliateReconciliations}
+          canEdit={canEditAffiliateReconciliations}
+        />
       )}
     </div>
   );

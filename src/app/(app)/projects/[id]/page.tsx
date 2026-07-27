@@ -3,8 +3,9 @@ import { notFound, redirect } from "next/navigation";
 import { Building2, Briefcase, Wrench, FileText, BarChart3, ExternalLink } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { isStaff } from "@/lib/permissions";
 import { projectScope } from "@/lib/dataScope";
+import { resolveUserPermission } from "@/lib/permissionResolver";
+import { hasPermissionLevel } from "@/lib/permissionGuard";
 import { BackButton } from "@/components/BackButton";
 import { formatCurrency, formatDate, formatNumber } from "@/lib/utils";
 import { ProjectHeaderActions } from "./ProjectHeaderActions";
@@ -46,7 +47,13 @@ export default async function ProjectDetailPage({
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const session = await requireSession();
-  if (!isStaff(session.role)) redirect("/dashboard");
+  const [recordsPermission, kpiPermission] = await Promise.all([
+    resolveUserPermission(session.userId, "projects.records"),
+    resolveUserPermission(session.userId, "projects.kpi"),
+  ]);
+  if (!hasPermissionLevel(recordsPermission, "READ")) redirect("/dashboard");
+  const canEdit = hasPermissionLevel(recordsPermission, "EDIT");
+  const canManage = hasPermissionLevel(recordsPermission, "MANAGE");
   const { id } = await params;
   const sp = await searchParams;
   const targetMonth = sp.targetMonth || currentMonthKey();
@@ -57,7 +64,7 @@ export default async function ProjectDetailPage({
     role: session.role,
     brandName: session.brandName,
   };
-  const scope = session.role === "ADMIN" ? {} : projectScope(sessForScope, "mine");
+  const scope = projectScope(sessForScope, canManage ? "all" : "mine");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const project = await (prisma.project.findFirst as any)({
     where: { id, deletedAt: null, ...scope },
@@ -190,7 +197,7 @@ export default async function ProjectDetailPage({
   let gmvMonthOptions: string[] = [targetMonth];
   let gmvDefaultAmOwner: string | null = null;
   let gmvAllUsers: { id: string; name: string }[] = [];
-  if (!isOneOff) {
+  if (!isOneOff && hasPermissionLevel(kpiPermission, "READ")) {
     // 拉本项目所有 month + 当前 month 的目标
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const allTargets = await (prisma as any).projectGmvTarget.findMany({
@@ -270,6 +277,8 @@ export default async function ProjectDetailPage({
               <h1 className="mt-0.5 text-2xl font-bold text-white">{project.name}</h1>
             </div>
             <ProjectHeaderActions
+              canEdit={canEdit}
+              canManage={canManage}
               projectId={project.id}
               status={project.status}
               type={project.type}
@@ -379,6 +388,7 @@ export default async function ProjectDetailPage({
             </div>
           )}
           <OneOffFlow
+            canEdit={canEdit}
             projectId={project.id}
             stage={project.stage ?? "REQUIREMENT"}
             price={project.price ?? null}
@@ -395,7 +405,7 @@ export default async function ProjectDetailPage({
               <h2 className="text-sm font-bold text-slate-700">流程时间流</h2>
               <span className="h-px flex-1 bg-slate-200" />
             </div>
-            <ProjectTimeline projectId={project.id} entries={entries} />
+            <ProjectTimeline projectId={project.id} entries={entries} canEdit={canEdit} />
           </div>
         </>
       )}
@@ -412,7 +422,7 @@ export default async function ProjectDetailPage({
       )}
 
       {/* ── 项目 GMV 目标（员工 KPI 第一期）── */}
-      <ProjectGmvTargetPanel
+      {hasPermissionLevel(kpiPermission, "READ") && <ProjectGmvTargetPanel
         projectId={project.id}
         projectType={project.type}
         current={gmvCurrent}
@@ -420,8 +430,8 @@ export default async function ProjectDetailPage({
         selectedMonth={targetMonth}
         defaultAmOwnerId={gmvDefaultAmOwner}
         users={gmvAllUsers}
-        canEdit={isStaff(session.role)}
-      />
+        canEdit={hasPermissionLevel(kpiPermission, "EDIT")}
+      />}
 
       {/* ── ① 数据维度：推广 BI 数据 ── */}
       <div>
@@ -475,7 +485,7 @@ export default async function ProjectDetailPage({
           <h2 className="text-sm font-bold text-slate-700">日常工作（时间流）</h2>
           <span className="h-px flex-1 bg-slate-200" />
         </div>
-        <ProjectTimeline projectId={project.id} entries={entries} />
+        <ProjectTimeline projectId={project.id} entries={entries} canEdit={canEdit} />
       </div>
       </>
       )}

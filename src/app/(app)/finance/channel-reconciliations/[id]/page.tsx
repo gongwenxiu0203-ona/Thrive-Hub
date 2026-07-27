@@ -2,6 +2,8 @@ import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { isStaff } from "@/lib/permissions";
+import { channelReconciliationScope } from "@/lib/dataScope";
+import { requireFeaturePermission, hasPermissionLevel } from "@/lib/permissionGuard";
 import { deriveChannelPeriod, parseTieredRules, type PeriodDerived } from "@/lib/channelSplit";
 import { ensureChannelDueDateReminders } from "@/actions/channelSplit";
 import { ChannelReconciliationDetail } from "./ChannelReconciliationDetail";
@@ -15,11 +17,18 @@ export default async function ChannelReconciliationDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const session = await requireSession();
-  if (!isStaff(session.role) && session.role !== "CHANNEL") redirect("/finance");
+  const permission = await requireFeaturePermission(session, "finance.channel_reconciliation", "READ");
+  const canEdit = hasPermissionLevel(permission, "EDIT");
+  const canManage = hasPermissionLevel(permission, "MANAGE");
   const { id } = await params;
 
-  const rec = await prisma.channelReconciliation.findUnique({
-    where: { id },
+  const rec = await prisma.channelReconciliation.findFirst({
+    where: {
+      AND: [
+        { id },
+        channelReconciliationScope(session, canManage ? "all" : "mine"),
+      ],
+    },
     include: {
       customer: { select: { id: true, brandName: true } },
       contract: { select: { id: true, contractNo: true } },
@@ -157,7 +166,7 @@ export default async function ChannelReconciliationDetailPage({
         })),
       }}
       derivedPeriods={derivedPeriods}
-      canEdit={isStaff(session.role) || session.role === "CHANNEL"}
+      canEdit={canEdit}
     />
   );
 }

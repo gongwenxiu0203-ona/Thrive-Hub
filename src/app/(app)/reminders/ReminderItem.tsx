@@ -29,12 +29,16 @@ export function ReminderItem({
   reminder,
   targetName,
   creatorName,
+  canEdit,
+  canModify,
   canManage,
   users,
 }: {
   reminder: ReminderData & { isRead: boolean };
   targetName: string;
   creatorName: string;
+  canEdit: boolean;
+  canModify: boolean;
   canManage: boolean;
   users: Option[];
 }) {
@@ -105,7 +109,7 @@ export function ReminderItem({
       </div>
 
       <div className="flex shrink-0 items-center gap-1">
-        <button
+        {canEdit && <button
           className="btn-ghost btn-sm"
           onClick={toggle}
           disabled={pending}
@@ -119,12 +123,13 @@ export function ReminderItem({
               <Check className="h-3.5 w-3.5" /> 标为已读
             </>
           )}
-        </button>
-        {canManage && (
+        </button>}
+        {canModify && (
           <ReminderFormModal
             users={users}
             reminder={reminder}
             trigger="edit"
+            canDelete={canManage}
           />
         )}
       </div>

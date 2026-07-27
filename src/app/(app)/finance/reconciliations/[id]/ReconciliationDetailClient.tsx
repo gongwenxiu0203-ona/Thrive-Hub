@@ -83,9 +83,11 @@ type Props = {
   rec: Rec;
   currentUserId: string;
   users: { id: string; name: string; role: string }[];
+  canEdit: boolean;
+  canManage: boolean;
 };
 
-export function ReconciliationDetailClient({ rec, currentUserId, users: _users }: Props) {
+export function ReconciliationDetailClient({ rec, currentUserId, users: _users, canEdit, canManage }: Props) {
   void _users;
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -190,7 +192,7 @@ export function ReconciliationDetailClient({ rec, currentUserId, users: _users }
       <section className="card p-5">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="font-semibold text-slate-900">月度对账</h2>
-          {isDraft && (
+          {isDraft && canEdit && (
             <div className="flex gap-2">
               <button
                 onClick={pullBiData}
@@ -208,7 +210,7 @@ export function ReconciliationDetailClient({ rec, currentUserId, users: _users }
               </button>
             </div>
           )}
-          {(isPendingReview || isDisputed) && (
+          {(isPendingReview || isDisputed) && canManage && (
             <div className="flex gap-2">
               <button
                 onClick={() => { setReviewAction("APPROVED"); setShowReviewModal(true); }}
@@ -224,7 +226,7 @@ export function ReconciliationDetailClient({ rec, currentUserId, users: _users }
               </button>
             </div>
           )}
-          {isDisputed && rec.submittedById === currentUserId && (
+          {isDisputed && rec.submittedById === currentUserId && canManage && (
             <button
               onClick={() => setShowConfirmModal(true)}
               className="btn-primary text-sm"

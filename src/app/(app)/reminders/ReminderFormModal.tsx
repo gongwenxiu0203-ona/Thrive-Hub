@@ -27,10 +27,12 @@ export function ReminderFormModal({
   users,
   reminder,
   trigger = "button",
+  canDelete = false,
 }: {
   users: Option[];
   reminder?: ReminderData;
   trigger?: "button" | "edit";
+  canDelete?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -150,7 +152,7 @@ export function ReminderFormModal({
 
           <div className="flex justify-between border-t border-slate-100 pt-4">
             <div>
-              {isEdit && (
+              {isEdit && canDelete && (
                 <button
                   type="button"
                   className="btn-danger"

@@ -26,7 +26,7 @@ export async function POST(
 ) {
   try {
     const session = await requireSession();
-    await requireFeaturePermission(session, "finance_channel", "MANAGE");
+    await requireFeaturePermission(session, "finance.channel_reconciliation", "MANAGE");
     const { id } = await params;
     const body = await req.json();
     const { totalPeriods, periodType, fixedFeeTotal, commissionTotal } = body;

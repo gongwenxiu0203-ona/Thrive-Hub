@@ -13,7 +13,7 @@ export async function POST(
 ) {
   try {
     const session = await requireSession();
-    await requireFeaturePermission(session, "finance_channel", "MANAGE");
+    await requireFeaturePermission(session, "finance.channel_reconciliation", "MANAGE");
     const { id } = await params;
     const { side } = await req.json();
     if (side !== "FIXED_FEE" && side !== "COMMISSION") {

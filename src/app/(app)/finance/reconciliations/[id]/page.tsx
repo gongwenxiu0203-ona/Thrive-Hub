@@ -3,6 +3,8 @@ import { BackButton } from "@/components/BackButton";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { ReconciliationDetailClient } from "./ReconciliationDetailClient";
+import { getReconciliationAccess, scopedReconciliationWhere } from "@/lib/reconciliationAccess";
+import { hasPermissionLevel } from "@/lib/permissionGuard";
 
 export default async function ReconciliationDetailPage({
   params,
@@ -10,11 +12,14 @@ export default async function ReconciliationDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const session = await requireSession();
+  const access = await getReconciliationAccess(session, "READ");
+  const canEdit = hasPermissionLevel(access.permission, "EDIT");
+  const canManage = hasPermissionLevel(access.permission, "MANAGE");
   const { id } = await params;
 
   const [rec, users] = await Promise.all([
-    prisma.customerReconciliation.findUnique({
-      where: { id },
+    prisma.customerReconciliation.findFirst({
+      where: scopedReconciliationWhere(id, access.scope),
       include: {
         customer: {
           select: {
@@ -46,11 +51,11 @@ export default async function ReconciliationDetailPage({
         },
       },
     }),
-    prisma.user.findMany({
+    canEdit ? prisma.user.findMany({
       where: { status: "APPROVED" },
       select: { id: true, name: true, role: true },
       orderBy: { name: "asc" },
-    }),
+    }) : Promise.resolve([]),
   ]);
 
   if (!rec) notFound();
@@ -73,6 +78,8 @@ export default async function ReconciliationDetailPage({
         rec={rec}
         currentUserId={session.userId}
         users={users}
+        canEdit={canEdit}
+        canManage={canManage}
       />
     </div>
   );

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAdmin } from "@/lib/session";
+import { adminHasFeature, getSession } from "@/lib/session";
 import {
   ALL_ROLES,
   DEFAULT_ROLE_PERMISSIONS,
@@ -12,7 +12,11 @@ import {
 // GET /api/admin/permissions/role — 返回所有角色全部功能权限的当前配置
 export async function GET() {
   try {
-    await requireAdmin();
+    const session = await getSession();
+    if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!await adminHasFeature(session, "admin.permissions", "READ")) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const list = await (prisma as any).rolePermission.findMany();
     const map = new Map<string, PermLevel>(
@@ -42,7 +46,11 @@ export async function GET() {
 // body: { role, feature, level }
 export async function POST(req: Request) {
   try {
-    await requireAdmin();
+    const session = await getSession();
+    if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!await adminHasFeature(session, "admin.permissions", "MANAGE")) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
     const { role, feature, level } = await req.json();
     if (!ALL_ROLES.includes(role)) {
       return NextResponse.json({ error: "无效角色" }, { status: 400 });
@@ -52,6 +60,27 @@ export async function POST(req: Request) {
     }
     if (!PERM_LEVELS.includes(level)) {
       return NextResponse.json({ error: "无效权限等级" }, { status: 400 });
+    }
+    if (role === "ADMIN" && feature === "admin.permissions" && level !== "MANAGE") {
+      const protectedAdmin = await prisma.user.findFirst({
+        where: {
+          role: "ADMIN",
+          status: "APPROVED",
+          permissionOverrides: {
+            some: {
+              feature: { in: ["admin.permissions", "admin"] },
+              level: "MANAGE",
+            },
+          },
+        },
+        select: { id: true },
+      });
+      if (!protectedAdmin) {
+        return NextResponse.json(
+          { error: "必须保留至少一名可管理权限的管理员；请先为另一名管理员设置 MANAGE 覆盖" },
+          { status: 409 },
+        );
+      }
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await (prisma as any).rolePermission.upsert({

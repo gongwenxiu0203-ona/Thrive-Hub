@@ -41,12 +41,16 @@ export default function WorkLogsClient({
   affiliates = [],
   currentUserId,
   isAdmin,
+  canEdit,
+  canManage,
 }: {
   logs: LogRow[];
   projects: ProjectOption[];
   affiliates?: AffiliateOption[];
   currentUserId: string;
   isAdmin: boolean;
+  canEdit: boolean;
+  canManage: boolean;
 }) {
   const router = useRouter();
   const [scope, setScope] = useState<"mine" | "all">("mine");
@@ -69,18 +73,18 @@ export default function WorkLogsClient({
       <PageHeader
         title="工作日志"
         description="周报 / 月报记录，可关联项目并从项目时间流自动拉取进度，支持 AI 总结优化"
-        actions={
+        actions={canEdit ? (
           <button className="btn-primary" onClick={() => setShowCreate(true)}>
             <Plus className="h-4 w-4" /> 写日志
           </button>
-        }
+        ) : undefined}
       />
 
       {/* 范围切换 */}
       <div className="flex gap-1.5">
         {([
           { key: "mine", label: `我的日志（${logs.filter((l) => l.authorId === currentUserId).length}）` },
-          { key: "all", label: `全部日志（${logs.length}）` },
+          ...(canManage ? [{ key: "all" as const, label: `全部日志（${logs.length}）` }] : []),
         ] as const).map((s) => (
           <button
             key={s.key}
@@ -106,7 +110,8 @@ export default function WorkLogsClient({
         <div className="relative space-y-0 pl-5">
           <span className="absolute bottom-2 left-[7px] top-2 w-px bg-slate-200" />
           {shown.map((l) => {
-            const canManage = l.authorId === currentUserId || isAdmin;
+            const canEditLog = canEdit && (l.authorId === currentUserId || isAdmin);
+            const canDeleteLog = canManage && (l.authorId === currentUserId || isAdmin);
             return (
               <div key={l.id} className="relative pb-5 pl-5">
                 <span className={`absolute left-[-17px] top-1.5 h-3 w-3 rounded-full border-2 border-white shadow ${l.period === "MONTHLY" ? "bg-violet-500" : "bg-brand-500"}`} />
@@ -120,14 +125,18 @@ export default function WorkLogsClient({
                       <span key={t} className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-600">{t}</span>
                     ))}
                     <span className="ml-auto text-slate-400">{formatDateTime(l.logDate)}</span>
-                    {canManage && (
+                    {(canEditLog || canDeleteLog) && (
                       <span className="flex gap-1">
-                        <button onClick={() => setEditing(l)} className="rounded p-1 text-slate-300 hover:bg-slate-100 hover:text-slate-600">
-                          <Pencil className="h-3.5 w-3.5" />
-                        </button>
-                        <button onClick={() => onDelete(l.id)} className="rounded p-1 text-slate-300 hover:bg-rose-50 hover:text-rose-500">
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                        {canEditLog && (
+                          <button onClick={() => setEditing(l)} className="rounded p-1 text-slate-300 hover:bg-slate-100 hover:text-slate-600">
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                        {canDeleteLog && (
+                          <button onClick={() => onDelete(l.id)} className="rounded p-1 text-slate-300 hover:bg-rose-50 hover:text-rose-500">
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
                       </span>
                     )}
                   </div>
@@ -173,7 +182,7 @@ export default function WorkLogsClient({
         </div>
       )}
 
-      {(showCreate || editing) && (
+      {canEdit && (showCreate || editing) && (
         <WorkLogFormModal
           projects={projects}
           affiliates={affiliates}

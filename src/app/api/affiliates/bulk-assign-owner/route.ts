@@ -13,7 +13,7 @@ import { resolveUserPermission } from "@/lib/permissionResolver";
 export async function POST(req: NextRequest) {
   const auth = await getSession();
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const affiliatePermission = await resolveUserPermission(auth.userId, "affiliates");
+  const affiliatePermission = await resolveUserPermission(auth.userId, "affiliates.records");
   if (!hasPermissionLevel(affiliatePermission, "MANAGE")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const { fromPersonInChargeIds, toPersonInChargeId } = await req.json();

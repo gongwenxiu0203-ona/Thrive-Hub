@@ -12,7 +12,7 @@ export const maxDuration = 300;
 export async function POST(req: NextRequest) {
   const auth = await getSession();
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!hasPermissionLevel(await resolveUserPermission(auth.userId, "affiliates"), "EDIT")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!hasPermissionLevel(await resolveUserPermission(auth.userId, "affiliates.batches"), "EDIT")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const formData = await req.formData();
   const file = formData.get("file") as File | null;

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "crypto";
-import { getSession } from "@/lib/session";
+import { adminHasFeature, getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { hashPassword } from "@/lib/password";
 import { writeAdminAudit, writeApiAccessLog } from "@/lib/adminObservability";
@@ -15,14 +15,14 @@ function generateUniqueCode(): string {
   return code;
 }
 
-function isAdmin(role: string) {
-  return role === "ADMIN";
-}
-
 export async function GET(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
-  if (!isAdmin(session.role))
+  if (
+    !await adminHasFeature(session, "admin.users", "READ")
+    && !await adminHasFeature(session, "admin.registration_review", "READ")
+    && !await adminHasFeature(session, "admin.permissions", "READ")
+  )
     return NextResponse.json({ error: "无权限" }, { status: 403 });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
   const startedAt = Date.now();
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
-  if (!isAdmin(session.role))
+  if (!await adminHasFeature(session, "admin.users", "EDIT"))
     return NextResponse.json({ error: "无权限" }, { status: 403 });
 
   const body = await req.json();

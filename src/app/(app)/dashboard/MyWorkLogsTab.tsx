@@ -5,11 +5,16 @@ import { requireSession } from "@/lib/session";
 import { isStaff } from "@/lib/permissions";
 import { formatDateTime } from "@/lib/utils";
 import { QuickWorkLogForm } from "./QuickWorkLogForm";
+import { resolveUserPermission } from "@/lib/permissionResolver";
+import { hasPermissionLevel } from "@/lib/permissionGuard";
 
 /** "工作日志" tab：左边快速写日志 + 右边最近 5 条日志。 */
 export async function MyWorkLogsTab() {
   const session = await requireSession();
   if (!isStaff(session.role)) return null;
+  const permission = await resolveUserPermission(session.userId, "worklogs.records");
+  if (!hasPermissionLevel(permission, "READ")) return null;
+  const canEdit = hasPermissionLevel(permission, "EDIT");
 
   const logs = await prisma.workLog.findMany({
     where: { authorId: session.userId, deletedAt: null },
@@ -24,7 +29,7 @@ export async function MyWorkLogsTab() {
           <BookOpen className="h-4 w-4" />
           <p className="text-sm font-semibold">快速写日志</p>
         </div>
-        <QuickWorkLogForm />
+        {canEdit && <QuickWorkLogForm />}
         <p className="mt-2 text-[11px] text-slate-400">
           只支持「项目管理」类工作进度的快速记录；BD 联盟商进度、关联项目、详细内容请到完整日志页填写。
         </p>

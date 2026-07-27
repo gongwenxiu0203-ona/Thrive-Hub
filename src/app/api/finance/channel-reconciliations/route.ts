@@ -8,7 +8,7 @@ import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissi
 export async function GET(_req: Request) {
   try {
     const session = await requireSession();
-    await requireFeaturePermission(session, "finance_channel", "READ");
+    await requireFeaturePermission(session, "finance.channel_reconciliation", "READ");
     const list = await prisma.channelReconciliation.findMany({
       where: channelReconciliationScope(session, session.role === "ADMIN" ? "all" : "mine"),
       include: {
@@ -47,7 +47,7 @@ export async function GET(_req: Request) {
 export async function POST(req: Request) {
   try {
     const session = await requireSession();
-    await requireFeaturePermission(session, "finance_channel", "EDIT");
+    await requireFeaturePermission(session, "finance.channel_reconciliation", "EDIT");
     const body = await req.json();
     const {
       customerId,

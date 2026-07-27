@@ -43,7 +43,7 @@ export async function POST(
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
 
-  const permission = await resolveUserPermission(session.userId, "affiliates");
+  const permission = await resolveUserPermission(session.userId, "affiliates.media");
   if (!hasPermissionLevel(permission, "EDIT")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const { id } = await params;
   const form = await req.formData();
@@ -108,7 +108,7 @@ export async function PATCH(
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
 
-  const permission = await resolveUserPermission(session.userId, "affiliates");
+  const permission = await resolveUserPermission(session.userId, "affiliates.media");
   if (!hasPermissionLevel(permission, "EDIT")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const { id } = await params;
   const { itemId, text } = await req.json();
@@ -134,7 +134,7 @@ export async function DELETE(
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
 
-  const permission = await resolveUserPermission(session.userId, "affiliates");
+  const permission = await resolveUserPermission(session.userId, "affiliates.media");
   if (!hasPermissionLevel(permission, "MANAGE")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const { id } = await params;
   const itemId = req.nextUrl.searchParams.get("itemId");

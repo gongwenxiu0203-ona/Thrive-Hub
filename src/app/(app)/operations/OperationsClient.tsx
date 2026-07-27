@@ -22,6 +22,8 @@ import {
   deleteSnapshot, createAR, updateAR, deleteAR, refreshArRisks,
   createPipeline, updatePipelineStage, updatePipeline, deletePipeline,
 } from "@/actions/financeOperations";
+import type { PermLevel } from "@/lib/featurePermissions";
+import { hasPermissionLevel } from "@/lib/permissionGuard";
 
 // =============================================================================
 // Types
@@ -120,6 +122,7 @@ export function OperationsClient({
   kpiProjectId,
   kpiProjects,
   kpiCustomers,
+  permissions,
 }: {
   initialTab: Tab;
   month: string;
@@ -136,10 +139,17 @@ export function OperationsClient({
   kpiProjectId: string;
   kpiProjects: { id: string; name: string }[];
   kpiCustomers: Customer[];
+  permissions: Record<Tab | "invoices", PermLevel>;
 }) {
   const router = useRouter();
   const sp = useSearchParams();
   const [tab, setTab] = useState<Tab>(initialTab);
+  const canRead = (key: Tab | "invoices") =>
+    hasPermissionLevel(permissions[key], "READ");
+  const canEdit = (key: Tab) =>
+    hasPermissionLevel(permissions[key], "EDIT");
+  const canManage = (key: Tab) =>
+    hasPermissionLevel(permissions[key], "MANAGE");
 
   function setTabUrl(t: Tab) {
     setTab(t);
@@ -169,7 +179,7 @@ export function OperationsClient({
           { key: "revenue", label: "客户收入总表", icon: TrendingUp },
           { key: "count", label: "客户数统计", icon: Users },
           { key: "ar", label: "应收账款", icon: FileText },
-        ] as const).map((t) => (
+        ] as const).filter((t) => canRead(t.key)).map((t) => (
           <button
             key={t.key}
             onClick={() => setTabUrl(t.key)}
@@ -183,13 +193,13 @@ export function OperationsClient({
             <t.icon className="h-4 w-4" /> {t.label}
           </button>
         ))}
-        <Link href="/invoices" className="tab-trigger">
+        {canRead("invoices") && <Link href="/invoices" className="tab-trigger">
           <ReceiptText className="h-4 w-4" /> Invoice 开具
-        </Link>
+        </Link>}
         {([
           { key: "pipeline", label: "销售漏斗", icon: Target },
           { key: "kpi", label: "员工 KPI", icon: Award },
-        ] as const).map((t) => (
+        ] as const).filter((t) => canRead(t.key)).map((t) => (
           <button
             key={t.key}
             onClick={() => setTabUrl(t.key)}
@@ -206,16 +216,16 @@ export function OperationsClient({
       </div>
 
       {tab === "revenue" && (
-        <RevenueTab snapshots={snapshots} month={month} onMonthChange={setMonth} isAdmin={isAdmin} />
+        <RevenueTab snapshots={snapshots} month={month} onMonthChange={setMonth} canEdit={canEdit("revenue") && isAdmin} canManage={canManage("revenue") && isAdmin} />
       )}
       {tab === "count" && (
         <ClientCountTab summary={countSummary} month={month} onMonthChange={setMonth} />
       )}
       {tab === "ar" && (
-        <ARTab ars={ars} customers={customers} users={users} isAdmin={isAdmin} />
+        <ARTab ars={ars} customers={customers} users={users} canEdit={canEdit("ar")} canManage={canManage("ar") && isAdmin} />
       )}
       {tab === "pipeline" && (
-        <PipelineTab pipelines={pipelines} users={users} isAdmin={isAdmin} />
+        <PipelineTab pipelines={pipelines} users={users} canEdit={canEdit("pipeline")} canManage={canManage("pipeline") && isAdmin} />
       )}
       {tab === "kpi" && (
         <EmployeeKpiTab
@@ -224,7 +234,7 @@ export function OperationsClient({
           amOwnerId={kpiAmOwnerId}
           customerId={kpiCustomerId}
           projectId={kpiProjectId}
-          isAdmin={isAdmin}
+          isAdmin={isAdmin && canEdit("kpi")}
           users={users}
           customers={kpiCustomers}
           projects={kpiProjects}
@@ -260,9 +270,10 @@ function calcReconciledTotalRmb(row: SnapshotRow): number {
 }
 
 function RevenueTab({
-  snapshots, month, onMonthChange, isAdmin,
+  snapshots, month, onMonthChange, canEdit, canManage,
 }: {
-  snapshots: SnapshotRow[]; month: string; onMonthChange: (m: string) => void; isAdmin: boolean;
+  snapshots: SnapshotRow[]; month: string; onMonthChange: (m: string) => void;
+  canEdit: boolean; canManage: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -310,7 +321,7 @@ function RevenueTab({
           <input type="month" className="input h-9 w-36 text-sm"
             value={month} onChange={(e) => onMonthChange(e.target.value)} />
         </div>
-        {isAdmin && (
+        {canEdit && (
           <button onClick={runGenerate} disabled={pending} className="btn-primary text-sm">
             <RefreshCw className={cn("h-4 w-4", pending && "animate-spin")} />
             {pending ? "生成中…" : "一键生成 / 刷新当月快照"}
@@ -389,14 +400,14 @@ function RevenueTab({
                   </span>
                 </td>
                 <td className="px-3 py-2 text-right">
-                  {isAdmin && (
+                  {(canEdit || canManage) && (
                     <span className="flex justify-end gap-1">
-                      <button onClick={() => setEditing(s)} className="rounded p-1 text-slate-300 hover:bg-slate-100 hover:text-slate-600" title="编辑">
+                      {canEdit && <button onClick={() => setEditing(s)} className="rounded p-1 text-slate-300 hover:bg-slate-100 hover:text-slate-600" title="编辑">
                         <Pencil className="h-3.5 w-3.5" />
-                      </button>
-                      <button onClick={() => onDeleteSnapshot(s)} className="rounded p-1 text-slate-300 hover:bg-rose-50 hover:text-rose-500" title="删除客户收入记录">
+                      </button>}
+                      {canManage && <button onClick={() => onDeleteSnapshot(s)} className="rounded p-1 text-slate-300 hover:bg-rose-50 hover:text-rose-500" title="删除客户收入记录">
                         <Trash2 className="h-3.5 w-3.5" />
-                      </button>
+                      </button>}
                     </span>
                   )}
                 </td>
@@ -544,8 +555,8 @@ function ClientCountTab({
 // =============================================================================
 
 function ARTab({
-  ars, customers, users, isAdmin,
-}: { ars: ArRow[]; customers: Customer[]; users: UserOption[]; isAdmin: boolean }) {
+  ars, customers, users, canEdit, canManage,
+}: { ars: ArRow[]; customers: Customer[]; users: UserOption[]; canEdit: boolean; canManage: boolean }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [showCreate, setShowCreate] = useState(false);
@@ -608,12 +619,12 @@ function ARTab({
           <option value="">全部跟进人</option>
           {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
         </select>
-        <button onClick={onRefresh} disabled={pending} className="btn-secondary text-sm">
+        {canEdit && <button onClick={onRefresh} disabled={pending} className="btn-secondary text-sm">
           <RefreshCw className={cn("h-4 w-4", pending && "animate-spin")} />刷新风险
-        </button>
-        <button onClick={() => setShowCreate(true)} className="btn-primary ml-auto text-sm">
+        </button>}
+        {canEdit && <button onClick={() => setShowCreate(true)} className="btn-primary ml-auto text-sm">
           <Plus className="h-4 w-4" />新增应收
-        </button>
+        </button>}
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
@@ -669,10 +680,10 @@ function ARTab({
                   <td className="px-3 py-2 text-slate-600">{a.followOwnerName}</td>
                   <td className="px-3 py-2 text-right">
                     <span className="flex justify-end gap-1">
-                      <button onClick={() => setEditing(a)} className="rounded p-1 text-slate-300 hover:bg-slate-100 hover:text-slate-600">
+                      {canEdit && <button onClick={() => setEditing(a)} className="rounded p-1 text-slate-300 hover:bg-slate-100 hover:text-slate-600">
                         <Pencil className="h-3.5 w-3.5" />
-                      </button>
-                      {isAdmin && (
+                      </button>}
+                      {canManage && (
                         <button onClick={() => onDelete(a.id)} className="rounded p-1 text-slate-300 hover:bg-rose-50 hover:text-rose-500">
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
@@ -843,8 +854,8 @@ function AREditModal({ ar, users, onClose }: { ar: ArRow; users: UserOption[]; o
 // =============================================================================
 
 function PipelineTab({
-  pipelines, users, isAdmin,
-}: { pipelines: PipelineRow[]; users: UserOption[]; isAdmin: boolean }) {
+  pipelines, users, canEdit, canManage,
+}: { pipelines: PipelineRow[]; users: UserOption[]; canEdit: boolean; canManage: boolean }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [showCreate, setShowCreate] = useState(false);
@@ -910,9 +921,9 @@ function PipelineTab({
           <option value="">全部 BD</option>
           {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
         </select>
-        <button onClick={() => setShowCreate(true)} className="btn-primary ml-auto text-sm">
+        {canEdit && <button onClick={() => setShowCreate(true)} className="btn-primary ml-auto text-sm">
           <Plus className="h-4 w-4" />新增漏斗
-        </button>
+        </button>}
       </div>
 
       <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
@@ -967,7 +978,7 @@ function PipelineTab({
                 <td className="px-3 py-2 text-right">{p.estimatedMonthlyFee ? `¥${p.estimatedMonthlyFee.toLocaleString()}` : "—"}</td>
                 <td className="px-3 py-2 text-right">{p.estimatedGmv ? `$${p.estimatedGmv.toLocaleString()}` : "—"}</td>
                 <td className="px-3 py-2">
-                  <select className="input h-7 text-xs" value={p.stage} onChange={(e) => onStageChange(p.id, e.target.value)}>
+                  <select disabled={!canEdit} className="input h-7 text-xs" value={p.stage} onChange={(e) => onStageChange(p.id, e.target.value)}>
                     {STAGE_ORDER.map((s) => <option key={s} value={s}>{STAGE_LABELS[s].split(" ")[0]}</option>)}
                   </select>
                 </td>
@@ -977,10 +988,10 @@ function PipelineTab({
                 <td className="px-3 py-2 text-slate-500 max-w-[200px] truncate">{p.nextAction ?? "—"}</td>
                 <td className="px-3 py-2 text-right">
                   <span className="flex justify-end gap-1">
-                    <button onClick={() => setEditing(p)} className="rounded p-1 text-slate-300 hover:bg-slate-100 hover:text-slate-600">
+                    {canEdit && <button onClick={() => setEditing(p)} className="rounded p-1 text-slate-300 hover:bg-slate-100 hover:text-slate-600">
                       <Pencil className="h-3.5 w-3.5" />
-                    </button>
-                    {isAdmin && (
+                    </button>}
+                    {canManage && (
                       <button onClick={() => onDelete(p.id)} className="rounded p-1 text-slate-300 hover:bg-rose-50 hover:text-rose-500">
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>

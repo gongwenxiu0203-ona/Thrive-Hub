@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
-import { isStaff } from "@/lib/permissions";
 import {
   clearFilterFingerprint,
   consumeClearConfirmation,
@@ -10,6 +9,7 @@ import {
   issueClearConfirmation,
 } from "@/lib/biAuthorization";
 import { salesScope } from "@/lib/dataScope";
+import { isStaff } from "@/lib/permissions";
 import {
   buildSalesRecordWhereFromParams,
   csvFilterValues,
@@ -48,11 +48,12 @@ function normalizedFilter(filter: ClearFilter) {
 export async function POST(req: Request) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
+  // Destructive BI clearing remains an internal-only safety boundary.
   if (!isStaff(session.role)) {
-    return NextResponse.json({ error: "仅内部员工可执行数据清理" }, { status: 403 });
+    return NextResponse.json({ error: "无权清理 BI 数据" }, { status: 403 });
   }
-  if (session.role !== "ADMIN" && !(await hasBiPermission(session.userId, "MANAGE"))) {
-    return NextResponse.json({ error: "仅管理员或具有 BI 管理权限的内部员工可清理数据" }, { status: 403 });
+  if (!(await hasBiPermission(session.userId, "bi.manage", "MANAGE"))) {
+    return NextResponse.json({ error: "无权清理 BI 数据" }, { status: 403 });
   }
 
   let body: { filter?: ClearFilter; dryRun?: boolean; confirmationToken?: string };

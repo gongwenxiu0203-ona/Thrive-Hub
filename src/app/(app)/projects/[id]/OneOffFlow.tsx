@@ -24,6 +24,7 @@ const STAGE_LABELS: Record<string, string> = {
 };
 
 export function OneOffFlow({
+  canEdit,
   projectId,
   stage,
   price,
@@ -34,6 +35,7 @@ export function OneOffFlow({
   users,
   biParentAsins,
 }: {
+  canEdit: boolean;
   projectId: string;
   stage: string;
   price: string | null;
@@ -59,7 +61,7 @@ export function OneOffFlow({
   };
 
   return (
-    <div className="space-y-4">
+    <fieldset disabled={!canEdit} className="space-y-4">
       {/* 阶段进度条 */}
       <div className="card flex flex-wrap items-center gap-2 p-4">
         {STAGE_ORDER.map((s, i) => (
@@ -137,7 +139,7 @@ export function OneOffFlow({
       {submissionData && stage !== "PRICE_CONFIRMED" && (
         <SubmissionView submissionData={submissionData} price={price} />
       )}
-    </div>
+    </fieldset>
   );
 }
 

@@ -1,7 +1,9 @@
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { redirect } from "next/navigation";
-import { isStaff } from "@/lib/permissions";
+import { customerScope, projectScope } from "@/lib/dataScope";
+import { resolveUserPermission } from "@/lib/permissionResolver";
+import { hasPermissionLevel } from "@/lib/permissionGuard";
 import ProjectsClient from "./ProjectsClient";
 
 export const dynamic = "force-dynamic";
@@ -9,13 +11,16 @@ export const metadata = { title: "项目管理 · Thraive联盟营销系统" };
 
 export default async function ProjectsPage() {
   const session = await requireSession();
-  if (!isStaff(session.role)) redirect("/dashboard");
+  const permission = await resolveUserPermission(session.userId, "projects.records");
+  if (!hasPermissionLevel(permission, "READ")) redirect("/dashboard");
+  const scopeSession = { userId: session.userId, role: session.role };
+  const view = hasPermissionLevel(permission, "MANAGE") ? "all" : "mine";
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [projects, completedContracts] = await Promise.all([
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (prisma.project.findMany as any)({
-      where: { deletedAt: null },
+      where: { deletedAt: null, ...projectScope(scopeSession, view) },
       include: {
         customer: {
           select: {
@@ -38,7 +43,7 @@ export default async function ProjectsPage() {
         status: "COMPLETED",
         deletedAt: null,
         customerId: { not: null },
-        customer: { deletedAt: null },
+        customer: { deletedAt: null, ...customerScope(scopeSession, view) },
       },
       select: {
         id: true,
@@ -53,7 +58,7 @@ export default async function ProjectsPage() {
   // 关联客户（含商务负责人，自动带出）+ Strategy AM 候选用户
   const [customers, users] = await Promise.all([
     prisma.customer.findMany({
-      where: { deletedAt: null },
+      where: { deletedAt: null, ...customerScope(scopeSession, view) },
       select: { id: true, brandName: true, businessOwner: { select: { name: true } } },
       orderBy: { brandName: "asc" },
     }),
@@ -105,6 +110,7 @@ export default async function ProjectsPage() {
       customers={customerOptions}
       users={users}
       currentUserId={session.userId}
+      canEdit={hasPermissionLevel(permission, "EDIT")}
     />
   );
 }

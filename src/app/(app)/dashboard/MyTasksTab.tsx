@@ -6,11 +6,15 @@ import { isStaff } from "@/lib/permissions";
 import { TASK_STATUS_LABELS, TASK_PRIORITY_LABELS, TASK_PRIORITY_COLORS, labelOf } from "@/lib/constants";
 import { Badge } from "@/components/ui/Badge";
 import { daysUntil } from "@/lib/utils";
+import { resolveUserPermission } from "@/lib/permissionResolver";
+import { hasPermissionLevel } from "@/lib/permissionGuard";
 
 /** "我的任务" tab：按状态分组展示当前用户的任务，含跳转完整看板入口。 */
 export async function MyTasksTab() {
   const session = await requireSession();
   if (!isStaff(session.role)) return null;
+  const permission = await resolveUserPermission(session.userId, "tasks.board");
+  if (!hasPermissionLevel(permission, "READ")) return null;
 
   const tasks = await prisma.task.findMany({
     where: {

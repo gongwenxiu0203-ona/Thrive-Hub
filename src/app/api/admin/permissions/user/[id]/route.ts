@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAdmin } from "@/lib/session";
-import { resolveUserPermissionsMap } from "@/lib/permissionResolver";
+import { adminHasFeature, getSession } from "@/lib/session";
+import {
+  getRolePermissions,
+  resolveUserPermission,
+  resolveUserPermissionsMap,
+} from "@/lib/permissionResolver";
+import { hasPermissionLevel } from "@/lib/permissionGuard";
 import {
   FEATURES,
   PERM_LEVELS,
@@ -14,7 +19,11 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    await requireAdmin();
+    const session = await getSession();
+    if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!await adminHasFeature(session, "admin.permissions", "READ")) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
     const { id } = await params;
     const user = await prisma.user.findUnique({
       where: { id },
@@ -54,12 +63,47 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    await requireAdmin();
+    const session = await getSession();
+    if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!await adminHasFeature(session, "admin.permissions", "MANAGE")) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
     const { id } = await params;
     const { feature, level, reset } = await req.json();
 
     if (!FEATURES.find((f) => f.key === feature)) {
       return NextResponse.json({ error: "无效功能" }, { status: 400 });
+    }
+
+    const target = await prisma.user.findUnique({
+      where: { id },
+      select: { role: true, status: true },
+    });
+    if (!target) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+    if (target.role === "ADMIN" && target.status === "APPROVED" && feature === "admin.permissions") {
+      const currentLevel = await resolveUserPermission(id, feature);
+      const rolePermissions = reset ? await getRolePermissions(target.role) : null;
+      const nextLevel = reset ? rolePermissions?.[feature] ?? "NONE" : level;
+      if (hasPermissionLevel(currentLevel, "MANAGE") && !hasPermissionLevel(nextLevel, "MANAGE")) {
+        const otherAdmins = await prisma.user.findMany({
+          where: { id: { not: id }, role: "ADMIN", status: "APPROVED" },
+          select: { id: true },
+        });
+        let hasOtherManager = false;
+        for (const admin of otherAdmins) {
+          if (hasPermissionLevel(await resolveUserPermission(admin.id, feature), "MANAGE")) {
+            hasOtherManager = true;
+            break;
+          }
+        }
+        if (!hasOtherManager) {
+          return NextResponse.json(
+            { error: "必须保留至少一名已启用且可管理权限的管理员" },
+            { status: 409 },
+          );
+        }
+      }
     }
 
     if (reset) {

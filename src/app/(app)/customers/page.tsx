@@ -23,6 +23,7 @@ import { requireSession } from "@/lib/session";
 import { customerScope, isStaff, parseViewScope } from "@/lib/dataScope";
 import { ScopeToggle } from "@/components/ScopeToggle";
 import { CustomerTableClient, type CustomerTableRow } from "./CustomerTableClient";
+import { hasPermissionLevel, requireFeaturePermission } from "@/lib/permissionGuard";
 
 export const metadata = { title: "客户管理 · Thraive联盟营销系统" };
 
@@ -121,6 +122,13 @@ export default async function CustomersPage({
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const session = await requireSession();
+  const recordsPermission = await requireFeaturePermission(
+    session,
+    "customers.records",
+    "READ",
+  );
+  const canEditRecords = hasPermissionLevel(recordsPermission, "EDIT");
+  const canManageRecords = hasPermissionLevel(recordsPermission, "MANAGE");
 
   // 仅内部员工才跑全局客户状态校验，避免外部角色触发昂贵全表扫描
   if (isStaff(session.role)) await runCustomerStatusChecks();
@@ -238,9 +246,13 @@ export default async function CustomersPage({
         actions={
           <>
             {isStaff(session.role) && <ScopeToggle defaultView={session.role === "ADMIN" ? "all" : "mine"} />}
-            <CustomerImportModal />
-            <QuickCreateModal />
-            <CustomerFormModal users={userOptions} />
+            {canEditRecords && (
+              <>
+                <CustomerImportModal />
+                <QuickCreateModal />
+                <CustomerFormModal users={userOptions} />
+              </>
+            )}
           </>
         }
       />
@@ -249,7 +261,8 @@ export default async function CustomersPage({
         rows={tableRows}
         users={userOptions}
         isStaff={isStaff(session.role)}
-        canDeleteCustomers={session.role === "ADMIN"}
+        canEditRecords={canEditRecords}
+        canManageRecords={canManageRecords && session.role === "ADMIN"}
         isChannel={isChannel}
         staffUserId={isStaff(session.role) ? session.userId : undefined}
         channelUserId={isChannel ? session.userId : undefined}

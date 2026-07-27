@@ -7,7 +7,7 @@ import { resolveUserPermission } from "@/lib/permissionResolver";
 export async function GET(req: NextRequest) {
   const auth = await getSession();
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!hasPermissionLevel(await resolveUserPermission(auth.userId, "affiliates"), "READ")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!hasPermissionLevel(await resolveUserPermission(auth.userId, "affiliates.reviews"), "READ")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const sp = req.nextUrl.searchParams;
   const affiliateName = sp.get("affiliateName")?.trim() ?? "";

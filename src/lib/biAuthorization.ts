@@ -4,11 +4,18 @@ import { resolveUserPermission } from "@/lib/permissionResolver";
 
 const LEVEL: Record<PermLevel, number> = { NONE: 0, READ: 1, EDIT: 2, MANAGE: 3 };
 
+export type BiPermissionFeature =
+  | "bi.view"
+  | "bi.import"
+  | "bi.export"
+  | "bi.manage";
+
 export async function hasBiPermission(
   userId: string,
+  feature: BiPermissionFeature,
   minimum: Exclude<PermLevel, "NONE">,
 ): Promise<boolean> {
-  return LEVEL[await resolveUserPermission(userId, "bi")] >= LEVEL[minimum];
+  return LEVEL[await resolveUserPermission(userId, feature)] >= LEVEL[minimum];
 }
 
 type ClearConfirmation = {

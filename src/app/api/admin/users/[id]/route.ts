@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { adminHasFeature, getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { hashPassword } from "@/lib/password";
 import { writeAdminAudit, writeApiAccessLog } from "@/lib/adminObservability";
+import { resolveUserPermission } from "@/lib/permissionResolver";
+import { hasPermissionLevel } from "@/lib/permissionGuard";
 
 const ALLOWED_ROLES = new Set(["ADMIN", "USER", "BRAND", "CHANNEL"]);
 
@@ -12,15 +14,34 @@ type TransferImpact = {
   count: number;
 };
 
-function isAdmin(role: string) {
-  return role === "ADMIN";
-}
-
-async function requireAdmin() {
+async function requireAdminPermission(required: "READ" | "EDIT" | "MANAGE") {
   const session = await getSession();
   if (!session) return { error: NextResponse.json({ error: "未登录" }, { status: 401 }) };
-  if (!isAdmin(session.role)) return { error: NextResponse.json({ error: "无权限" }, { status: 403 }) };
+  if (!await adminHasFeature(session, "admin.users", required)) return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   return { session };
+}
+
+async function requireAdminRole() {
+  const session = await getSession();
+  if (!session) return { error: NextResponse.json({ error: "未登录" }, { status: 401 }) };
+  if (session.role !== "ADMIN") return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
+  return { session };
+}
+
+async function hasOtherPermissionAdmin(excludedUserId: string): Promise<boolean> {
+  const admins = await prisma.user.findMany({
+    where: {
+      id: { not: excludedUserId },
+      role: "ADMIN",
+      status: "APPROVED",
+    },
+    select: { id: true },
+  });
+  for (const admin of admins) {
+    const level = await resolveUserPermission(admin.id, "admin.permissions");
+    if (hasPermissionLevel(level, "MANAGE")) return true;
+  }
+  return false;
 }
 
 async function getTransferImpacts(userId: string) {
@@ -111,7 +132,7 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireAdmin();
+  const auth = await requireAdminPermission("READ");
   if (auth.error) return auth.error;
 
   const { id } = await params;
@@ -129,17 +150,54 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const startedAt = Date.now();
-  const auth = await requireAdmin();
+  const auth = await requireAdminRole();
   if (auth.error) return auth.error;
 
   const { id } = await params;
   const body = await req.json();
   const { role, status, brandName, newPassword } = body;
+  const isStatusOnly = status !== undefined
+    && role === undefined
+    && brandName === undefined
+    && newPassword === undefined;
+  if (
+    !isStatusOnly
+    && !await adminHasFeature(auth.session, "admin.users", "EDIT")
+  ) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   const previous = await prisma.user.findUnique({
     where: { id },
     select: { id: true, name: true, email: true, role: true, status: true, brandName: true },
   });
   if (!previous) return NextResponse.json({ error: "用户不存在" }, { status: 404 });
+  if (
+    status !== undefined
+    && previous.status === "PENDING"
+    && !await adminHasFeature(auth.session, "admin.registration_review", "EDIT")
+  ) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  if (
+    isStatusOnly
+    && previous.status !== "PENDING"
+    && !await adminHasFeature(auth.session, "admin.users", "EDIT")
+  ) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  const removesPermissionAdmin =
+    previous.role === "ADMIN"
+    && previous.status === "APPROVED"
+    && (role !== undefined && role !== "ADMIN" || status !== undefined && status !== "APPROVED");
+  if (removesPermissionAdmin) {
+    const currentLevel = await resolveUserPermission(id, "admin.permissions");
+    if (hasPermissionLevel(currentLevel, "MANAGE") && !await hasOtherPermissionAdmin(id)) {
+      return NextResponse.json(
+        { error: "必须保留至少一名已启用且可管理权限的管理员" },
+        { status: 409 },
+      );
+    }
+  }
 
   const updateData: Record<string, unknown> = {};
   if (role !== undefined) {
@@ -186,7 +244,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const startedAt = Date.now();
-  const auth = await requireAdmin();
+  const auth = await requireAdminPermission("MANAGE");
   if (auth.error) return auth.error;
 
   const { id } = await params;
@@ -208,6 +266,17 @@ export async function DELETE(
     getTransferImpacts(id),
   ]);
   if (!target) return NextResponse.json({ error: "用户不存在或已被移除" }, { status: 404 });
+  if (
+    target.role === "ADMIN"
+    && target.status === "APPROVED"
+    && hasPermissionLevel(await resolveUserPermission(id, "admin.permissions"), "MANAGE")
+    && !await hasOtherPermissionAdmin(id)
+  ) {
+    return NextResponse.json(
+      { error: "必须保留至少一名已启用且可管理权限的管理员" },
+      { status: 409 },
+    );
+  }
   if (!recipient || recipient.status !== "APPROVED") {
     return NextResponse.json({ error: "请选择一个已通过审核的接收账户" }, { status: 400 });
   }

@@ -23,7 +23,7 @@ const KIND_META: Record<string, { label: string; dot: string; badge: string }> =
   NODE:     { label: "流程节点", dot: "bg-slate-500", badge: "bg-slate-100 text-slate-600" },
 };
 
-export function ProjectTimeline({ projectId, entries }: { projectId: string; entries: Entry[] }) {
+export function ProjectTimeline({ projectId, entries, canEdit }: { projectId: string; entries: Entry[]; canEdit: boolean }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [content, setContent] = useState("");
@@ -61,7 +61,7 @@ export function ProjectTimeline({ projectId, entries }: { projectId: string; ent
   return (
     <div className="space-y-4">
       {/* ── 添加进度 ── */}
-      <div className="card p-4">
+      {canEdit && <div className="card p-4">
         <div className="flex items-start gap-3">
           <div className="flex-1">
             <textarea
@@ -105,7 +105,7 @@ export function ProjectTimeline({ projectId, entries }: { projectId: string; ent
             )}
           </div>
         </div>
-      </div>
+      </div>}
 
       {/* ── 筛选 ── */}
       <div className="flex gap-1.5">

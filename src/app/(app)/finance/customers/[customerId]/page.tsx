@@ -3,6 +3,8 @@ import { BackButton } from "@/components/BackButton";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { CustomerReconciliationDetailClient } from "./CustomerReconciliationDetailClient";
+import { getReconciliationAccess } from "@/lib/reconciliationAccess";
+import { hasPermissionLevel } from "@/lib/permissionGuard";
 
 export default async function CustomerReconciliationPage({
   params,
@@ -12,13 +14,16 @@ export default async function CustomerReconciliationPage({
   searchParams: Promise<{ contractId?: string }>;
 }) {
   const session = await requireSession();
+  const access = await getReconciliationAccess(session, "READ");
+  const canEdit = hasPermissionLevel(access.permission, "EDIT");
+  const canManage = hasPermissionLevel(access.permission, "MANAGE");
   const { customerId } = await params;
   const sp = await searchParams;
 
   const [customer, reconciliations, users] = await Promise.all([
     // 客户基本信息 + 合同 + 联系人
     prisma.customer.findFirst({
-      where: { id: customerId, deletedAt: null },
+      where: { id: customerId, deletedAt: null, ...access.customerScope },
       include: {
         businessOwner: { select: { id: true, name: true, email: true } },
         contracts: {
@@ -57,7 +62,7 @@ export default async function CustomerReconciliationPage({
 
     // 所有未删除的月度对账记录（新→旧）
     prisma.customerReconciliation.findMany({
-      where: { customerId, deletedAt: null },
+      where: { AND: [{ customerId, deletedAt: null }, access.scope] },
       include: {
         contract: {
           select: {
@@ -90,11 +95,11 @@ export default async function CustomerReconciliationPage({
     }),
 
     // 所有用户（用于「提交给」选择器）
-    prisma.user.findMany({
+    canEdit ? prisma.user.findMany({
       where: { status: "APPROVED" },
       select: { id: true, name: true, role: true },
       orderBy: { name: "asc" },
-    }),
+    }) : Promise.resolve([]),
   ]);
 
   if (!customer) notFound();
@@ -136,7 +141,8 @@ export default async function CustomerReconciliationPage({
         reconciliations={reconciliations}
         currentUserId={session.userId}
         users={users}
-        readOnly={session.role === "CHANNEL"}
+        readOnly={!canEdit}
+        canManage={canManage}
       />
     </div>
   );

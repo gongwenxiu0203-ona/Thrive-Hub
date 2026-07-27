@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { isStaff } from "@/lib/permissions";
+import { requireFeaturePermission } from "@/lib/permissionGuard";
 
 export type WorkLogSaveResult = { ok: boolean; error?: string; workLogId?: string };
 
@@ -58,7 +58,7 @@ async function validateActiveReferences(payload: WorkLogPayload): Promise<string
 /** 创建工作日志（日志时间自动生成）*/
 export async function createWorkLog(payload: WorkLogPayload): Promise<WorkLogSaveResult> {
   const session = await requireSession();
-  if (!isStaff(session.role)) return { ok: false, error: "无权操作" };
+  await requireFeaturePermission(session, "worklogs.records", "EDIT");
   const err = validateWorkContent(payload);
   if (err) return { ok: false, error: err };
   const referenceError = await validateActiveReferences(payload);
@@ -84,6 +84,7 @@ export async function createWorkLog(payload: WorkLogPayload): Promise<WorkLogSav
 /** 更新工作日志（仅作者或管理员）*/
 export async function updateWorkLog(id: string, payload: WorkLogPayload): Promise<WorkLogSaveResult> {
   const session = await requireSession();
+  await requireFeaturePermission(session, "worklogs.records", "EDIT");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const log = await (prisma.workLog.findUnique as any)({ where: { id } });
   if (!log) return { ok: false, error: "日志不存在" };
@@ -167,6 +168,7 @@ async function syncWorkLogToProjects(
 /** 软删除（回收站 7 天可恢复；仅作者或管理员）*/
 export async function softDeleteWorkLog(id: string) {
   const session = await requireSession();
+  await requireFeaturePermission(session, "worklogs.records", "MANAGE");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const log = await (prisma.workLog.findUnique as any)({ where: { id } });
   if (!log) throw new Error("日志不存在");
@@ -188,7 +190,8 @@ export async function fetchProjectProgress(
   period: "WEEKLY" | "MONTHLY",
 ): Promise<{ ok: boolean; text: string; count: number }> {
   const session = await requireSession();
-  if (!isStaff(session.role) || !projectIds.length) return { ok: true, text: "", count: 0 };
+  await requireFeaturePermission(session, "worklogs.records", "READ");
+  if (!projectIds.length) return { ok: true, text: "", count: 0 };
 
   const days = period === "MONTHLY" ? 30 : 7;
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);

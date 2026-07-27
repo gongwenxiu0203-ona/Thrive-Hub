@@ -9,7 +9,7 @@ import { resolveUserPermission } from "@/lib/permissionResolver";
 export async function GET() {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
-  if (!hasPermissionLevel(await resolveUserPermission(session.userId, "affiliates"), "READ")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!hasPermissionLevel(await resolveUserPermission(session.userId, "affiliates.records"), "READ")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const user = await prisma.user.findUnique({
     where: { id: session.userId },
     select: { email: true, name: true },
@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
 
-  if (!hasPermissionLevel(await resolveUserPermission(session.userId, "affiliates"), "EDIT")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!hasPermissionLevel(await resolveUserPermission(session.userId, "affiliates.records"), "EDIT")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const body = await req.json().catch(() => ({}));
   const to = String(body.to ?? "").trim();
   const fromEmail = String(body.fromEmail ?? "").trim();
