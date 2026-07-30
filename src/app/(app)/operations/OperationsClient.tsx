@@ -22,8 +22,7 @@ import {
   deleteSnapshot, createAR, updateAR, deleteAR, refreshArRisks,
   createPipeline, updatePipelineStage, updatePipeline, deletePipeline,
 } from "@/actions/financeOperations";
-import type { PermLevel } from "@/lib/featurePermissions";
-import { hasPermissionLevel } from "@/lib/permissionGuard";
+import { PERM_LEVELS, type PermLevel } from "@/lib/featurePermissions";
 
 // =============================================================================
 // Types
@@ -101,6 +100,10 @@ type CountSummary = {
 };
 
 type Tab = "revenue" | "count" | "ar" | "pipeline" | "kpi";
+
+function hasPermissionLevel(actual: PermLevel, required: PermLevel): boolean {
+  return PERM_LEVELS.indexOf(actual) >= PERM_LEVELS.indexOf(required);
+}
 
 // =============================================================================
 // Main component
