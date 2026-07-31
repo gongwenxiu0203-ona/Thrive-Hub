@@ -988,12 +988,17 @@ model Settlement {
 
 // 渠道商分账记录（v2：一条记录含固费+抽佣两侧分账）
 model ChannelReconciliation {
-  id                       String  @id @default(cuid())
-  customerId               String
-  contractId               String? // 关联合同
-  customerReconciliationId String? // 关联月度客户对账（v3）
-  settlementId             String? // legacy 关联（保留向后兼容）
-  channelUserId            String // 渠道商 User id
+  id                         String  @id @default(cuid())
+  customerId                 String
+  contractId                 String? // 关联合同
+  customerReconciliationId   String? // 关联月度客户对账（v3）
+  settlementId               String? // legacy 关联（保留向后兼容）
+  channelUserId              String // 渠道商 User id
+  recordMode                 String  @default("LEGACY") // LEGACY | RULE_DRIVEN
+  fixedFeeReceivedCurrency   String  @default("USD")
+  commissionReceivedCurrency String  @default("USD")
+  channelPayeeSnapshot       String  @default("{}") // JSON 渠道商未来付款收款信息快照
+  auditLog                   String  @default("[]") // JSON append-only correction snapshots
 
   // 分账期
   periodNo    Int       @default(1) // 分账期数
@@ -1062,22 +1067,27 @@ model ChannelReconciliation {
   @@index([customerReconciliationId])
   @@index([periodStart])
   @@index([splitRuleId])
+  @@index([customerId, recordMode])
 }
 
 // 客户级渠道商分账规则配置（1 客户 : 1 规则）
 // ruleType=A：commissionRate 单一比例
 // ruleType=B：tieredRules JSON 数组 [{gmvMin,gmvMax,rate}]，累计 GMV 分段（个税口径）
 model ChannelSplitRule {
-  id             String   @id @default(cuid())
-  customerId     String   @unique
-  ruleType       String // "A" | "B"
-  splitEndDate   DateTime
-  fixedFeeRate   Float // 给渠道商的固费分账比例（小数 0.0~1.0）
-  commissionRate Float? // 仅 A：佣金分账比例（小数；UI 默认 0.15，可选 0.25 或自定义）
-  tieredRules    String   @default("[]") // 仅 B：JSON [{gmvMin:number,gmvMax:number|null,rate:number}]
-  createdById    String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id                          String   @id @default(cuid())
+  customerId                  String   @unique
+  ruleType                    String // "A" | "B"
+  splitEndDate                DateTime
+  fixedFeeRate                Float // 给渠道商的固费分账比例（小数 0.0~1.0）
+  commissionRate              Float? // 仅 A：佣金分账比例（小数；UI 默认 0.15，可选 0.25 或自定义）
+  tieredRules                 String   @default("[]") // 仅 B：JSON [{gmvMin:number,gmvMax:number|null,rate:number}]
+  commissionThresholdAmount   Float    @default(4400) // A：每客户每服务月实际到账佣金 USD 阈值
+  commissionThresholdCurrency String   @default("USD")
+  commissionBelowRate         Float    @default(0.15)
+  commissionAtOrAboveRate     Float    @default(0.25)
+  createdById                 String?
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime @updatedAt
 
   customer        Customer                @relation(fields: [customerId], references: [id])
   reconciliations ChannelReconciliation[]
@@ -1086,23 +1096,39 @@ model ChannelSplitRule {
 }
 
 model ChannelReconciliationPeriod {
-  id               String    @id @default(cuid())
-  reconciliationId String
-  periodIndex      Int
-  periodLabel      String?
-  fixedFeeAmount   Float?
-  commissionAmount Float?
-  fixedFeePaidAt   DateTime?
-  commissionPaidAt DateTime?
-  proofUrl         String?
-  notes            String?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  id                    String    @id @default(cuid())
+  reconciliationId      String
+  streamType            String    @default("BOTH") // BOTH | FIXED_FEE | COMMISSION
+  periodIndex           Int
+  periodLabel           String?
+  fixedFeeAmount        Float?
+  commissionAmount      Float?
+  fixedFeePaidAt        DateTime?
+  commissionPaidAt      DateTime?
+  periodStart           DateTime?
+  periodEnd             DateTime?
+  fixedFeeReceived      Float?
+  commissionReceived    Float?
+  fixedFeeReceivedCurrency String?
+  commissionReceivedCurrency String?
+  fixedFeeShareRate     Float?
+  commissionShareRate   Float?
+  fixedFeeShareAmount   Float?
+  commissionShareAmount Float?
+  fixedFeeSplitDate     DateTime?
+  commissionSplitDate   DateTime?
+  confirmedGmv          Float?
+  auditLog              String    @default("[]") // JSON append-only correction snapshots
+  proofUrl              String?
+  notes                 String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
   reconciliation ChannelReconciliation @relation(fields: [reconciliationId], references: [id], onDelete: Cascade)
 
   @@unique([reconciliationId, periodIndex])
   @@index([reconciliationId])
+  @@index([reconciliationId, streamType, periodIndex])
 }
 
 // 联盟商对账记录 — 合作审核通过后自动创建

@@ -15,9 +15,12 @@ export interface ExistingRule {
   fixedFeeRate: number;
   commissionRate: number | null;
   tieredRules: string;        // JSON
+  commissionThresholdAmount?: number;
+  commissionThresholdCurrency?: string;
+  commissionBelowRate?: number;
+  commissionAtOrAboveRate?: number;
 }
 
-const COMMISSION_PRESETS = [0.15, 0.25];
 const FIXED_PRESETS = [0.15, 0.25];
 
 function toPct(r: number | null | undefined): string {
@@ -57,7 +60,15 @@ export function ChannelSplitRuleModal({
   const [ruleType, setRuleType] = useState<"A" | "B">(existing?.ruleType ?? "A");
   const [splitEndDate, setSplitEndDate] = useState(existing?.splitEndDate?.slice(0, 10) ?? "2026-12-31");
   const [fixedFeePct, setFixedFeePct] = useState(toPct(existing?.fixedFeeRate ?? 0.15));
-  const [commissionPct, setCommissionPct] = useState(toPct(existing?.commissionRate ?? 0.15));
+  const [commissionThreshold, setCommissionThreshold] = useState(
+    String(existing?.commissionThresholdAmount ?? 4400),
+  );
+  const [commissionBelowPct, setCommissionBelowPct] = useState(
+    toPct(existing?.commissionBelowRate ?? 0.15),
+  );
+  const [commissionAtOrAbovePct, setCommissionAtOrAbovePct] = useState(
+    toPct(existing?.commissionAtOrAboveRate ?? 0.25),
+  );
   const [tiers, setTiers] = useState<Tier[]>(initialTiers);
 
   function addTier() {
@@ -82,10 +93,20 @@ export function ChannelSplitRuleModal({
     let commissionRate: number | null = null;
     let tieredRules: Tier[] = [];
     if (ruleType === "A") {
-      commissionRate = fromPct(commissionPct);
-      if (!Number.isFinite(commissionRate) || commissionRate < 0 || commissionRate > 1) {
-        setError("佣金分账比例需在 0~100 之间"); return;
+      const threshold = Number(commissionThreshold);
+      const belowRate = fromPct(commissionBelowPct);
+      const atOrAboveRate = fromPct(commissionAtOrAbovePct);
+      if (!Number.isFinite(threshold) || threshold < 0) {
+        setError("佣金到账阈值必须大于或等于 0"); return;
       }
+      if (!Number.isFinite(belowRate) || belowRate < 0 || belowRate > 1) {
+        setError("低于阈值的分账比例需在 0~100 之间"); return;
+      }
+      if (!Number.isFinite(atOrAboveRate) || atOrAboveRate < 0 || atOrAboveRate > 1) {
+        setError("达到阈值的分账比例需在 0~100 之间"); return;
+      }
+      // Keep the legacy flat-rate field populated for backward compatibility.
+      commissionRate = belowRate;
     } else {
       if (tiers.length === 0) { setError("请至少配置一档阶梯比例"); return; }
       for (const t of tiers) {
@@ -104,6 +125,10 @@ export function ChannelSplitRuleModal({
         fixedFeeRate: fixedRate,
         commissionRate,
         tieredRules,
+        commissionThresholdAmount: Number(commissionThreshold),
+        commissionThresholdCurrency: "USD",
+        commissionBelowRate: fromPct(commissionBelowPct),
+        commissionAtOrAboveRate: fromPct(commissionAtOrAbovePct),
       });
       if (!r.ok) { setError(r.error); return; }
       setOpen(false);
@@ -146,7 +171,7 @@ export function ChannelSplitRuleModal({
                 }`}
               >
                 <p className="font-semibold">A 基础分账规则</p>
-                <p className="mt-0.5 text-[11px] text-slate-500">单一固定比例的佣金分账</p>
+                <p className="mt-0.5 text-[11px] text-slate-500">按每个服务月的 Thraive 实际到账佣金判断比例</p>
               </button>
               <button
                 type="button"
@@ -198,31 +223,65 @@ export function ChannelSplitRuleModal({
                 </div>
               </div>
 
-              {/* A: single commission rate */}
+              {/* A: monthly received-commission threshold */}
               {ruleType === "A" && (
-                <div>
-                  <label className="label">佣金分账比例 <span className="text-rose-500">*</span></label>
-                  <div className="flex items-center gap-1">
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      max="100"
-                      className="input flex-1"
-                      value={commissionPct}
-                      onChange={(e) => setCommissionPct(e.target.value)}
-                      placeholder="15"
-                    />
-                    <span className="text-sm text-slate-500">%</span>
+                <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-4">
+                  <div className="mb-3">
+                    <p className="text-sm font-semibold text-blue-900">佣金渠道比例</p>
+                    <p className="mt-1 text-[11px] leading-5 text-blue-700">
+                      每一客户、每一服务月份，按 Thraive 实际到账销售佣金（USD）整档判断，不做累进分段。
+                    </p>
                   </div>
-                  <div className="mt-1 flex gap-1">
-                    {COMMISSION_PRESETS.map((p) => (
-                      <button key={p} type="button" onClick={() => setCommissionPct(toPct(p))}
-                        className="rounded px-2 py-0.5 text-[11px] text-slate-500 hover:bg-slate-100">
-                        {(p * 100).toFixed(0)}%
-                      </button>
-                    ))}
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div>
+                      <label className="label">佣金到账阈值</label>
+                      <div className="flex items-center gap-1">
+                        <span className="text-sm font-medium text-slate-500">$</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          className="input"
+                          value={commissionThreshold}
+                          onChange={(e) => setCommissionThreshold(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="label">低于阈值</label>
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          max="100"
+                          className="input"
+                          value={commissionBelowPct}
+                          onChange={(e) => setCommissionBelowPct(e.target.value)}
+                        />
+                        <span className="text-sm text-slate-500">%</span>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="label">达到或超过阈值</label>
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          max="100"
+                          className="input"
+                          value={commissionAtOrAbovePct}
+                          onChange={(e) => setCommissionAtOrAbovePct(e.target.value)}
+                        />
+                        <span className="text-sm text-slate-500">%</span>
+                      </div>
+                    </div>
                   </div>
+                  <p className="mt-3 rounded-lg bg-white/80 px-3 py-2 text-xs text-slate-600">
+                    当前规则：低于 ${Number(commissionThreshold || 0).toLocaleString()} 按 {commissionBelowPct || "0"}%；
+                    达到或超过 ${Number(commissionThreshold || 0).toLocaleString()} 按 {commissionAtOrAbovePct || "0"}%。
+                  </p>
                 </div>
               )}
 

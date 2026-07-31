@@ -11,7 +11,6 @@ import {
 } from "@/lib/contractAiExtract";
 import { contractFileBaseName } from "@/lib/contractFileName";
 import { bumpCustomerStatus } from "@/lib/customer";
-import { ensureReconciliationForContract } from "@/actions/channelSplit";
 import { syncContractProgressToProjects } from "@/actions/projects";
 import {
   commissionConfigFromLegacy,
@@ -523,19 +522,6 @@ export async function uploadExistingContract(
   const archived = true;
   await syncContractProgressToProjects(contract.id, "签署完成");
   await bumpCustomerStatus(customerId, "COOPERATING");
-  const archiveCustomer = await prisma.customer.findUnique({
-    where: { id: customerId },
-    select: { channelUserId: true },
-  });
-  if (archiveCustomer?.channelUserId) {
-    await ensureReconciliationForContract({
-      contractId: contract.id,
-      customerId,
-      channelUserId: archiveCustomer.channelUserId,
-      createdById: session.userId,
-    });
-  }
-
   const autoSubmitted = false;
 
   revalidatePath("/contracts");

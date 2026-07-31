@@ -27,6 +27,12 @@ export async function POST(
   try {
     const session = await requireSession();
     await requireFeaturePermission(session, "finance.channel_reconciliation", "MANAGE");
+    if (session.role !== "ADMIN" && session.role !== "USER") {
+      return NextResponse.json(
+        { error: "仅内部员工可生成渠道商分账周期" },
+        { status: 403 },
+      );
+    }
     const { id } = await params;
     const body = await req.json();
     const { totalPeriods, periodType, fixedFeeTotal, commissionTotal } = body;
@@ -37,9 +43,33 @@ export async function POST(
 
     const rec = await prisma.channelReconciliation.findFirst({
       where: { AND: [{ id }, channelReconciliationScope(session, session.role === "ADMIN" ? "all" : "mine")] },
-      include: { contract: { select: { startDate: true } } },
+      include: {
+        contract: { select: { startDate: true } },
+        periods: {
+          where: {
+            OR: [
+              { fixedFeePaidAt: { not: null } },
+              { commissionPaidAt: { not: null } },
+            ],
+          },
+          select: { id: true },
+          take: 1,
+        },
+      },
     });
     if (!rec) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    if (rec.periods.length > 0) {
+      return NextResponse.json(
+        { error: "已有向渠道商付款的锁定期，不能删除并重新生成周期" },
+        { status: 409 },
+      );
+    }
+    if (rec.recordMode === "RULE_DRIVEN") {
+      return NextResponse.json(
+        { error: "新版分账周期在创建时按服务周期自动生成，不能手动覆盖或重新生成" },
+        { status: 409 },
+      );
+    }
 
     const perFixedFee = fixedFeeTotal ? fixedFeeTotal / totalPeriods : null;
     const perCommission = commissionTotal ? commissionTotal / totalPeriods : null;

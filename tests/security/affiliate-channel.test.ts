@@ -155,14 +155,14 @@ test("channel reconciliation list is scoped to the signed-in channel", async () 
   assert.deepEqual(rows.map((row) => row.id), [ids.ownedReconciliation]);
 });
 
-test("channel reconciliation mutation cannot cross row scope", async () => {
+test("channel reconciliation writes are staff-only and remain row-scoped", async () => {
   const patchResponse = await jsonRequest(
     `/api/finance/channel-reconciliations/${ids.unrelatedReconciliation}`,
     "PATCH",
     { note: "cross-scope-write" },
     actors.channel,
   );
-  assert.equal(patchResponse.status, 404);
+  assert.equal(patchResponse.status, 403);
   assert.equal(
     (await prisma.channelReconciliation.findUniqueOrThrow({ where: { id: ids.unrelatedReconciliation } })).note,
     null,
@@ -177,18 +177,19 @@ test("channel reconciliation mutation cannot cross row scope", async () => {
   assert.ok(await prisma.channelReconciliation.findUnique({ where: { id: ids.unrelatedReconciliation } }));
 });
 
-test("channel reconciliation POST validates contract and customer scope", async () => {
+test("channel reconciliation POST rejects a channel actor", async () => {
   const response = await jsonRequest(
     "/api/finance/channel-reconciliations",
     "POST",
     {
       customerId: unrelatedCustomerId,
+      periodStart: "2026-07-01",
       contractId: ids.unrelatedContract,
-      channelUserId: actors.channel.id,
+      periodEnd: "2026-12-31",
     },
     actors.channel,
   );
-  assert.equal(response.status, 404);
+  assert.equal(response.status, 403);
   assert.equal(
     await prisma.channelReconciliation.count({
       where: { customerId: unrelatedCustomerId, createdById: actors.channel.id },

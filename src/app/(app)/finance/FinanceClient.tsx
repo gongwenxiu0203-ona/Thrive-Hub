@@ -14,7 +14,7 @@ import { formatDate } from "@/lib/utils";
 import { NewReconciliationModal } from "./NewReconciliationModal";
 import {
   NewChannelReconciliationModal,
-  type ConfirmedCustomerRec,
+  type ChannelReconciliationCustomerOption,
 } from "./NewChannelReconciliationModal";
 import { ChannelReconciliationDetailModal, type ChannelReconciliationRecord, type CRPeriod } from "./ChannelReconciliationDetailModal";
 import { ScopeToggle } from "@/components/ScopeToggle";
@@ -59,7 +59,17 @@ type TrashedReconciliation = {
   createdBy: { id: string; name: string };
 };
 
-type ChannelReconciliation = ChannelReconciliationRecord & {
+type ChannelReconciliation = Omit<ChannelReconciliationRecord, "periods"> & {
+  recordMode: string;
+  fixedFeeReceivedCurrency: string;
+  commissionReceivedCurrency: string;
+  periods: Array<CRPeriod & {
+    streamType: string;
+    fixedFeeShareAmount: number | null;
+    commissionShareAmount: number | null;
+    fixedFeeReceivedCurrency: string | null;
+    commissionReceivedCurrency: string | null;
+  }>;
   status: string;
   totalShareAmount: number;
   fixedFeeShareTotal: number;
@@ -97,7 +107,7 @@ type Props = {
   channelUsers: { id: string; name: string }[];
   allUsers: User[];
   currentUserId: string;
-  confirmedCustomerReconciliations: ConfirmedCustomerRec[];
+  channelReconciliationCustomers: ChannelReconciliationCustomerOption[];
   affiliateReconciliations: AffiliateRec[];
   canToggleScope?: boolean;
   currentView?: "mine" | "all";
@@ -293,7 +303,7 @@ export function FinanceClient({
   channelUsers,
   allUsers,
   currentUserId,
-  confirmedCustomerReconciliations,
+  channelReconciliationCustomers,
   affiliateReconciliations,
   canToggleScope = false,
   currentView = "mine",
@@ -303,11 +313,11 @@ export function FinanceClient({
   canManageCustomerReconciliations = true,
   canViewChannelReconciliations = true,
   canEditChannelReconciliations = true,
-  canManageChannelReconciliations: _canManageChannelReconciliations = true,
+  canManageChannelReconciliations = true,
   canCreateChannelReconciliations = true,
   canViewAffiliateReconciliations = true,
   canEditAffiliateReconciliations = true,
-  canManageAffiliateReconciliations: _canManageAffiliateReconciliations = true,
+  canManageAffiliateReconciliations = true,
 }: Props) {
   const router = useRouter();
 
@@ -334,6 +344,13 @@ export function FinanceClient({
     return canManageCustomerReconciliations;
   });
   const [tab, setTab] = useState<Tab>(tabs[0]?.key ?? "customers");
+  const canToggleCurrentTab =
+    canToggleScope &&
+    (tab === "channels"
+      ? canManageChannelReconciliations
+      : tab === "affiliates"
+        ? canManageAffiliateReconciliations
+        : canManageCustomerReconciliations);
 
   return (
     <div className="space-y-6">
@@ -341,7 +358,7 @@ export function FinanceClient({
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">财务对账</h1>
           <p className="mt-1 text-sm text-slate-500">
-            {canToggleScope
+            {canToggleCurrentTab
               ? currentView === "all"
                 ? "全部数据视图 · 管理客户、渠道商、联盟商的对账与结算"
                 : "仅显示与你相关的对账 · 可切换到「全部」"
@@ -349,7 +366,7 @@ export function FinanceClient({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {canToggleScope && <ScopeToggle />}
+          {canToggleCurrentTab && <ScopeToggle />}
           {tab === "customers" && canEditCustomerReconciliations && (
             <NewReconciliationModal
               customers={customers}
@@ -360,8 +377,10 @@ export function FinanceClient({
           )}
           {tab === "channels" && canEditChannelReconciliations && canCreateChannelReconciliations && (
             <NewChannelReconciliationModal
-              confirmedRecs={confirmedCustomerReconciliations}
-              channelUsers={channelUsers}
+              customers={channelReconciliationCustomers}
+              existingCustomerIds={channelReconciliations
+                .filter((record) => record.recordMode === "RULE_DRIVEN")
+                .map((record) => record.customer.id)}
               onCreated={() => router.refresh()}
             />
           )}
@@ -839,6 +858,36 @@ function CustomerReconciliationTab({
 
 // 分账结算状态聚合
 function channelShareStatusAgg(cr: ChannelReconciliation): { label: string; color: string } {
+  if (cr.recordMode === "RULE_DRIVEN") {
+    const fixed = cr.periods
+      .filter((period) => period.streamType !== "COMMISSION")
+      .map((period) => ({
+        recorded: period.fixedFeeShareAmount !== null,
+        paid: Boolean(period.fixedFeePaidAt),
+      }));
+    const commission = cr.periods
+      .filter((period) => period.streamType !== "FIXED_FEE")
+      .map((period) => ({
+        recorded: period.commissionShareAmount !== null,
+        paid: Boolean(period.commissionPaidAt),
+      }));
+    const entries = [...fixed, ...commission];
+    const recorded = entries.filter((entry) => entry.recorded).length;
+    const paid = entries.filter((entry) => entry.paid).length;
+    if (entries.length === 0 || recorded === 0) {
+      return { label: "待录入", color: "bg-slate-100 text-slate-500" };
+    }
+    if (paid === entries.length) {
+      return { label: "已完成", color: "bg-emerald-100 text-emerald-700" };
+    }
+    if (paid > 0) {
+      return { label: "进行中", color: "bg-amber-100 text-amber-700" };
+    }
+    if (recorded < entries.length) {
+      return { label: "录入中", color: "bg-blue-100 text-blue-700" };
+    }
+    return { label: "待付款", color: "bg-rose-100 text-rose-700" };
+  }
   if (cr.autoCreated) {
     const total = cr.periods.length;
     if (total === 0) return { label: "待配置", color: "bg-slate-100 text-slate-500" };
@@ -883,7 +932,7 @@ function ChannelReconciliationTab({
   const allChannelNames = [
     ...new Set(channelReconciliations.map((c) => c.channelUser.name)),
   ].sort();
-  const statusOptions = ["待结算", "待分账", "部分分账", "已分账"];
+  const statusOptions = ["待录入", "录入中", "待付款", "进行中", "已完成", "待结算", "待分账", "部分分账", "已分账"];
 
   // 应用筛选
   const filtered = channelReconciliations.filter((cr) => {
@@ -917,7 +966,45 @@ function ChannelReconciliationTab({
   }
 
   function sym(c: string) {
-    return c === "美金" ? "$" : "¥";
+    return ({
+      USD: "$",
+      RMB: "¥",
+      CNY: "¥",
+      EUR: "€",
+      GBP: "£",
+      HKD: "HK$",
+      美金: "$",
+      人民币: "¥",
+    } as Record<string, string>)[c] ?? `${c} `;
+  }
+
+  function moneyDisplay(amount: number, currency: string) {
+    return `${sym(currency)}${amount.toLocaleString("zh-CN", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
+  }
+
+  function streamMoneyDisplay(
+    periods: ChannelReconciliation["periods"],
+    kind: "fixed" | "commission",
+    fallbackCurrency: string,
+  ) {
+    const totals = new Map<string, number>();
+    for (const period of periods) {
+      const currency =
+        (kind === "fixed"
+          ? period.fixedFeeReceivedCurrency
+          : period.commissionReceivedCurrency) ?? fallbackCurrency;
+      const amount =
+        (kind === "fixed"
+          ? period.fixedFeeShareAmount
+          : period.commissionShareAmount) ?? 0;
+      totals.set(currency, (totals.get(currency) ?? 0) + amount);
+    }
+    return [...totals.entries()]
+      .map(([currency, amount]) => moneyDisplay(amount, currency))
+      .join(" · ");
   }
 
   function shareDisplay(
@@ -1021,8 +1108,12 @@ function ChannelReconciliationTab({
             ) : (
               filtered.map((cr) => {
                 const agg = channelShareStatusAgg(cr);
-                const paidFixed = cr.periods.filter((p: CRPeriod) => p.fixedFeePaidAt).length;
-                const paidComm  = cr.periods.filter((p: CRPeriod) => p.commissionPaidAt).length;
+                const fixedPeriods = cr.periods.filter((period) => period.streamType !== "COMMISSION");
+                const commissionPeriods = cr.periods.filter((period) => period.streamType !== "FIXED_FEE");
+                const paidFixed = fixedPeriods.filter((period) => period.fixedFeePaidAt).length;
+                const paidComm = commissionPeriods.filter((period) => period.commissionPaidAt).length;
+                const ruleFixedTotal = streamMoneyDisplay(fixedPeriods, "fixed", cr.fixedFeeReceivedCurrency);
+                const ruleCommissionTotal = streamMoneyDisplay(commissionPeriods, "commission", cr.commissionReceivedCurrency);
                 return (
                   <tr key={cr.id} className="hover:bg-slate-50">
                     <td className="px-4 py-3 font-medium text-slate-900">
@@ -1037,21 +1128,30 @@ function ChannelReconciliationTab({
                     </td>
                     <td className="px-4 py-3 text-slate-600">{cr.channelUser.name}</td>
                     <td className="px-4 py-3 text-xs text-slate-600">
-                      {cr.autoCreated ? (
+                      {cr.recordMode === "RULE_DRIVEN" ? (
+                        <span>{ruleFixedTotal}</span>
+                      ) : cr.autoCreated ? (
                         cr.fixedFeeTotal != null ? (
                           <span>¥{cr.fixedFeeTotal.toLocaleString()}</span>
                         ) : <span className="text-slate-400">待设置</span>
                       ) : shareDisplay(cr.fixedFeeReceived, cr.fixedFeeShareAmount, cr.fixedFeeShareRate, cr.fixedFeeShareCurrency, cr.fixedFeeActualDate)}
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-600">
-                      {cr.autoCreated ? (
+                      {cr.recordMode === "RULE_DRIVEN" ? (
+                        <span>{ruleCommissionTotal}</span>
+                      ) : cr.autoCreated ? (
                         cr.commissionTotal != null ? (
                           <span>¥{cr.commissionTotal.toLocaleString()}</span>
                         ) : <span className="text-slate-400">待设置</span>
                       ) : shareDisplay(cr.commissionReceived, cr.commissionShareAmount, cr.commissionShareRate, cr.commissionShareCurrency, cr.commissionActualDate)}
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-500">
-                      {cr.autoCreated ? (
+                      {cr.recordMode === "RULE_DRIVEN" ? (
+                        <div>
+                          <div>固费 {paidFixed}/{fixedPeriods.length}</div>
+                          <div className="text-slate-400">佣金 {paidComm}/{commissionPeriods.length}</div>
+                        </div>
+                      ) : cr.autoCreated ? (
                         cr.periods.length > 0 ? (
                           <div>
                             <div>{cr.periodType === "quarterly" ? "季度" : "月度"} · 共{cr.totalPeriods}期</div>
@@ -1070,7 +1170,7 @@ function ChannelReconciliationTab({
                         className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-brand-600 hover:bg-brand-50"
                       >
                         <Pencil className="h-3.5 w-3.5" />
-                        {cr.autoCreated ? "管理" : "编辑"}
+                        {cr.recordMode === "RULE_DRIVEN" || cr.autoCreated ? "管理" : "编辑"}
                       </Link>
                     </td>
                   </tr>

@@ -14,6 +14,12 @@ export async function POST(
   try {
     const session = await requireSession();
     await requireFeaturePermission(session, "finance.channel_reconciliation", "MANAGE");
+    if (session.role !== "ADMIN" && session.role !== "USER") {
+      return NextResponse.json(
+        { error: "仅内部员工可推送渠道商分账" },
+        { status: 403 },
+      );
+    }
     const { id } = await params;
     const { side } = await req.json();
     if (side !== "FIXED_FEE" && side !== "COMMISSION") {
@@ -30,6 +36,12 @@ export async function POST(
     });
     if (!rec) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+    if (rec.recordMode === "RULE_DRIVEN") {
+      return NextResponse.json(
+        { error: "新版分账请在对应服务周期填写向渠道商实际付款时间" },
+        { status: 409 },
+      );
     }
 
     const isFixed = side === "FIXED_FEE";

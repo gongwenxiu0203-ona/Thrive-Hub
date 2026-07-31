@@ -13,7 +13,6 @@ import {
 } from "@/lib/contractCommissionConfig";
 import { CONTRACT_REVIEW_FIELDS } from "@/lib/constants";
 import { syncContractProgressToProjects } from "@/actions/projects";
-import { ensureReconciliationForContract } from "@/actions/channelSplit";
 import { contractScope, customerScope } from "@/lib/dataScope";
 import type { PermLevel } from "@/lib/featurePermissions";
 import { requireFeaturePermission } from "@/lib/permissionGuard";
@@ -518,24 +517,6 @@ export async function markCompleted(id: string) {
   await syncContractProgressToProjects(id, "签署完成");
   if (contract.customerId) {
     await bumpCustomerStatus(contract.customerId, "COOPERATING");
-  }
-
-  // Auto-create channel reconciliation for customers with a channel user.
-  // If the customer has a ChannelSplitRule configured, generates rule-driven
-  // periods; otherwise falls back to a single stub record.
-  const customer = contract.customerId
-    ? await prisma.customer.findUnique({
-        where: { id: contract.customerId },
-        select: { channelUserId: true },
-      })
-    : null;
-  if (contract.customerId && customer?.channelUserId) {
-    await ensureReconciliationForContract({
-      contractId: id,
-      customerId: contract.customerId,
-      channelUserId: customer.channelUserId,
-      createdById: session.userId,
-    });
   }
 
   revalidatePath("/contracts");

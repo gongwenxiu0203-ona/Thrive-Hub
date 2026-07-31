@@ -11,6 +11,111 @@ export interface SplitPeriod {
   coefficient: number;          // coveredDays / daysInMonth (0 < c <= 1)
 }
 
+export type ChannelSplitStreamType = "FIXED_FEE" | "COMMISSION";
+
+export interface ServicePeriod {
+  periodIndex: number;
+  start: Date;
+  end: Date;
+  label: string;
+}
+
+const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1000;
+
+function shanghaiDateParts(date: Date): { year: number; month: number; day: number } {
+  const shifted = new Date(date.getTime() + SHANGHAI_OFFSET_MS);
+  return {
+    year: shifted.getUTCFullYear(),
+    month: shifted.getUTCMonth(),
+    day: shifted.getUTCDate(),
+  };
+}
+
+function atShanghaiStart(year: number, month: number, day: number): Date {
+  return new Date(Date.UTC(year, month, day, -8, 0, 0, 0));
+}
+
+function atShanghaiEnd(year: number, month: number, day: number): Date {
+  return new Date(Date.UTC(year, month, day, 15, 59, 59, 999));
+}
+
+function addShanghaiDays(date: Date, days: number, endOfDay = false): Date {
+  const { year, month, day } = shanghaiDateParts(date);
+  return endOfDay
+    ? atShanghaiEnd(year, month, day + days)
+    : atShanghaiStart(year, month, day + days);
+}
+
+export function formatShanghaiDay(date: Date): string {
+  const { year, month, day } = shanghaiDateParts(date);
+  return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/**
+ * Fixed fees use consecutive 30-calendar-day service periods.
+ * The final period is clipped to the configured reconciliation end date.
+ */
+export function splitFixedFeeServicePeriods(start: Date, end: Date): ServicePeriod[] {
+  if (end.getTime() < start.getTime()) return [];
+  const startParts = shanghaiDateParts(start);
+  const endParts = shanghaiDateParts(end);
+  const configuredEnd = atShanghaiEnd(endParts.year, endParts.month, endParts.day);
+  const periods: ServicePeriod[] = [];
+  let cursor = atShanghaiStart(startParts.year, startParts.month, startParts.day);
+
+  while (cursor.getTime() <= configuredEnd.getTime()) {
+    const fullCycleEnd = addShanghaiDays(cursor, 29, true);
+    const periodEnd =
+      fullCycleEnd.getTime() <= configuredEnd.getTime() ? fullCycleEnd : configuredEnd;
+    periods.push({
+      periodIndex: periods.length + 1,
+      start: cursor,
+      end: periodEnd,
+      label: `${formatShanghaiDay(cursor)} ~ ${formatShanghaiDay(periodEnd)}`,
+    });
+    cursor = addShanghaiDays(cursor, 30);
+  }
+
+  return periods;
+}
+
+/**
+ * Commission periods follow calendar months, clipped by the configured
+ * reconciliation start/end dates for the first and final month.
+ */
+export function splitCommissionServicePeriods(start: Date, end: Date): ServicePeriod[] {
+  if (end.getTime() < start.getTime()) return [];
+  const startParts = shanghaiDateParts(start);
+  const endParts = shanghaiDateParts(end);
+  const configuredStart = atShanghaiStart(startParts.year, startParts.month, startParts.day);
+  const configuredEnd = atShanghaiEnd(endParts.year, endParts.month, endParts.day);
+  const periods: ServicePeriod[] = [];
+  let year = startParts.year;
+  let month = startParts.month;
+
+  while (year < endParts.year || (year === endParts.year && month <= endParts.month)) {
+    const calendarStart = atShanghaiStart(year, month, 1);
+    const calendarEnd = atShanghaiEnd(year, month + 1, 0);
+    const periodStart =
+      calendarStart.getTime() < configuredStart.getTime() ? configuredStart : calendarStart;
+    const periodEnd =
+      calendarEnd.getTime() > configuredEnd.getTime() ? configuredEnd : calendarEnd;
+    periods.push({
+      periodIndex: periods.length + 1,
+      start: periodStart,
+      end: periodEnd,
+      label: `${year}-${String(month + 1).padStart(2, "0")}`,
+    });
+    month += 1;
+    if (month === 12) {
+      year += 1;
+      month = 0;
+    }
+  }
+
+  return periods;
+}
+
 /** Last day of the month containing d, at 23:59:59.999 */
 function endOfMonth(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999);
@@ -153,6 +258,58 @@ export const RULE_TYPE_LABELS: Record<string, string> = {
 
 export const COMMISSION_RATE_PRESETS = [0.15, 0.25];
 export const FIXED_FEE_RATE_PRESETS = [0.15, 0.25];
+
+export const BASIC_COMMISSION_THRESHOLD_USD = 4_400;
+export const BASIC_COMMISSION_BELOW_RATE = 0.15;
+export const BASIC_COMMISSION_AT_OR_ABOVE_RATE = 0.25;
+
+export function selectBasicCommissionRate(
+  receivedCommissionUsd: number,
+  threshold = BASIC_COMMISSION_THRESHOLD_USD,
+  belowRate = BASIC_COMMISSION_BELOW_RATE,
+  atOrAboveRate = BASIC_COMMISSION_AT_OR_ABOVE_RATE,
+): number {
+  if (!Number.isFinite(receivedCommissionUsd) || receivedCommissionUsd < 0) {
+    throw new Error("Thraive 到账销售佣金必须是非负数");
+  }
+  if (!Number.isFinite(threshold) || threshold < 0) {
+    throw new Error("佣金分账阈值无效");
+  }
+  if (![belowRate, atOrAboveRate].every((rate) => Number.isFinite(rate) && rate >= 0 && rate <= 1)) {
+    throw new Error("佣金分账比例必须在 0~100% 之间");
+  }
+  return receivedCommissionUsd < threshold ? belowRate : atOrAboveRate;
+}
+
+export function calculateShareAmount(received: number | null, rate: number): number {
+  if (received === null) return 0;
+  if (!Number.isFinite(received) || received < 0) throw new Error("到账金额必须是非负数");
+  if (!Number.isFinite(rate) || rate < 0 || rate > 1) throw new Error("分账比例必须在 0~100% 之间");
+  return Math.round((received * rate + Number.EPSILON) * 100) / 100;
+}
+
+export function parseNonNegativeAmount(value: unknown, fieldLabel: string): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount < 0) throw new Error(`${fieldLabel}必须是非负数`);
+  return amount;
+}
+
+export function appendAuditEntry(
+  raw: string | null | undefined,
+  entry: Record<string, unknown>,
+): string {
+  let entries: unknown[] = [];
+  try {
+    const parsed = JSON.parse(raw || "[]");
+    if (!Array.isArray(parsed)) throw new Error("分账审计日志格式无效");
+    entries = parsed;
+  } catch {
+    throw new Error("分账审计日志格式无效，已拒绝覆盖历史审计数据");
+  }
+  entries.push(entry);
+  return JSON.stringify(entries);
+}
 
 /**
  * Add N workdays to a date (skips Sat/Sun; does NOT consider PRC holidays).

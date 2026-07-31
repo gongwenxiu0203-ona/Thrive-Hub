@@ -1,164 +1,151 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { FEE_CURRENCY_OPTIONS } from "@/lib/constants";
-import { formatDate } from "@/lib/utils";
+import {
+  CalendarDays,
+  CircleAlert,
+  FileText,
+  Landmark,
+  Store,
+} from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 
-type Settlement = {
+const CURRENCY_OPTIONS = ["USD", "RMB", "EUR", "GBP", "HKD"] as const;
+
+export type ChannelSplitRuleOption = {
   id: string;
-  type: string;
-  status: string;
-  amount: number;
-  actualDate: Date | string | null;
+  ruleType: "A" | "B";
+  splitEndDate: string;
+  fixedFeeRate: number;
+  commissionThresholdAmount: number;
+  commissionThresholdCurrency: string;
+  commissionBelowRate: number;
+  commissionAtOrAboveRate: number;
 };
 
-export type ConfirmedCustomerRec = {
+export type ChannelReconciliationContractOption = {
   id: string;
-  customerId: string;
-  contractId: string;
-  periodStart: Date | string;
-  periodEnd: Date | string;
-  feeAmount: number;
-  commissionAmount: number;
-  finalCommissionAmount: number | null;
-  fixedFeeCurrency: string;
-  commissionCurrency: string;
-  customer: { id: string; brandName: string };
-  contract: { id: string; contractNo: string };
-  settlements: Settlement[];
+  contractNo: string;
+  startDate: string | null;
+  endDate: string | null;
+  feeCurrency: string | null;
 };
 
-type ChannelUser = { id: string; name: string };
-
-type Props = {
-  confirmedRecs: ConfirmedCustomerRec[];
-  channelUsers: ChannelUser[];
-  onCreated: () => void;
+export type ChannelReconciliationCustomerOption = {
+  id: string;
+  brandName: string;
+  channelUser: { id: string; name: string } | null;
+  splitRule: ChannelSplitRuleOption | null;
+  contracts: ChannelReconciliationContractOption[];
 };
+
+function pct(value: number) {
+  return `${(value * 100).toFixed(2).replace(/\.?0+$/, "")}%`;
+}
+
+function dateValue(value: string | null | undefined) {
+  return value?.slice(0, 10) ?? "";
+}
+
+function normalizeCurrency(value: string | null | undefined) {
+  if (value === "美金" || value === "美元") return "USD";
+  if (value === "人民币" || value === "CNY") return "RMB";
+  return CURRENCY_OPTIONS.includes(value as (typeof CURRENCY_OPTIONS)[number])
+    ? value!
+    : "USD";
+}
 
 export function NewChannelReconciliationModal({
-  confirmedRecs,
-  channelUsers,
+  customers,
+  existingCustomerIds,
   onCreated,
-}: Props) {
+}: {
+  customers: ChannelReconciliationCustomerOption[];
+  existingCustomerIds: string[];
+  onCreated: () => void;
+}) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [customerId, setCustomerId] = useState("");
   const [contractId, setContractId] = useState("");
-  const [customerReconciliationId, setCustomerReconciliationId] = useState("");
-  const [channelUserId, setChannelUserId] = useState("");
-  const [periodNo, setPeriodNo] = useState("1");
-  const [fixedFeeShareRate, setFixedFeeShareRate] = useState("");
-  const [fixedFeeShareCurrency, setFixedFeeShareCurrency] = useState("人民币");
-  const [commissionShareRate, setCommissionShareRate] = useState("");
-  const [commissionShareCurrency, setCommissionShareCurrency] =
-    useState("人民币");
+  const [periodStart, setPeriodStart] = useState("");
+  const [periodEnd, setPeriodEnd] = useState("");
+  const [fixedFeeReceivedCurrency, setFixedFeeReceivedCurrency] = useState("USD");
+  const [commissionReceivedCurrency, setCommissionReceivedCurrency] = useState("USD");
   const [note, setNote] = useState("");
-  const router = useRouter();
 
-  // 按客户聚合
-  const customers = useMemo(() => {
-    const map = new Map<string, { id: string; brandName: string }>();
-    for (const r of confirmedRecs) {
-      if (!map.has(r.customerId)) {
-        map.set(r.customerId, r.customer);
-      }
-    }
-    return [...map.values()].sort((a, b) =>
-      a.brandName.localeCompare(b.brandName),
-    );
-  }, [confirmedRecs]);
+  const selectable = useMemo(() => {
+    const used = new Set(existingCustomerIds);
+    return customers.filter((customer) => !used.has(customer.id));
+  }, [customers, existingCustomerIds]);
+  const selected = selectable.find((customer) => customer.id === customerId);
+  const selectedContract = selected?.contracts.find((contract) => contract.id === contractId);
+  const commissionCurrencyMismatch =
+    selected?.splitRule?.ruleType === "A" &&
+    commissionReceivedCurrency !== selected.splitRule.commissionThresholdCurrency;
 
-  // 按客户筛选合同
-  const contracts = useMemo(() => {
-    if (!customerId) return [];
-    const map = new Map<string, { id: string; contractNo: string }>();
-    for (const r of confirmedRecs) {
-      if (r.customerId === customerId && !map.has(r.contractId)) {
-        map.set(r.contractId, r.contract);
-      }
-    }
-    return [...map.values()];
-  }, [confirmedRecs, customerId]);
-
-  // 按客户 + 合同筛选月度对账
-  const monthlyRecs = useMemo(() => {
-    if (!customerId || !contractId) return [];
-    return confirmedRecs.filter(
-      (r) => r.customerId === customerId && r.contractId === contractId,
-    );
-  }, [confirmedRecs, customerId, contractId]);
-
-  const selectedRec = monthlyRecs.find(
-    (r) => r.id === customerReconciliationId,
-  );
-
-  // 预览到账金额（仅当对应 Settlement 已结算）
-  const fixedFeeSettlement = selectedRec?.settlements.find(
-    (s) => s.type === "FIXED_FEE",
-  );
-  const commissionSettlement = selectedRec?.settlements.find(
-    (s) => s.type === "COMMISSION",
-  );
-  const fixedFeeReceived =
-    fixedFeeSettlement?.status === "SETTLED" ? fixedFeeSettlement.amount : null;
-  const commissionReceived =
-    commissionSettlement?.status === "SETTLED"
-      ? commissionSettlement.amount
-      : null;
-
-  function parsePct(s: string): number {
-    if (!s) return 0;
-    const n = Number(s.replace(/[%\s]/g, ""));
-    if (!Number.isFinite(n)) return 0;
-    return n > 1 ? n / 100 : n;
+  function applyContract(
+    contract: ChannelReconciliationContractOption | undefined,
+    customer: ChannelReconciliationCustomerOption | undefined,
+  ) {
+    setContractId(contract?.id ?? "");
+    setPeriodStart(dateValue(contract?.startDate));
+    setPeriodEnd(dateValue(contract?.endDate ?? customer?.splitRule?.splitEndDate));
+    setFixedFeeReceivedCurrency(normalizeCurrency(contract?.feeCurrency));
   }
-  const fxRate = parsePct(fixedFeeShareRate);
-  const cmRate = parsePct(commissionShareRate);
-  const fxAmount = fixedFeeReceived != null ? fixedFeeReceived * fxRate : null;
-  const cmAmount =
-    commissionReceived != null ? commissionReceived * cmRate : null;
+
+  function selectCustomer(nextCustomerId: string) {
+    setCustomerId(nextCustomerId);
+    setError(null);
+    const customer = selectable.find((item) => item.id === nextCustomerId);
+    applyContract(customer?.contracts.length === 1 ? customer.contracts[0] : undefined, customer);
+  }
 
   function reset() {
     setCustomerId("");
     setContractId("");
-    setCustomerReconciliationId("");
-    setChannelUserId("");
-    setPeriodNo("1");
-    setFixedFeeShareRate("");
-    setCommissionShareRate("");
+    setPeriodStart("");
+    setPeriodEnd("");
+    setFixedFeeReceivedCurrency("USD");
+    setCommissionReceivedCurrency("USD");
     setNote("");
+    setError(null);
   }
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!customerId || !contractId || !channelUserId) return;
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    if (!selected?.channelUser) return setError("该客户尚未关联已审核渠道商。");
+    if (!selected.splitRule) return setError("该客户尚未配置分账规则。");
+    if (!selectedContract) return setError("请选择关联合同。");
+    if (!periodStart || !periodEnd) return setError("请填写分账开始和结束时间。");
+    if (periodEnd < periodStart) return setError("分账结束时间不能早于开始时间。");
+    if (commissionCurrencyMismatch) {
+      return setError(
+        `A 类佣金门槛按 ${selected.splitRule.commissionThresholdCurrency} 判断，请将到账销售佣金货币改为相同货币。`,
+      );
+    }
+
     setLoading(true);
+    setError(null);
     try {
-      const res = await fetch("/api/finance/channel-reconciliations", {
+      const response = await fetch("/api/finance/channel-reconciliations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           customerId,
           contractId,
-          customerReconciliationId: customerReconciliationId || undefined,
-          channelUserId,
-          periodNo: Number(periodNo) || 1,
-          periodStart: selectedRec?.periodStart,
-          periodEnd: selectedRec?.periodEnd,
-          fixedFeeShareRate: fxRate,
-          fixedFeeShareCurrency,
-          commissionShareRate: cmRate,
-          commissionShareCurrency,
-          note,
+          periodStart,
+          periodEnd,
+          fixedFeeReceivedCurrency,
+          commissionReceivedCurrency,
+          note: note.trim() || null,
         }),
       });
-      if (!res.ok) {
-        alert((await res.json()).error ?? "创建失败");
-        return;
-      }
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) return setError(payload.error ?? "创建失败");
       setOpen(false);
       reset();
       onCreated();
@@ -168,13 +155,10 @@ export function NewChannelReconciliationModal({
     }
   }
 
-  const fxSym = fixedFeeShareCurrency === "美金" ? "$" : "¥";
-  const cmSym = commissionShareCurrency === "美金" ? "$" : "¥";
-
   return (
     <>
-      <button onClick={() => setOpen(true)} className="btn-primary">
-        + 新建渠道分账
+      <button type="button" onClick={() => setOpen(true)} className="btn-primary">
+        + 新建渠道商分账
       </button>
       <Modal
         open={open}
@@ -182,295 +166,208 @@ export function NewChannelReconciliationModal({
           setOpen(false);
           reset();
         }}
-        title="新建渠道分账"
-        wide
+        title="新建渠道商分账"
+        description="关联合同后，固费按合同合作日滚动生成 30 天服务周期；销售佣金按自然月生成。"
+        size="lg"
       >
-        <div>
-          <p className="mb-4 text-xs text-slate-500">
-            关联已确认的客户月度对账，到账金额自动同步（未结算前显示「—」）
-          </p>
-          <form onSubmit={submit} className="space-y-4">
-            {/* 客户 / 合同 / 月度对账 */}
-            <div className="grid gap-3 sm:grid-cols-2">
+        <form onSubmit={submit} className="space-y-5">
+          <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+            <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-700">
+              <Store className="h-4 w-4 text-brand-600" />
+              客户与合同
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
               <div>
                 <label className="label">客户 *</label>
                 <select
                   className="input"
                   value={customerId}
-                  onChange={(e) => {
-                    setCustomerId(e.target.value);
-                    setContractId("");
-                    setCustomerReconciliationId("");
-                  }}
+                  onChange={(event) => selectCustomer(event.target.value)}
                   required
                 >
-                  <option value="">请选择</option>
-                  {customers.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.brandName}
+                  <option value="">请选择客户</option>
+                  {selectable.map((customer) => (
+                    <option key={customer.id} value={customer.id}>
+                      {customer.brandName}
                     </option>
                   ))}
                 </select>
-                {customers.length === 0 && (
-                  <p className="mt-1 text-xs text-rose-500">
-                    暂无已确认的客户对账，无法新建渠道分账
-                  </p>
-                )}
               </div>
-
               <div>
                 <label className="label">关联合同 *</label>
-                <select
-                  className="input"
-                  value={contractId}
-                  onChange={(e) => {
-                    setContractId(e.target.value);
-                    setCustomerReconciliationId("");
-                  }}
-                  disabled={!customerId}
-                  required
-                >
-                  <option value="">请选择</option>
-                  {contracts.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.contractNo}
+                <div className="relative">
+                  <FileText className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                  <select
+                    className="input pl-9"
+                    value={contractId}
+                    disabled={!selected || selected.contracts.length === 0}
+                    onChange={(event) => {
+                      const contract = selected?.contracts.find((item) => item.id === event.target.value);
+                      applyContract(contract, selected);
+                    }}
+                    required
+                  >
+                    <option value="">
+                      {!selected
+                        ? "请先选择客户"
+                        : selected.contracts.length === 0
+                          ? "该客户暂无有效合同"
+                          : "请选择合同"}
                     </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="sm:col-span-2">
-                <label className="label">关联月度对账 *</label>
-                <select
-                  className="input"
-                  value={customerReconciliationId}
-                  onChange={(e) => setCustomerReconciliationId(e.target.value)}
-                  disabled={!contractId}
-                  required
-                >
-                  <option value="">请选择月度对账周期</option>
-                  {monthlyRecs.map((r) => {
-                    const sym = r.commissionCurrency === "美金" ? "$" : "¥";
-                    return (
-                      <option key={r.id} value={r.id}>
-                        {formatDate(r.periodStart)} ~ {formatDate(r.periodEnd)}
-                        {`  ·  固费 ${sym}${r.feeAmount.toLocaleString()}  ·  抽佣 ${sym}${(r.finalCommissionAmount ?? r.commissionAmount).toLocaleString("zh-CN", { minimumFractionDigits: 2 })}`}
+                    {selected?.contracts.map((contract) => (
+                      <option key={contract.id} value={contract.id}>
+                        {contract.contractNo}
                       </option>
-                    );
-                  })}
-                </select>
+                    ))}
+                  </select>
+                </div>
+                {selected?.contracts.length === 1 && (
+                  <p className="mt-1 text-xs text-emerald-600">已自动关联唯一有效合同</p>
+                )}
+                {selected && selected.contracts.length > 1 && (
+                  <p className="mt-1 text-xs text-amber-600">检测到多份有效合同，请手动选择</p>
+                )}
               </div>
-
               <div>
-                <label className="label">渠道商 *</label>
-                <select
-                  className="input"
-                  value={channelUserId}
-                  onChange={(e) => setChannelUserId(e.target.value)}
-                  required
-                >
-                  <option value="">请选择渠道商用户</option>
-                  {channelUsers.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="label">分账期数</label>
+                <label className="label">渠道商（自动关联）</label>
                 <input
-                  type="number"
-                  className="input"
-                  value={periodNo}
-                  onChange={(e) => setPeriodNo(e.target.value)}
-                  min={1}
+                  className="input bg-white"
+                  readOnly
+                  value={selected?.channelUser?.name ?? "选择客户后显示"}
+                />
+              </div>
+              <div>
+                <label className="label">分账规则（自动关联）</label>
+                <input
+                  className="input bg-white"
+                  readOnly
+                  value={
+                    !selected?.splitRule
+                      ? "选择客户后显示"
+                      : selected.splitRule.ruleType === "A"
+                        ? `A 类：固费 ${pct(selected.splitRule.fixedFeeRate)}；佣金按到账金额分档`
+                        : `B 类：固费 ${pct(selected.splitRule.fixedFeeRate)}；佣金按阶梯规则`
+                  }
                 />
               </div>
             </div>
-
-            {/* 待支付金额预览（来自客户对账） */}
-            {selectedRec && (
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs">
-                <p className="mb-1.5 font-medium text-slate-600">
-                  客户对账确认数据（来源：{selectedRec.contract.contractNo}）
-                </p>
-                <div className="grid grid-cols-2 gap-2 text-slate-600">
-                  <div>
-                    待支付固费：
-                    <strong className="text-slate-800">
-                      {selectedRec.fixedFeeCurrency === "美金" ? "$" : "¥"}
-                      {selectedRec.feeAmount.toLocaleString()}
-                    </strong>
-                  </div>
-                  <div>
-                    待支付抽佣：
-                    <strong className="text-slate-800">
-                      {selectedRec.commissionCurrency === "美金" ? "$" : "¥"}
-                      {(
-                        selectedRec.finalCommissionAmount ??
-                        selectedRec.commissionAmount
-                      ).toLocaleString("zh-CN", { minimumFractionDigits: 2 })}
-                    </strong>
-                  </div>
-                  <div>
-                    到账固费：
-                    <strong
-                      className={
-                        fixedFeeReceived != null
-                          ? "text-emerald-700"
-                          : "text-slate-400"
-                      }
-                    >
-                      {fixedFeeReceived != null
-                        ? `${selectedRec.fixedFeeCurrency === "美金" ? "$" : "¥"}${fixedFeeReceived.toLocaleString()}`
-                        : "— 待结算"}
-                    </strong>
-                  </div>
-                  <div>
-                    到账抽佣：
-                    <strong
-                      className={
-                        commissionReceived != null
-                          ? "text-emerald-700"
-                          : "text-slate-400"
-                      }
-                    >
-                      {commissionReceived != null
-                        ? `${selectedRec.commissionCurrency === "美金" ? "$" : "¥"}${commissionReceived.toLocaleString()}`
-                        : "— 待结算"}
-                    </strong>
-                  </div>
-                </div>
+            {selected && (!selected.channelUser || !selected.splitRule || selected.contracts.length === 0) && (
+              <div className="mt-3 flex gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                <CircleAlert className="h-4 w-4 shrink-0" />
+                {!selected.channelUser
+                  ? "客户未关联有效渠道商，暂不能创建。"
+                  : !selected.splitRule
+                    ? "客户未配置分账规则，暂不能创建。"
+                    : "客户暂无有效合同，暂不能创建。"}
               </div>
             )}
+          </section>
 
-            {/* 固费分账设置 */}
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-3 space-y-3">
-              <p className="text-xs font-semibold text-emerald-800">
-                固费分账设置
-              </p>
-              <div className="grid gap-3 sm:grid-cols-3">
-                <div>
-                  <label className="label text-xs">固费分账比例 *</label>
-                  <input
-                    className="input"
-                    placeholder="如 30%"
-                    value={fixedFeeShareRate}
-                    onChange={(e) => setFixedFeeShareRate(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="label text-xs">货币</label>
-                  <select
-                    className="input"
-                    value={fixedFeeShareCurrency}
-                    onChange={(e) => setFixedFeeShareCurrency(e.target.value)}
-                  >
-                    {FEE_CURRENCY_OPTIONS.map((o) => (
-                      <option key={o} value={o}>
-                        {o}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="label text-xs">固费分账金额（预览）</label>
-                  <input
-                    className="input bg-slate-50"
-                    readOnly
-                    value={
-                      fxAmount != null
-                        ? `${fxSym}${fxAmount.toLocaleString("zh-CN", { minimumFractionDigits: 2 })}`
-                        : "— 待结算后自动计算"
-                    }
-                  />
-                </div>
+          <section className="rounded-xl border border-slate-200 p-4">
+            <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-700">
+              <CalendarDays className="h-4 w-4 text-brand-600" />
+              分账范围
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="label">开始时间 *</label>
+                <input
+                  type="date"
+                  className="input"
+                  value={periodStart}
+                  onChange={(event) => setPeriodStart(event.target.value)}
+                  required
+                />
+                <p className="mt-1 text-xs text-slate-400">默认读取合同开始合作时间，可手动更改</p>
+              </div>
+              <div>
+                <label className="label">结束时间 *</label>
+                <input
+                  type="date"
+                  className="input"
+                  min={periodStart || undefined}
+                  value={periodEnd}
+                  onChange={(event) => setPeriodEnd(event.target.value)}
+                  required
+                />
               </div>
             </div>
+          </section>
 
-            {/* 抽佣分账设置 */}
-            <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-3 space-y-3">
-              <p className="text-xs font-semibold text-amber-800">
-                抽佣分账设置
-              </p>
-              <div className="grid gap-3 sm:grid-cols-3">
-                <div>
-                  <label className="label text-xs">抽佣分账比例 *</label>
-                  <input
-                    className="input"
-                    placeholder="如 20%"
-                    value={commissionShareRate}
-                    onChange={(e) => setCommissionShareRate(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="label text-xs">货币</label>
-                  <select
-                    className="input"
-                    value={commissionShareCurrency}
-                    onChange={(e) => setCommissionShareCurrency(e.target.value)}
-                  >
-                    {FEE_CURRENCY_OPTIONS.map((o) => (
-                      <option key={o} value={o}>
-                        {o}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="label text-xs">抽佣分账金额（预览）</label>
-                  <input
-                    className="input bg-slate-50"
-                    readOnly
-                    value={
-                      cmAmount != null
-                        ? `${cmSym}${cmAmount.toLocaleString("zh-CN", { minimumFractionDigits: 2 })}`
-                        : "— 待结算后自动计算"
-                    }
-                  />
-                </div>
+          <section className="rounded-xl border border-slate-200 p-4">
+            <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-700">
+              <Landmark className="h-4 w-4 text-brand-600" />
+              到账金额货币
+            </div>
+            <p className="mb-3 text-xs text-slate-500">
+              创建后各期金额始终沿用这里选择的货币。
+            </p>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="label">到账固费货币 *</label>
+                <select
+                  className="input"
+                  value={fixedFeeReceivedCurrency}
+                  onChange={(event) => setFixedFeeReceivedCurrency(event.target.value)}
+                >
+                  {CURRENCY_OPTIONS.map((currency) => (
+                    <option key={currency} value={currency}>{currency}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label">到账销售佣金货币 *</label>
+                <select
+                  className="input"
+                  value={commissionReceivedCurrency}
+                  onChange={(event) => setCommissionReceivedCurrency(event.target.value)}
+                >
+                  {CURRENCY_OPTIONS.map((currency) => (
+                    <option key={currency} value={currency}>{currency}</option>
+                  ))}
+                </select>
+                {commissionCurrencyMismatch && (
+                  <p className="mt-1 text-xs text-amber-600">
+                    A 类规则门槛货币为 {selected?.splitRule?.commissionThresholdCurrency}，
+                    当前货币无法计算，请选择相同货币（通常为 USD）。
+                  </p>
+                )}
               </div>
             </div>
+          </section>
 
-            <div>
-              <label className="label text-xs">备注（可选）</label>
-              <textarea
-                className="input resize-none text-sm"
-                rows={2}
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-              />
-            </div>
-
-            <div className="flex justify-end gap-3 border-t border-slate-100 pt-3">
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={() => {
-                  setOpen(false);
-                  reset();
-                }}
-              >
-                取消
-              </button>
-              <button
-                type="submit"
-                className="btn-primary"
-                disabled={
-                  loading ||
-                  !customerId ||
-                  !contractId ||
-                  !customerReconciliationId ||
-                  !channelUserId
-                }
-              >
-                {loading ? "创建中…" : "创建分账"}
-              </button>
-            </div>
-          </form>
-        </div>
+          <div>
+            <label className="label">备注</label>
+            <textarea
+              className="input min-h-20"
+              value={note}
+              onChange={(event) => setNote(event.target.value)}
+            />
+          </div>
+          {error && (
+            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>
+          )}
+          <div className="flex justify-end gap-2">
+            <button type="button" className="btn-secondary" onClick={() => setOpen(false)}>
+              取消
+            </button>
+            <button
+              type="submit"
+              className="btn-primary"
+              disabled={
+                loading ||
+                !selectedContract ||
+                !selected?.channelUser ||
+                !selected?.splitRule ||
+                commissionCurrencyMismatch ||
+                !periodStart ||
+                !periodEnd
+              }
+            >
+              {loading ? "创建中…" : "创建并生成期数"}
+            </button>
+          </div>
+        </form>
       </Modal>
     </>
   );

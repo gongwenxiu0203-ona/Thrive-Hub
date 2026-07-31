@@ -6,9 +6,11 @@ import { requireSession } from "@/lib/session";
 import { channelReconciliationScope, customerScope } from "@/lib/dataScope";
 import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
 import {
-  splitPeriodsByMonth,
   parseTieredRules,
   addWorkdays,
+  BASIC_COMMISSION_AT_OR_ABOVE_RATE,
+  BASIC_COMMISSION_BELOW_RATE,
+  BASIC_COMMISSION_THRESHOLD_USD,
   type PeriodDerived,
 } from "@/lib/channelSplit";
 
@@ -17,7 +19,11 @@ export interface SplitRuleInput {
   ruleType: "A" | "B";
   splitEndDate: string;          // ISO yyyy-mm-dd or full ISO
   fixedFeeRate: number;          // 0~1
-  commissionRate?: number | null; // 0~1, A only
+  commissionRate?: number | null; // legacy A compatibility
+  commissionThresholdAmount?: number;
+  commissionThresholdCurrency?: string;
+  commissionBelowRate?: number;
+  commissionAtOrAboveRate?: number;
   tieredRules?: { gmvMin: number; gmvMax: number | null; rate: number }[]; // B only
 }
 
@@ -31,8 +37,11 @@ function validateInput(input: SplitRuleInput): string | null {
     return "固费分账比例需在 0~100% 之间";
   }
   if (input.ruleType === "A") {
-    const r = input.commissionRate;
-    if (r === null || r === undefined || !Number.isFinite(r) || r < 0 || r > 1) {
+    const threshold = input.commissionThresholdAmount ?? BASIC_COMMISSION_THRESHOLD_USD;
+    const below = input.commissionBelowRate ?? BASIC_COMMISSION_BELOW_RATE;
+    const above = input.commissionAtOrAboveRate ?? BASIC_COMMISSION_AT_OR_ABOVE_RATE;
+    if (!Number.isFinite(threshold) || threshold < 0) return "佣金分账阈值必须是非负数";
+    if (![below, above].every((r) => Number.isFinite(r) && r >= 0 && r <= 1)) {
       return "佣金分账比例需在 0~100% 之间";
     }
   } else {
@@ -66,10 +75,19 @@ export async function upsertChannelSplitRule(input: SplitRuleInput): Promise<Res
     ruleType: input.ruleType,
     splitEndDate: new Date(input.splitEndDate),
     fixedFeeRate: input.fixedFeeRate,
-    commissionRate: input.ruleType === "A" ? (input.commissionRate ?? null) : null,
+    commissionRate: input.ruleType === "A"
+      ? (input.commissionBelowRate ?? BASIC_COMMISSION_BELOW_RATE)
+      : null,
     tieredRules: input.ruleType === "B"
       ? JSON.stringify(parseTieredRules(input.tieredRules ?? []))
       : "[]",
+    commissionThresholdAmount:
+      input.commissionThresholdAmount ?? BASIC_COMMISSION_THRESHOLD_USD,
+    commissionThresholdCurrency: "USD",
+    commissionBelowRate:
+      input.commissionBelowRate ?? BASIC_COMMISSION_BELOW_RATE,
+    commissionAtOrAboveRate:
+      input.commissionAtOrAboveRate ?? BASIC_COMMISSION_AT_OR_ABOVE_RATE,
     createdById: session.userId,
   };
 
@@ -77,22 +95,6 @@ export async function upsertChannelSplitRule(input: SplitRuleInput): Promise<Res
   const rule = existing
     ? await prisma.channelSplitRule.update({ where: { id: existing.id }, data })
     : await prisma.channelSplitRule.create({ data });
-
-  // After (re)configuring rule, back-fill any signed contracts that lack a rule-driven reconciliation.
-  if (customer.channelUserId) {
-    const signedContracts = await prisma.contract.findMany({
-      where: { customerId: input.customerId, status: "COMPLETED", deletedAt: null },
-      select: { id: true },
-    });
-    for (const c of signedContracts) {
-      await ensureReconciliationForContract({
-        contractId: c.id,
-        customerId: input.customerId,
-        channelUserId: customer.channelUserId,
-        createdById: session.userId,
-      });
-    }
-  }
 
   revalidatePath(`/customers/${input.customerId}`);
   revalidatePath("/finance");
@@ -112,97 +114,6 @@ export async function deleteChannelSplitRule(customerId: string): Promise<Result
   await prisma.channelSplitRule.deleteMany({ where: { customerId } });
   revalidatePath(`/customers/${customerId}`);
   return { ok: true };
-}
-
-/** Idempotent. Ensures a rule-driven ChannelReconciliation exists for (contract, splitRule).
- * If the customer has no rule, falls back to a single stub (matches legacy behavior). */
-export async function ensureReconciliationForContract(args: {
-  contractId: string;
-  customerId: string;
-  channelUserId: string;
-  createdById: string;
-}): Promise<Result<{ reconciliationId: string }>> {
-  const session = await requireSession();
-  await requireFeaturePermission(session, "finance.channel_reconciliation", "EDIT");
-  const { contractId, customerId, channelUserId } = args;
-  const relation = await prisma.contract.findFirst({
-    where: {
-      id: contractId,
-      customerId,
-      deletedAt: null,
-      customer: {
-        ...customerScope(session, session.role === "ADMIN" ? "all" : "mine"),
-        channelUserId,
-        deletedAt: null,
-      },
-    },
-    select: { id: true },
-  });
-  if (!relation) return { ok: false, error: "合同、客户或渠道归属不匹配" };
-  const createdById = session.userId;
-
-  // Already wired (rule-driven or stub) for this contract? Skip.
-  const existing = await prisma.channelReconciliation.findFirst({
-    where: { contractId, autoCreated: true },
-    select: { id: true },
-  });
-  if (existing) return { ok: true, data: { reconciliationId: existing.id } };
-
-  const rule = await prisma.channelSplitRule.findUnique({ where: { customerId } });
-
-  // No rule configured -> legacy stub (preserve current markCompleted behavior).
-  if (!rule) {
-    const r = await prisma.channelReconciliation.create({
-      data: {
-        customerId,
-        contractId,
-        channelUserId,
-        autoCreated: true,
-        createdById,
-      },
-    });
-    return { ok: true, data: { reconciliationId: r.id } };
-  }
-
-  // Rule-driven: generate main record + N period rows.
-  // 开始时间 = 合同开始时间（contract.startDate）；如果合同未填写则回退到今天。
-  const contractRow = await prisma.contract.findUnique({
-    where: { id: contractId },
-    select: { startDate: true },
-  });
-  const start = contractRow?.startDate ?? new Date();
-  const end = rule.splitEndDate;
-  const periods = splitPeriodsByMonth(start, end);
-
-  const main = await prisma.channelReconciliation.create({
-    data: {
-      customerId,
-      contractId,
-      channelUserId,
-      autoCreated: true,
-      splitRuleId: rule.id,
-      periodNo: 1,
-      periodStart: start,
-      periodEnd: end,
-      periodType: "monthly",
-      totalPeriods: periods.length,
-      fixedFeeShareRate: rule.fixedFeeRate,
-      commissionShareRate: rule.ruleType === "A" ? (rule.commissionRate ?? 0) : 0,
-      createdById,
-    },
-  });
-
-  if (periods.length > 0) {
-    await prisma.channelReconciliationPeriod.createMany({
-      data: periods.map((p) => ({
-        reconciliationId: main.id,
-        periodIndex: p.periodIndex,
-        periodLabel: p.monthLabel,
-      })),
-    });
-  }
-
-  return { ok: true, data: { reconciliationId: main.id } };
 }
 
 // Cache the Shallow user id at module level (cheap re-lookup ok if missing).

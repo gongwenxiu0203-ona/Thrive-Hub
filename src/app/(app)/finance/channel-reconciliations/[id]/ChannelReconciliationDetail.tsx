@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft, Settings, CheckCircle2, DollarSign, TrendingUp, Calendar, Clock,
+  Save, LockKeyhole, Landmark, PencilLine,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import type { PeriodDerived } from "@/lib/channelSplit";
@@ -16,6 +17,7 @@ import {
 
 export interface DetailRecord {
   id: string;
+  recordMode: string;
   autoCreated: boolean;
   totalPeriods: number | null;
   periodType: string | null;
@@ -29,6 +31,9 @@ export interface DetailRecord {
   periodNo: number;
   periodStart: string | null;
   periodEnd: string | null;
+  fixedFeeReceivedCurrency: string;
+  commissionReceivedCurrency: string;
+  channelPayeeSnapshot: ChannelPayeeSnapshot;
   fixedFeeReceived: number | null;
   fixedFeeShareAmount: number;
   fixedFeeShareCurrency: string;
@@ -49,24 +54,652 @@ export interface DetailRecord {
     splitEndDate: string;
     fixedFeeRate: number;
     commissionRate: number | null;
+    commissionThresholdAmount: number;
+    commissionThresholdCurrency: string;
+    commissionBelowRate: number;
+    commissionAtOrAboveRate: number;
     tieredRules: string;
   } | null;
   periods: {
     id: string;
+    streamType: "BOTH" | "FIXED_FEE" | "COMMISSION";
     periodIndex: number;
     periodLabel: string | null;
+    periodStart: string | null;
+    periodEnd: string | null;
     fixedFeeAmount: number | null;
     commissionAmount: number | null;
     fixedFeePaidAt: string | null;
     commissionPaidAt: string | null;
+    fixedFeeReceived: number | null;
+    commissionReceived: number | null;
+    fixedFeeShareRate: number | null;
+    commissionShareRate: number | null;
+    fixedFeeShareAmount: number | null;
+    commissionShareAmount: number | null;
+    fixedFeeReceivedCurrency: string | null;
+    commissionReceivedCurrency: string | null;
+    fixedFeeSplitDate: string | null;
+    commissionSplitDate: string | null;
+    confirmedGmv: number | null;
     proofUrl: string | null;
     notes: string | null;
   }[];
 }
 
-function fmtMoney(v: number | null | undefined): string {
+type ChannelPayeeSnapshot = {
+  paymentMethod: string;
+  beneficiary: string;
+  accountNo: string;
+  bankName: string;
+  bankAddress: string;
+  swiftCode: string;
+  paypalAccount: string;
+  note: string;
+};
+
+type StreamKind = "fixed" | "commission";
+const RECEIVED_CURRENCY_OPTIONS = ["USD", "RMB", "EUR", "GBP", "HKD"] as const;
+
+const EMPTY_PAYEE: ChannelPayeeSnapshot = {
+  paymentMethod: "",
+  beneficiary: "",
+  accountNo: "",
+  bankName: "",
+  bankAddress: "",
+  swiftCode: "",
+  paypalAccount: "",
+  note: "",
+};
+
+function ChannelPayeeCard({
+  reconciliationId,
+  payee,
+  canEdit,
+}: {
+  reconciliationId: string;
+  payee: ChannelPayeeSnapshot;
+  canEdit: boolean;
+}) {
+  const router = useRouter();
+  const hasSavedInfo = Object.values(payee).some((value) => value.trim());
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState<ChannelPayeeSnapshot>({ ...EMPTY_PAYEE, ...payee });
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function setField(field: keyof ChannelPayeeSnapshot, value: string) {
+    setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  async function save() {
+    if (!Object.values(form).some((value) => value.trim())) {
+      setError("请至少填写一项渠道商收款信息");
+      return;
+    }
+    if (hasSavedInfo && !reason.trim()) {
+      setError("修改已保存的收款信息时，请填写修改原因");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/finance/channel-reconciliations/${reconciliationId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          channelPayeeSnapshot: Object.fromEntries(
+            Object.entries(form).map(([key, value]) => [key, value.trim()]),
+          ),
+          ...(hasSavedInfo ? { correctionReason: reason.trim() } : {}),
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setError(payload.error ?? "保存失败");
+        return;
+      }
+      setEditing(false);
+      setReason("");
+      router.refresh();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const displayItems = ([
+    ["付款方式", payee.paymentMethod],
+    ["收款人 / 户名", payee.beneficiary],
+    ["收款账号", payee.accountNo],
+    ["开户银行", payee.bankName],
+    ["银行地址", payee.bankAddress],
+    ["SWIFT Code", payee.swiftCode],
+    ["PayPal 账号", payee.paypalAccount],
+    ["备注", payee.note],
+  ] as [string, string][]).filter((item) => Boolean(item[1]));
+
+  return (
+    <section className="card p-5">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <Landmark className="h-4 w-4 text-brand-600" />
+            <h2 className="font-semibold text-slate-800">渠道商收款信息</h2>
+          </div>
+          <p className="mt-1 text-xs text-slate-400">用于向渠道商实际付款，请在付款前复核账号。</p>
+        </div>
+        {canEdit && !editing && (
+          <button
+            type="button"
+            className="inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:text-brand-700"
+            onClick={() => setEditing(true)}
+          >
+            <PencilLine className="h-3.5 w-3.5" />
+            {hasSavedInfo ? "编辑收款信息" : "新增收款信息"}
+          </button>
+        )}
+      </div>
+
+      {!editing && (
+        hasSavedInfo ? (
+          <dl className="mt-4 grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+            {displayItems.map(([label, value]) => (
+              <div key={label} className={label === "备注" || label === "银行地址" ? "lg:col-span-2" : ""}>
+                <dt className="text-xs text-slate-400">{label}</dt>
+                <dd className="mt-1 break-words font-medium text-slate-700">{value}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : (
+          <p className="mt-4 rounded-lg border border-dashed border-slate-200 px-4 py-5 text-center text-sm text-slate-400">
+            暂未填写渠道商收款信息
+          </p>
+        )
+      )}
+
+      {editing && (
+        <div className="mt-4 space-y-4 border-t border-slate-100 pt-4">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div>
+              <label className="label">付款方式</label>
+              <select className="input" value={form.paymentMethod} onChange={(e) => setField("paymentMethod", e.target.value)}>
+                <option value="">请选择</option>
+                <option value="银行转账">银行转账</option>
+                <option value="PayPal">PayPal</option>
+                <option value="其他">其他</option>
+              </select>
+            </div>
+            <div>
+              <label className="label">收款人 / 户名</label>
+              <input className="input" value={form.beneficiary} onChange={(e) => setField("beneficiary", e.target.value)} />
+            </div>
+            <div>
+              <label className="label">收款账号</label>
+              <input className="input" value={form.accountNo} onChange={(e) => setField("accountNo", e.target.value)} />
+            </div>
+            <div>
+              <label className="label">开户银行</label>
+              <input className="input" value={form.bankName} onChange={(e) => setField("bankName", e.target.value)} />
+            </div>
+            <div>
+              <label className="label">SWIFT Code</label>
+              <input className="input" value={form.swiftCode} onChange={(e) => setField("swiftCode", e.target.value)} />
+            </div>
+            <div>
+              <label className="label">PayPal 账号</label>
+              <input className="input" value={form.paypalAccount} onChange={(e) => setField("paypalAccount", e.target.value)} />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="label">银行地址</label>
+              <input className="input" value={form.bankAddress} onChange={(e) => setField("bankAddress", e.target.value)} />
+            </div>
+            <div>
+              <label className="label">备注</label>
+              <input className="input" value={form.note} onChange={(e) => setField("note", e.target.value)} />
+            </div>
+          </div>
+          {hasSavedInfo && (
+            <div>
+              <label className="label">修改原因 *</label>
+              <input className="input" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="请说明本次修改原因" />
+            </div>
+          )}
+          {error && <p className="text-xs text-red-600">{error}</p>}
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => {
+                setForm({ ...EMPTY_PAYEE, ...payee });
+                setReason("");
+                setError(null);
+                setEditing(false);
+              }}
+            >
+              取消
+            </button>
+            <button type="button" className="btn-primary" disabled={saving || (hasSavedInfo && !reason.trim())} onClick={save}>
+              {saving ? "保存中…" : "保存收款信息"}
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function RuleDrivenPeriodCard({
+  reconciliationId,
+  period,
+  kind,
+  ruleType,
+  commissionRuleCurrency,
+  currency,
+  displayIndex,
+  totalPeriods,
+  canEdit,
+}: {
+  reconciliationId: string;
+  period: DetailRecord["periods"][number];
+  kind: StreamKind;
+  ruleType: string;
+  commissionRuleCurrency: string;
+  currency: string;
+  displayIndex: number;
+  totalPeriods: number;
+  canEdit: boolean;
+}) {
+  const router = useRouter();
+  const isFixed = kind === "fixed";
+  const paidAt = isFixed ? period.fixedFeePaidAt : period.commissionPaidAt;
+  const isFirstEntry = isFixed
+    ? period.fixedFeeReceived === null &&
+      period.fixedFeeShareAmount === null &&
+      period.fixedFeePaidAt === null
+    : period.commissionReceived === null &&
+      period.commissionShareAmount === null &&
+      period.commissionPaidAt === null;
+  const locked = Boolean(paidAt);
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [received, setReceived] = useState(String(
+    (isFixed ? period.fixedFeeReceived : period.commissionReceived) ?? "",
+  ));
+  const [receivedCurrency, setReceivedCurrency] = useState(
+    (isFixed
+      ? period.fixedFeeReceivedCurrency
+      : period.commissionReceivedCurrency) ?? currency,
+  );
+  const [serviceStart, setServiceStart] = useState(period.periodStart?.slice(0, 10) ?? "");
+  const [serviceEnd, setServiceEnd] = useState(period.periodEnd?.slice(0, 10) ?? "");
+  const [paymentDate, setPaymentDate] = useState(paidAt?.slice(0, 10) ?? "");
+  const [paymentNote, setPaymentNote] = useState("");
+  const [editingPayment, setEditingPayment] = useState(false);
+  const [gmv, setGmv] = useState(String(period.confirmedGmv ?? ""));
+  const [reason, setReason] = useState("");
+  const shareRate = isFixed ? period.fixedFeeShareRate : period.commissionShareRate;
+  const shareAmount = isFixed ? period.fixedFeeShareAmount : period.commissionShareAmount;
+  const displayCurrency =
+    (isFixed
+      ? period.fixedFeeReceivedCurrency
+      : period.commissionReceivedCurrency) ?? currency;
+
+  async function save() {
+    if (locked) return;
+    if (!serviceStart || !serviceEnd) {
+      setError("请填写对应服务周期的起止时间");
+      return;
+    }
+    if (serviceEnd < serviceStart) {
+      setError("服务周期结束时间不能早于开始时间");
+      return;
+    }
+    if (
+      !isFixed &&
+      ruleType === "A" &&
+      receivedCurrency !== commissionRuleCurrency
+    ) {
+      setError(`A 类佣金规则按 ${commissionRuleCurrency} 判断，请选择相同货币`);
+      return;
+    }
+    if (!isFirstEntry && !reason.trim()) {
+      setError("修改已录入数据时，请填写修改原因");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const response = await fetch(
+        `/api/finance/channel-reconciliations/${reconciliationId}/periods/${period.id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...(isFixed
+              ? {
+                  fixedFeeReceived: received === "" ? null : Number(received),
+                  ...(isFirstEntry ? { fixedFeeReceivedCurrency: receivedCurrency } : {}),
+                }
+              : {
+                  commissionReceived: received === "" ? null : Number(received),
+                  ...(isFirstEntry ? { commissionReceivedCurrency: receivedCurrency } : {}),
+                  ...(ruleType === "B" ? { confirmedGmv: gmv === "" ? null : Number(gmv) } : {}),
+                }),
+            periodStart: serviceStart,
+            periodEnd: serviceEnd,
+            ...(!isFirstEntry ? { correctionReason: reason.trim() } : {}),
+          }),
+        },
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) return setError(payload.error ?? "保存失败");
+      setEditing(false);
+      setReason("");
+      router.refresh();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function savePayment() {
+    if (locked || !complete) return;
+    if (!paymentDate || !paymentNote.trim()) {
+      setError("请填写实际付款日期和付款确认说明");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const response = await fetch(
+        `/api/finance/channel-reconciliations/${reconciliationId}/periods/${period.id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...(isFixed
+              ? { fixedFeePaidAt: paymentDate }
+              : { commissionPaidAt: paymentDate }),
+            correctionReason: paymentNote.trim(),
+          }),
+        },
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) return setError(payload.error ?? "保存付款信息失败");
+      setEditingPayment(false);
+      setPaymentNote("");
+      router.refresh();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const complete = shareAmount !== null;
+  const cycleName = isFixed
+    ? "到账固费对应服务周期"
+    : "到账销售佣金对应服务周期";
+  const cycleLabel =
+    serviceStart && serviceEnd ? `${serviceStart} ～ ${serviceEnd}` : "—";
+
+  return (
+    <article className={`relative overflow-hidden rounded-xl border bg-white p-4 shadow-sm ${locked ? "border-emerald-200" : "border-slate-200"}`}>
+      <div className="absolute -left-[27px] top-5 h-3 w-3 rounded-full border-2 border-white bg-brand-500 ring-2 ring-brand-100" />
+      {locked && (
+        <div
+          aria-label="已付款"
+          className="pointer-events-none absolute right-5 top-12 z-10 -rotate-12 rounded-md border-[3px] border-emerald-500/55 px-3 py-1 text-2xl font-black tracking-[0.18em] text-emerald-600/55"
+        >
+          已付款
+        </div>
+      )}
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-slate-800">{period.periodLabel ?? `第 ${displayIndex} 期`}</p>
+          <p className="mt-1 text-xs text-slate-400">
+            第 {displayIndex} / {totalPeriods} 期 · {locked ? "已付款并锁定" : complete ? "已录入" : "待录入"}
+          </p>
+        </div>
+        {locked ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
+            <LockKeyhole className="h-3 w-3" /> 不可修改
+          </span>
+        ) : canEdit ? (
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              className="text-xs font-medium text-brand-600 hover:text-brand-700"
+              onClick={() => {
+                setEditingPayment(false);
+                setEditing((value) => !value);
+                setError(null);
+              }}
+            >
+              {editing ? "收起" : isFirstEntry ? "录入" : "修改"}
+            </button>
+            {complete && (
+              <button
+                type="button"
+                className="text-xs font-medium text-emerald-600 hover:text-emerald-700"
+                onClick={() => {
+                  setEditing(false);
+                  setEditingPayment((value) => !value);
+                  setError(null);
+                }}
+              >
+                {editingPayment ? "收起付款信息" : "补充付款信息"}
+              </button>
+            )}
+          </div>
+        ) : null}
+      </div>
+      <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-4 text-xs">
+        <div><dt className="text-slate-400">Thraive 实际到账</dt><dd className="mt-1 font-medium text-slate-700">{fmtMoney(isFixed ? period.fixedFeeReceived : period.commissionReceived, displayCurrency)}</dd></div>
+        <div><dt className="text-slate-400">分账比例</dt><dd className="mt-1 font-medium text-slate-700">{fmtPct(shareRate)}</dd></div>
+        <div><dt className="text-slate-400">渠道商分账金额</dt><dd className="mt-1 font-semibold text-emerald-600">{fmtMoney(shareAmount, displayCurrency)}</dd></div>
+        <div><dt className="text-slate-400">向渠道商实际付款时间</dt><dd className="mt-1 font-medium text-slate-700">{paidAt?.slice(0, 10) ?? "—"}</dd></div>
+        <div className="col-span-2"><dt className="text-slate-400">{cycleName}</dt><dd className="mt-1 font-medium text-slate-700">{cycleLabel}</dd></div>
+      </dl>
+      {editing && !locked && (
+        <div className="mt-4 space-y-3 border-t border-slate-100 pt-3">
+          <div>
+            <label className="label">Thraive 实际到账金额</label>
+            <div className="flex h-10 overflow-hidden rounded-lg border border-slate-200 bg-white focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-brand-100">
+              <span className="flex min-w-11 items-center justify-center border-r border-slate-200 bg-slate-50 px-2 text-sm font-semibold text-slate-600">
+                {currencySymbol(receivedCurrency)}
+              </span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                inputMode="decimal"
+                className="min-w-0 flex-1 bg-transparent px-3 text-sm text-slate-800 outline-none"
+                value={received}
+                onChange={(e) => setReceived(e.target.value)}
+              />
+              {isFirstEntry ? (
+                <select
+                  aria-label="到账货币"
+                  className="border-l border-slate-200 bg-slate-50 px-2 text-sm font-medium text-slate-700 outline-none"
+                  value={receivedCurrency}
+                  onChange={(e) => setReceivedCurrency(e.target.value)}
+                >
+                  {RECEIVED_CURRENCY_OPTIONS.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              ) : (
+                <span className="flex items-center border-l border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-600">
+                  {displayCurrency}
+                </span>
+              )}
+            </div>
+            {!isFixed && ruleType === "A" && receivedCurrency !== commissionRuleCurrency && (
+              <p className="mt-1 text-xs text-amber-600">
+                A 类规则门槛按 {commissionRuleCurrency} 判断，请选择相同货币。
+              </p>
+            )}
+          </div>
+          {!isFixed && ruleType === "B" && (
+            <div>
+              <label className="label">本期确认 GMV</label>
+              <input type="number" min="0" step="0.01" className="input" value={gmv} onChange={(e) => setGmv(e.target.value)} />
+            </div>
+          )}
+          <div>
+            <label className="label">{cycleName} *</label>
+            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+              <input type="date" className="input min-w-0" value={serviceStart} onChange={(e) => setServiceStart(e.target.value)} />
+              <span className="text-xs text-slate-400">至</span>
+              <input type="date" className="input min-w-0" min={serviceStart || undefined} value={serviceEnd} onChange={(e) => setServiceEnd(e.target.value)} />
+            </div>
+          </div>
+          {!isFirstEntry && (
+            <div>
+              <label className="label">修改原因 *</label>
+              <input className="input" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="请说明本次修改原因" />
+            </div>
+          )}
+          {error && <p className="text-xs text-red-600">{error}</p>}
+          <button type="button" className="btn-primary flex w-full items-center justify-center gap-1.5" disabled={saving || !serviceStart || !serviceEnd || (!isFirstEntry && !reason.trim())} onClick={save}>
+            <Save className="h-4 w-4" /> {saving ? "保存中…" : "保存并重新计算"}
+          </button>
+        </div>
+      )}
+      {editingPayment && complete && !locked && (
+        <div className="mt-4 space-y-3 border-t border-emerald-100 bg-emerald-50/40 pt-3">
+          <div>
+            <label className="label">向渠道商实际付款时间 *</label>
+            <input type="date" className="input" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} />
+          </div>
+          <div>
+            <label className="label">付款确认说明 *</label>
+            <textarea
+              className="input min-h-20 resize-y"
+              value={paymentNote}
+              onChange={(e) => setPaymentNote(e.target.value)}
+              placeholder="例如：已核对渠道商收款账号与银行流水，确认完成付款"
+            />
+          </div>
+          <p className="text-xs text-amber-700">确认后本期将盖上“已付款”印章并永久锁定，不能再修改。</p>
+          {error && <p className="text-xs text-red-600">{error}</p>}
+          <button type="button" className="btn-primary flex w-full items-center justify-center gap-1.5" disabled={saving || !paymentDate || !paymentNote.trim()} onClick={savePayment}>
+            <CheckCircle2 className="h-4 w-4" /> {saving ? "确认中…" : "确认付款并锁定"}
+          </button>
+        </div>
+      )}
+    </article>
+  );
+}
+
+function RuleDrivenDetail({
+  record,
+  canEdit,
+}: {
+  record: DetailRecord;
+  canEdit: boolean;
+}) {
+  const fixedPeriods = record.periods.filter((period) => period.streamType !== "COMMISSION");
+  const commissionPeriods = record.periods.filter((period) => period.streamType !== "FIXED_FEE");
+  const fixedCompleted = fixedPeriods.filter((period) => period.fixedFeeShareAmount !== null).length;
+  const commissionCompleted = commissionPeriods.filter((period) => period.commissionShareAmount !== null).length;
+  const streamTotal = (periods: DetailRecord["periods"], kind: StreamKind, fallbackCurrency: string) => {
+    const totals = new Map<string, number>();
+    for (const period of periods) {
+      const periodCurrency =
+        (kind === "fixed"
+          ? period.fixedFeeReceivedCurrency
+          : period.commissionReceivedCurrency) ?? fallbackCurrency;
+      const amount =
+        (kind === "fixed"
+          ? period.fixedFeeShareAmount
+          : period.commissionShareAmount) ?? 0;
+      totals.set(periodCurrency, (totals.get(periodCurrency) ?? 0) + amount);
+    }
+    return [...totals.entries()]
+      .map(([periodCurrency, amount]) => fmtMoney(amount, periodCurrency))
+      .join(" · ");
+  };
+  const fixedTotal = streamTotal(fixedPeriods, "fixed", record.fixedFeeReceivedCurrency);
+  const commissionTotal = streamTotal(commissionPeriods, "commission", record.commissionReceivedCurrency);
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <Link href="/finance?tab=channels" className="mb-3 inline-flex items-center gap-1 text-sm text-slate-500 hover:text-brand-600">
+            <ArrowLeft className="h-4 w-4" /> 返回渠道商分账
+          </Link>
+          <h1 className="text-2xl font-semibold text-slate-900">{record.customer.brandName} · 渠道商分账</h1>
+          <p className="mt-1 text-sm text-slate-500">合同 {record.contract?.contractNo ?? "—"} · 渠道商 {record.channelUser.name}</p>
+        </div>
+      </div>
+      <ChannelPayeeCard
+        reconciliationId={record.id}
+        payee={record.channelPayeeSnapshot}
+        canEdit={canEdit}
+      />
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="card p-4"><p className="text-xs text-slate-400">固费总期数</p><p className="mt-1 text-2xl font-semibold">{fixedPeriods.length}</p><p className="text-xs text-emerald-600">已录入 {fixedCompleted} 期</p></div>
+        <div className="card p-4"><p className="text-xs text-slate-400">固费分账累计</p><p className="mt-1 text-2xl font-semibold text-emerald-600">{fixedTotal}</p></div>
+        <div className="card p-4"><p className="text-xs text-slate-400">抽佣总期数</p><p className="mt-1 text-2xl font-semibold">{commissionPeriods.length}</p><p className="text-xs text-emerald-600">已录入 {commissionCompleted} 期</p></div>
+        <div className="card p-4"><p className="text-xs text-slate-400">抽佣分账累计</p><p className="mt-1 text-2xl font-semibold text-emerald-600">{commissionTotal}</p></div>
+      </div>
+      <div className="grid gap-6 xl:grid-cols-2">
+        {(["fixed", "commission"] as const).map((kind) => (
+          <section key={kind} className="card p-5">
+            <div className="mb-5">
+              <h2 className="font-semibold text-slate-800">{kind === "fixed" ? "固费分账瀑布流" : "抽佣分账瀑布流"}</h2>
+              <p className="mt-1 text-xs text-slate-400">
+                {kind === "fixed"
+                  ? `按合同开始日滚动，每 30 天一个服务周期 · 分账比例 ${fmtPct(record.splitRule?.fixedFeeRate)}`
+                  : record.splitRule?.ruleType === "A"
+                    ? `按自然月划分 · 每月实际到账低于 ${record.splitRule.commissionThresholdCurrency} ${record.splitRule.commissionThresholdAmount} 按 ${fmtPct(record.splitRule.commissionBelowRate)}；达到或超过按 ${fmtPct(record.splitRule.commissionAtOrAboveRate)}`
+                    : "按自然月划分 · 沿用 B 类原阶梯规则，按本期确认 GMV 计算"}
+              </p>
+            </div>
+            <div className="ml-3 space-y-4 border-l-2 border-slate-100 pl-5">
+              {(kind === "fixed" ? fixedPeriods : commissionPeriods).map((period, index, periods) => (
+                <RuleDrivenPeriodCard
+                  key={`${kind}-${period.id}`}
+                  reconciliationId={record.id}
+                  period={period}
+                  kind={kind}
+                  ruleType={record.splitRule?.ruleType ?? "A"}
+                  commissionRuleCurrency={record.splitRule?.commissionThresholdCurrency ?? "USD"}
+                  currency={kind === "fixed" ? record.fixedFeeReceivedCurrency : record.commissionReceivedCurrency}
+                  displayIndex={index + 1}
+                  totalPeriods={periods.length}
+                  canEdit={canEdit}
+                />
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function currencySymbol(currency: string): string {
+  const symbols: Record<string, string> = {
+    USD: "$",
+    RMB: "¥",
+    CNY: "¥",
+    EUR: "€",
+    GBP: "£",
+    HKD: "HK$",
+    美金: "$",
+    人民币: "¥",
+  };
+  return symbols[currency] ?? currency;
+}
+
+function fmtMoney(v: number | null | undefined, currency = "RMB"): string {
   if (v === null || v === undefined || !Number.isFinite(v)) return "—";
-  return `¥${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+  const symbol = currencySymbol(currency);
+  const prefix = symbol === currency ? `${currency} ` : symbol;
+  return `${prefix}${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 }
 function fmtPct(v: number | null | undefined): string {
   if (v === null || v === undefined || !Number.isFinite(v)) return "—";
@@ -145,6 +778,10 @@ export function ChannelReconciliationDetail({
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
+
+  if (record.recordMode === "RULE_DRIVEN") {
+    return <RuleDrivenDetail record={record} canEdit={canEdit} />;
+  }
 
   const waterfall = buildWaterfall(derivedPeriods);
 

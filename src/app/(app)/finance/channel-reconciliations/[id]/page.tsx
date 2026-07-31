@@ -11,6 +11,40 @@ import { ChannelReconciliationDetail } from "./ChannelReconciliationDetail";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "渠道商分账详情 · Thraive联盟营销系统" };
 
+function toShanghaiDateString(value: Date | null): string | null {
+  if (!value) return null;
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(value);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((item) => item.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+function parseChannelPayeeSnapshot(value: string) {
+  const empty = {
+    paymentMethod: "",
+    beneficiary: "",
+    accountNo: "",
+    bankName: "",
+    bankAddress: "",
+    swiftCode: "",
+    paypalAccount: "",
+    note: "",
+  };
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.keys(empty).map((key) => [key, typeof parsed[key] === "string" ? parsed[key] : ""]),
+    ) as typeof empty;
+  } catch {
+    return empty;
+  }
+}
+
 export default async function ChannelReconciliationDetailPage({
   params,
 }: {
@@ -18,7 +52,7 @@ export default async function ChannelReconciliationDetailPage({
 }) {
   const session = await requireSession();
   const permission = await requireFeaturePermission(session, "finance.channel_reconciliation", "READ");
-  const canEdit = hasPermissionLevel(permission, "EDIT");
+  const canEdit = hasPermissionLevel(permission, "EDIT") && isStaff(session.role);
   const canManage = hasPermissionLevel(permission, "MANAGE");
   const { id } = await params;
 
@@ -118,6 +152,7 @@ export default async function ChannelReconciliationDetailPage({
       isStaff={isStaff(session.role)}
       record={{
         id: rec.id,
+        recordMode: rec.recordMode,
         autoCreated: rec.autoCreated,
         totalPeriods: rec.totalPeriods,
         periodType: rec.periodType,
@@ -129,8 +164,11 @@ export default async function ChannelReconciliationDetailPage({
         contract: rec.contract,
         channelUser: rec.channelUser,
         periodNo: rec.periodNo,
-        periodStart: rec.periodStart?.toISOString() ?? null,
-        periodEnd: rec.periodEnd?.toISOString() ?? null,
+        periodStart: toShanghaiDateString(rec.periodStart),
+        periodEnd: toShanghaiDateString(rec.periodEnd),
+        fixedFeeReceivedCurrency: rec.fixedFeeReceivedCurrency,
+        commissionReceivedCurrency: rec.commissionReceivedCurrency,
+        channelPayeeSnapshot: parseChannelPayeeSnapshot(rec.channelPayeeSnapshot),
         fixedFeeReceived: rec.fixedFeeReceived,
         fixedFeeShareAmount: rec.fixedFeeShareAmount,
         fixedFeeShareCurrency: rec.fixedFeeShareCurrency,
@@ -148,19 +186,37 @@ export default async function ChannelReconciliationDetailPage({
         splitRule: rec.splitRule ? {
           id: rec.splitRule.id,
           ruleType: rec.splitRule.ruleType,
-          splitEndDate: rec.splitRule.splitEndDate.toISOString(),
+          splitEndDate: toShanghaiDateString(rec.splitRule.splitEndDate)!,
           fixedFeeRate: rec.splitRule.fixedFeeRate,
           commissionRate: rec.splitRule.commissionRate,
+          commissionThresholdAmount: rec.splitRule.commissionThresholdAmount,
+          commissionThresholdCurrency: rec.splitRule.commissionThresholdCurrency,
+          commissionBelowRate: rec.splitRule.commissionBelowRate,
+          commissionAtOrAboveRate: rec.splitRule.commissionAtOrAboveRate,
           tieredRules: rec.splitRule.tieredRules,
         } : null,
         periods: rec.periods.map((p) => ({
           id: p.id,
+          streamType: p.streamType as "BOTH" | "FIXED_FEE" | "COMMISSION",
           periodIndex: p.periodIndex,
           periodLabel: p.periodLabel,
+          periodStart: toShanghaiDateString(p.periodStart),
+          periodEnd: toShanghaiDateString(p.periodEnd),
           fixedFeeAmount: p.fixedFeeAmount,
           commissionAmount: p.commissionAmount,
-          fixedFeePaidAt: p.fixedFeePaidAt?.toISOString() ?? null,
-          commissionPaidAt: p.commissionPaidAt?.toISOString() ?? null,
+          fixedFeePaidAt: toShanghaiDateString(p.fixedFeePaidAt),
+          commissionPaidAt: toShanghaiDateString(p.commissionPaidAt),
+          fixedFeeReceived: p.fixedFeeReceived,
+          commissionReceived: p.commissionReceived,
+          fixedFeeShareRate: p.fixedFeeShareRate,
+          commissionShareRate: p.commissionShareRate,
+          fixedFeeShareAmount: p.fixedFeeShareAmount,
+          commissionShareAmount: p.commissionShareAmount,
+          fixedFeeReceivedCurrency: p.fixedFeeReceivedCurrency,
+          commissionReceivedCurrency: p.commissionReceivedCurrency,
+          fixedFeeSplitDate: p.fixedFeeSplitDate?.toISOString() ?? null,
+          commissionSplitDate: p.commissionSplitDate?.toISOString() ?? null,
+          confirmedGmv: p.confirmedGmv,
           proofUrl: p.proofUrl,
           notes: p.notes,
         })),
