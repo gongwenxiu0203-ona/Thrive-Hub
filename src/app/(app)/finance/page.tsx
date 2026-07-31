@@ -207,7 +207,7 @@ export default async function FinancePage({
           id: true,
           brandName: true,
           channelUserId: true,
-          splitRule: true,
+          splitRules: { where: { contractId: null }, take: 1 },
           contracts: {
             where: { status: "COMPLETED", deletedAt: null },
             select: {
@@ -216,6 +216,7 @@ export default async function FinancePage({
               startDate: true,
               endDate: true,
               feeCurrency: true,
+              splitRule: true,
             },
             orderBy: { createdAt: "desc" },
           },
@@ -247,17 +248,27 @@ export default async function FinancePage({
       startDate: toShanghaiDateString(contract.startDate),
       endDate: toShanghaiDateString(contract.endDate),
       feeCurrency: contract.feeCurrency,
+      splitRule: contract.splitRule ? {
+        id: contract.splitRule.id,
+        ruleType: contract.splitRule.ruleType as "A" | "B",
+        splitEndDate: toShanghaiDateString(contract.splitRule.splitEndDate)!,
+        fixedFeeRate: contract.splitRule.fixedFeeRate,
+        commissionThresholdAmount: contract.splitRule.commissionThresholdAmount,
+        commissionThresholdCurrency: contract.splitRule.commissionThresholdCurrency,
+        commissionBelowRate: contract.splitRule.commissionBelowRate,
+        commissionAtOrAboveRate: contract.splitRule.commissionAtOrAboveRate,
+      } : null,
     })),
-    splitRule: row.splitRule
+    splitRule: row.splitRules[0]
       ? {
-          id: row.splitRule.id,
-          ruleType: row.splitRule.ruleType as "A" | "B",
-          splitEndDate: toShanghaiDateString(row.splitRule.splitEndDate)!,
-          fixedFeeRate: row.splitRule.fixedFeeRate,
-          commissionThresholdAmount: row.splitRule.commissionThresholdAmount,
-          commissionThresholdCurrency: row.splitRule.commissionThresholdCurrency,
-          commissionBelowRate: row.splitRule.commissionBelowRate,
-          commissionAtOrAboveRate: row.splitRule.commissionAtOrAboveRate,
+          id: row.splitRules[0].id,
+          ruleType: row.splitRules[0].ruleType as "A" | "B",
+          splitEndDate: toShanghaiDateString(row.splitRules[0].splitEndDate)!,
+          fixedFeeRate: row.splitRules[0].fixedFeeRate,
+          commissionThresholdAmount: row.splitRules[0].commissionThresholdAmount,
+          commissionThresholdCurrency: row.splitRules[0].commissionThresholdCurrency,
+          commissionBelowRate: row.splitRules[0].commissionBelowRate,
+          commissionAtOrAboveRate: row.splitRules[0].commissionAtOrAboveRate,
         }
       : null,
   }));

@@ -156,10 +156,10 @@ export default async function ChannelReconciliationDetailPage({
         select: {
           id: true,
           brandName: true,
-          splitRule: { select: { splitEndDate: true } },
+          splitRules: { where: { contractId: null }, take: 1, select: { splitEndDate: true } },
           contracts: {
             where: { status: "COMPLETED", deletedAt: null },
-            select: { id: true, contractNo: true, startDate: true },
+            select: { id: true, contractNo: true, startDate: true, splitRule: { select: { splitEndDate: true } } },
             orderBy: { createdAt: "desc" },
           },
         },
@@ -172,11 +172,12 @@ export default async function ChannelReconciliationDetailPage({
       adminCustomerOptions={adminCustomerOptions.map((customer) => ({
         id: customer.id,
         brandName: customer.brandName,
-        splitEndDate: toShanghaiDateString(customer.splitRule?.splitEndDate ?? null),
+        splitEndDate: toShanghaiDateString(customer.splitRules[0]?.splitEndDate ?? null),
         contracts: customer.contracts.map((contract) => ({
           id: contract.id,
           contractNo: contract.contractNo,
           startDate: toShanghaiDateString(contract.startDate),
+          splitEndDate: toShanghaiDateString(customer.splitRules[0]?.splitEndDate ?? contract.splitRule?.splitEndDate ?? null),
         })),
       }))}
       isStaff={isStaff(session.role)}

@@ -513,7 +513,7 @@ type AdminCustomerOption = {
   id: string;
   brandName: string;
   splitEndDate: string | null;
-  contracts: { id: string; contractNo: string; startDate: string | null }[];
+  contracts: { id: string; contractNo: string; startDate: string | null; splitEndDate: string | null }[];
 };
 
 function AdminRecordActions({
@@ -620,7 +620,7 @@ function AdminRecordActions({
             </div>
             <div>
               <label className="label">结束时间</label>
-              <input className="input bg-slate-50" readOnly value={customer?.splitEndDate ?? ""} />
+              <input className="input bg-slate-50" readOnly value={customer?.contracts.find((contract) => contract.id === contractId)?.splitEndDate ?? customer?.splitEndDate ?? ""} />
             </div>
           </div>
           <div className="mt-3">

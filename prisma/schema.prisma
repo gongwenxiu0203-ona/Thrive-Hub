@@ -175,7 +175,7 @@ model Customer {
   revenueSnapshots         ClientRevenueSnapshot[]
   accountsReceivable       AccountsReceivable[]
   invoices                 Invoice[]
-  splitRule                ChannelSplitRule?
+  splitRules               ChannelSplitRule[]
   authorizationInfos       CustomerAuthorizationInfo[]
   intakeSubmissions        CustomerIntakeSubmission[] @relation("IntakeTargetCustomer")
   createdFromSubmissions   CustomerIntakeSubmission[] @relation("IntakeCreatedCustomer")
@@ -348,6 +348,7 @@ model Contract {
   projects               Project[]
   invoices               Invoice[]
   invoiceLinks           InvoiceContract[]
+  splitRule              ChannelSplitRule?
 }
 
 model ContractFieldReview {
@@ -1078,7 +1079,8 @@ createdById    String
 // ruleType=B：tieredRules JSON 数组 [{gmvMin,gmvMax,rate}]，累计 GMV 分段（个税口径）
 model ChannelSplitRule {
   id                          String   @id @default(cuid())
-  customerId                  String   @unique
+  customerId                  String
+  contractId                  String?  @unique
   ruleType                    String // "A" | "B"
   splitEndDate                DateTime
   fixedFeeRate                Float // 给渠道商的固费分账比例（小数 0.0~1.0）
@@ -1093,9 +1095,11 @@ model ChannelSplitRule {
   updatedAt                   DateTime @updatedAt
 
   customer        Customer                @relation(fields: [customerId], references: [id])
+  contract        Contract?               @relation(fields: [contractId], references: [id], onDelete: Cascade)
   reconciliations ChannelReconciliation[]
 
   @@index([customerId])
+  @@index([contractId])
 }
 
 model ChannelReconciliationPeriod {

@@ -54,17 +54,13 @@ export async function POST(req: Request) {
       select: {
         id: true,
         channelUserId: true,
-        splitRule: true,
+        splitRules: { where: { contractId: null }, take: 1 },
       },
     });
     if (!customer) return NextResponse.json({ error: "客户不存在或无权访问" }, { status: 404 });
     if (!customer.channelUserId) {
       return NextResponse.json({ error: "该客户尚未关联渠道商" }, { status: 400 });
     }
-    if (!customer.splitRule) {
-      return NextResponse.json({ error: "该客户尚未配置分账规则" }, { status: 400 });
-    }
-    const splitRule = customer.splitRule;
     const contract = await prisma.contract.findFirst({
       where: {
         id: contractId,
@@ -78,6 +74,7 @@ export async function POST(req: Request) {
         startDate: true,
         endDate: true,
         feeCurrency: true,
+        splitRule: true,
       },
     });
     if (!contract) {
@@ -85,6 +82,10 @@ export async function POST(req: Request) {
         { error: "合同不存在、未签署完成、已删除或不属于所选客户" },
         { status: 404 },
       );
+    }
+    const splitRule = customer.splitRules[0] ?? contract.splitRule;
+    if (!splitRule) {
+      return NextResponse.json({ error: "\u8be5\u5ba2\u6237\u53ca\u6240\u9009\u5408\u540c\u5747\u672a\u914d\u7f6e\u5206\u8d26\u89c4\u5219" }, { status: 400 });
     }
     if (!contract.startDate) {
       return NextResponse.json({ error: "所选合同尚未填写合作开始时间" }, { status: 400 });

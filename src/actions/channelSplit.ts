@@ -16,6 +16,7 @@ import {
 
 export interface SplitRuleInput {
   customerId: string;
+  contractId?: string | null;
   ruleType: "A" | "B";
   splitEndDate: string;          // ISO yyyy-mm-dd or full ISO
   fixedFeeRate: number;          // 0~1
@@ -70,8 +71,17 @@ export async function upsertChannelSplitRule(input: SplitRuleInput): Promise<Res
   });
   if (!customer || customer.deletedAt) return { ok: false, error: "客户不存在" };
 
+  if (input.contractId) {
+    const contract = await prisma.contract.findFirst({
+      where: { id: input.contractId, customerId: input.customerId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!contract) return { ok: false, error: "合同不存在、已删除或不属于该客户" };
+  }
+
   const data = {
     customerId: input.customerId,
+    contractId: input.contractId ?? null,
     ruleType: input.ruleType,
     splitEndDate: new Date(input.splitEndDate),
     fixedFeeRate: input.fixedFeeRate,
@@ -91,17 +101,20 @@ export async function upsertChannelSplitRule(input: SplitRuleInput): Promise<Res
     createdById: session.userId,
   };
 
-  const existing = await prisma.channelSplitRule.findUnique({ where: { customerId: input.customerId } });
+  const existing = input.contractId
+    ? await prisma.channelSplitRule.findUnique({ where: { contractId: input.contractId } })
+    : await prisma.channelSplitRule.findFirst({ where: { customerId: input.customerId, contractId: null } });
   const rule = existing
     ? await prisma.channelSplitRule.update({ where: { id: existing.id }, data })
     : await prisma.channelSplitRule.create({ data });
 
   revalidatePath(`/customers/${input.customerId}`);
+  if (input.contractId) revalidatePath(`/contracts/${input.contractId}`);
   revalidatePath("/finance");
   return { ok: true, data: { id: rule.id } };
 }
 
-export async function deleteChannelSplitRule(customerId: string): Promise<Result> {
+export async function deleteChannelSplitRule(customerId: string, contractId?: string): Promise<Result> {
   const session = await requireSession();
   try {
     await requireFeaturePermission(session, "finance.channel_reconciliation", "MANAGE");
@@ -111,8 +124,19 @@ export async function deleteChannelSplitRule(customerId: string): Promise<Result
   }
   const customer = await prisma.customer.findFirst({ where: { AND: [{ id: customerId }, customerScope(session, session.role === "ADMIN" ? "all" : "mine")] }, select: { id: true } });
   if (!customer) return { ok: false, error: "客户不存在或无权操作" };
-  await prisma.channelSplitRule.deleteMany({ where: { customerId } });
+  if (contractId) {
+    const contract = await prisma.contract.findFirst({
+      where: { id: contractId, customerId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!contract) return { ok: false, error: "合同不存在、已删除或不属于该客户" };
+  }
+  await prisma.channelSplitRule.deleteMany({
+    where: contractId ? { customerId, contractId } : { customerId, contractId: null },
+  });
   revalidatePath(`/customers/${customerId}`);
+  if (contractId) revalidatePath(`/contracts/${contractId}`);
+  revalidatePath("/finance");
   return { ok: true };
 }
 

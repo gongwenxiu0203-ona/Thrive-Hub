@@ -100,18 +100,20 @@ export async function PATCH(
       const customerId = typeof body.customerId === "string" ? body.customerId : existing.customerId;
       const contractId = typeof body.contractId === "string" ? body.contractId : existing.contractId;
       if (!contractId) return NextResponse.json({ error: "请选择关联合同" }, { status: 400 });
-      const customer = await prisma.customer.findFirst({ where: { id: customerId, deletedAt: null }, select: { channelUserId: true, splitRule: true } });
-      if (!customer?.channelUserId || !customer.splitRule) return NextResponse.json({ error: "客户缺少渠道商或分账规则" }, { status: 400 });
-      const contract = await prisma.contract.findFirst({ where: { id: contractId, customerId, status: "COMPLETED", deletedAt: null }, select: { id: true, startDate: true } });
+      const customer = await prisma.customer.findFirst({ where: { id: customerId, deletedAt: null }, select: { channelUserId: true, splitRules: { where: { contractId: null }, take: 1 } } });
+      if (!customer?.channelUserId) return NextResponse.json({ error: "\u5ba2\u6237\u7f3a\u5c11\u6e20\u9053\u5546" }, { status: 400 });
+      const contract = await prisma.contract.findFirst({ where: { id: contractId, customerId, status: "COMPLETED", deletedAt: null }, select: { id: true, startDate: true, splitRule: true } });
+      const splitRule = customer.splitRules[0] ?? contract?.splitRule ?? null;
+      if (!splitRule) return NextResponse.json({ error: "\u8be5\u5ba2\u6237\u53ca\u6240\u9009\u5408\u540c\u5747\u672a\u914d\u7f6e\u5206\u8d26\u89c4\u5219" }, { status: 400 });
       if (!contract?.startDate) return NextResponse.json({ error: "合同不存在或缺少开始时间" }, { status: 400 });
       if (existing.periods.some((p) => p.fixedFeePaidAt || p.commissionPaidAt)) return NextResponse.json({ error: "已有付款记录，不能重新编辑主记录" }, { status: 409 });
       if (existing.periods.some((p) => p.fixedFeeReceived != null || p.commissionReceived != null || p.fixedFeeShareAmount != null || p.commissionShareAmount != null || p.confirmedGmv != null)) return NextResponse.json({ error: "已有分账录入，不能重建服务周期" }, { status: 409 });
-      const start = contract.startDate; const end = customer.splitRule.splitEndDate;
+      const start = contract.startDate; const end = splitRule.splitEndDate;
       if (end.getTime() < start.getTime()) return NextResponse.json({ error: "分账规则截止时间早于合同开始时间" }, { status: 400 });
       const fixed = splitFixedFeeServicePeriods(start, end); const commission = splitCommissionServicePeriods(start, end);
       const updated = await prisma.$transaction(async (tx) => {
         await tx.channelReconciliationPeriod.deleteMany({ where: { reconciliationId: id } });
-        return tx.channelReconciliation.update({ where: { id }, data: { customerId, contractId, channelUserId: customer.channelUserId!, splitRuleId: customer.splitRule!.id, periodStart: start, periodEnd: end, totalPeriods: fixed.length + commission.length, note: typeof body.note === "string" ? body.note.trim() || null : existing.note, auditLog: appendAuditEntry(existing.auditLog, { type: "MASTER_EDIT", actorId: session.userId, at: new Date().toISOString(), reason, before: { customerId: existing.customerId, contractId: existing.contractId, periodStart: existing.periodStart, periodEnd: existing.periodEnd }, after: { customerId, contractId, periodStart: start, periodEnd: end } }), periods: { create: [ ...fixed.map((period) => ({ streamType: "FIXED_FEE", periodIndex: period.periodIndex, periodLabel: period.label, periodStart: period.start, periodEnd: period.end, fixedFeeShareRate: customer.splitRule!.fixedFeeRate })), ...commission.map((period) => ({ streamType: "COMMISSION", periodIndex: fixed.length + period.periodIndex, periodLabel: period.label, periodStart: period.start, periodEnd: period.end, commissionShareRate: customer.splitRule!.ruleType === "A" ? customer.splitRule!.commissionBelowRate : null })) ] } } });
+        return tx.channelReconciliation.update({ where: { id }, data: { customerId, contractId, channelUserId: customer.channelUserId!, splitRuleId: splitRule.id, periodStart: start, periodEnd: end, totalPeriods: fixed.length + commission.length, note: typeof body.note === "string" ? body.note.trim() || null : existing.note, auditLog: appendAuditEntry(existing.auditLog, { type: "MASTER_EDIT", actorId: session.userId, at: new Date().toISOString(), reason, before: { customerId: existing.customerId, contractId: existing.contractId, periodStart: existing.periodStart, periodEnd: existing.periodEnd }, after: { customerId, contractId, periodStart: start, periodEnd: end } }), periods: { create: [ ...fixed.map((period) => ({ streamType: "FIXED_FEE", periodIndex: period.periodIndex, periodLabel: period.label, periodStart: period.start, periodEnd: period.end, fixedFeeShareRate: splitRule.fixedFeeRate })), ...commission.map((period) => ({ streamType: "COMMISSION", periodIndex: fixed.length + period.periodIndex, periodLabel: period.label, periodStart: period.start, periodEnd: period.end, commissionShareRate: splitRule.ruleType === "A" ? splitRule.commissionBelowRate : null })) ] } } });
       });
       return NextResponse.json(updated);
     }

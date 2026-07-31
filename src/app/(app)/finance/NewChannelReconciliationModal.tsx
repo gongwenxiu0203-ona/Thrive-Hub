@@ -27,6 +27,7 @@ export type ChannelReconciliationContractOption = {
   startDate: string | null;
   endDate: string | null;
   feeCurrency: string | null;
+  splitRule: ChannelSplitRuleOption | null;
 };
 
 export type ChannelReconciliationCustomerOption = {
@@ -75,6 +76,8 @@ export function NewChannelReconciliationModal({
   const selectable = useMemo(() => customers.filter((customer) => customer.channelUser), [customers]);
   const selected = selectable.find((customer) => customer.id === customerId);
   const selectedContract = selected?.contracts.find((contract) => contract.id === contractId);
+  const effectiveRule = selected?.splitRule ?? selectedContract?.splitRule ?? null;
+  const ruleSource = selected?.splitRule ? "\u5ba2\u6237\u89c4\u5219" : selectedContract?.splitRule ? "\u5408\u540c\u89c4\u5219" : null;
 
   function applyContract(
     contract: ChannelReconciliationContractOption | undefined,
@@ -82,7 +85,7 @@ export function NewChannelReconciliationModal({
   ) {
     setContractId(contract?.id ?? "");
     setPeriodStart(dateValue(contract?.startDate));
-    setPeriodEnd(dateValue(customer?.splitRule?.splitEndDate));
+    setPeriodEnd(dateValue(customer?.splitRule?.splitEndDate ?? contract?.splitRule?.splitEndDate));
   }
 
   function selectCustomer(nextCustomerId: string) {
@@ -104,7 +107,7 @@ export function NewChannelReconciliationModal({
 
   async function create(confirmDuplicate = false) {
     if (!selected?.channelUser) return setError("该客户尚未关联已审核渠道商。");
-    if (!selected.splitRule) return setError("该客户尚未配置分账规则。");
+    if (!effectiveRule) return setError("该客户尚未配置分账规则。");
     if (!selectedContract) return setError("请选择关联合同。");
     if (!periodStart || !periodEnd) return setError("请填写分账开始和结束时间。");
     if (periodEnd < periodStart) return setError("分账结束时间不能早于开始时间。");
@@ -231,21 +234,21 @@ export function NewChannelReconciliationModal({
                   className="input bg-white"
                   readOnly
                   value={
-                    !selected?.splitRule
+                    !effectiveRule
                       ? "选择客户后显示"
-                      : selected.splitRule.ruleType === "A"
-                        ? `A 类：固费 ${pct(selected.splitRule.fixedFeeRate)}；佣金按到账金额分档`
-                        : `B 类：固费 ${pct(selected.splitRule.fixedFeeRate)}；佣金按阶梯规则`
+                      : effectiveRule.ruleType === "A"
+                        ? `${ruleSource} \u00b7 A 类：固费 ${pct(effectiveRule.fixedFeeRate)}；佣金按到账金额分档`
+                        : `${ruleSource} \u00b7 B 类：固费 ${pct(effectiveRule.fixedFeeRate)}；佣金按阶梯规则`
                   }
                 />
               </div>
             </div>
-            {selected && (!selected.channelUser || !selected.splitRule || selected.contracts.length === 0) && (
+            {selected && (!selected.channelUser || !effectiveRule || selected.contracts.length === 0) && (
               <div className="mt-3 flex gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                 <CircleAlert className="h-4 w-4 shrink-0" />
                 {!selected.channelUser
                   ? "客户未关联有效渠道商，暂不能创建。"
-                  : !selected.splitRule
+                  : !effectiveRule
                     ? "客户未配置分账规则，暂不能创建。"
                     : "客户暂无有效合同，暂不能创建。"}
               </div>
@@ -326,7 +329,7 @@ export function NewChannelReconciliationModal({
                 loading ||
                 !selectedContract ||
                 !selected?.channelUser ||
-                !selected?.splitRule ||
+                !effectiveRule ||
                 !periodStart ||
                 !periodEnd
               }

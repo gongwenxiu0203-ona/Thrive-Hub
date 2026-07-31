@@ -35,39 +35,45 @@ function fromPct(s: string): number {
 
 export function ChannelSplitRuleModal({
   customerId,
+  contractId,
   isAdmin,
   existing,
+  inheritedCustomerRule = null,
 }: {
   customerId: string;
+  contractId?: string;
   isAdmin: boolean;
   existing: ExistingRule | null;
+  inheritedCustomerRule?: ExistingRule | null;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const isInherited = Boolean(contractId && inheritedCustomerRule);
+  const displayedRule = inheritedCustomerRule ?? existing;
 
   const initialTiers: Tier[] = (() => {
-    if (!existing) return [{ gmvMin: 0, gmvMax: 100000, rate: 0.15 }, { gmvMin: 100000, gmvMax: null, rate: 0.2 }];
+    if (!displayedRule) return [{ gmvMin: 0, gmvMax: 100000, rate: 0.15 }, { gmvMin: 100000, gmvMax: null, rate: 0.2 }];
     try {
-      const parsed = JSON.parse(existing.tieredRules) as Tier[];
+      const parsed = JSON.parse(displayedRule.tieredRules) as Tier[];
       return Array.isArray(parsed) && parsed.length > 0 ? parsed : [{ gmvMin: 0, gmvMax: null, rate: 0.15 }];
     } catch {
       return [{ gmvMin: 0, gmvMax: null, rate: 0.15 }];
     }
   })();
 
-  const [ruleType, setRuleType] = useState<"A" | "B">(existing?.ruleType ?? "A");
-  const [splitEndDate, setSplitEndDate] = useState(existing?.splitEndDate?.slice(0, 10) ?? "2026-12-31");
-  const [fixedFeePct, setFixedFeePct] = useState(toPct(existing?.fixedFeeRate ?? 0.15));
+  const [ruleType, setRuleType] = useState<"A" | "B">(displayedRule?.ruleType ?? "A");
+  const [splitEndDate, setSplitEndDate] = useState(displayedRule?.splitEndDate?.slice(0, 10) ?? "2026-12-31");
+  const [fixedFeePct, setFixedFeePct] = useState(toPct(displayedRule?.fixedFeeRate ?? 0.15));
   const [commissionThreshold, setCommissionThreshold] = useState(
-    String(existing?.commissionThresholdAmount ?? 4400),
+    String(displayedRule?.commissionThresholdAmount ?? 4400),
   );
   const [commissionBelowPct, setCommissionBelowPct] = useState(
-    toPct(existing?.commissionBelowRate ?? 0.15),
+    toPct(displayedRule?.commissionBelowRate ?? 0.15),
   );
   const [commissionAtOrAbovePct, setCommissionAtOrAbovePct] = useState(
-    toPct(existing?.commissionAtOrAboveRate ?? 0.25),
+    toPct(displayedRule?.commissionAtOrAboveRate ?? 0.25),
   );
   const [tiers, setTiers] = useState<Tier[]>(initialTiers);
 
@@ -84,6 +90,7 @@ export function ChannelSplitRuleModal({
   }
 
   function submit() {
+    if (isInherited) return;
     setError(null);
     if (!splitEndDate) { setError("请填写分账截止日期"); return; }
     const fixedRate = fromPct(fixedFeePct);
@@ -120,6 +127,7 @@ export function ChannelSplitRuleModal({
     startTransition(async () => {
       const r = await upsertChannelSplitRule({
         customerId,
+        contractId,
         ruleType,
         splitEndDate,
         fixedFeeRate: fixedRate,
@@ -137,10 +145,10 @@ export function ChannelSplitRuleModal({
   }
 
   function remove() {
-    if (!existing) return;
+    if (!displayedRule) return;
     if (!confirm("确认删除分账规则？此操作不影响已生成的分账记录。")) return;
     startTransition(async () => {
-      const r = await deleteChannelSplitRule(customerId);
+      const r = await deleteChannelSplitRule(customerId, contractId);
       if (!r.ok) { setError(r.error); return; }
       setOpen(false);
       router.refresh();
@@ -152,7 +160,10 @@ export function ChannelSplitRuleModal({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex items-center gap-1.5 rounded-lg bg-white/20 px-3 py-1.5 text-sm font-medium text-white hover:bg-white/30 transition-colors"
+        className={contractId
+          ? "btn-secondary flex items-center gap-1.5 text-sm"
+          : "flex items-center gap-1.5 rounded-lg bg-white/20 px-3 py-1.5 text-sm font-medium text-white hover:bg-white/30 transition-colors"
+        }
         title="配置渠道商分账规则（A 基础 / B 阶梯）"
       >
         <Percent className="h-4 w-4" />
@@ -161,6 +172,11 @@ export function ChannelSplitRuleModal({
 
       {open && (
         <Modal open onClose={() => setOpen(false)} title="渠道商分账规则" size="lg" closeOnBackdrop={false}>
+            {isInherited && (
+              <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                {"\u5f53\u524d\u5ba2\u6237\u5df2\u914d\u7f6e\u5ba2\u6237\u7ea7\u5206\u8d26\u89c4\u5219\uff0c\u672c\u5408\u540c\u7ee7\u627f\u8be5\u89c4\u5219\uff1b\u5ba2\u6237\u7ea7\u89c4\u5219\u4f18\u5148\uff0c\u4e0d\u80fd\u5728\u5408\u540c\u9875\u9762\u8986\u76d6\u3002"}
+              </div>
+            )}
             {/* Rule type switch */}
             <div className="mb-4 grid grid-cols-2 gap-2">
               <button
@@ -345,7 +361,7 @@ export function ChannelSplitRuleModal({
 
             <div className="mt-6 flex items-center justify-between">
               <div>
-                {existing && isAdmin && (
+                {existing && isAdmin && !isInherited && (
                   <button type="button" onClick={remove} disabled={pending}
                     className="text-sm text-rose-600 hover:underline disabled:opacity-50">
                     删除规则
@@ -356,7 +372,7 @@ export function ChannelSplitRuleModal({
                 <button type="button" onClick={() => setOpen(false)} className="btn-secondary text-sm">
                   取消
                 </button>
-                <button type="button" onClick={submit} disabled={pending}
+                <button type="button" onClick={submit} disabled={pending || isInherited}
                   className="btn-primary flex items-center gap-1 text-sm">
                   <Save className="h-4 w-4" /> {pending ? "保存中…" : existing ? "更新规则" : "保存规则"}
                 </button>

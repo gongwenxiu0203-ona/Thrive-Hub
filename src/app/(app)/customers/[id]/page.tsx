@@ -67,7 +67,7 @@ export default async function CustomerDetailPage({
       orderBy: { createdAt: "desc" },
       include: { periods: { orderBy: { periodIndex: "asc" } } },
     }),
-    prisma.channelSplitRule.findUnique({ where: { customerId: id } }),
+    prisma.channelSplitRule.findFirst({ where: { customerId: id, contractId: null } }),
     session.role === "ADMIN" ? prisma.customerIntakeSubmission.count({ where: { customerId: id, status: "PENDING" } }) : Promise.resolve(0),
   ]);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

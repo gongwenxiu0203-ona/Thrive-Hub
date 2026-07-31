@@ -9,6 +9,7 @@ import { FileUploader } from "@/components/FileUploader";
 import { ContractFormModal } from "../ContractFormModal";
 import { ContractActions } from "./ContractActions";
 import { ContactAdminModifyButton } from "./ContactAdminModifyButton";
+import { ChannelSplitRuleModal, type ExistingRule } from "../../customers/[id]/ChannelSplitRuleModal";
 import { ContractCompare } from "./ContractCompare";
 import { ContractWorkflowPanel, type ContractVersionRow } from "./ContractWorkflowPanel";
 import {
@@ -52,7 +53,10 @@ export default async function ContractDetailPage({
   const contract = await prisma.contract.findFirst({
     where: { id, ...contractScope(session, session.role === "ADMIN" ? "all" : "mine"), deletedAt: null },
     include: {
-      customer: true,
+      customer: {
+        include: { splitRules: { where: { contractId: null }, take: 1 } },
+      },
+      splitRule: true,
       createdBy: true,
       owner: true,
       reviewer: true,
@@ -113,6 +117,20 @@ export default async function ContractDetailPage({
   ]);
 
   const isAdmin = session.role === "ADMIN";
+  const canConfigureSplitRule = session.role === "ADMIN" || session.role === "USER";
+  const toExistingRule = (rule: typeof contract.splitRule): ExistingRule | null => rule ? ({
+    id: rule.id,
+    ruleType: rule.ruleType as "A" | "B",
+    splitEndDate: rule.splitEndDate.toISOString(),
+    fixedFeeRate: rule.fixedFeeRate,
+    commissionRate: rule.commissionRate,
+    tieredRules: rule.tieredRules,
+    commissionThresholdAmount: rule.commissionThresholdAmount,
+    commissionThresholdCurrency: rule.commissionThresholdCurrency,
+    commissionBelowRate: rule.commissionBelowRate,
+    commissionAtOrAboveRate: rule.commissionAtOrAboveRate,
+  }) : null;
+  const customerSplitRule = contract.customer?.splitRules[0] ?? null;
   const userOptions = users.map((u) => ({ id: u.id, name: u.name }));
 
   // ── 审核轮次 + 批注（用于 ReviewerActionsPanel）───────────────────────────
@@ -318,6 +336,15 @@ export default async function ContractDetailPage({
             </Badge>
           </div>
           <div className="flex items-center gap-2">
+            {canConfigureSplitRule && contract.customerId && (
+              <ChannelSplitRuleModal
+                customerId={contract.customerId}
+                contractId={contract.id}
+                isAdmin={isAdmin}
+                existing={toExistingRule(contract.splitRule)}
+                inheritedCustomerRule={toExistingRule(customerSplitRule)}
+              />
+            )}
             {/* V4 合同：编辑 + 下载 */}
             {c.fillMethod && (
               contract.status === "IN_PROGRESS" ||
