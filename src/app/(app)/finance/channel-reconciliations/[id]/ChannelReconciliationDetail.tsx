@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import {
   ArrowLeft, Settings, CheckCircle2, DollarSign, TrendingUp, Calendar, Clock,
   Save, LockKeyhole, Landmark, PencilLine, Send, SkipForward, AlertTriangle,
-  Upload, Image as ImageIcon,
+  Upload, Image as ImageIcon, Trash2,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import type { PeriodDerived } from "@/lib/channelSplit";
@@ -832,6 +832,32 @@ export function ChannelReconciliationDetail({
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
+  const [deletingLegacy, setDeletingLegacy] = useState(false);
+  const [legacyDeleteError, setLegacyDeleteError] = useState<string | null>(null);
+
+  async function deleteLegacyRecord() {
+    const reason = window.prompt("请填写删除原因");
+    if (!reason?.trim()) return;
+    if (!window.confirm("删除后记录将进入软删除状态，确定继续吗？")) return;
+    setDeletingLegacy(true);
+    setLegacyDeleteError(null);
+    try {
+      const response = await fetch(`/api/finance/channel-reconciliations/${record.id}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: reason.trim() }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setLegacyDeleteError(payload.error ?? "删除失败");
+        return;
+      }
+      router.push("/finance?tab=channels");
+      router.refresh();
+    } finally {
+      setDeletingLegacy(false);
+    }
+  }
 
   if (record.recordMode === "RULE_DRIVEN") {
     return (
@@ -898,12 +924,26 @@ export function ChannelReconciliationDetail({
             </p>
           </div>
         </div>
-        {canEdit && (
-          <button onClick={() => setEditing(true)} className="btn-primary flex items-center gap-1.5 text-sm">
-            <Settings className="h-4 w-4" /> 编辑/管理分账
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {isAdmin && (
+            <button
+              type="button"
+              disabled={deletingLegacy}
+              onClick={() => void deleteLegacyRecord()}
+              className="btn-secondary flex items-center gap-1.5 text-sm text-red-600 hover:border-red-200 hover:bg-red-50"
+            >
+              <Trash2 className="h-4 w-4" /> {deletingLegacy ? "删除中…" : "删除记录"}
+            </button>
+          )}
+          {canEdit && (
+            <button onClick={() => setEditing(true)} className="btn-primary flex items-center gap-1.5 text-sm">
+              <Settings className="h-4 w-4" /> 编辑/管理分账
+            </button>
+          )}
+        </div>
       </div>
+
+      {legacyDeleteError && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{legacyDeleteError}</div>}
 
       {/* Summary cards */}
       <div className="grid gap-3 sm:grid-cols-2">
