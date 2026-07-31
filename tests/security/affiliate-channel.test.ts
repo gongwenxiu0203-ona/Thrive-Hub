@@ -17,6 +17,9 @@ const ids = {
   unrelatedContract: "security-channel-unrelated-contract",
   ownedReconciliation: "security-channel-owned-reconciliation",
   unrelatedReconciliation: "security-channel-unrelated-reconciliation",
+  ownedSplitRule: "security-channel-owned-split-rule",
+  ownedPeriod: "security-channel-owned-period",
+  unrelatedPeriod: "security-channel-unrelated-period",
 } as const;
 
 let ownedCustomerId = "";
@@ -51,7 +54,7 @@ before(async () => {
       { userId: actors.user.id, feature: "affiliates", level: "EDIT" },
       { userId: actors.brand.id, feature: "affiliates", level: "NONE" },
       { userId: actors.channel.id, feature: "finance_channel", level: "EDIT" },
-      { userId: actors.user.id, feature: "finance_channel", level: "MANAGE" },
+      { userId: actors.user.id, feature: "finance_channel", level: "EDIT" },
     ],
   });
 
@@ -74,6 +77,20 @@ before(async () => {
       },
     ],
   });
+  await prisma.channelSplitRule.create({
+    data: {
+      id: ids.ownedSplitRule,
+      customerId: ownedCustomerId,
+      ruleType: "A",
+      splitEndDate: new Date("2026-12-31T00:00:00+08:00"),
+      fixedFeeRate: 0.15,
+      commissionThresholdAmount: 4400,
+      commissionThresholdCurrency: "USD",
+      commissionBelowRate: 0.15,
+      commissionAtOrAboveRate: 0.25,
+      createdById: actors.admin.id,
+    },
+  });
   await prisma.channelReconciliation.createMany({
     data: [
       {
@@ -82,6 +99,8 @@ before(async () => {
         contractId: ids.ownedContract,
         channelUserId: actors.channel.id,
         createdById: actors.user.id,
+        recordMode: "RULE_DRIVEN",
+        splitRuleId: ids.ownedSplitRule,
       },
       {
         id: ids.unrelatedReconciliation,
@@ -92,6 +111,12 @@ before(async () => {
       },
     ],
   });
+  await prisma.channelReconciliationPeriod.createMany({
+    data: [
+      { id: ids.ownedPeriod, reconciliationId: ids.ownedReconciliation, streamType: "FIXED_FEE", periodIndex: 1, periodStart: new Date("2026-07-01T00:00:00+08:00"), periodEnd: new Date("2026-07-30T00:00:00+08:00") },
+      { id: ids.unrelatedPeriod, reconciliationId: ids.unrelatedReconciliation, streamType: "FIXED_FEE", periodIndex: 1, periodStart: new Date("2026-07-01T00:00:00+08:00"), periodEnd: new Date("2026-07-30T00:00:00+08:00") },
+    ],
+  });
 });
 
 after(async () => {
@@ -99,6 +124,7 @@ after(async () => {
     where: { id: { in: [ids.ownedReconciliation, ids.unrelatedReconciliation] } },
   });
   await prisma.contract.deleteMany({ where: { id: { in: [ids.ownedContract, ids.unrelatedContract] } } });
+  await prisma.channelSplitRule.deleteMany({ where: { id: ids.ownedSplitRule } });
   await prisma.affiliate.deleteMany({ where: { id: ids.affiliate } });
   await prisma.userPermissionOverride.deleteMany({
     where: { userId: { in: Object.values(actors).map((actor) => actor.id) } },
@@ -173,7 +199,9 @@ test("channel reconciliation writes are staff-only and remain row-scoped", async
     { method: "DELETE" },
     actors.user,
   );
-  assert.equal(deleteResponse.status, 404);
+  // Channel reconciliation deletion is now ADMIN-only, so a USER is rejected
+  // before row-scope lookup.
+  assert.equal(deleteResponse.status, 403);
   assert.ok(await prisma.channelReconciliation.findUnique({ where: { id: ids.unrelatedReconciliation } }));
 });
 

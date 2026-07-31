@@ -6,12 +6,9 @@ import {
   CalendarDays,
   CircleAlert,
   FileText,
-  Landmark,
   Store,
 } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
-
-const CURRENCY_OPTIONS = ["USD", "RMB", "EUR", "GBP", "HKD"] as const;
 
 export type ChannelSplitRuleOption = {
   id: string;
@@ -48,21 +45,20 @@ function dateValue(value: string | null | undefined) {
   return value?.slice(0, 10) ?? "";
 }
 
-function normalizeCurrency(value: string | null | undefined) {
-  if (value === "美金" || value === "美元") return "USD";
-  if (value === "人民币" || value === "CNY") return "RMB";
-  return CURRENCY_OPTIONS.includes(value as (typeof CURRENCY_OPTIONS)[number])
-    ? value!
-    : "USD";
-}
+type SimilarRecord = {
+  id: string;
+  customerName?: string;
+  contractNo?: string | null;
+  periodStart?: string | null;
+  periodEnd?: string | null;
+  createdAt?: string | null;
+};
 
 export function NewChannelReconciliationModal({
   customers,
-  existingCustomerIds,
   onCreated,
 }: {
   customers: ChannelReconciliationCustomerOption[];
-  existingCustomerIds: string[];
   onCreated: () => void;
 }) {
   const router = useRouter();
@@ -73,19 +69,12 @@ export function NewChannelReconciliationModal({
   const [contractId, setContractId] = useState("");
   const [periodStart, setPeriodStart] = useState("");
   const [periodEnd, setPeriodEnd] = useState("");
-  const [fixedFeeReceivedCurrency, setFixedFeeReceivedCurrency] = useState("USD");
-  const [commissionReceivedCurrency, setCommissionReceivedCurrency] = useState("USD");
   const [note, setNote] = useState("");
+  const [similarRecords, setSimilarRecords] = useState<SimilarRecord[]>([]);
 
-  const selectable = useMemo(() => {
-    const used = new Set(existingCustomerIds);
-    return customers.filter((customer) => !used.has(customer.id));
-  }, [customers, existingCustomerIds]);
+  const selectable = useMemo(() => customers.filter((customer) => customer.channelUser), [customers]);
   const selected = selectable.find((customer) => customer.id === customerId);
   const selectedContract = selected?.contracts.find((contract) => contract.id === contractId);
-  const commissionCurrencyMismatch =
-    selected?.splitRule?.ruleType === "A" &&
-    commissionReceivedCurrency !== selected.splitRule.commissionThresholdCurrency;
 
   function applyContract(
     contract: ChannelReconciliationContractOption | undefined,
@@ -93,8 +82,7 @@ export function NewChannelReconciliationModal({
   ) {
     setContractId(contract?.id ?? "");
     setPeriodStart(dateValue(contract?.startDate));
-    setPeriodEnd(dateValue(contract?.endDate ?? customer?.splitRule?.splitEndDate));
-    setFixedFeeReceivedCurrency(normalizeCurrency(contract?.feeCurrency));
+    setPeriodEnd(dateValue(customer?.splitRule?.splitEndDate));
   }
 
   function selectCustomer(nextCustomerId: string) {
@@ -109,24 +97,17 @@ export function NewChannelReconciliationModal({
     setContractId("");
     setPeriodStart("");
     setPeriodEnd("");
-    setFixedFeeReceivedCurrency("USD");
-    setCommissionReceivedCurrency("USD");
     setNote("");
+    setSimilarRecords([]);
     setError(null);
   }
 
-  async function submit(event: React.FormEvent) {
-    event.preventDefault();
+  async function create(confirmDuplicate = false) {
     if (!selected?.channelUser) return setError("该客户尚未关联已审核渠道商。");
     if (!selected.splitRule) return setError("该客户尚未配置分账规则。");
     if (!selectedContract) return setError("请选择关联合同。");
     if (!periodStart || !periodEnd) return setError("请填写分账开始和结束时间。");
     if (periodEnd < periodStart) return setError("分账结束时间不能早于开始时间。");
-    if (commissionCurrencyMismatch) {
-      return setError(
-        `A 类佣金门槛按 ${selected.splitRule.commissionThresholdCurrency} 判断，请将到账销售佣金货币改为相同货币。`,
-      );
-    }
 
     setLoading(true);
     setError(null);
@@ -139,12 +120,15 @@ export function NewChannelReconciliationModal({
           contractId,
           periodStart,
           periodEnd,
-          fixedFeeReceivedCurrency,
-          commissionReceivedCurrency,
           note: note.trim() || null,
+          confirmDuplicate,
         }),
       });
       const payload = await response.json().catch(() => ({}));
+      if (response.status === 409 && payload.code === "SIMILAR_RECORDS" && Array.isArray(payload.similarRecords)) {
+        setSimilarRecords(payload.similarRecords);
+        return;
+      }
       if (!response.ok) return setError(payload.error ?? "创建失败");
       setOpen(false);
       reset();
@@ -153,6 +137,11 @@ export function NewChannelReconciliationModal({
     } finally {
       setLoading(false);
     }
+  }
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    await create(false);
   }
 
   return (
@@ -275,10 +264,10 @@ export function NewChannelReconciliationModal({
                   type="date"
                   className="input"
                   value={periodStart}
-                  onChange={(event) => setPeriodStart(event.target.value)}
+                  readOnly
                   required
                 />
-                <p className="mt-1 text-xs text-slate-400">默认读取合同开始合作时间，可手动更改</p>
+                <p className="mt-1 text-xs text-slate-400">自动读取所选合同的合作开始时间</p>
               </div>
               <div>
                 <label className="label">结束时间 *</label>
@@ -287,55 +276,12 @@ export function NewChannelReconciliationModal({
                   className="input"
                   min={periodStart || undefined}
                   value={periodEnd}
-                  onChange={(event) => setPeriodEnd(event.target.value)}
+                  readOnly
                   required
                 />
               </div>
             </div>
           </section>
-
-          <section className="rounded-xl border border-slate-200 p-4">
-            <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-700">
-              <Landmark className="h-4 w-4 text-brand-600" />
-              到账金额货币
-            </div>
-            <p className="mb-3 text-xs text-slate-500">
-              创建后各期金额始终沿用这里选择的货币。
-            </p>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <label className="label">到账固费货币 *</label>
-                <select
-                  className="input"
-                  value={fixedFeeReceivedCurrency}
-                  onChange={(event) => setFixedFeeReceivedCurrency(event.target.value)}
-                >
-                  {CURRENCY_OPTIONS.map((currency) => (
-                    <option key={currency} value={currency}>{currency}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="label">到账销售佣金货币 *</label>
-                <select
-                  className="input"
-                  value={commissionReceivedCurrency}
-                  onChange={(event) => setCommissionReceivedCurrency(event.target.value)}
-                >
-                  {CURRENCY_OPTIONS.map((currency) => (
-                    <option key={currency} value={currency}>{currency}</option>
-                  ))}
-                </select>
-                {commissionCurrencyMismatch && (
-                  <p className="mt-1 text-xs text-amber-600">
-                    A 类规则门槛货币为 {selected?.splitRule?.commissionThresholdCurrency}，
-                    当前货币无法计算，请选择相同货币（通常为 USD）。
-                  </p>
-                )}
-              </div>
-            </div>
-          </section>
-
           <div>
             <label className="label">备注</label>
             <textarea
@@ -344,7 +290,29 @@ export function NewChannelReconciliationModal({
               onChange={(event) => setNote(event.target.value)}
             />
           </div>
-          {error && (
+          {similarRecords.length > 0 && (
+            <section className="rounded-xl border border-amber-300 bg-amber-50 p-4">
+              <div className="flex gap-2 text-sm font-semibold text-amber-900">
+                <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                已存在相似的渠道商分账记录，是否仍要新建？
+              </div>
+              <div className="mt-3 space-y-2">
+                {similarRecords.map((record) => (
+                  <div key={record.id} className="rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs text-slate-600">
+                    <div className="font-medium text-slate-800">{record.customerName ?? selected?.brandName} · {record.contractNo ?? "未关联合同"}</div>
+                    <div className="mt-1">分账范围：{dateValue(record.periodStart)} 至 {dateValue(record.periodEnd)}</div>
+                    <div>创建时间：{record.createdAt ? new Date(record.createdAt).toLocaleString("zh-CN") : "—"}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-3 flex justify-end gap-2">
+                <button type="button" className="btn-secondary" onClick={() => setSimilarRecords([])} disabled={loading}>取消</button>
+                <button type="button" className="btn-primary" onClick={() => void create(true)} disabled={loading}>
+                  {loading ? "创建中…" : "仍然新建"}
+                </button>
+              </div>
+            </section>
+          )}          {error && (
             <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>
           )}
           <div className="flex justify-end gap-2">
@@ -359,7 +327,6 @@ export function NewChannelReconciliationModal({
                 !selectedContract ||
                 !selected?.channelUser ||
                 !selected?.splitRule ||
-                commissionCurrencyMismatch ||
                 !periodStart ||
                 !periodEnd
               }

@@ -1,4 +1,3 @@
-import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
@@ -9,44 +8,12 @@ import {
   splitFixedFeeServicePeriods,
 } from "@/lib/channelSplit";
 
-const RECEIVED_CURRENCIES = new Set(["USD", "RMB", "EUR", "GBP", "HKD"]);
-
-function parseShanghaiDate(value: unknown): Date | null {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
-  const date = new Date(`${value}T00:00:00+08:00`);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function parseReceivedCurrency(value: unknown): string | null {
-  if (value === undefined || value === null || value === "") return "USD";
-  if (typeof value !== "string") return null;
-  const raw = value.trim();
-  const aliases: Record<string, string> = {
-    CNY: "RMB",
-    人民币: "RMB",
-    美元: "USD",
-    美金: "USD",
-    欧元: "EUR",
-    英镑: "GBP",
-    港币: "HKD",
-  };
-  const upper = raw.toUpperCase();
-  const normalized = aliases[raw] ?? aliases[upper] ?? upper;
-  return RECEIVED_CURRENCIES.has(normalized) ? normalized : null;
-}
-
-function canonicalCurrency(value: string): string {
-  return value.trim().toUpperCase() === "CNY"
-    ? "RMB"
-    : value.trim().toUpperCase();
-}
-
 export async function GET() {
   try {
     const session = await requireSession();
     await requireFeaturePermission(session, "finance.channel_reconciliation", "READ");
     const list = await prisma.channelReconciliation.findMany({
-      where: channelReconciliationScope(session, session.role === "ADMIN" ? "all" : "mine"),
+      where: { AND: [{ deletedAt: null }, channelReconciliationScope(session, session.role === "ADMIN" ? "all" : "mine")] },
       include: {
         customer: { select: { id: true, brandName: true } },
         contract: { select: { id: true, contractNo: true } },
@@ -74,6 +41,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "仅内部员工可创建渠道商分账" }, { status: 403 });
     }
     const body = await req.json();
+    const confirmDuplicate = body.confirmDuplicate === true;
     const customerId = typeof body.customerId === "string" ? body.customerId : "";
     const contractId = typeof body.contractId === "string" ? body.contractId : "";
     if (!customerId || !contractId) {
@@ -122,47 +90,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "所选合同尚未填写合作开始时间" }, { status: 400 });
     }
 
-    const start =
-      body.periodStart === undefined || body.periodStart === ""
-        ? contract.startDate
-        : parseShanghaiDate(body.periodStart);
-    const end =
-      body.periodEnd === undefined || body.periodEnd === ""
-        ? splitRule.splitEndDate
-        : parseShanghaiDate(body.periodEnd);
-    if (!start) {
-      return NextResponse.json({ error: "分账开始时间格式无效" }, { status: 400 });
-    }
-    if (!end) {
-      return NextResponse.json({ error: "分账结束时间格式无效" }, { status: 400 });
-    }
-
-    const fixedFeeReceivedCurrency =
-      body.fixedFeeReceivedCurrency === undefined
-        ? parseReceivedCurrency(contract.feeCurrency) ?? "USD"
-        : parseReceivedCurrency(body.fixedFeeReceivedCurrency);
-    const commissionReceivedCurrency = parseReceivedCurrency(
-      body.commissionReceivedCurrency,
-    );
-    if (!fixedFeeReceivedCurrency || !commissionReceivedCurrency) {
-      return NextResponse.json(
-        { error: "到账货币必须为 USD、RMB、EUR、GBP 或 HKD" },
-        { status: 400 },
-      );
-    }
-    if (
-      splitRule.ruleType === "A" &&
-      canonicalCurrency(commissionReceivedCurrency) !==
-        canonicalCurrency(splitRule.commissionThresholdCurrency)
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "A 类规则的到账销售佣金货币必须与规则阈值货币一致；系统没有汇率，不能直接比较",
-        },
-        { status: 400 },
-      );
-    }
+    // Server-authoritative range: contract start -> split-rule end.
+    // Request dates and master currencies are intentionally ignored.
+    const start = contract.startDate;
+    const end = splitRule.splitEndDate;
 
     const channelUser = await prisma.user.findFirst({
       where: { id: customer.channelUserId, role: "CHANNEL", status: "APPROVED" },
@@ -180,13 +111,31 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "没有可生成的分账服务周期" }, { status: 400 });
     }
 
-    const record = await prisma.$transaction(async (tx) => {
-      const duplicate = await tx.channelReconciliation.findFirst({
-        where: { customerId, recordMode: "RULE_DRIVEN" },
-        select: { id: true },
-      });
-      if (duplicate) throw new Error("DUPLICATE_RULE_DRIVEN");
+    const similarRecords = await prisma.channelReconciliation.findMany({
+      where: { customerId, recordMode: "RULE_DRIVEN", deletedAt: null },
+      select: {
+        id: true, periodStart: true, periodEnd: true, createdAt: true,
+        customer: { select: { id: true, brandName: true } },
+        contract: { select: { id: true, contractNo: true } },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    if (similarRecords.length > 0 && !confirmDuplicate) {
+      return NextResponse.json({
+        error: "已存在相似的渠道商分账记录，请确认是否仍要新建",
+        code: "SIMILAR_RECORDS",
+        similarRecords: similarRecords.map((record) => ({
+          id: record.id,
+          customerName: record.customer.brandName,
+          contractNo: record.contract?.contractNo ?? null,
+          periodStart: record.periodStart,
+          periodEnd: record.periodEnd,
+          createdAt: record.createdAt,
+        })),
+      }, { status: 409 });
+    }
 
+    const record = await prisma.$transaction(async (tx) => {
       return tx.channelReconciliation.create({
         data: {
           customerId,
@@ -206,10 +155,10 @@ export async function POST(req: Request) {
             splitRule.ruleType === "A"
               ? splitRule.commissionBelowRate
               : 0,
-          fixedFeeReceivedCurrency,
-          commissionReceivedCurrency,
-          fixedFeeShareCurrency: fixedFeeReceivedCurrency,
-          commissionShareCurrency: commissionReceivedCurrency,
+          fixedFeeReceivedCurrency: "USD",
+          commissionReceivedCurrency: "USD",
+          fixedFeeShareCurrency: "USD",
+          commissionShareCurrency: "USD",
           note: typeof body.note === "string" ? body.note.trim() || null : null,
           createdById: session.userId,
           periods: {
@@ -251,12 +200,6 @@ export async function POST(req: Request) {
   } catch (error) {
     if (error instanceof FeaturePermissionError) {
       return NextResponse.json({ error: "无权限" }, { status: 403 });
-    }
-    if (
-      (error instanceof Error && error.message === "DUPLICATE_RULE_DRIVEN") ||
-      (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002")
-    ) {
-      return NextResponse.json({ error: "该客户已存在渠道商分账记录，请进入详情维护各期数据" }, { status: 409 });
     }
     console.error(error);
     return NextResponse.json({ error: "创建失败" }, { status: 500 });

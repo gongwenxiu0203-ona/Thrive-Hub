@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { channelReconciliationScope } from "@/lib/dataScope";
 import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
-import { appendAuditEntry } from "@/lib/channelSplit";
+import { appendAuditEntry, splitCommissionServicePeriods, splitFixedFeeServicePeriods } from "@/lib/channelSplit";
 
 const PAYEE_FIELD_LIMITS = {
   paymentMethod: 50,
@@ -78,9 +78,42 @@ export async function PATCH(
 
     const existing = await prisma.channelReconciliation.findFirst({
       where: { AND: [{ id }, channelReconciliationScope(session, session.role === "ADMIN" ? "all" : "mine")] },
+      include: { periods: true },
     });
     if (!existing) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+
+    if (existing.recordMode === "RULE_DRIVEN" && body.action === "restore") {
+      if (session.role !== "ADMIN") return NextResponse.json({ error: "仅管理员可恢复渠道商分账" }, { status: 403 });
+      if (!existing.deletedAt) return NextResponse.json({ error: "该记录未被删除" }, { status: 409 });
+      const reason = typeof body.correctionReason === "string" ? body.correctionReason.trim() : "";
+      if (!reason) return NextResponse.json({ error: "请填写恢复原因" }, { status: 400 });
+      const updated = await prisma.channelReconciliation.update({ where: { id }, data: { deletedAt: null, deletedById: null, deletionReason: null, auditLog: appendAuditEntry(existing.auditLog, { type: "RESTORE", actorId: session.userId, at: new Date().toISOString(), reason, before: { deletedAt: existing.deletedAt }, after: { deletedAt: null } }) }});
+      return NextResponse.json(updated);
+    }
+
+    if (existing.recordMode === "RULE_DRIVEN" && ("customerId" in body || "contractId" in body)) {
+      if (session.role !== "ADMIN") return NextResponse.json({ error: "仅管理员可重新编辑主记录，请联系管理员" }, { status: 403 });
+      const reason = typeof body.correctionReason === "string" ? body.correctionReason.trim() : "";
+      if (!reason) return NextResponse.json({ error: "请填写修改原因" }, { status: 400 });
+      const customerId = typeof body.customerId === "string" ? body.customerId : existing.customerId;
+      const contractId = typeof body.contractId === "string" ? body.contractId : existing.contractId;
+      if (!contractId) return NextResponse.json({ error: "请选择关联合同" }, { status: 400 });
+      const customer = await prisma.customer.findFirst({ where: { id: customerId, deletedAt: null }, select: { channelUserId: true, splitRule: true } });
+      if (!customer?.channelUserId || !customer.splitRule) return NextResponse.json({ error: "客户缺少渠道商或分账规则" }, { status: 400 });
+      const contract = await prisma.contract.findFirst({ where: { id: contractId, customerId, status: "COMPLETED", deletedAt: null }, select: { id: true, startDate: true } });
+      if (!contract?.startDate) return NextResponse.json({ error: "合同不存在或缺少开始时间" }, { status: 400 });
+      if (existing.periods.some((p) => p.fixedFeePaidAt || p.commissionPaidAt)) return NextResponse.json({ error: "已有付款记录，不能重新编辑主记录" }, { status: 409 });
+      if (existing.periods.some((p) => p.fixedFeeReceived != null || p.commissionReceived != null || p.fixedFeeShareAmount != null || p.commissionShareAmount != null || p.confirmedGmv != null)) return NextResponse.json({ error: "已有分账录入，不能重建服务周期" }, { status: 409 });
+      const start = contract.startDate; const end = customer.splitRule.splitEndDate;
+      if (end.getTime() < start.getTime()) return NextResponse.json({ error: "分账规则截止时间早于合同开始时间" }, { status: 400 });
+      const fixed = splitFixedFeeServicePeriods(start, end); const commission = splitCommissionServicePeriods(start, end);
+      const updated = await prisma.$transaction(async (tx) => {
+        await tx.channelReconciliationPeriod.deleteMany({ where: { reconciliationId: id } });
+        return tx.channelReconciliation.update({ where: { id }, data: { customerId, contractId, channelUserId: customer.channelUserId!, splitRuleId: customer.splitRule!.id, periodStart: start, periodEnd: end, totalPeriods: fixed.length + commission.length, note: typeof body.note === "string" ? body.note.trim() || null : existing.note, auditLog: appendAuditEntry(existing.auditLog, { type: "MASTER_EDIT", actorId: session.userId, at: new Date().toISOString(), reason, before: { customerId: existing.customerId, contractId: existing.contractId, periodStart: existing.periodStart, periodEnd: existing.periodEnd }, after: { customerId, contractId, periodStart: start, periodEnd: end } }), periods: { create: [ ...fixed.map((period) => ({ streamType: "FIXED_FEE", periodIndex: period.periodIndex, periodLabel: period.label, periodStart: period.start, periodEnd: period.end, fixedFeeShareRate: customer.splitRule!.fixedFeeRate })), ...commission.map((period) => ({ streamType: "COMMISSION", periodIndex: fixed.length + period.periodIndex, periodLabel: period.label, periodStart: period.start, periodEnd: period.end, commissionShareRate: customer.splitRule!.ruleType === "A" ? customer.splitRule!.commissionBelowRate : null })) ] } } });
+      });
+      return NextResponse.json(updated);
     }
 
     if (existing.recordMode === "RULE_DRIVEN") {
@@ -274,23 +307,25 @@ export async function PATCH(
 
 // DELETE /api/finance/channel-reconciliations/[id]
 export async function DELETE(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     const session = await requireSession();
     await requireFeaturePermission(session, "finance.channel_reconciliation", "MANAGE");
-    if (session.role !== "ADMIN" && session.role !== "USER") {
-      return NextResponse.json(
-        { error: "仅内部员工可删除渠道商分账" },
-        { status: 403 },
-      );
+    if (session.role !== "ADMIN") {
+      return NextResponse.json({ error: "仅管理员可删除渠道商分账，请联系管理员" }, { status: 403 });
     }
     const { id } = await params;
+    const body = await req.json().catch(() => ({}));
+    const deletionReason = typeof body.reason === "string" ? body.reason.trim() : "";
+    if (!deletionReason) {
+      return NextResponse.json({ error: "请填写删除原因" }, { status: 400 });
+    }
     const existing = await prisma.channelReconciliation.findFirst({
       where: {
         AND: [
-          { id },
+          { id, deletedAt: null },
           channelReconciliationScope(
             session,
             session.role === "ADMIN" ? "all" : "mine",
@@ -318,8 +353,9 @@ export async function DELETE(
         { status: 409 },
       );
     }
-    await prisma.channelReconciliation.delete({ where: { id: existing.id } });
-    return NextResponse.json({ success: true });
+    const current = await prisma.channelReconciliation.findUniqueOrThrow({ where: { id }, select: { auditLog: true, status: true } });
+    const updated = await prisma.channelReconciliation.update({ where: { id: existing.id }, data: { deletedAt: new Date(), deletedById: session.userId, deletionReason, auditLog: appendAuditEntry(current.auditLog, { type: "SOFT_DELETE", actorId: session.userId, at: new Date().toISOString(), reason: deletionReason, before: { status: current.status }, after: { deletedAt: new Date().toISOString() } }) }});
+    return NextResponse.json({ success: true, record: updated });
   } catch (e) {
     if (e instanceof FeaturePermissionError) return NextResponse.json({ error: "无权限" }, { status: 403 });
     console.error(e);

@@ -1049,9 +1049,12 @@ model ChannelReconciliation {
   // 关联到客户配置的分账规则（autoCreated=true 时由规则触发器写入；手动创建为 null）
   splitRuleId String?
 
-  createdById String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+createdById    String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+  deletedById    String?
+  deletionReason String?
 
   customer               Customer                      @relation("CustomerChannelReconciliations", fields: [customerId], references: [id])
   contract               Contract?                     @relation("ContractChannelReconciliations", fields: [contractId], references: [id])
@@ -1118,7 +1121,13 @@ model ChannelReconciliationPeriod {
   fixedFeeSplitDate     DateTime?
   commissionSplitDate   DateTime?
   confirmedGmv          Float?
-  auditLog              String    @default("[]") // JSON append-only correction snapshots
+auditLog              String    @default("[]")
+  channelReviewStatus   String    @default("DRAFT")
+  channelPushedAt       DateTime?
+  channelReviewedAt     DateTime?
+  channelDisputeReason  String?
+  channelReviewVersion  Int       @default(0)
+  paymentProofUrl       String? // JSON append-only correction snapshots
   proofUrl              String?
   notes                 String?
   createdAt             DateTime  @default(now())
@@ -1129,6 +1138,7 @@ model ChannelReconciliationPeriod {
   @@unique([reconciliationId, periodIndex])
   @@index([reconciliationId])
   @@index([reconciliationId, streamType, periodIndex])
+  @@index([reconciliationId, channelReviewStatus])
 }
 
 // 联盟商对账记录 — 合作审核通过后自动创建

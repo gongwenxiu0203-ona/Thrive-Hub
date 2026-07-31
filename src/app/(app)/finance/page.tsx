@@ -113,7 +113,7 @@ export default async function FinancePage({
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     canViewChannel ? prisma.channelReconciliation.findMany({
-      where: chRecScope as any,
+      where: { AND: [{ deletedAt: null }, chRecScope as any] },
       include: {
         customer: { select: { id: true, brandName: true } },
         contract: { select: { id: true, contractNo: true } },
@@ -197,7 +197,12 @@ export default async function FinancePage({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const channelCustomerRows = canWriteChannel
     ? await prisma.customer.findMany({
-        where: { AND: [{ deletedAt: null }, channelCustomerScope as any] },
+        where: {
+          AND: [
+            { deletedAt: null, channelUserId: { not: null } },
+            channelCustomerScope as any,
+          ],
+        },
         select: {
           id: true,
           brandName: true,

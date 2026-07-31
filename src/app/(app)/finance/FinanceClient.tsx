@@ -378,9 +378,6 @@ export function FinanceClient({
           {tab === "channels" && canEditChannelReconciliations && canCreateChannelReconciliations && (
             <NewChannelReconciliationModal
               customers={channelReconciliationCustomers}
-              existingCustomerIds={channelReconciliations
-                .filter((record) => record.recordMode === "RULE_DRIVEN")
-                .map((record) => record.customer.id)}
               onCreated={() => router.refresh()}
             />
           )}

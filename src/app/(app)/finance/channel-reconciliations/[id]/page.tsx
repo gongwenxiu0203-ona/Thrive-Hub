@@ -59,7 +59,7 @@ export default async function ChannelReconciliationDetailPage({
   const rec = await prisma.channelReconciliation.findFirst({
     where: {
       AND: [
-        { id },
+        { id, deletedAt: null },
         channelReconciliationScope(session, canManage ? "all" : "mine"),
       ],
     },
@@ -73,6 +73,10 @@ export default async function ChannelReconciliationDetailPage({
   });
   if (!rec) notFound();
   if (session.role === "CHANNEL" && rec.channelUserId !== session.userId) notFound();
+
+  const visiblePeriods = session.role === "CHANNEL"
+    ? rec.periods.filter((period) => ["PENDING", "CONFIRMED", "DISPUTED"].includes(period.channelReviewStatus))
+    : rec.periods;
 
   // Pull all customer reconciliations (confirmed and not) for the customer,
   // along with their Settlement actualDates (for "Thraive 实际收款").
@@ -113,7 +117,7 @@ export default async function ChannelReconciliationDetailPage({
     try { return JSON.parse(rule.tieredRules); } catch { return []; }
   })()) : [];
 
-  const derivedPeriods: PeriodDerived[] = rec.periods.map((p) => {
+  const derivedPeriods: PeriodDerived[] = visiblePeriods.map((p) => {
     const month = p.periodLabel ?? "";
     const cr = month ? monthMap.get(month) : undefined;
     const confirmed = cr && cr.status === "CONFIRMED" ? cr : null;
@@ -146,10 +150,37 @@ export default async function ChannelReconciliationDetailPage({
     await ensureChannelDueDateReminders(rec.id, derivedPeriods);
   } catch {}
 
+  const adminCustomerOptions = session.role === "ADMIN"
+    ? await prisma.customer.findMany({
+        where: { deletedAt: null, channelUserId: { not: null } },
+        select: {
+          id: true,
+          brandName: true,
+          splitRule: { select: { splitEndDate: true } },
+          contracts: {
+            where: { status: "COMPLETED", deletedAt: null },
+            select: { id: true, contractNo: true, startDate: true },
+            orderBy: { createdAt: "desc" },
+          },
+        },
+        orderBy: { brandName: "asc" },
+      })
+    : [];
   return (
     <ChannelReconciliationDetail
       isAdmin={session.role === "ADMIN"}
+      adminCustomerOptions={adminCustomerOptions.map((customer) => ({
+        id: customer.id,
+        brandName: customer.brandName,
+        splitEndDate: toShanghaiDateString(customer.splitRule?.splitEndDate ?? null),
+        contracts: customer.contracts.map((contract) => ({
+          id: contract.id,
+          contractNo: contract.contractNo,
+          startDate: toShanghaiDateString(contract.startDate),
+        })),
+      }))}
       isStaff={isStaff(session.role)}
+      isChannel={session.role === "CHANNEL"}
       record={{
         id: rec.id,
         recordMode: rec.recordMode,
@@ -195,7 +226,7 @@ export default async function ChannelReconciliationDetailPage({
           commissionAtOrAboveRate: rec.splitRule.commissionAtOrAboveRate,
           tieredRules: rec.splitRule.tieredRules,
         } : null,
-        periods: rec.periods.map((p) => ({
+        periods: visiblePeriods.map((p) => ({
           id: p.id,
           streamType: p.streamType as "BOTH" | "FIXED_FEE" | "COMMISSION",
           periodIndex: p.periodIndex,
@@ -219,6 +250,12 @@ export default async function ChannelReconciliationDetailPage({
           confirmedGmv: p.confirmedGmv,
           proofUrl: p.proofUrl,
           notes: p.notes,
+          channelReviewStatus: p.channelReviewStatus as "DRAFT" | "PENDING" | "CONFIRMED" | "DISPUTED" | "SKIPPED",
+          channelPushedAt: p.channelPushedAt?.toISOString() ?? null,
+          channelReviewedAt: p.channelReviewedAt?.toISOString() ?? null,
+          channelDisputeReason: p.channelDisputeReason,
+          channelReviewVersion: p.channelReviewVersion,
+          paymentProofUrl: p.paymentProofUrl,
         })),
       }}
       derivedPeriods={derivedPeriods}

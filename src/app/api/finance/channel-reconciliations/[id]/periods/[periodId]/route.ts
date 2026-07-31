@@ -248,10 +248,32 @@ export async function PATCH(
         "commissionPaidAt" in body &&
         body.commissionPaidAt !== null &&
         body.commissionPaidAt !== "";
+      const requestsPayment = requestsFixedPayment || requestsCommissionPayment;
+      if (requestsPayment) {
+        if (!["CONFIRMED", "SKIPPED"].includes(period.channelReviewStatus)) throw new Error("CHANNEL_REVIEW_REQUIRED");
+        const paymentProofUrl = typeof body.paymentProofUrl === "string" ? body.paymentProofUrl.trim() : "";
+        if (!paymentProofUrl) throw new Error("PAYMENT_PROOF_REQUIRED");
+        let paymentProofUrls: unknown;
+        try {
+          paymentProofUrls = JSON.parse(paymentProofUrl);
+        } catch {
+          paymentProofUrls = [paymentProofUrl];
+        }
+        if (
+          !Array.isArray(paymentProofUrls) ||
+          paymentProofUrls.length === 0 ||
+          paymentProofUrls.length > 10 ||
+          paymentProofUrls.some((url) => typeof url !== "string" || !url.startsWith("/uploads/"))
+        ) {
+          throw new Error("PAYMENT_PROOF_INVALID");
+        }
+      } else if (!["DRAFT", "DISPUTED"].includes(period.channelReviewStatus)) {
+        throw new Error("CHANNEL_REVIEW_LOCKED");
+      }
       if (
         requestsFixedPayment &&
         bodyKeys.some(
-          (key) => key !== "fixedFeePaidAt" && key !== "correctionReason",
+          (key) => key !== "fixedFeePaidAt" && key !== "paymentProofUrl" && key !== "correctionReason",
         )
       ) {
         throw new Error("PAYMENT_ONLY_REQUEST");
@@ -259,7 +281,7 @@ export async function PATCH(
       if (
         requestsCommissionPayment &&
         bodyKeys.some(
-          (key) => key !== "commissionPaidAt" && key !== "correctionReason",
+          (key) => key !== "commissionPaidAt" && key !== "paymentProofUrl" && key !== "correctionReason",
         )
       ) {
         throw new Error("PAYMENT_ONLY_REQUEST");
@@ -292,25 +314,33 @@ export async function PATCH(
         throw new Error("PAID_LOCKED");
       }
 
+      // Generated periods already contain default currency and cycle dates. Those
+      // defaults are not an entry. Each waterfall decides from its own values only.
       const relevantAlreadyRecorded =
-        (period.streamType !== "COMMISSION" &&
-          (period.fixedFeeReceived !== null || period.fixedFeePaidAt !== null)) ||
-        (period.streamType !== "FIXED_FEE" &&
-          (period.commissionReceived !== null ||
-            period.commissionPaidAt !== null ||
-            period.confirmedGmv !== null)) ||
-        (period.streamType !== "COMMISSION" &&
-          period.fixedFeeReceivedCurrency !== null) ||
-        (period.streamType !== "FIXED_FEE" &&
-          period.commissionReceivedCurrency !== null);
-      const submittedReason =
+        period.streamType === "FIXED_FEE"
+          ? period.fixedFeeReceived !== null ||
+            period.fixedFeeShareAmount !== null ||
+            period.fixedFeePaidAt !== null
+          : period.streamType === "COMMISSION"
+            ? period.commissionReceived !== null ||
+              period.commissionShareAmount !== null ||
+              period.commissionPaidAt !== null ||
+              period.confirmedGmv !== null
+            : period.fixedFeeReceived !== null ||
+              period.fixedFeeShareAmount !== null ||
+              period.fixedFeePaidAt !== null ||
+              period.commissionReceived !== null ||
+              period.commissionShareAmount !== null ||
+              period.commissionPaidAt !== null ||
+              period.confirmedGmv !== null;      const submittedReason =
         typeof body.correctionReason === "string"
           ? body.correctionReason.trim()
           : "";
-      if (relevantAlreadyRecorded && !submittedReason) {
+      if (relevantAlreadyRecorded && !requestsPayment && !submittedReason) {
         throw new Error("CORRECTION_REASON_REQUIRED");
       }
-      const reason = relevantAlreadyRecorded ? submittedReason : "首次录入";
+      if (period.channelReviewStatus === "DISPUTED" && !submittedReason) throw new Error("CORRECTION_REASON_REQUIRED");
+      const reason = requestsPayment ? submittedReason || "确认付款" : relevantAlreadyRecorded ? submittedReason : "首次录入";
 
       const nextPeriodStart =
         "periodStart" in body
@@ -479,6 +509,10 @@ export async function PATCH(
               ? body.proofUrl.trim() || null
               : null
             : period.proofUrl,
+        paymentProofUrl:
+          "paymentProofUrl" in body && typeof body.paymentProofUrl === "string"
+            ? body.paymentProofUrl.trim() || null
+            : period.paymentProofUrl,
         notes:
           "notes" in body
             ? typeof body.notes === "string"
@@ -511,7 +545,11 @@ export async function PATCH(
           commissionPaidAt: next.commissionPaidAt,
           confirmedGmv: next.confirmedGmv,
           proofUrl: next.proofUrl,
+          paymentProofUrl: next.paymentProofUrl,
           notes: next.notes,
+          channelReviewStatus: !requestsPayment && period.channelReviewStatus === "DISPUTED" ? "DRAFT" : period.channelReviewStatus,
+          channelReviewedAt: !requestsPayment && period.channelReviewStatus === "DISPUTED" ? null : period.channelReviewedAt,
+          channelDisputeReason: !requestsPayment && period.channelReviewStatus === "DISPUTED" ? null : period.channelDisputeReason,
           auditLog,
         },
       });
@@ -544,6 +582,10 @@ export async function PATCH(
           { status: 409 },
         );
       }
+      if (error.message === "CHANNEL_REVIEW_REQUIRED") return NextResponse.json({ error: "渠道商确认完成或跳过确认后才能填写付款信息" }, { status: 409 });
+      if (error.message === "CHANNEL_REVIEW_LOCKED") return NextResponse.json({ error: "当前确认状态已锁定分账数据" }, { status: 409 });
+      if (error.message === "PAYMENT_PROOF_REQUIRED") return NextResponse.json({ error: "请先上传付款回单" }, { status: 400 });
+      if (error.message === "PAYMENT_PROOF_INVALID") return NextResponse.json({ error: "付款回单格式无效，最多支持 10 张已上传回单" }, { status: 400 });
       if (error.message === "CORRECTION_REASON_REQUIRED") {
         return NextResponse.json(
           { error: "修改已有录入时必须填写修改原因" },
