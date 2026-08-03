@@ -21,6 +21,7 @@ import {
 import { writePrivateContractFile } from "@/lib/contractFileStorage";
 import { customerScope } from "@/lib/dataScope";
 import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
+import { CONTRACT_UPLOAD_MAX_BYTES, CONTRACT_UPLOAD_MAX_MB } from "@/lib/contractUploadLimits";
 import {
   CONTRACT_FEE_CURRENCIES,
   CONTRACT_FEE_CYCLES,
@@ -292,7 +293,9 @@ export async function uploadExistingContract(
   const lowerName = file.name.toLowerCase();
   const ext = lowerName.endsWith(".pdf") ? "pdf" : lowerName.endsWith(".docx") ? "docx" : "";
   if (!ext) return { ok: false, error: "仅支持 .docx 或 .pdf 文件" };
-  if (file.size > 25 * 1024 * 1024) return { ok: false, error: "文件超过 25MB" };
+  if (file.size > CONTRACT_UPLOAD_MAX_BYTES) {
+    return { ok: false, error: `\u6587\u4ef6\u8d85\u8fc7 ${CONTRACT_UPLOAD_MAX_MB}MB\uff0c\u8bf7\u538b\u7f29\u540e\u518d\u4e0a\u4f20` };
+  }
 
   const buf = Buffer.from(await file.arrayBuffer());
   let text = "";

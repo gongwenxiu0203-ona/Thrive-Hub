@@ -16,6 +16,7 @@ import {
   CONTRACT_TARGET_SITES,
 } from "@/lib/contractFormOptions";
 import { CURRENCY_OPTIONS } from "@/lib/contractCommissionConfig";
+import { CONTRACT_UPLOAD_MAX_BYTES, CONTRACT_UPLOAD_MAX_MB, formatUploadSize } from "@/lib/contractUploadLimits";
 
 const PERCENT_KEYS = new Set([
   "commissionRate",
@@ -70,9 +71,10 @@ export interface UploadExistingFormProps {
   presetCustomerId?: string;
 }
 
-function uploadRequestError(error: unknown): string {
+function uploadRequestError(error: unknown, file?: File | null): string {
   console.error("[contract-upload] request failed", error);
-  return "上传识别请求失败，请检查网络后重试。文件仍保留在当前页面，无需重新选择。";
+  const size = file ? `\uff08${formatUploadSize(file.size)}\uff09` : "";
+  return `\u4e0a\u4f20\u8bf7\u6c42\u5931\u8d25${size}\u3002\u5982\u679c\u4ec5\u5927\u6587\u4ef6\u5931\u8d25\uff0c\u8bf7\u68c0\u67e5\u670d\u52a1\u5668\u6216 Nginx \u7684\u4e0a\u4f20\u5927\u5c0f\u9650\u5236\uff1b\u6587\u4ef6\u4ecd\u4fdd\u7559\u5728\u5f53\u524d\u9875\u9762\uff0c\u65e0\u9700\u91cd\u65b0\u9009\u62e9\u3002`;
 }
 
 async function uploadExistingContract(fd: FormData): Promise<Result<UploadExistingContractData>> {
@@ -81,6 +83,12 @@ async function uploadExistingContract(fd: FormData): Promise<Result<UploadExisti
     body: fd,
     cache: "no-store",
   });
+  if (response.status === 413) {
+    return { ok: false, error: `\u670d\u52a1\u5668\u62d2\u7edd\u4e86\u8fc7\u5927\u7684\u4e0a\u4f20\u8bf7\u6c42\uff0c\u8bf7\u5c06\u670d\u52a1\u5668\u4e0a\u4f20\u4e0a\u9650\u8c03\u6574\u5230\u81f3\u5c11 ${CONTRACT_UPLOAD_MAX_MB}MB` };
+  }
+  if (response.status === 408 || response.status === 504) {
+    return { ok: false, error: "\u5927\u6587\u4ef6\u4e0a\u4f20\u8d85\u65f6\uff0c\u8bf7\u68c0\u67e5\u670d\u52a1\u5668\u4ee3\u7406\u8d85\u65f6\u914d\u7f6e\u540e\u91cd\u8bd5" };
+  }
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.includes("application/json")) {
     throw new Error(`Unexpected upload response (${response.status})`);
@@ -129,6 +137,10 @@ export function UploadExistingForm({
     setError(null);
     if (!customerId) { setError("请选择关联客户"); return; }
     if (!file) { setError("请选择合同 Word/PDF 文件"); return; }
+    if (file.size > CONTRACT_UPLOAD_MAX_BYTES) {
+      setError(`\u6587\u4ef6\u5927\u5c0f\u4e3a ${formatUploadSize(file.size)}\uff0c\u8d85\u8fc7 ${CONTRACT_UPLOAD_MAX_MB}MB \u4e0a\u9650\uff0c\u8bf7\u538b\u7f29\u540e\u518d\u4e0a\u4f20`);
+      return;
+    }
     submittingRef.current = true;
     startTransition(async () => {
       try {
@@ -145,7 +157,7 @@ export function UploadExistingForm({
         if (!r.ok) { setError(r.error); return; }
         setSuccess(r.data!);
       } catch (error) {
-        setError(uploadRequestError(error));
+        setError(uploadRequestError(error, file));
       } finally {
         submittingRef.current = false;
       }
@@ -183,7 +195,7 @@ export function UploadExistingForm({
       setSuccess(r.data!);
       return { ok: true as const, contractId: r.data?.contractId ?? undefined };
     } catch (error) {
-      const message = uploadRequestError(error);
+      const message = uploadRequestError(error, file);
       setError(message);
       return { ok: false as const, error: message };
     }
@@ -286,12 +298,20 @@ export function UploadExistingForm({
             <span className="text-sm text-slate-600">
               {file ? file.name : "点击选择已签或待签的 Word/PDF 合同"}
             </span>
-            <span className="text-[11px] text-slate-400">系统会识别甲方、合作、推广、费用和佣金等字段（最大 25MB）</span>
+            <span className="text-[11px] text-slate-400">{"\u7cfb\u7edf\u4f1a\u8bc6\u522b\u7532\u65b9\u3001\u5408\u4f5c\u3001\u63a8\u5e7f\u3001\u8d39\u7528\u548c\u4f63\u91d1\u7b49\u5b57\u6bb5\uff08\u6700\u5927 100MB\uff1b\u65e0\u6587\u5b57\u5c42\u65f6\u76f4\u63a5\u624b\u52a8\u8865\u5145\uff09"}</span>
             <input
               type="file"
               accept=".docx,.pdf"
               className="hidden"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              onChange={(e) => {
+                const selected = e.target.files?.[0] ?? null;
+                setFile(selected);
+                if (selected && selected.size > CONTRACT_UPLOAD_MAX_BYTES) {
+                  setError(`\u6587\u4ef6\u5927\u5c0f\u4e3a ${formatUploadSize(selected.size)}\uff0c\u8d85\u8fc7 ${CONTRACT_UPLOAD_MAX_MB}MB \u4e0a\u9650\uff0c\u8bf7\u538b\u7f29\u540e\u518d\u4e0a\u4f20`);
+                } else {
+                  setError(null);
+                }
+              }}
             />
           </label>
         </Section>
