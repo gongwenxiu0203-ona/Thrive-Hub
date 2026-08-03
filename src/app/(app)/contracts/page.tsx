@@ -200,6 +200,8 @@ export default async function ContractsPage({
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">关联客户</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">甲方公司</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">类型</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">开始时间</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">结束时间</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">负责人</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">审核人</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">固费</th>
@@ -240,6 +242,12 @@ export default async function ContractsPage({
                     <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
                       {labelOf(CONTRACT_TYPE_LABELS, ct.type)}
                     </span>
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-600">
+                    {ct.startDate ? formatDate(ct.startDate) : <span className="text-slate-300">—</span>}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-600">
+                    {ct.endDate ? formatDate(ct.endDate) : <span className="text-slate-300">—</span>}
                   </td>
                   <td className="px-4 py-3 text-sm text-slate-700">{ct.owner?.name ?? <span className="text-slate-300">—</span>}</td>
                   <td className="px-4 py-3 text-sm text-slate-700">{ct.reviewer?.name ?? <span className="text-slate-300">—</span>}</td>
