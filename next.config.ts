@@ -3,10 +3,12 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   serverExternalPackages: ["bcryptjs", "pdf-parse", "nodemailer", "xlsx"],
   experimental: {
+    // Allow API route FormData up to the 100 MB contract limit plus multipart overhead.
+    middlewareClientMaxBodySize: "110mb",
     // Server actions accept FormData uploads (contract templates, seal PNG,
-    // contract re-upload). Default 1 MB is too small; lift to 25 MB.
+    // contract re-upload). Keep the same proxy-safe ceiling.
     serverActions: {
-      bodySizeLimit: "25mb",
+      bodySizeLimit: "110mb",
     },
   },
   eslint: {
