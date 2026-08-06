@@ -7,7 +7,7 @@ import { SALES_FIELDS } from "@/lib/salesFields";
 import { formatDate } from "@/lib/utils";
 import { hasBiPermission } from "@/lib/biAuthorization";
 import { salesScope } from "@/lib/dataScope";
-import { resolveSafeViewScope } from "@/lib/permissionGuard";
+import { isStaff } from "@/lib/permissions";
 import {
   buildSalesRecordWhereFromParams,
   csvFilterValues,
@@ -24,7 +24,9 @@ export async function GET(req: Request) {
 
   const url = new URL(req.url);
   const sp = Object.fromEntries(url.searchParams.entries()) as SalesRecordFilterParams;
-  const view = await resolveSafeViewScope(session, "bi.export", sp.scope);
+  // Keep exports aligned with the BI detail page: internal staff see and
+  // export all matching rows, while external roles retain their own scope.
+  const view = isStaff(session.role) ? "all" : "mine";
   const base: Prisma.SalesRecordWhereInput = { deletedAt: null, batch: { deletedAt: null } };
   const types = csvFilterValues(sp, "types").filter((value) => value !== EMPTY_FILTER_VALUE);
   let typeAffiliateNames: string[] | undefined;
