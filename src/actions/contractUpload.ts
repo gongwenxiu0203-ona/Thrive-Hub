@@ -452,7 +452,11 @@ export async function uploadExistingContract(
 
   if (needsTemplate) return { ok: false, error: "请选择适用的合同模板后再确认" };
   if (missing.length > 0) {
-    return { ok: false, error: `仍有 ${missing.length} 个关键字段未补齐，请先补齐后再确认` };
+    const missingLabels = missing.map((field) => `「${field.label}」`).join("、");
+    return {
+      ok: false,
+      error: `仍有 ${missing.length} 个关键字段未补齐：${missingLabels}。请补齐后再确认`,
+    };
   }
 
   let contract: { id: string; contractNo: string } | null = null;
