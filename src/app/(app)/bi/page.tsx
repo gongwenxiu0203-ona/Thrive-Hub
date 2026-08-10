@@ -20,6 +20,7 @@ import {
   exportSalesFilterQueryString,
   EMPTY_FILTER_VALUE,
 } from "@/lib/salesRecordFilters";
+import { activeSalesRecordWhere } from "@/lib/activeSalesScope";
 
 export const metadata = { title: "推广数据BI · Thraive联盟营销系统" };
 
@@ -259,7 +260,7 @@ export default async function BIPage({
 
   // Build base where clause — restrict by role
   // 同时排除已软删除（回收站）批次的销售记录
-  const baseWhere: Prisma.SalesRecordWhereInput = { deletedAt: null, batch: { deletedAt: null } };
+  const baseWhere: Prisma.SalesRecordWhereInput = activeSalesRecordWhere();
   if (role === "BRAND" && brandName) {
     baseWhere.brand = brandName;
   }

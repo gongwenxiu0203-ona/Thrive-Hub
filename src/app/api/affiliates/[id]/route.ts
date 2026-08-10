@@ -4,6 +4,7 @@ import { getSession } from "@/lib/session";
 import { salesScope } from "@/lib/dataScope";
 import { hasPermissionLevel } from "@/lib/permissionGuard";
 import { resolveUserPermission } from "@/lib/permissionResolver";
+import { activeSalesRecordWhere } from "@/lib/activeSalesScope";
 
 export async function GET(
   req: NextRequest,
@@ -39,7 +40,10 @@ export async function GET(
 
   // Linked sales data
   const salesRecords = await prisma.salesRecord.findMany({
-    where: { affiliateName: affiliate.platformAffiliateName, deletedAt: null, ...salesScope(auth, "all") },
+    where: activeSalesRecordWhere({
+      affiliateName: affiliate.platformAffiliateName,
+      ...salesScope(auth, "all"),
+    }),
     orderBy: { orderDate: "desc" },
     take: 500,
   });

@@ -4,6 +4,7 @@ import { getSession } from "@/lib/session";
 import { salesScope } from "@/lib/dataScope";
 import { hasPermissionLevel } from "@/lib/permissionGuard";
 import { resolveUserPermission } from "@/lib/permissionResolver";
+import { activeSalesRecordWhere } from "@/lib/activeSalesScope";
 
 export async function GET(req: NextRequest) {
   const auth = await getSession();
@@ -112,11 +113,11 @@ export async function GET(req: NextRequest) {
   let nameFilter: string[] | undefined;
   if (salesBrands.length || salesTypes.length) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const srWhere: any = { deletedAt: null, ...salesScope(auth, "all") };
+    const srWhere: any = { ...salesScope(auth, "all") };
     if (salesBrands.length) srWhere.brand = { in: salesBrands };
     if (salesTypes.length) srWhere.affiliateType = { in: salesTypes };
     const matches = await prisma.salesRecord.findMany({
-      where: srWhere,
+      where: activeSalesRecordWhere(srWhere),
       select: { affiliateName: true },
       distinct: ["affiliateName"],
     });
@@ -153,7 +154,10 @@ export async function GET(req: NextRequest) {
   if (pageNames.length) {
     const grouped = await prisma.salesRecord.groupBy({
       by: ["affiliateName"],
-      where: { affiliateName: { in: pageNames }, deletedAt: null, ...salesScope(auth, "all") },
+      where: activeSalesRecordWhere({
+        affiliateName: { in: pageNames },
+        ...salesScope(auth, "all"),
+      }),
       _sum: { revenue: true, unitsSold: true },
     });
     for (const g of grouped) {

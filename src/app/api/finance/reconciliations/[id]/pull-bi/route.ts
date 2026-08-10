@@ -4,6 +4,7 @@ import { requireSession } from "@/lib/session";
 import { getReconciliationAccess, scopedReconciliationWhere } from "@/lib/reconciliationAccess";
 import { FeaturePermissionError } from "@/lib/permissionGuard";
 import { calcBetAndCommission } from "@/lib/reconciliationCalc";
+import { reconciliationSalesRecordWhere } from "@/lib/activeSalesScope";
 
 // POST /api/finance/reconciliations/[id]/pull-bi
 // 根据对账周期从 SalesRecord 自动拉取该客户的销售单量和销售额
@@ -27,14 +28,11 @@ export async function POST(
 
     // 聚合该客户在对账周期内的销售数据
     const agg = await prisma.salesRecord.aggregate({
-      where: {
+      where: reconciliationSalesRecordWhere({
         customerId: rec.customerId,
-        deletedAt: null,
-        orderDate: {
-          gte: rec.periodStart,
-          lte: rec.periodEnd,
-        },
-      },
+        periodStart: rec.periodStart,
+        periodEnd: rec.periodEnd,
+      }),
       _sum: {
         orders: true,
         revenue: true,

@@ -11,6 +11,7 @@ import {
   EMPTY_FILTER_VALUE,
   type SalesRecordFilterParams,
 } from "@/lib/salesRecordFilters";
+import { activeSalesRecordWhere } from "@/lib/activeSalesScope";
 
 export type SalesRecordUndoSnapshot = {
   id: string;
@@ -90,7 +91,7 @@ async function salesWhereFromFilterParams(
   }
   return {
     AND: [
-      { deletedAt: null, batch: { deletedAt: null } },
+      activeSalesRecordWhere(),
       salesScope(session, session.role === "ADMIN" ? "all" : "mine"),
       buildSalesRecordWhereFromParams(filterParams, typeAffNames),
     ],

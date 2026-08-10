@@ -4,6 +4,8 @@
 // the operations KPI tab, and the project detail page.
 
 import { prisma } from "@/lib/prisma";
+import { activeSalesRecordWhere } from "@/lib/activeSalesScope";
+import { shanghaiDateRangeFromUtcSentinels } from "@/lib/dateRange";
 
 /** "YYYY-MM" → { start: 2026-06-01 00:00 UTC, endExclusive: 2026-07-01 00:00 UTC } */
 export function monthRange(yyyyMM: string): { start: Date; endExclusive: Date } {
@@ -13,6 +15,17 @@ export function monthRange(yyyyMM: string): { start: Date; endExclusive: Date } 
   const start = new Date(Date.UTC(y, m - 1, 1));
   const endExclusive = new Date(Date.UTC(y, m, 1));
   return { start, endExclusive };
+}
+
+/** "YYYY-MM" -> Shanghai natural-month range for SalesRecord.orderDate. */
+export function salesMonthRange(yyyyMM: string): { start: Date; endExclusive: Date } {
+  const [yStr, mStr] = yyyyMM.split("-");
+  const y = Number(yStr);
+  const m = Number(mStr);
+  const periodStart = new Date(Date.UTC(y, m - 1, 1));
+  const periodEnd = new Date(Date.UTC(y, m, 0));
+  const { gte, lt } = shanghaiDateRangeFromUtcSentinels(periodStart, periodEnd);
+  return { start: gte, endExclusive: lt };
 }
 
 export function currentMonthKey(d: Date = new Date()): string {
@@ -60,13 +73,12 @@ export async function computeBiGmv(
   yyyyMM: string,
 ): Promise<number> {
   if (!brandName?.trim()) return 0;
-  const { start, endExclusive } = monthRange(yyyyMM);
+  const { start, endExclusive } = salesMonthRange(yyyyMM);
   const agg = await prisma.salesRecord.aggregate({
-    where: {
+    where: activeSalesRecordWhere({
       brand: brandName,
-      deletedAt: null,
       orderDate: { gte: start, lt: endExclusive },
-    },
+    }),
     _sum: { revenue: true },
   });
   return agg._sum.revenue ?? 0;

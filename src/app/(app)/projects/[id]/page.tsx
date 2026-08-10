@@ -19,8 +19,9 @@ import {
   effectiveKpiActual,
   isAchieved,
   currentMonthKey,
-  monthRange,
+  salesMonthRange,
 } from "@/lib/projectKpi";
+import { activeSalesRecordWhere } from "@/lib/activeSalesScope";
 import type { Currency } from "@/lib/projectChannels";
 import { COMMISSION_TYPE_LABELS, CONTRACT_STATUS_COLORS, CONTRACT_STATUS_LABELS, labelOf } from "@/lib/constants";
 
@@ -159,7 +160,7 @@ export default async function ProjectDetailPage({
     }
     if (brandName) {
       const asinRows = await prisma.salesRecord.findMany({
-        where: { brand: brandName, deletedAt: null, parentAsin: { not: null } },
+        where: activeSalesRecordWhere({ brand: brandName, parentAsin: { not: null } }),
         select: { parentAsin: true },
         distinct: ["parentAsin"],
         take: 200,
@@ -169,14 +170,13 @@ export default async function ProjectDetailPage({
   }
 
   // ── 数据维度：从推广 BI 拉取该客户品牌的所选月份销售数据 ───────────────────────
-  const { start: monthStart, endExclusive: monthEnd } = monthRange(targetMonth);
+  const { start: monthStart, endExclusive: monthEnd } = salesMonthRange(targetMonth);
   const monthAgg = brandName
     ? await prisma.salesRecord.aggregate({
-        where: {
+        where: activeSalesRecordWhere({
           brand: brandName,
-          deletedAt: null,
           orderDate: { gte: monthStart, lt: monthEnd },
-        },
+        }),
         _sum: { revenue: true, commission: true, unitsSold: true },
         _count: true,
       })

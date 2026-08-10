@@ -4,6 +4,7 @@ import { requireSession } from "@/lib/session";
 import { getReconciliationAccess, scopedReconciliationWhere } from "@/lib/reconciliationAccess";
 import { FeaturePermissionError } from "@/lib/permissionGuard";
 import { recalcReconciliation } from "@/lib/reconciliationCalc";
+import { parseDateOnlyUtc } from "@/lib/dateRange";
 
 // GET /api/finance/reconciliations/[id]
 export async function GET(
@@ -94,10 +95,32 @@ export async function PATCH(
       if (existing.status !== "DRAFT") {
         return NextResponse.json({ error: "只能修改草稿状态的对账记录" }, { status: 400 });
       }
+      const parsedPeriodStart = "periodStart" in body
+        ? typeof body.periodStart === "string"
+          ? parseDateOnlyUtc(body.periodStart)
+          : null
+        : existing.periodStart;
+      const parsedPeriodEnd = "periodEnd" in body
+        ? typeof body.periodEnd === "string"
+          ? parseDateOnlyUtc(body.periodEnd)
+          : null
+        : existing.periodEnd;
+      if (!parsedPeriodStart || !parsedPeriodEnd) {
+        return NextResponse.json({ error: "对账周期日期格式无效" }, { status: 400 });
+      }
+      if (parsedPeriodStart > parsedPeriodEnd) {
+        return NextResponse.json(
+          { error: "对账周期结束时间不能早于开始时间" },
+          { status: 400 },
+        );
+      }
+
       for (const key of draftOnlyFields) {
         if (key in body) {
-          if (key === "periodStart" || key === "periodEnd") {
-            data[key] = new Date(body[key]);
+          if (key === "periodStart") {
+            data[key] = parsedPeriodStart;
+          } else if (key === "periodEnd") {
+            data[key] = parsedPeriodEnd;
           } else {
             data[key] = body[key];
           }

@@ -14,6 +14,7 @@ import {
   EMPTY_FILTER_VALUE,
   type SalesRecordFilterParams,
 } from "@/lib/salesRecordFilters";
+import { activeSalesRecordWhere } from "@/lib/activeSalesScope";
 
 export async function GET(req: Request) {
   const session = await getSession();
@@ -27,7 +28,7 @@ export async function GET(req: Request) {
   // Keep exports aligned with the BI detail page: internal staff see and
   // export all matching rows, while external roles retain their own scope.
   const view = isStaff(session.role) ? "all" : "mine";
-  const base: Prisma.SalesRecordWhereInput = { deletedAt: null, batch: { deletedAt: null } };
+  const base: Prisma.SalesRecordWhereInput = activeSalesRecordWhere();
   const types = csvFilterValues(sp, "types").filter((value) => value !== EMPTY_FILTER_VALUE);
   let typeAffiliateNames: string[] | undefined;
   if (types.length) {

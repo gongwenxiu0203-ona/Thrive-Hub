@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
+import { activeSalesRecordWhere } from "@/lib/activeSalesScope";
 import AffiliatesClient from "./AffiliatesClient";
 
 export const dynamic = "force-dynamic";
@@ -37,7 +38,7 @@ async function loadOptions() {
       orderBy: { brandName: "asc" },
     }),
     // 往期合作数据里的品牌（销售记录 distinct brand）
-    prisma.salesRecord.findMany({ where: { deletedAt: null }, select: { brand: true }, distinct: ["brand"] }),
+    prisma.salesRecord.findMany({ where: activeSalesRecordWhere(), select: { brand: true }, distinct: ["brand"] }),
   ]);
 
   const distinct = <T,>(arr: (T | null | undefined)[]) =>

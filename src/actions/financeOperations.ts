@@ -8,8 +8,10 @@ import { hasPermissionLevel } from "@/lib/permissionGuard";
 import { resolveUserPermission } from "@/lib/permissionResolver";
 import {
   calcRevenueGrade, calcArStatus, calcArRiskLevel,
-  probabilityForStage, currentMonthKey, monthRange,
+  probabilityForStage, currentMonthKey,
 } from "@/lib/financeOperations";
+import { activeSalesRecordWhere } from "@/lib/activeSalesScope";
+import { shanghaiDateRangeFromUtcSentinels } from "@/lib/dateRange";
 
 export type SaveResult = { ok: boolean; error?: string; id?: string };
 
@@ -99,7 +101,11 @@ export async function generateMonthlySnapshot(
   if (!(await canOperate(session.userId, "operations.revenue", "EDIT"))) return { ok: false, created: 0, updated: 0, error: "无权操作" };
 
   const month = monthInput || currentMonthKey();
-  const { start, end } = monthRange(month);
+  const [year, monthNumber] = month.split("-").map(Number);
+  const salesDateRange = shanghaiDateRangeFromUtcSentinels(
+    new Date(Date.UTC(year, monthNumber - 1, 1)),
+    new Date(Date.UTC(year, monthNumber, 0)),
+  );
 
   // Pull all live customers along with their signed/in-progress contracts.
   const customers = await prisma.customer.findMany({
@@ -127,7 +133,10 @@ export async function generateMonthlySnapshot(
 
     // Monthly GMV from BI sales records.
     const salesAgg = await prisma.salesRecord.aggregate({
-      where: { customerId: c.id, deletedAt: null, orderDate: { gte: start, lte: end } },
+      where: activeSalesRecordWhere({
+        customerId: c.id,
+        orderDate: salesDateRange,
+      }),
       _sum: { revenue: true },
     });
     const monthlyGmv = salesAgg._sum.revenue ?? 0;

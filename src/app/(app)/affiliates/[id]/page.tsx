@@ -7,6 +7,7 @@ import { requireSession } from "@/lib/session";
 import { isStaff } from "@/lib/permissions";
 import { AFFILIATE_DEV_STATUS_COLORS } from "@/lib/constants";
 import { parsePlacements } from "@/lib/affiliateFields";
+import { activeSalesRecordWhere } from "@/lib/activeSalesScope";
 import AffiliateDetailClient from "./AffiliateDetailClient";
 import { AffiliateSalesPanel, type SaleRec } from "./AffiliateSalesPanel";
 import AffiliateMediaKitPanel, { type MediaKitItem } from "./AffiliateMediaKitPanel";
@@ -45,7 +46,7 @@ export default async function AffiliateDetailPage({
 
   // Sales data linked by platformAffiliateName
   const rawSalesRecords = await prisma.salesRecord.findMany({
-    where: { affiliateName: affiliate.platformAffiliateName, deletedAt: null },
+    where: activeSalesRecordWhere({ affiliateName: affiliate.platformAffiliateName }),
     orderBy: { orderDate: "desc" },
     take: 2000,
     select: {

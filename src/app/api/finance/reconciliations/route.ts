@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { getReconciliationAccess } from "@/lib/reconciliationAccess";
 import { FeaturePermissionError } from "@/lib/permissionGuard";
+import { parseDateOnlyUtc } from "@/lib/dateRange";
 
 // GET /api/finance/reconciliations — 获取对账列表
 export async function GET(req: Request) {
@@ -63,9 +64,9 @@ export async function POST(req: Request) {
     if (!NEW_RECONCILIATION_TYPES.includes(normalizedType)) {
       return NextResponse.json({ error: "新建对账必须分开选择固费或销售佣金，不再支持合并对账" }, { status: 400 });
     }
-    const start = new Date(periodStart);
-    const end = new Date(periodEnd);
-    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    const start = typeof periodStart === "string" ? parseDateOnlyUtc(periodStart) : null;
+    const end = typeof periodEnd === "string" ? parseDateOnlyUtc(periodEnd) : null;
+    if (!start || !end) {
       return NextResponse.json({ error: "对账周期日期格式无效" }, { status: 400 });
     }
     if (start > end) {

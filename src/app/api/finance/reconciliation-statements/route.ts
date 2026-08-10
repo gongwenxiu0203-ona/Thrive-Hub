@@ -10,6 +10,7 @@ import {
   type ReconciliationStatementData,
   type ReconciliationStatementRow,
 } from "@/lib/reconciliationStatementPdf";
+import { reconciliationSalesRecordWhere } from "@/lib/activeSalesScope";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -79,11 +80,11 @@ export async function POST(request: Request) {
     const biSections: ReconciliationBiSection[] = await Promise.all(
       commissionRecords.map(async (record) => {
         const details = await prisma.salesRecord.findMany({
-          where: {
+          where: reconciliationSalesRecordWhere({
             customerId: record.customerId,
-            deletedAt: null,
-            orderDate: { gte: record.periodStart, lte: record.periodEnd },
-          },
+            periodStart: record.periodStart,
+            periodEnd: record.periodEnd,
+          }),
           select: {
             id: true,
             orderDate: true,

@@ -16,6 +16,7 @@ import {
   EMPTY_FILTER_VALUE,
   type SalesRecordFilterParams,
 } from "@/lib/salesRecordFilters";
+import { activeSalesRecordWhere } from "@/lib/activeSalesScope";
 
 type ClearFilter = {
   platforms?: string[];
@@ -92,7 +93,7 @@ export async function POST(req: Request) {
 
   const where: Prisma.SalesRecordWhereInput = {
     AND: [
-      { deletedAt: null, batch: { deletedAt: null } },
+      activeSalesRecordWhere(),
       buildSalesRecordWhereFromParams(params, typeAffiliateNames),
       ...(filter.customerId ? [{ customerId: filter.customerId }] : []),
       salesScope(session, session.role === "ADMIN" ? "all" : "mine"),
