@@ -3,7 +3,7 @@
 import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { customerScope, isStaff } from "@/lib/dataScope";
+import { customerScope, isStaff, reconciliationScope } from "@/lib/dataScope";
 import type { PermLevel } from "@/lib/featurePermissions";
 import {
   INVOICE_BANK_ACCOUNTS,
@@ -11,7 +11,10 @@ import {
   normalizeInvoiceBankKey,
   type InvoiceBankAccount,
 } from "@/lib/invoiceBankAccounts";
-import { requireFeaturePermission } from "@/lib/permissionGuard";
+import {
+  requireFeaturePermission,
+  resolveSafeViewScope,
+} from "@/lib/permissionGuard";
 import { requireSession } from "@/lib/session";
 
 const INVOICE_FEATURE = "operations.invoices";
@@ -28,6 +31,9 @@ type InvoiceSummaryFeeType = InvoiceFeeType | "MIXED";
 
 export type InvoiceItemInput = {
   feeType: InvoiceFeeType;
+  currency: string;
+  periodType: InvoicePeriodType;
+  periodLabel: string;
   description: string;
   promoPlatform?: string | null;
   targetSite?: string | null;
@@ -54,6 +60,7 @@ export type InvoiceDraftInput = {
   terms?: string | null;
   status?: "DRAFT" | "ISSUED";
   items: InvoiceItemInput[];
+  reconciliationIds?: string[];
 };
 
 export type InvoiceListItem = {
@@ -69,6 +76,7 @@ export type InvoiceListItem = {
   feeType: InvoiceSummaryFeeType;
   currency: string;
   totalAmount: number;
+  currencyTotals: Array<{ currency: string; amount: number }>;
   status: InvoiceStatus;
   createdByName: string | null;
   createdAt: string;
@@ -90,6 +98,7 @@ export type InvoiceDetail = {
   clientAddress: string | null;
   currency: string;
   totalAmount: number;
+  currencyTotals: Array<{ currency: string; amount: number }>;
   bankAccountKey: string | null;
   bankSnapshot: Partial<InvoiceBankAccount>;
   terms: string | null;
@@ -100,6 +109,7 @@ export type InvoiceDetail = {
   createdAt: string;
   updatedAt: string;
   items: Array<InvoiceItemInput & { id: string; amount: number }>;
+  reconciliationIds?: string[];
 };
 
 export type InvoiceFormOptions = {
@@ -125,6 +135,13 @@ export type InvoiceFormOptions = {
   }>;
   bankAccounts: InvoiceBankAccount[];
 };
+
+export type InvoiceReconciliationPrefillResult =
+  | { ok: true; invoice: InvoiceDetail | null; existingInvoiceId?: string }
+  | { ok: false; error: string };
+
+const RECONCILIATION_FEATURE = "finance.customer_reconciliation";
+const MAX_RECONCILIATION_PREFILL_ITEMS = 100;
 
 export type InvoiceSaveResult = {
   ok: boolean;
@@ -153,7 +170,10 @@ function parseDate(value: string, label: string): Date {
     throw new Error(`${label}格式不正确`);
   }
   const date = new Date(`${clean}T00:00:00.000Z`);
-  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== clean) {
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.toISOString().slice(0, 10) !== clean
+  ) {
     throw new Error(`${label}格式不正确`);
   }
   return date;
@@ -204,6 +224,50 @@ function normalizeCurrency(value: string): string {
   }
   return currency === "RMB" ? "CNY" : currency;
 }
+function normalizeItemPeriod(
+  periodType: InvoicePeriodType,
+  rawLabel: string,
+  lineNumber: number,
+): string {
+  if (!PERIOD_TYPES.includes(periodType)) {
+    throw new Error(`第 ${lineNumber} 行费用期间类型不正确`);
+  }
+  const periodLabel = rawLabel.trim();
+  if (!periodLabel || periodLabel.length > 120) {
+    throw new Error(`第 ${lineNumber} 行费用期间必填且不能超过 120 个字符`);
+  }
+  if (periodType === "MONTH") {
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(periodLabel)) {
+      throw new Error(`第 ${lineNumber} 行月份格式应为 YYYY-MM`);
+    }
+    return periodLabel;
+  }
+  const match = periodLabel.match(
+    /^(\d{4}-\d{2}-\d{2})\s*~\s*(\d{4}-\d{2}-\d{2})$/,
+  );
+  if (!match) {
+    throw new Error(
+      `第 ${lineNumber} 行日期范围格式应为 YYYY-MM-DD ~ YYYY-MM-DD`,
+    );
+  }
+  const start = parseDate(match[1], `第 ${lineNumber} 行开始日期`);
+  const end = parseDate(match[2], `第 ${lineNumber} 行结束日期`);
+  if (end < start) {
+    throw new Error(`第 ${lineNumber} 行费用期间结束日期不能早于开始日期`);
+  }
+  return `${match[1]} ~ ${match[2]}`;
+}
+
+function summarizeCurrencyTotals(
+  items: Array<{ currency: string; amount: number }>,
+): Array<{ currency: string; amount: number }> {
+  const totals = new Map<string, number>();
+  for (const item of items) {
+    const currency = normalizeCurrency(item.currency);
+    totals.set(currency, roundMoney((totals.get(currency) ?? 0) + item.amount));
+  }
+  return Array.from(totals, ([currency, amount]) => ({ currency, amount }));
+}
 
 function normalizeItems(items: InvoiceItemInput[]) {
   if (items.length > MAX_LINE_ITEMS) {
@@ -229,6 +293,13 @@ function normalizeItems(items: InvoiceItemInput[]) {
     }
     return {
       feeType: item.feeType,
+      currency: normalizeCurrency(item.currency),
+      periodType: item.periodType,
+      periodLabel: normalizeItemPeriod(
+        item.periodType,
+        item.periodLabel,
+        index + 1,
+      ),
       description,
       promoPlatform: cleanNullable(item.promoPlatform),
       targetSite: cleanNullable(item.targetSite),
@@ -236,7 +307,9 @@ function normalizeItems(items: InvoiceItemInput[]) {
       quantity,
       unitPrice: roundMoney(unitPrice),
       amount: roundMoney(amount),
-      sortOrder: Number.isInteger(item.sortOrder) ? Number(item.sortOrder) : index,
+      sortOrder: Number.isInteger(item.sortOrder)
+        ? Number(item.sortOrder)
+        : index,
     };
   });
 }
@@ -251,6 +324,7 @@ async function validateRelations(
   customerId: string,
   contractIds: string[],
   accountsReceivableId?: string | null,
+  expectedCurrency?: string,
 ) {
   const contracts = await prisma.contract.findMany({
     where: {
@@ -275,7 +349,9 @@ async function validateRelations(
   if (contracts.length !== contractIds.length) {
     throw new Error("部分关联合同不存在、已删除或不属于所选客户");
   }
-  const contractMap = new Map(contracts.map((contract) => [contract.id, contract]));
+  const contractMap = new Map(
+    contracts.map((contract) => [contract.id, contract]),
+  );
   const contract = contractMap.get(contractIds[0]);
   if (!contract) throw new Error("请选择有效的主合同");
 
@@ -289,9 +365,15 @@ async function validateRelations(
           ...customerScope(session, session.role === "ADMIN" ? "all" : "mine"),
         },
       },
-      select: { id: true },
+      select: { id: true, currency: true },
     });
     if (!receivable) throw new Error("应收账款不存在或不属于所选客户");
+    if (
+      expectedCurrency &&
+      normalizeCurrency(receivable.currency) !== expectedCurrency
+    ) {
+      throw new Error("所选应收账款币种与 Invoice 项目币种不一致");
+    }
   }
   return contract;
 }
@@ -322,33 +404,68 @@ async function normalizedDraft(
   input: InvoiceDraftInput,
 ) {
   if (!input.customerId?.trim()) throw new Error("请选择关联客户");
-  const contractIds = Array.from(new Set(
-    (input.contractIds?.length ? input.contractIds : [input.contractId])
-      .map((id) => id?.trim())
-      .filter((id): id is string => Boolean(id)),
-  ));
+  const contractIds = Array.from(
+    new Set(
+      (input.contractIds?.length ? input.contractIds : [input.contractId])
+        .map((id) => id?.trim())
+        .filter((id): id is string => Boolean(id)),
+    ),
+  );
   if (!contractIds.length) throw new Error("请选择关联合同");
-  if (!PERIOD_TYPES.includes(input.periodType)) throw new Error("账期类型不正确");
+  if (!PERIOD_TYPES.includes(input.periodType))
+    throw new Error("账期类型不正确");
 
   const invoiceDate = parseDate(input.invoiceDate, "Invoice 日期");
   const dueDate = parseDate(input.dueDate, "付款截止日");
   if (dueDate < invoiceDate) throw new Error("付款截止日不能早于 Invoice 日期");
 
+  const items = normalizeItems(input.items);
+  const currencyTotals = summarizeCurrencyTotals(items);
+  if (currencyTotals.some((row) => row.amount > MAX_INVOICE_AMOUNT)) {
+    throw new Error("Invoice 单币种合计金额超出允许范围");
+  }
+  const isMixedCurrency = currencyTotals.length > 1;
+  const fallbackCurrency =
+    currencyTotals[0]?.currency ??
+    normalizeCurrency(input.currency === "MIXED" ? "USD" : input.currency);
+  const summaryCurrency = isMixedCurrency
+    ? "MIXED"
+    : (currencyTotals[0]?.currency ?? fallbackCurrency);
+  const requestedReceivableId = cleanNullable(input.accountsReceivableId);
+  if (isMixedCurrency && requestedReceivableId) {
+    throw new Error(
+      "混合币种 Invoice 不能关联单一应收账款，请取消应收账款关联后保存",
+    );
+  }
   const relation = await validateRelations(
     session,
     input.customerId,
     contractIds,
-    cleanNullable(input.accountsReceivableId),
+    requestedReceivableId,
+    isMixedCurrency ? undefined : summaryCurrency,
   );
-  const items = normalizeItems(input.items);
   const feeTypes = new Set(items.map((item) => item.feeType));
-  const feeType: InvoiceSummaryFeeType = feeTypes.size > 1
-    ? "MIXED"
-    : items[0]?.feeType ?? "MONTHLY_FEE";
-  const periodLabel = input.periodLabel.trim();
-  if (!periodLabel || periodLabel.length > 120) {
+  const feeType: InvoiceSummaryFeeType =
+    feeTypes.size > 1 ? "MIXED" : (items[0]?.feeType ?? "MONTHLY_FEE");
+  const parentPeriodLabel = input.periodLabel.trim();
+  if (!parentPeriodLabel || parentPeriodLabel.length > 120) {
     throw new Error("费用期间必填且不能超过 120 个字符");
   }
+  const periodKeys = new Set(
+    items.map((item) => `${item.periodType}\u0000${item.periodLabel}`),
+  );
+  const summaryPeriodType: InvoicePeriodType =
+    periodKeys.size === 1
+      ? items[0].periodType
+      : items.length
+        ? "DATE_RANGE"
+        : input.periodType;
+  const summaryPeriodLabel =
+    periodKeys.size === 1
+      ? items[0].periodLabel
+      : items.length
+        ? "多个费用期间"
+        : parentPeriodLabel;
   if (input.status === "ISSUED" && items.length === 0) {
     throw new Error("正式开具前请至少添加一个收费项目");
   }
@@ -381,16 +498,17 @@ async function normalizedDraft(
       contractId,
       sortOrder,
     })),
-    accountsReceivableId: cleanNullable(input.accountsReceivableId),
+    accountsReceivableId: isMixedCurrency ? null : requestedReceivableId,
     invoiceDate,
     dueDate,
-    periodType: input.periodType,
-    periodLabel,
+    periodType: summaryPeriodType,
+    periodLabel: summaryPeriodLabel,
     feeType,
     clientName,
     clientAddress:
-      cleanNullable(input.clientAddress) ?? cleanNullable(relation.partyAAddress),
-    currency: normalizeCurrency(input.currency),
+      cleanNullable(input.clientAddress) ??
+      cleanNullable(relation.partyAAddress),
+    currency: summaryCurrency,
     bankAccountKey: selectedBankKey
       ? normalizeInvoiceBankKey(selectedBankKey)
       : null,
@@ -398,13 +516,7 @@ async function normalizedDraft(
     terms: cleanNullable(input.terms),
     status: input.status ?? "DRAFT",
     items,
-    totalAmount: (() => {
-      const total = roundMoney(items.reduce((sum, item) => sum + item.amount, 0));
-      if (!Number.isFinite(total) || total > MAX_INVOICE_AMOUNT) {
-        throw new Error("Invoice 总金额超出允许范围");
-      }
-      return total;
-    })(),
+    totalAmount: isMixedCurrency ? 0 : (currencyTotals[0]?.amount ?? 0),
   };
 }
 
@@ -475,31 +587,389 @@ export async function getInvoiceFormOptions(): Promise<InvoiceFormOptions> {
       const bankAccounts = keys
         .map(invoiceBankAccountForKey)
         .filter((bank): bank is InvoiceBankAccount => Boolean(bank));
-      return [{
-        id: contract.id,
-        customerId: contract.customerId,
-        contractNo: contract.contractNo,
-        partyACompany: contract.partyA ?? "",
-        address: contract.partyAAddress ?? "",
-        platforms: parseStringList(contract.promoPlatform),
-        targetSites: parseStringList(contract.targetSite),
-        affiliatePlatforms: parseStringList(contract.coopChannels),
-        bankAccounts,
-      }];
+      return [
+        {
+          id: contract.id,
+          customerId: contract.customerId,
+          contractNo: contract.contractNo,
+          partyACompany: contract.partyA ?? "",
+          address: contract.partyAAddress ?? "",
+          platforms: parseStringList(contract.promoPlatform),
+          targetSites: parseStringList(contract.targetSite),
+          affiliatePlatforms: parseStringList(contract.coopChannels),
+          bankAccounts,
+        },
+      ];
     }),
     accountsReceivables: accountsReceivables.flatMap((row) =>
       row.customerId
-        ? [{
-            id: row.id,
-            customerId: row.customerId,
-            label: row.invoiceNo,
-            amount: row.invoiceAmount,
-            currency: row.currency,
-          }]
+        ? [
+            {
+              id: row.id,
+              customerId: row.customerId,
+              label: row.invoiceNo,
+              amount: row.invoiceAmount,
+              currency: row.currency,
+            },
+          ]
         : [],
     ),
     bankAccounts: Object.values(INVOICE_BANK_ACCOUNTS),
   };
+}
+
+function reconciliationCurrency(value: string): string {
+  const clean = value.trim().toUpperCase();
+  const aliases: Record<string, string> = {
+    人民币: "CNY",
+    人民币元: "CNY",
+    "¥": "CNY",
+    RMB: "CNY",
+    CNY: "CNY",
+    美金: "USD",
+    美元: "USD",
+    $: "USD",
+    USD: "USD",
+  };
+  const normalized = aliases[clean] ?? clean;
+  try {
+    return normalizeCurrency(normalized);
+  } catch {
+    throw new Error(
+      `对账记录中的币种“${value || "未填写"}”无法用于 Invoice，请先修正币种`,
+    );
+  }
+}
+
+function reconciliationPeriod(start: Date, end: Date): {
+  periodType: InvoicePeriodType;
+  periodLabel: string;
+} {
+  const startYear = start.getUTCFullYear();
+  const startMonth = start.getUTCMonth();
+  const isSameMonth =
+    startYear === end.getUTCFullYear() && startMonth === end.getUTCMonth();
+  const lastDayOfMonth = new Date(
+    Date.UTC(startYear, startMonth + 1, 0),
+  ).getUTCDate();
+  const isCompleteCalendarMonth =
+    isSameMonth && start.getUTCDate() === 1 && end.getUTCDate() === lastDayOfMonth;
+
+  return isCompleteCalendarMonth
+    ? { periodType: "MONTH", periodLabel: isoDate(start).slice(0, 7) }
+    : {
+        periodType: "DATE_RANGE",
+        periodLabel: `${isoDate(start)} ~ ${isoDate(end)}`,
+      };
+}
+
+export async function getInvoiceReconciliationPrefill(
+  reconciliationIds: string[],
+  requestedScope?: string | null,
+): Promise<InvoiceReconciliationPrefillResult> {
+  try {
+    const session = await requireInvoicePermission("EDIT");
+    let reconciliationPermission: PermLevel;
+    try {
+      reconciliationPermission = await requireFeaturePermission(
+        session,
+        RECONCILIATION_FEATURE,
+        "READ",
+      );
+    } catch {
+      return {
+        ok: false,
+        error: "缺少客户对账查看权限，无法从对账记录预填 Invoice",
+      };
+    }
+
+    const ids = Array.from(
+      new Set(reconciliationIds.map((id) => id.trim()).filter(Boolean)),
+    );
+    if (!ids.length) {
+      return { ok: false, error: "未选择要开具 Invoice 的对账记录" };
+    }
+    if (ids.length > MAX_RECONCILIATION_PREFILL_ITEMS) {
+      return {
+        ok: false,
+        error: `单次最多选择 ${MAX_RECONCILIATION_PREFILL_ITEMS} 条对账记录开具 Invoice`,
+      };
+    }
+
+    const dataView = await resolveSafeViewScope(
+      session,
+      RECONCILIATION_FEATURE,
+      session.role === "ADMIN" ? "all" : requestedScope,
+      reconciliationPermission,
+    );
+    const rows = await prisma.customerReconciliation.findMany({
+      where: {
+        AND: [
+          { id: { in: ids }, deletedAt: null },
+          reconciliationScope(session, dataView),
+          {
+            customer: {
+              deletedAt: null,
+              ...customerScope(session, dataView),
+            },
+          },
+          { contract: { deletedAt: null } },
+        ],
+      },
+      orderBy: [{ periodStart: "asc" }, { createdAt: "asc" }],
+      select: {
+        id: true,
+        customerId: true,
+        contractId: true,
+        periodStart: true,
+        periodEnd: true,
+        status: true,
+        reconcileType: true,
+        feeAmount: true,
+        fixedFeeCurrency: true,
+        commissionAmount: true,
+        commissionCurrency: true,
+        finalCommissionAmount: true,
+        invoiceLinks: {
+          select: {
+            invoice: {
+              select: { id: true, status: true, deletedAt: true },
+            },
+          },
+        },
+        customer: { select: { brandName: true } },
+        contract: {
+          select: {
+            partyA: true,
+            partyAAddress: true,
+            partyBBankAccounts: true,
+          },
+        },
+      },
+    });
+
+    if (rows.length !== ids.length) {
+      return {
+        ok: false,
+        error:
+          "部分对账记录不存在、已删除、关联客户或合同已失效，或不在你的数据范围内",
+      };
+    }
+    if (rows.some((row) => row.status !== "CONFIRMED")) {
+      return {
+        ok: false,
+        error: "只有状态为“已确认”的对账记录可以开具 Invoice",
+      };
+    }
+    if (
+      rows.some(
+        (row) => !["FEE_ONLY", "COMMISSION_ONLY"].includes(row.reconcileType),
+      )
+    ) {
+      return {
+        ok: false,
+        error: "历史固费与销售佣金合并对账不能自动开具 Invoice，请先拆分对账",
+      };
+    }
+    const customerId = rows[0].customerId;
+    if (rows.some((row) => row.customerId !== customerId)) {
+      return { ok: false, error: "一次只能为同一客户的对账记录开具 Invoice" };
+    }
+
+    const activeLinkedInvoices = rows.map(
+      (row) =>
+        row.invoiceLinks
+          .map((link) => link.invoice)
+          .find(
+            (invoice) =>
+              invoice.deletedAt === null && invoice.status !== "VOID",
+          ) ?? null,
+    );
+    const activeLinkedIds = Array.from(
+      new Set(
+        activeLinkedInvoices
+          .filter((invoice): invoice is NonNullable<typeof invoice> =>
+            Boolean(invoice),
+          )
+          .map((invoice) => invoice.id),
+      ),
+    );
+    if (
+      activeLinkedIds.length === 1 &&
+      activeLinkedInvoices.every(
+        (invoice) =>
+          invoice?.id === activeLinkedIds[0] && invoice.status === "DRAFT",
+      )
+    ) {
+      return { ok: true, invoice: null, existingInvoiceId: activeLinkedIds[0] };
+    }
+    if (activeLinkedIds.length > 0) {
+      return {
+        ok: false,
+        error:
+          activeLinkedIds.length > 1
+            ? "所选对账记录已关联不同 Invoice，请分别打开处理"
+            : "部分对账记录已有 Invoice，不能与未开票记录重复合并，请分别处理",
+      };
+    }
+
+    const currencies = rows.map((row) =>
+      reconciliationCurrency(
+        row.reconcileType === "FEE_ONLY"
+          ? row.fixedFeeCurrency
+          : row.commissionCurrency,
+      ),
+    );
+
+    const items = rows.map((row, index) => {
+      const period = reconciliationPeriod(row.periodStart, row.periodEnd);
+      const currency = currencies[index];
+      const isFixedFee = row.reconcileType === "FEE_ONLY";
+      const amount = isFixedFee
+        ? row.feeAmount
+        : (row.finalCommissionAmount ?? row.commissionAmount);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new Error(
+          `${isFixedFee ? "月度服务费" : "销售佣金"}（${period.periodLabel}）的待支付金额必须大于 0，暂不能开具 Invoice`,
+        );
+      }
+      return {
+        id: `reconciliation-${row.id}`,
+        feeType: isFixedFee
+          ? ("MONTHLY_FEE" as const)
+          : ("SALES_COMMISSION" as const),
+        currency,
+        periodType: period.periodType,
+        periodLabel: period.periodLabel,
+        description: isFixedFee ? "月度服务费" : "销售佣金",
+        promoPlatform: null,
+        targetSite: null,
+        affiliatePlatform: null,
+        quantity: 1,
+        unitPrice: amount,
+        amount,
+        sortOrder: index,
+      };
+    });
+
+    const contractIds = Array.from(new Set(rows.map((row) => row.contractId)));
+    const start = rows.reduce(
+      (earliest, row) =>
+        row.periodStart < earliest ? row.periodStart : earliest,
+      rows[0].periodStart,
+    );
+    const end = rows.reduce(
+      (latest, row) => (row.periodEnd > latest ? row.periodEnd : latest),
+      rows[0].periodEnd,
+    );
+    const primaryContract = rows[0].contract;
+    const bankKey =
+      parseStringList(primaryContract.partyBBankAccounts).find((key) =>
+        Boolean(invoiceBankAccountForKey(key)),
+      ) ?? null;
+    const bankSnapshot = bankKey
+      ? (invoiceBankAccountForKey(bankKey) ?? {})
+      : {};
+    const today = isoDate(new Date());
+    const due = new Date(`${today}T00:00:00`);
+    due.setDate(due.getDate() + 15);
+    const now = new Date().toISOString();
+    const feeTypes = new Set(items.map((item) => item.feeType));
+    const currencyTotals = summarizeCurrencyTotals(items);
+    const isMixedCurrency = currencyTotals.length > 1;
+    const invoicePeriod = reconciliationPeriod(start, end);
+
+    return {
+      ok: true,
+      invoice: {
+        id: "",
+        invoiceNo: "",
+        customerId,
+        contractId: contractIds[0] ?? null,
+        contractIds,
+        accountsReceivableId: null,
+        invoiceDate: today,
+        dueDate: isoDate(due),
+        periodType: invoicePeriod.periodType,
+        periodLabel: invoicePeriod.periodLabel,
+        feeType: feeTypes.size > 1 ? "MIXED" : items[0].feeType,
+        clientName:
+          primaryContract.partyA?.trim() || rows[0].customer.brandName,
+        clientAddress: primaryContract.partyAAddress,
+        currency: isMixedCurrency ? "MIXED" : currencyTotals[0].currency,
+        totalAmount: isMixedCurrency ? 0 : currencyTotals[0].amount,
+        currencyTotals,
+        bankAccountKey: bankKey,
+        bankSnapshot,
+        terms: null,
+        status: "DRAFT",
+        pdfUrl: null,
+        createdById: null,
+        createdByName: null,
+        createdAt: now,
+        updatedAt: now,
+        items,
+        reconciliationIds: ids,
+      },
+    };
+  } catch (error) {
+    console.error("[invoice-reconciliation-prefill] failed", error);
+    return { ok: false, error: errorMessage(error) };
+  }
+}
+
+async function validateReconciliationLinksForCreate(
+  tx: Prisma.TransactionClient,
+  session: Awaited<ReturnType<typeof requireInvoicePermission>>,
+  rawIds: string[] | undefined,
+  customerId: string,
+  contractIds: string[],
+): Promise<string[]> {
+  const ids = Array.from(
+    new Set((rawIds ?? []).map((id) => id.trim()).filter(Boolean)),
+  );
+  if (!ids.length) return [];
+  if (ids.length > MAX_RECONCILIATION_PREFILL_ITEMS) {
+    throw new Error(
+      "\u5355\u6b21\u5173\u8054\u7684\u5bf9\u8d26\u8bb0\u5f55\u8fc7\u591a",
+    );
+  }
+  try {
+    await requireFeaturePermission(session, RECONCILIATION_FEATURE, "READ");
+  } catch {
+    throw new Error(
+      "\u7f3a\u5c11\u5ba2\u6237\u5bf9\u8d26\u67e5\u770b\u6743\u9650\uff0c\u65e0\u6cd5\u5173\u8054 Invoice",
+    );
+  }
+  const rows = await tx.customerReconciliation.findMany({
+    where: {
+      id: { in: ids },
+      customerId,
+      contractId: { in: contractIds },
+      status: "CONFIRMED",
+      deletedAt: null,
+    },
+    select: {
+      id: true,
+      invoiceLinks: {
+        where: {
+          invoice: { deletedAt: null, status: { not: "VOID" } },
+        },
+        select: { invoiceId: true },
+      },
+    },
+  });
+  if (rows.length !== ids.length) {
+    throw new Error(
+      "\u90e8\u5206\u5bf9\u8d26\u8bb0\u5f55\u4e0d\u5b58\u5728\u3001\u672a\u786e\u8ba4\uff0c\u6216\u4e0e\u6240\u9009\u5ba2\u6237\u5408\u540c\u4e0d\u4e00\u81f4",
+    );
+  }
+  if (rows.some((row) => row.invoiceLinks.length > 0)) {
+    throw new Error(
+      "\u90e8\u5206\u5bf9\u8d26\u8bb0\u5f55\u5df2\u5173\u8054 Invoice\uff0c\u8bf7\u6253\u5f00\u5df2\u6709 Invoice \u5904\u7406",
+    );
+  }
+  return ids;
 }
 
 export async function listInvoices(input?: {
@@ -509,7 +979,9 @@ export async function listInvoices(input?: {
   const session = await requireInvoicePermission("READ");
   const search = input?.search?.trim();
   const status =
-    input?.status && input.status !== "ALL" && INVOICE_STATUSES.includes(input.status)
+    input?.status &&
+    input.status !== "ALL" &&
+    INVOICE_STATUSES.includes(input.status)
       ? input.status
       : undefined;
   const rows = await prisma.invoice.findMany({
@@ -542,6 +1014,7 @@ export async function listInvoices(input?: {
         include: { contract: { select: { contractNo: true } } },
       },
       createdBy: { select: { name: true } },
+      items: { select: { currency: true, amount: true } },
     },
   });
   return rows.map((row) => ({
@@ -552,7 +1025,7 @@ export async function listInvoices(input?: {
     contractId: row.contractId,
     contractNo: row.contractLinks.length
       ? row.contractLinks.map((link) => link.contract.contractNo).join("、")
-      : row.contract?.contractNo ?? null,
+      : (row.contract?.contractNo ?? null),
     invoiceDate: isoDate(row.invoiceDate),
     dueDate: isoDate(row.dueDate),
     periodLabel: row.periodLabel,
@@ -560,6 +1033,7 @@ export async function listInvoices(input?: {
     currency: row.currency,
     totalAmount: row.totalAmount,
     status: row.status as InvoiceStatus,
+    currencyTotals: summarizeCurrencyTotals(row.items),
     createdByName: row.createdBy?.name ?? null,
     createdAt: row.createdAt.toISOString(),
   }));
@@ -599,6 +1073,7 @@ export async function getInvoiceById(
     currency: row.currency,
     totalAmount: row.totalAmount,
     bankAccountKey: row.bankAccountKey,
+    currencyTotals: summarizeCurrencyTotals(row.items),
     bankSnapshot: parseBankSnapshot(row.bankSnapshot),
     terms: row.terms,
     status: row.status as InvoiceStatus,
@@ -611,6 +1086,9 @@ export async function getInvoiceById(
       id: item.id,
       feeType: item.feeType as InvoiceFeeType,
       description: item.description,
+      currency: item.currency,
+      periodType: item.periodType as InvoicePeriodType,
+      periodLabel: item.periodLabel,
       promoPlatform: item.promoPlatform,
       targetSite: item.targetSite,
       affiliatePlatform: item.affiliatePlatform,
@@ -633,6 +1111,13 @@ export async function createInvoice(
       try {
         const created = await prisma.$transaction(async (tx) => {
           const invoiceNo = await nextInvoiceNumber(tx, draft.invoiceDate);
+          const reconciliationIds = await validateReconciliationLinksForCreate(
+            tx,
+            session,
+            input.reconciliationIds,
+            draft.customerId,
+            draft.contractLinks.map((link) => link.contractId),
+          );
           const { items, contractLinks, ...invoiceData } = draft;
           return tx.invoice.create({
             data: {
@@ -641,6 +1126,16 @@ export async function createInvoice(
               createdById: session.userId,
               items: { create: items },
               contractLinks: { create: contractLinks },
+              reconciliationLinks: reconciliationIds.length
+                ? {
+                    create: reconciliationIds.map(
+                      (reconciliationId, sortOrder) => ({
+                        reconciliationId,
+                        sortOrder,
+                      }),
+                    ),
+                  }
+                : undefined,
             },
             select: { id: true, invoiceNo: true },
           });
@@ -720,10 +1215,22 @@ export async function setInvoiceStatus(
   status: "ISSUED" | "VOID",
 ): Promise<InvoiceSaveResult> {
   try {
-    const session = await requireInvoicePermission(status === "VOID" ? "MANAGE" : "EDIT");
+    const session = await requireInvoicePermission(
+      status === "VOID" ? "MANAGE" : "EDIT",
+    );
     const existing = await prisma.invoice.findFirst({
       where: { id, deletedAt: null, ...invoiceScope(session) },
-      include: { items: { select: { id: true } } },
+      include: {
+        items: {
+          select: {
+            id: true,
+            currency: true,
+            amount: true,
+            periodType: true,
+            periodLabel: true,
+          },
+        },
+      },
     });
     if (!existing) return { ok: false, error: "Invoice 不存在" };
     if (status === "ISSUED") {
@@ -733,6 +1240,30 @@ export async function setInvoiceStatus(
       const bank = parseBankSnapshot(existing.bankSnapshot);
       if (!existing.clientName.trim() || existing.items.length === 0) {
         return { ok: false, error: "客户信息或收费项目尚未填写完整" };
+      }
+      let currencyTotals: Array<{ currency: string; amount: number }>;
+      try {
+        currencyTotals = summarizeCurrencyTotals(existing.items);
+      } catch {
+        return {
+          ok: false,
+          error: "收费项目币种或费用期间尚未填写完整",
+        };
+      }
+      if (
+        existing.items.some(
+          (item) =>
+            !PERIOD_TYPES.includes(item.periodType as InvoicePeriodType) ||
+            !item.periodLabel.trim(),
+        )
+      ) {
+        return { ok: false, error: "收费项目币种或费用期间尚未填写完整" };
+      }
+      if (currencyTotals.length > 1 && existing.accountsReceivableId) {
+        return {
+          ok: false,
+          error: "混合币种 Invoice 不能关联单一应收账款，请先取消关联",
+        };
       }
       if (!cleanNullable(bank.accountNo)) {
         return { ok: false, error: "请先选择有效收款账户" };

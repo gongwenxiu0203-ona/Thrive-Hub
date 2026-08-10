@@ -19,7 +19,7 @@ const TAB_FEATURES = {
   kpi: "operations.employee_kpi",
 } as const;
 type OperationsTab = keyof typeof TAB_FEATURES;
-export const metadata = { title: "经营管理 · Thraive联盟营销系统" };
+export const metadata = { title: "经营驾驶舱 · Thraive 联盟营销系统" };
 
 export default async function FinanceOperationsPage({
   searchParams,

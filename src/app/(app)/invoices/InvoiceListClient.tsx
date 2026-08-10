@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { ArrowLeft, FileDown, FilePenLine, Plus, Search, Trash2 } from "lucide-react";
+import { FileDown, FilePenLine, Plus, Search, Trash2 } from "lucide-react";
 import {
   setInvoiceStatus,
   softDeleteInvoice,
@@ -68,13 +68,10 @@ export function InvoiceListClient({
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Invoice 开具"
-        description="基于客户、合同与应收账款生成、留存和下载 Invoice。"
+        title="开票与收款"
+        description="统一查看 Invoice 与应收账款，跟进从开票到回款的完整流程。"
         actions={(
           <div className="flex flex-wrap items-center gap-2">
-            <Link href="/operations?tab=ar" className="btn-secondary">
-              <ArrowLeft className="h-4 w-4" /> 返回经营管理
-            </Link>
             {canEdit && (
               <Link href="/invoices/new" className="btn-primary">
                 <Plus className="h-4 w-4" /> 新建 Invoice
@@ -83,6 +80,13 @@ export function InvoiceListClient({
           </div>
         )}
       />
+      <div className="border-b border-slate-200">
+        <nav className="-mb-px flex gap-6" aria-label="开票与收款视图">
+          <Link href="/invoices" aria-current="page" className="border-b-2 border-brand-600 pb-3 text-sm font-medium text-brand-700">Invoice</Link>
+          <Link href="/operations?tab=ar" className="border-b-2 border-transparent pb-3 text-sm font-medium text-slate-500 transition-colors hover:text-slate-700">应收账款</Link>
+        </nav>
+      </div>
+
 
       <form className="filter-bar" action="/invoices" method="get">
         <label className="relative min-w-[220px] flex-1">
@@ -157,8 +161,14 @@ export function InvoiceListClient({
                   </td>
                   <td>{formatDate(invoice.invoiceDate)}</td>
                   <td>{formatDate(invoice.dueDate)}</td>
-                  <td className="text-right font-medium">
-                    {invoice.currency} {invoice.totalAmount.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                  <td className="text-right font-medium tabular-nums">
+                    <div className="space-y-0.5">
+                      {invoice.currencyTotals.map((entry) => (
+                        <div key={entry.currency}>
+                          {entry.currency} {entry.amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                      ))}
+                    </div>
                   </td>
                   <td><StatusBadge status={invoice.status} /></td>
                   <td>{invoice.createdByName}</td>

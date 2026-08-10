@@ -30,6 +30,7 @@ type Settlement = {
 type Reconciliation = {
   id: string;
   status: string;
+  reconcileType: string;
   periodStart: Date | string;
   periodEnd: Date | string;
   feeAmount: number;
@@ -147,31 +148,79 @@ type CustomerRow = {
   contractId: string;
   contractNo: string;
   latestRec: Reconciliation;
+  latestFixedRec: Reconciliation | null;
+  latestCommissionRec: Reconciliation | null;
   ownerName: string;
 };
 
 function buildCustomerRows(recs: Reconciliation[]): CustomerRow[] {
-  const map = new Map<string, CustomerRow>();
+  const grouped = new Map<string, Reconciliation[]>();
   for (const rec of recs) {
-    const key = rec.customer.id;
-    const existing = map.get(key);
-    if (
-      !existing ||
-      new Date(rec.periodStart) > new Date(existing.latestRec.periodStart)
-    ) {
-      map.set(key, {
-        customerId: rec.customer.id,
-        customerName: rec.customer.brandName,
-        contractId: rec.contract.id,
-        contractNo: rec.contract.contractNo,
-        latestRec: rec,
-        ownerName: rec.customer.businessOwner?.name ?? rec.createdBy.name,
-      });
-    }
+    grouped.set(rec.customer.id, [...(grouped.get(rec.customer.id) ?? []), rec]);
   }
-  return Array.from(map.values()).sort((a, b) =>
-    new Date(b.latestRec.periodStart).getTime() -
-    new Date(a.latestRec.periodStart).getTime()
+  const rows = Array.from(grouped.values()).map((customerRecs) => {
+    const sorted = [...customerRecs].sort(
+      (a, b) =>
+        new Date(b.periodStart).getTime() - new Date(a.periodStart).getTime(),
+    );
+    const latestRec = sorted[0];
+    return {
+      customerId: latestRec.customer.id,
+      customerName: latestRec.customer.brandName,
+      contractId: latestRec.contract.id,
+      contractNo: latestRec.contract.contractNo,
+      latestRec,
+      latestFixedRec:
+        sorted.find((rec) => rec.reconcileType !== "COMMISSION_ONLY") ?? null,
+      latestCommissionRec:
+        sorted.find((rec) => rec.reconcileType !== "FEE_ONLY") ?? null,
+      ownerName:
+        latestRec.customer.businessOwner?.name ?? latestRec.createdBy.name,
+    };
+  });
+  return rows.sort(
+    (a, b) =>
+      new Date(b.latestRec.periodStart).getTime() -
+      new Date(a.latestRec.periodStart).getTime(),
+  );
+}
+
+function streamSettlementAgg(
+  rec: Reconciliation | null,
+  type: "FIXED_FEE" | "COMMISSION",
+) {
+  if (!rec) return settlementAgg([]);
+  return settlementAgg(
+    rec.settlements.filter((settlement) => settlement.type === type),
+  );
+}
+function CustomerStreamSummary({
+  rec,
+  settlementType,
+}: {
+  rec: Reconciliation | null;
+  settlementType: "FIXED_FEE" | "COMMISSION";
+}) {
+  if (!rec) return <span className="text-sm text-slate-400">暂无记录</span>;
+  const settlement = streamSettlementAgg(rec, settlementType);
+  return (
+    <div className="min-w-[190px] space-y-1.5">
+      <div className="text-sm text-slate-700">
+        {formatDate(rec.periodStart)} ~ {formatDate(rec.periodEnd)}
+      </div>
+      <Link href={`/contracts/${rec.contract.id}`} className="text-xs text-brand-600 hover:underline">
+        合同 {rec.contract.contractNo}
+      </Link>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Badge className={RECONCILIATION_STATUS_COLORS[rec.status]}>
+          {RECONCILIATION_STATUS_LABELS[rec.status] ?? rec.status}
+        </Badge>
+        <Badge className={settlement.color}>{settlement.label}</Badge>
+        {rec.reconcileType === "BOTH" && (
+          <Badge className="bg-indigo-50 text-indigo-600">历史合并</Badge>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -322,10 +371,10 @@ export function FinanceClient({
   const router = useRouter();
 
   const allTabs: { key: Tab; label: string; count?: number }[] = [
-    { key: "customers", label: "客户对账及结算" },
-    { key: "channels", label: "渠道商对账及结算" },
+    { key: "customers", label: "客户对账" },
+    { key: "channels", label: "渠道分账" },
     ...(canViewAffiliateReconciliations
-      ? [{ key: "affiliates" as Tab, label: "联盟商对账及结算" }]
+      ? [{ key: "affiliates" as Tab, label: "联盟商结算" }]
       : []),
     ...(canManageCustomerReconciliations
       ? [
@@ -356,13 +405,13 @@ export function FinanceClient({
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">财务对账</h1>
+          <h1 className="text-2xl font-semibold text-slate-900">结算中心</h1>
           <p className="mt-1 text-sm text-slate-500">
             {canToggleCurrentTab
               ? currentView === "all"
-                ? "全部数据视图 · 管理客户、渠道商、联盟商的对账与结算"
-                : "仅显示与你相关的对账 · 可切换到「全部」"
-              : "管理客户、渠道商、联盟商的对账与结算"}
+                ? "全部数据视图 · 统一管理客户对账、渠道分账与联盟商结算"
+                : "仅显示与你相关的结算记录 · 可切换到「全部」"
+              : "统一管理客户对账、渠道分账与联盟商结算"}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -635,10 +684,11 @@ function CustomerReconciliationTab({
     )
       return false;
     if (settlementFilter.length > 0) {
-      const agg = settlementAgg(row.latestRec.settlements);
-      if (!settlementFilter.includes(agg.label) && agg.label !== "—")
-        return false;
-      if (agg.label === "—" && !settlementFilter.includes("待结算"))
+      const statuses = [
+        streamSettlementAgg(row.latestFixedRec, "FIXED_FEE").label,
+        streamSettlementAgg(row.latestCommissionRec, "COMMISSION").label,
+      ].map((label) => (label === "—" ? "待结算" : label));
+      if (!statuses.some((label) => settlementFilter.includes(label)))
         return false;
     }
     return true;
@@ -699,16 +749,10 @@ function CustomerReconciliationTab({
                 客户
               </th>
               <th className="px-4 py-3 text-left font-medium text-slate-600">
-                合同编号
+                固费对账（最新）
               </th>
               <th className="px-4 py-3 text-left font-medium text-slate-600">
-                最新对账周期
-              </th>
-              <th className="px-4 py-3 text-left font-medium text-slate-600">
-                最新对账状态
-              </th>
-              <th className="px-4 py-3 text-left font-medium text-slate-600">
-                结算状态
+                销售佣金对账（最新）
               </th>
               <th className="px-4 py-3 text-left font-medium text-slate-600">
                 负责人
@@ -727,7 +771,7 @@ function CustomerReconciliationTab({
             {filtered.length === 0 ? (
               <tr>
                 <td
-                  colSpan={canManage ? 8 : 7}
+                  colSpan={canManage ? 6 : 5}
                   className="px-4 py-8 text-center text-slate-400"
                 >
                   没有匹配的记录
@@ -735,37 +779,24 @@ function CustomerReconciliationTab({
               </tr>
             ) : (
               filtered.map((row) => {
-                const rec = row.latestRec;
-                const agg = settlementAgg(rec.settlements);
+                const fixedRec = row.latestFixedRec;
+                const commissionRec = row.latestCommissionRec;
                 return (
                   <tr key={row.customerId} className="hover:bg-slate-50">
                     <td className="px-4 py-3 font-medium text-slate-900">
                       {row.customerName}
                     </td>
                     <td className="px-4 py-3">
-                      <Link
-                        href={`/contracts/${row.contractId}`}
-                        className="text-brand-600 hover:underline"
-                      >
-                        {row.contractNo}
-                      </Link>
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {formatDate(rec.periodStart)} ~{" "}
-                      {formatDate(rec.periodEnd)}
+                      <CustomerStreamSummary
+                        rec={fixedRec}
+                        settlementType="FIXED_FEE"
+                      />
                     </td>
                     <td className="px-4 py-3">
-                      <Badge
-                        className={
-                          RECONCILIATION_STATUS_COLORS[rec.status]
-                        }
-                      >
-                        {RECONCILIATION_STATUS_LABELS[rec.status] ??
-                          rec.status}
-                      </Badge>
-                    </td>
-                    <td className="px-4 py-3">
-                      <Badge className={agg.color}>{agg.label}</Badge>
+                      <CustomerStreamSummary
+                        rec={commissionRec}
+                        settlementType="COMMISSION"
+                      />
                     </td>
                     <td className="px-4 py-3 text-slate-600">
                       {row.ownerName}

@@ -25,6 +25,24 @@ export async function DELETE(
     }
 
     // 软删除：标记 deletedAt，7 天内可恢复
+    const protectedRecord = await prisma.customerReconciliation.findFirst({
+      where: {
+        AND: [
+          { customerId, deletedAt: null },
+          reconciliationScope(session, view),
+          {
+            OR: [
+              { status: "CONFIRMED" },
+              { settlements: { some: { status: "SETTLED" } } },
+            ],
+          },
+        ],
+      },
+      select: { id: true },
+    });
+    if (protectedRecord) {
+      return NextResponse.json({ error: "该客户存在已确认或已结算的财务历史，不能批量删除" }, { status: 409 });
+    }
     const { count } = await prisma.customerReconciliation.updateMany({
       where: { AND: [{ customerId, deletedAt: null }, reconciliationScope(session, view)] },
       data: { deletedAt: new Date() },

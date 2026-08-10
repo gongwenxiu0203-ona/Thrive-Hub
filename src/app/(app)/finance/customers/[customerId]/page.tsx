@@ -5,6 +5,7 @@ import { requireSession } from "@/lib/session";
 import { CustomerReconciliationDetailClient } from "./CustomerReconciliationDetailClient";
 import { getReconciliationAccess } from "@/lib/reconciliationAccess";
 import { hasPermissionLevel } from "@/lib/permissionGuard";
+import { getReconciliationInvoiceStateMap } from "@/lib/reconciliationInvoice";
 
 export default async function CustomerReconciliationPage({
   params,
@@ -86,10 +87,7 @@ export default async function CustomerReconciliationPage({
           include: { reviewer: { select: { id: true, name: true } } },
           orderBy: { createdAt: "asc" },
         },
-        settlements: {
-          include: { createdBy: { select: { id: true, name: true } } },
-          orderBy: { type: "asc" },
-        },
+
       },
       orderBy: { periodStart: "desc" },
     }),
@@ -101,6 +99,11 @@ export default async function CustomerReconciliationPage({
       orderBy: { name: "asc" },
     }) : Promise.resolve([]),
   ]);
+
+  const invoiceStates = await getReconciliationInvoiceStateMap(
+    prisma,
+    reconciliations.map((record) => record.id),
+  );
 
   if (!customer) notFound();
 
@@ -143,6 +146,7 @@ export default async function CustomerReconciliationPage({
         users={users}
         readOnly={!canEdit}
         canManage={canManage}
+        invoiceStates={invoiceStates}
       />
     </div>
   );

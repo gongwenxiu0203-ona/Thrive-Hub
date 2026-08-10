@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import {
   LayoutDashboard,
@@ -74,7 +74,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     items: [
       {
         href: "/finance",
-        label: "\u8d22\u52a1\u5bf9\u8d26",
+        label: "\u7ed3\u7b97\u4e2d\u5fc3",
         icon: Receipt,
         features: [
           "finance.customer_reconciliation",
@@ -83,14 +83,21 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
         ],
       },
       {
+        href: "/invoices",
+        label: "\u5f00\u7968\u4e0e\u6536\u6b3e",
+        icon: FileText,
+        features: [
+          "operations.accounts_receivable",
+          "operations.invoices",
+        ],
+      },
+      {
         href: "/operations",
-        label: "\u7ecf\u8425\u7ba1\u7406",
+        label: "\u7ecf\u8425\u9a7e\u9a76\u8231",
         icon: TrendingUp,
         features: [
           "operations.revenue",
           "operations.customer_count",
-          "operations.accounts_receivable",
-          "operations.invoices",
           "operations.sales_pipeline",
           "operations.employee_kpi",
         ],
@@ -114,6 +121,7 @@ export function Sidebar({
 }) {
   const pathname = usePathname();
   const visibleHrefs = visibleNavForRole(role);
+  const searchParams = useSearchParams();
   const hasAtLeast = (feature: string, required: PermLevel) =>
     PERM_LEVELS.indexOf(permissions[feature] ?? "NONE") >=
     PERM_LEVELS.indexOf(required);
@@ -182,12 +190,24 @@ export function Sidebar({
             <p className="mb-2 px-3 text-[11px] font-semibold text-slate-400">{group.label}</p>
             <div className="space-y-1">
               {group.items.map((item) => {
-                const active = pathname === item.href || pathname.startsWith(item.href + "/");
+                const href =
+                  item.href === "/invoices" &&
+                  !hasAtLeast("operations.invoices", "READ") &&
+                  hasAtLeast("operations.accounts_receivable", "READ")
+                    ? "/operations?tab=ar"
+                    : item.href;
+                const active = item.href === "/invoices"
+                  ? pathname === "/invoices" ||
+                    pathname.startsWith("/invoices/") ||
+                    (pathname === "/operations" && searchParams.get("tab") === "ar")
+                  : item.href === "/operations"
+                    ? pathname === "/operations" && searchParams.get("tab") !== "ar"
+                    : pathname === item.href || pathname.startsWith(item.href + "/");
                 const Icon = item.icon;
                 return (
                   <Link
                     key={item.href}
-                    href={item.href}
+                    href={href}
                     onClick={onMobileClose}
                     className={cn(
                       "relative flex min-h-11 items-center gap-3 rounded-md border px-3 py-2.5 text-sm font-medium transition-colors",

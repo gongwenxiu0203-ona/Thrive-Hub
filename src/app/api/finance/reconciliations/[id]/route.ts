@@ -63,10 +63,17 @@ export async function PATCH(
     const body = await req.json();
 
     const existing = await prisma.customerReconciliation.findFirst({ where: scopedReconciliationWhere(id, access.scope) });
-    if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    if (!existing) return NextResponse.json({ error: "对账记录不存在或您无权访问" }, { status: 404 });
 
     // 货币字段任何状态可改
     const currencyFields = ["fixedFeeCurrency", "commissionCurrency"];
+    const hasCurrencyFields = currencyFields.some((key) => key in body);
+    if (hasCurrencyFields && existing.status === "CONFIRMED") {
+      return NextResponse.json(
+        { error: "已确认的对账记录已锁定，不能修改币种" },
+        { status: 409 },
+      );
+    }
     const draftOnlyFields = [
       "periodStart", "periodEnd",
       "betType", "betOrderCount", "betSalesAmount",
@@ -123,9 +130,16 @@ export async function DELETE(
     const { id } = await params;
     const existing = await prisma.customerReconciliation.findFirst({
       where: scopedReconciliationWhere(id, access.scope),
+      include: { settlements: { select: { status: true } } },
     });
     if (!existing) {
-      return NextResponse.json({ error: "Not found" }, { status: 404 });
+      return NextResponse.json({ error: "对账记录不存在或您无权访问" }, { status: 404 });
+    }
+    if (existing.status === "CONFIRMED") {
+      return NextResponse.json({ error: "已确认的对账记录属于财务历史，不能删除" }, { status: 409 });
+    }
+    if (existing.settlements.some((settlement) => settlement.status === "SETTLED")) {
+      return NextResponse.json({ error: "该对账记录已存在已结算款项，不能删除" }, { status: 409 });
     }
 
     await prisma.customerReconciliation.update({

@@ -218,7 +218,8 @@ export async function updateSnapshot(
 export async function deleteSnapshot(id: string): Promise<SaveResult> {
   const session = await requireSession();
   if (!(await canOperate(session.userId, "operations.revenue", "MANAGE"))) return { ok: false, error: "无权删除客户收入记录" };
-  await prisma.clientRevenueSnapshot.delete({ where: { id } });
+  const deleted = await prisma.clientRevenueSnapshot.deleteMany({ where: { id } });
+  if (deleted.count === 0) return { ok: false, error: "客户收入记录不存在或已被删除" };
   revalidatePath("/operations");
   revalidatePath("/dashboard");
   return { ok: true, id };
@@ -349,15 +350,18 @@ export async function updateAR(
 export async function deleteAR(id: string): Promise<SaveResult> {
   const session = await requireSession();
   if (!(await canOperate(session.userId, "operations.accounts_receivable", "MANAGE"))) return { ok: false, error: "无权删除应收账款" };
-  await prisma.accountsReceivable.delete({ where: { id } });
+  const deleted = await prisma.accountsReceivable.deleteMany({ where: { id } });
+  if (deleted.count === 0) return { ok: false, error: "应收账款记录不存在或已被删除" };
   revalidatePath("/operations");
   return { ok: true, id };
 }
 
 /** Bulk recalculate status + riskLevel for every AR row using today as the reference date. */
-export async function refreshArRisks(): Promise<{ ok: boolean; updated: number }> {
+export async function refreshArRisks(): Promise<{ ok: boolean; updated: number; error?: string }> {
   const session = await requireSession();
-  if (!(await canOperate(session.userId, "operations.accounts_receivable", "EDIT"))) return { ok: false, updated: 0 };
+  if (!(await canOperate(session.userId, "operations.accounts_receivable", "EDIT"))) {
+    return { ok: false, updated: 0, error: "无权刷新应收账款风险，请联系管理员授予应收账款编辑权限" };
+  }
   const all = await prisma.accountsReceivable.findMany();
   let updated = 0;
   for (const a of all) {
@@ -427,11 +431,12 @@ export async function createPipeline(payload: {
 
 export async function updatePipelineStage(id: string, stage: string): Promise<SaveResult> {
   const session = await requireSession();
-  if (!(await canOperate(session.userId, "operations.sales_pipeline", "EDIT"))) return { ok: false, error: "无权操作" };
-  await prisma.salesPipeline.update({
+  if (!(await canOperate(session.userId, "operations.sales_pipeline", "EDIT"))) return { ok: false, error: "无权修改销售漏斗阶段，请联系管理员授予销售漏斗编辑权限" };
+  const updated = await prisma.salesPipeline.updateMany({
     where: { id },
     data: { stage, probability: probabilityForStage(stage) },
   });
+  if (updated.count === 0) return { ok: false, error: "销售漏斗记录不存在或已被删除" };
   revalidatePath("/operations");
   return { ok: true, id };
 }
@@ -472,8 +477,9 @@ export async function updatePipeline(
 
 export async function deletePipeline(id: string): Promise<SaveResult> {
   const session = await requireSession();
-  if (!(await canOperate(session.userId, "operations.sales_pipeline", "MANAGE"))) return { ok: false, error: "无权删除销售漏斗" };
-  await prisma.salesPipeline.delete({ where: { id } });
+  if (!(await canOperate(session.userId, "operations.sales_pipeline", "MANAGE"))) return { ok: false, error: "无权删除销售漏斗记录，请联系管理员授予销售漏斗管理权限" };
+  const deleted = await prisma.salesPipeline.deleteMany({ where: { id } });
+  if (deleted.count === 0) return { ok: false, error: "销售漏斗记录不存在或已被删除" };
   revalidatePath("/operations");
   return { ok: true, id };
 }

@@ -94,10 +94,21 @@ export async function GET(
     clientAddress: invoice.clientAddress,
     currency: invoice.currency,
     totalAmount: invoice.totalAmount,
+    currencyTotals: Array.from(
+      invoice.items.reduce((totals, item) => {
+        const currency = item.currency.trim().toUpperCase();
+        totals.set(currency, (totals.get(currency) ?? 0) + item.amount);
+        return totals;
+      }, new Map<string, number>()),
+      ([currency, amount]) => ({ currency, amount }),
+    ).sort((left, right) => left.currency.localeCompare(right.currency)),
     bankSnapshot: parseBankSnapshot(invoice.bankSnapshot),
     terms: invoice.terms,
     items: invoice.items.map((item) => ({
       feeType: item.feeType,
+      currency: item.currency,
+      periodType: item.periodType,
+      periodLabel: item.periodLabel,
       description: item.description,
       quantity: item.quantity,
       unitPrice: item.unitPrice,

@@ -938,6 +938,7 @@ model CustomerReconciliation {
   reviews                ReconciliationReview[]
   settlements            Settlement[]
   channelReconciliations ChannelReconciliation[] @relation("CustomerReconciliationToChannels")
+  invoiceLinks           InvoiceReconciliation[]
 
   @@index([customerId])
   @@index([contractId])
@@ -1289,6 +1290,7 @@ model Invoice {
   createdBy          User?               @relation("InvoiceCreator", fields: [createdById], references: [id], onDelete: SetNull)
   items              InvoiceItem[]
   contractLinks      InvoiceContract[]
+  reconciliationLinks InvoiceReconciliation[]
 
   @@index([customerId])
   @@index([contractId])
@@ -1314,10 +1316,27 @@ model InvoiceContract {
   @@index([contractId])
 }
 
+// Links confirmed customer reconciliations to their generated Invoice draft.
+model InvoiceReconciliation {
+  id               String   @id @default(cuid())
+  invoiceId        String
+  reconciliationId String   @unique
+  sortOrder        Int      @default(0)
+  createdAt        DateTime @default(now())
+
+  invoice        Invoice                @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  reconciliation CustomerReconciliation @relation(fields: [reconciliationId], references: [id], onDelete: Cascade)
+
+  @@unique([invoiceId, reconciliationId])
+  @@index([invoiceId, sortOrder])
+}
 model InvoiceItem {
   id                String   @id @default(cuid())
   invoiceId         String
   feeType           String   @default("MONTHLY_FEE") // MONTHLY_FEE | SALES_COMMISSION
+  currency          String   @default("USD")
+  periodType        String   @default("MONTH") // MONTH | DATE_RANGE
+  periodLabel       String   @default("")
   description       String
   promoPlatform     String?
   targetSite        String?

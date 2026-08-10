@@ -3,14 +3,27 @@ import { prisma } from "@/lib/prisma";
 import { AppShell } from "@/components/AppShell";
 import { resolveUserPermissionsMap } from "@/lib/permissionResolver";
 import { hasPermissionLevel } from "@/lib/permissionGuard";
+import { ensureOverdueInvoiceIssueReminders } from "@/lib/reconciliationInvoiceReminder";
 
-export default async function AppLayout({ children }: { children: React.ReactNode }) {
+export default async function AppLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   const session = await requireSession();
   const permissions = await resolveUserPermissionsMap(session.userId);
   const canViewReminders = hasPermissionLevel(
     permissions["reminders.records"] ?? "NONE",
     "READ",
   );
+  if (canViewReminders) {
+    try {
+      await ensureOverdueInvoiceIssueReminders(session.userId);
+    } catch (error) {
+      console.error("[invoice-issue-reminder] scan failed", error);
+    }
+  }
+
   const unreadCount = canViewReminders
     ? await prisma.reminder.count({
         where: { targetId: session.userId, isRead: false, deletedAt: null },

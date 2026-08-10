@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { getReconciliationAccess, scopedReconciliationWhere } from "@/lib/reconciliationAccess";
+import {
+  getReconciliationAccess,
+  scopedReconciliationWhere,
+} from "@/lib/reconciliationAccess";
 import { FeaturePermissionError } from "@/lib/permissionGuard";
 
 // POST /api/finance/reconciliations/[id]/confirm
@@ -21,9 +24,16 @@ export async function POST(
       where: scopedReconciliationWhere(id, access.scope),
       include: { customer: { select: { brandName: true } } },
     });
-    if (!rec) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    if (!rec)
+      return NextResponse.json(
+        { error: "对账记录不存在或您无权访问" },
+        { status: 404 },
+      );
     if (rec.status !== "DISPUTED") {
-      return NextResponse.json({ error: "只有争议状态才需要最终确认" }, { status: 400 });
+      return NextResponse.json(
+        { error: "只有争议状态才需要最终确认" },
+        { status: 400 },
+      );
     }
 
     await prisma.$transaction(async (tx) => {
@@ -31,8 +41,8 @@ export async function POST(
       const finalSalesAmount = rec.actualSalesAmount;
       const finalCommissionAmount = rec.commissionAmount;
 
-      await tx.customerReconciliation.update({
-        where: { id },
+      const transition = await tx.customerReconciliation.updateMany({
+        where: { id, status: "DISPUTED" },
         data: {
           status: "CONFIRMED",
           finalOrders,
@@ -42,6 +52,8 @@ export async function POST(
           updatedAt: new Date(),
         },
       });
+      if (transition.count !== 1)
+        throw new Error("RECONCILIATION_STATE_CHANGED");
 
       await tx.reconciliationReview.create({
         data: {
@@ -53,33 +65,34 @@ export async function POST(
         },
       });
 
-      // 创建结算记录
+      // 按对账流生成结算记录，并避免重复生成。
       const now = new Date();
-      if (rec.feeAmount > 0) {
-        await tx.settlement.create({
-          data: {
-            reconciliationId: id,
-            type: "FIXED_FEE",
-            amount: rec.feeAmount,
-            status: "PENDING",
-            createdById: session.userId,
-            createdAt: now,
-            updatedAt: now,
-          },
+      const settlementSpecs = [
+        ...(rec.reconcileType !== "COMMISSION_ONLY" && rec.feeAmount > 0
+          ? [{ type: "FIXED_FEE", amount: rec.feeAmount }]
+          : []),
+        ...(rec.reconcileType !== "FEE_ONLY" && finalCommissionAmount > 0
+          ? [{ type: "COMMISSION", amount: finalCommissionAmount }]
+          : []),
+      ];
+      for (const settlementSpec of settlementSpecs) {
+        const existingSettlement = await tx.settlement.findFirst({
+          where: { reconciliationId: id, type: settlementSpec.type },
+          select: { id: true },
         });
-      }
-      if (finalCommissionAmount > 0) {
-        await tx.settlement.create({
-          data: {
-            reconciliationId: id,
-            type: "COMMISSION",
-            amount: finalCommissionAmount,
-            status: "PENDING",
-            createdById: session.userId,
-            createdAt: now,
-            updatedAt: now,
-          },
-        });
+        if (!existingSettlement) {
+          await tx.settlement.create({
+            data: {
+              reconciliationId: id,
+              type: settlementSpec.type,
+              amount: settlementSpec.amount,
+              status: "PENDING",
+              createdById: session.userId,
+              createdAt: now,
+              updatedAt: now,
+            },
+          });
+        }
       }
 
       // 7天后提醒提交人跟进结算状态
@@ -97,12 +110,24 @@ export async function POST(
           },
         });
       }
+
+      return;
     });
 
     return NextResponse.json({ success: true });
   } catch (e) {
-    if (e instanceof FeaturePermissionError) return NextResponse.json({ error: "无权限" }, { status: 403 });
+    if (e instanceof Error && e.message === "RECONCILIATION_STATE_CHANGED") {
+      return NextResponse.json(
+        { error: "对账状态已被其他操作更新，请刷新页面后重试" },
+        { status: 409 },
+      );
+    }
+    if (e instanceof FeaturePermissionError)
+      return NextResponse.json({ error: "无权限" }, { status: 403 });
     console.error(e);
-    return NextResponse.json({ error: "确认失败" }, { status: 500 });
+    return NextResponse.json(
+      { error: "最终确认失败，请稍后重试" },
+      { status: 500 },
+    );
   }
 }

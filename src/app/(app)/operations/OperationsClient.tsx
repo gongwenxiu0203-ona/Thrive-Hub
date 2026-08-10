@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useTransition } from "react";
+import { useEffect, useState, useMemo, useTransition } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -147,6 +147,12 @@ export function OperationsClient({
   const router = useRouter();
   const sp = useSearchParams();
   const [tab, setTab] = useState<Tab>(initialTab);
+  const isReceivablesWorkbench = tab === "ar";
+
+  useEffect(() => {
+    setTab(initialTab);
+  }, [initialTab]);
+
   const canRead = (key: Tab | "invoices") =>
     hasPermissionLevel(permissions[key], "READ");
   const canEdit = (key: Tab) =>
@@ -171,53 +177,41 @@ export function OperationsClient({
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <PageHeader
-          title="经营管理"
-          description="客户收入 / 客户数统计 / 应收账款 / 销售漏斗"
+          title={isReceivablesWorkbench ? "开票与收款" : "经营驾驶舱"}
+          description={isReceivablesWorkbench
+            ? "应收账款跟进、风险刷新与 Invoice 开具"
+            : "收入与现金流、客户经营、销售漏斗与项目 KPI"}
         />
       </div>
 
       {/* Tabs */}
       <div className="tab-strip">
-        {([
-          { key: "revenue", label: "客户收入总表", icon: TrendingUp },
-          { key: "count", label: "客户数统计", icon: Users },
+        {(isReceivablesWorkbench ? ([
           { key: "ar", label: "应收账款", icon: FileText },
-        ] as const).filter((t) => canRead(t.key)).map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTabUrl(t.key)}
-            className={cn(
-              "tab-trigger",
-              tab === t.key
-                ? "tab-trigger-active"
-                : "",
-            )}
-          >
-            <t.icon className="h-4 w-4" /> {t.label}
+        ] as const) : ([
+          { key: "revenue", label: "收入与现金流", icon: TrendingUp },
+          { key: "count", label: "客户经营", icon: Users },
+        ] as const)).filter((item) => canRead(item.key)).map((item) => (
+          <button key={item.key} onClick={() => setTabUrl(item.key)}
+            className={cn("tab-trigger", tab === item.key && "tab-trigger-active")}>
+            <item.icon className="h-4 w-4" /> {item.label}
           </button>
         ))}
-        {canRead("invoices") && <Link href="/invoices" className="tab-trigger">
-          <ReceiptText className="h-4 w-4" /> Invoice 开具
-        </Link>}
-        {([
+        {isReceivablesWorkbench && canRead("invoices") && (
+          <Link href="/invoices" className="tab-trigger">
+            <ReceiptText className="h-4 w-4" /> Invoice
+          </Link>
+        )}
+        {!isReceivablesWorkbench && ([
           { key: "pipeline", label: "销售漏斗", icon: Target },
-          { key: "kpi", label: "员工 KPI", icon: Award },
-        ] as const).filter((t) => canRead(t.key)).map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTabUrl(t.key)}
-            className={cn(
-              "tab-trigger",
-              tab === t.key
-                ? "tab-trigger-active"
-                : "",
-            )}
-          >
-            <t.icon className="h-4 w-4" /> {t.label}
+          { key: "kpi", label: "项目与 KPI", icon: Award },
+        ] as const).filter((item) => canRead(item.key)).map((item) => (
+          <button key={item.key} onClick={() => setTabUrl(item.key)}
+            className={cn("tab-trigger", tab === item.key && "tab-trigger-active")}>
+            <item.icon className="h-4 w-4" /> {item.label}
           </button>
         ))}
       </div>
-
       {tab === "revenue" && (
         <RevenueTab snapshots={snapshots} month={month} onMonthChange={setMonth} canEdit={canEdit("revenue") && isAdmin} canManage={canManage("revenue") && isAdmin} />
       )}
@@ -568,6 +562,7 @@ function ARTab({
   const [filterMonth, setFilterMonth] = useState("");
   const [filterRisk, setFilterRisk] = useState("");
   const [filterOwner, setFilterOwner] = useState("");
+  const [notice, setNotice] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   const filtered = useMemo(() => {
     return ars.filter((a) => {
@@ -592,15 +587,40 @@ function ARTab({
   }, [filtered]);
 
   function onRefresh() {
+    setNotice(null);
     startTransition(async () => {
-      await refreshArRisks();
-      router.refresh();
+      try {
+        const result = await refreshArRisks();
+        if (!result.ok) {
+          setNotice({ type: "error", text: result.error ?? "刷新失败，请稍后重试" });
+          return;
+        }
+        setNotice({ type: "success", text: `风险状态刷新完成，更新 ${result.updated} 条记录` });
+        router.refresh();
+      } catch (error) {
+        console.error("Failed to refresh AR risks", error);
+        setNotice({ type: "error", text: "刷新失败，请稍后重试" });
+      }
     });
   }
 
   function onDelete(id: string) {
     if (!confirm("确认删除该应收账款记录？")) return;
-    startTransition(async () => { await deleteAR(id); router.refresh(); });
+    setNotice(null);
+    startTransition(async () => {
+      try {
+        const result = await deleteAR(id);
+        if (!result.ok) {
+          setNotice({ type: "error", text: result.error ?? "删除失败，请稍后重试" });
+          return;
+        }
+        setNotice({ type: "success", text: "应收账款记录已删除" });
+        router.refresh();
+      } catch (error) {
+        console.error("Failed to delete accounts receivable", error);
+        setNotice({ type: "error", text: "删除失败，请稍后重试" });
+      }
+    });
   }
 
   return (
@@ -629,6 +649,12 @@ function ARTab({
           <Plus className="h-4 w-4" />新增应收
         </button>}
       </div>
+
+      {notice && (
+        <div className={cn("rounded-lg border px-3 py-2 text-sm", notice.type === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-rose-200 bg-rose-50 text-rose-700")}>
+          {notice.text}
+        </div>
+      )}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <StatCard label="应收总额 (RMB)" value={`¥${totals.totalInvoice.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} />
@@ -865,6 +891,7 @@ function PipelineTab({
   const [editing, setEditing] = useState<PipelineRow | null>(null);
   const [filterStage, setFilterStage] = useState("");
   const [filterOwner, setFilterOwner] = useState("");
+  const [operationError, setOperationError] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
     return pipelines.filter((p) => {
@@ -905,16 +932,37 @@ function PipelineTab({
   }, [filtered]);
 
   function onDelete(id: string) {
-    if (!confirm("确认删除该漏斗记录？")) return;
-    startTransition(async () => { await deletePipeline(id); router.refresh(); });
+    if (!confirm("确认删除该销售漏斗记录？")) return;
+    setOperationError(null);
+    startTransition(async () => {
+      try {
+        const result = await deletePipeline(id);
+        if (!result.ok) { setOperationError(result.error ?? "删除失败，请稍后重试"); return; }
+        router.refresh();
+      } catch (error) {
+        console.error("Failed to delete sales pipeline", error);
+        setOperationError("删除失败，请稍后重试");
+      }
+    });
   }
 
   function onStageChange(id: string, stage: string) {
-    startTransition(async () => { await updatePipelineStage(id, stage); router.refresh(); });
+    setOperationError(null);
+    startTransition(async () => {
+      try {
+        const result = await updatePipelineStage(id, stage);
+        if (!result.ok) { setOperationError(result.error ?? "阶段更新失败，请稍后重试"); return; }
+        router.refresh();
+      } catch (error) {
+        console.error("Failed to update sales pipeline stage", error);
+        setOperationError("阶段更新失败，请稍后重试");
+      }
+    });
   }
 
   return (
     <div className="space-y-4">
+      {operationError && <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{operationError}</div>}
       <div className="card flex flex-wrap items-center gap-3 p-4">
         <select className="input h-9 w-44 text-sm" value={filterStage} onChange={(e) => setFilterStage(e.target.value)}>
           <option value="">全部阶段</option>

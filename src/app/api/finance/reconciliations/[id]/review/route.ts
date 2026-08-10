@@ -1,13 +1,16 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { getReconciliationAccess, scopedReconciliationWhere } from "@/lib/reconciliationAccess";
+import {
+  getReconciliationAccess,
+  scopedReconciliationWhere,
+} from "@/lib/reconciliationAccess";
 import { FeaturePermissionError } from "@/lib/permissionGuard";
 import { recalcReconciliation } from "@/lib/reconciliationCalc";
 
 // POST /api/finance/reconciliations/[id]/review
 // 客户负责人确认或提出异议
-// body: { action: "APPROVED" | "DISPUTED", disputedOrders?, disputedSalesAmount?, note? }
+// body: { action: "APPROVED" | "DISPUTED", disputedSalesAmount?, note? }
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -17,19 +20,61 @@ export async function POST(
     const access = await getReconciliationAccess(session, "MANAGE", req);
     const { id } = await params;
     const body = await req.json();
-    const { action, disputedOrders, disputedSalesAmount, salesAmountCurrency, note } = body;
+    if (Object.prototype.hasOwnProperty.call(body, "disputedOrders")) {
+      return NextResponse.json(
+        { error: "系统已取消单量异议，仅支持纠正销售额" },
+        { status: 400 },
+      );
+    }
+    const {
+      action,
+      disputedSalesAmount,
+      correctedSalesAmount,
+      salesAmountCurrency,
+      note,
+    } = body;
+    const correctedSales = correctedSalesAmount ?? disputedSalesAmount;
 
     if (action !== "APPROVED" && action !== "DISPUTED") {
-      return NextResponse.json({ error: "action 只能是 APPROVED 或 DISPUTED" }, { status: 400 });
+      return NextResponse.json(
+        { error: "action 只能是 APPROVED 或 DISPUTED" },
+        { status: 400 },
+      );
     }
 
     const rec = await prisma.customerReconciliation.findFirst({
       where: scopedReconciliationWhere(id, access.scope),
-      include: { customer: { select: { brandName: true, businessOwnerId: true } } },
+      include: {
+        customer: { select: { brandName: true, businessOwnerId: true } },
+      },
     });
-    if (!rec) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    if (!rec)
+      return NextResponse.json(
+        { error: "对账记录不存在或您无权访问" },
+        { status: 404 },
+      );
     if (rec.status !== "PENDING_REVIEW" && rec.status !== "DISPUTED") {
-      return NextResponse.json({ error: "当前状态不允许审核操作" }, { status: 400 });
+      return NextResponse.json(
+        { error: "当前状态不允许审核操作" },
+        { status: 400 },
+      );
+    }
+    if (action === "DISPUTED" && rec.reconcileType === "FEE_ONLY") {
+      return NextResponse.json(
+        { error: "固费对账不包含销售额，不能提交销售额异议" },
+        { status: 400 },
+      );
+    }
+    if (
+      action === "DISPUTED" &&
+      (typeof correctedSales !== "number" ||
+        !Number.isFinite(correctedSales) ||
+        correctedSales < 0)
+    ) {
+      return NextResponse.json(
+        { error: "提出异议时必须填写有效的纠正后销售额" },
+        { status: 400 },
+      );
     }
 
     await prisma.$transaction(async (tx) => {
@@ -39,8 +84,8 @@ export async function POST(
         const finalSalesAmount = rec.actualSalesAmount;
         const finalCommissionAmount = rec.commissionAmount;
 
-        await tx.customerReconciliation.update({
-          where: { id },
+        const transition = await tx.customerReconciliation.updateMany({
+          where: { id, status: { in: ["PENDING_REVIEW", "DISPUTED"] } },
           data: {
             status: "CONFIRMED",
             finalOrders,
@@ -50,6 +95,8 @@ export async function POST(
             updatedAt: new Date(),
           },
         });
+        if (transition.count !== 1)
+          throw new Error("RECONCILIATION_STATE_CHANGED");
 
         await tx.reconciliationReview.create({
           data: {
@@ -61,33 +108,34 @@ export async function POST(
           },
         });
 
-        // 自动创建结算记录（固费 + 抽佣）
+        // 按对账流生成结算记录；查存在后再创建，避免重试产生重复结算。
         const now = new Date();
-        if (rec.feeAmount > 0) {
-          await tx.settlement.create({
-            data: {
-              reconciliationId: id,
-              type: "FIXED_FEE",
-              amount: rec.feeAmount,
-              status: "PENDING",
-              createdById: session.userId,
-              createdAt: now,
-              updatedAt: now,
-            },
+        const settlementSpecs = [
+          ...(rec.reconcileType !== "COMMISSION_ONLY" && rec.feeAmount > 0
+            ? [{ type: "FIXED_FEE", amount: rec.feeAmount }]
+            : []),
+          ...(rec.reconcileType !== "FEE_ONLY" && finalCommissionAmount > 0
+            ? [{ type: "COMMISSION", amount: finalCommissionAmount }]
+            : []),
+        ];
+        for (const settlementSpec of settlementSpecs) {
+          const existingSettlement = await tx.settlement.findFirst({
+            where: { reconciliationId: id, type: settlementSpec.type },
+            select: { id: true },
           });
-        }
-        if (finalCommissionAmount > 0) {
-          await tx.settlement.create({
-            data: {
-              reconciliationId: id,
-              type: "COMMISSION",
-              amount: finalCommissionAmount,
-              status: "PENDING",
-              createdById: session.userId,
-              createdAt: now,
-              updatedAt: now,
-            },
-          });
+          if (!existingSettlement) {
+            await tx.settlement.create({
+              data: {
+                reconciliationId: id,
+                type: settlementSpec.type,
+                amount: settlementSpec.amount,
+                status: "PENDING",
+                createdById: session.userId,
+                createdAt: now,
+                updatedAt: now,
+              },
+            });
+          }
         }
 
         // 7天后提醒提交人跟进结算状态
@@ -105,21 +153,20 @@ export async function POST(
             },
           });
         }
+        return;
       } else {
         // 有异议 → 用争议数据重算（v3 逻辑），状态变为 DISPUTED
-        const actualOrders = disputedOrders ?? rec.actualOrders;
-        const actualSalesAmount = disputedSalesAmount ?? rec.actualSalesAmount;
-        const calc = await recalcReconciliation(id, { actualSalesAmount });
-
         const updateData: Record<string, unknown> = {
           status: "DISPUTED",
-          actualOrders,
-          actualSalesAmount,
-          ...calc,
           updatedAt: new Date(),
         };
+        if (rec.reconcileType !== "FEE_ONLY") {
+          const actualSalesAmount = Number(correctedSales);
+          const calc = await recalcReconciliation(id, { actualSalesAmount });
+          Object.assign(updateData, { actualSalesAmount, ...calc });
+        }
         // 同步更新销售额/抽佣货币（如果审核人指定）
-        if (salesAmountCurrency) {
+        if (rec.reconcileType !== "FEE_ONLY" && salesAmountCurrency) {
           updateData.commissionCurrency = salesAmountCurrency;
         }
 
@@ -133,8 +180,7 @@ export async function POST(
             reconciliationId: id,
             reviewerId: session.userId,
             action: "DISPUTED",
-            disputedOrders,
-            disputedSalesAmount,
+            disputedSalesAmount: Number(correctedSales),
             note,
             createdAt: new Date(),
           },
@@ -153,13 +199,24 @@ export async function POST(
             },
           });
         }
+        return null;
       }
     });
 
     return NextResponse.json({ success: true });
   } catch (e) {
-    if (e instanceof FeaturePermissionError) return NextResponse.json({ error: "无权限" }, { status: 403 });
+    if (e instanceof Error && e.message === "RECONCILIATION_STATE_CHANGED") {
+      return NextResponse.json(
+        { error: "对账状态已被其他操作更新，请刷新页面后重试" },
+        { status: 409 },
+      );
+    }
+    if (e instanceof FeaturePermissionError)
+      return NextResponse.json({ error: "无权限" }, { status: 403 });
     console.error(e);
-    return NextResponse.json({ error: "操作失败" }, { status: 500 });
+    return NextResponse.json(
+      { error: "审核对账失败，请稍后重试" },
+      { status: 500 },
+    );
   }
 }

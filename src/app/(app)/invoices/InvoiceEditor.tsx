@@ -23,7 +23,11 @@ import {
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/utils";
 
-type EditorItem = InvoiceDraftInput["items"][number] & {
+type EditorItem = Omit<
+  InvoiceDraftInput["items"][number],
+  "unitPrice"
+> & {
+  unitPrice: number | string;
   localId: string;
   autoDescription: boolean;
 };
@@ -31,6 +35,7 @@ type EditorItem = InvoiceDraftInput["items"][number] & {
 type InvoiceEditorProps = {
   options: InvoiceFormOptions;
   initialInvoice?: InvoiceDetail | null;
+  initialError?: string;
   canEdit?: boolean;
 };
 
@@ -134,6 +139,7 @@ function money(value: number, currency: string) {
 }
 
 function newItem(sortOrder = 0): EditorItem {
+  const defaultMonth = localDate().slice(0, 7);
   return {
     localId: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
     feeType: "MONTHLY_FEE",
@@ -142,14 +148,19 @@ function newItem(sortOrder = 0): EditorItem {
     targetSite: "",
     affiliatePlatform: "",
     quantity: 1,
-    unitPrice: 0,
+    unitPrice: "",
     sortOrder,
+    currency: "USD",
+    periodType: "MONTH",
+    periodLabel: defaultMonth,
     autoDescription: true,
   };
 }
 
 function unique(values: Array<string | null | undefined>) {
-  return Array.from(new Set(values.filter((value): value is string => Boolean(value?.trim()))));
+  return Array.from(
+    new Set(values.filter((value): value is string => Boolean(value?.trim()))),
+  );
 }
 
 const MULTI_VALUE_SEPARATOR = "、";
@@ -171,7 +182,9 @@ function matchContractValues(
   options: readonly string[],
   aliases: Record<string, string> = {},
 ) {
-  const optionByKey = new Map(options.map((option) => [normalizeOptionKey(option), option]));
+  const optionByKey = new Map(
+    options.map((option) => [normalizeOptionKey(option), option]),
+  );
   const matched: string[] = [];
   const unmatched: string[] = [];
 
@@ -219,24 +232,58 @@ function composeDescription({
 export function InvoiceEditor({
   options,
   initialInvoice,
+  initialError = "",
   canEdit = true,
 }: InvoiceEditorProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const today = localDate();
   const initialDate = initialInvoice?.invoiceDate?.slice(0, 10) || today;
-  const initialPeriodType = initialInvoice?.periodType ?? "MONTH";
-  const initialPeriodLabel = initialInvoice?.periodLabel ?? today.slice(0, 7);
+  const initialContractIds = initialInvoice?.contractIds?.length
+    ? initialInvoice.contractIds
+    : initialInvoice?.contractId
+      ? [initialInvoice.contractId]
+      : [];
+  const initialContracts = initialContractIds
+    .map((id) => options.contracts.find((contract) => contract.id === id))
+    .filter((contract): contract is InvoiceFormOptions["contracts"][number] =>
+      Boolean(contract),
+    );
+  const isNewInvoice = !initialInvoice?.id;
+  const populateNewInvoiceFromContracts =
+    isNewInvoice && initialContracts.length > 0;
+  const initialCustomer = options.customers.find(
+    (customer) => customer.id === initialInvoice?.customerId,
+  );
+  const initialDescriptionCustomerName =
+    initialCustomer?.brandName ||
+    initialInvoice?.clientName ||
+    "";
+  const initialPrimaryBank = populateNewInvoiceFromContracts
+    ? initialContracts[0]?.bankAccounts?.[0]
+    : null;
+  const initialPromoPlatforms = joinMultiValues(
+    matchContractValues(
+      initialContracts.flatMap((contract) => contract.platforms),
+      PROMO_PLATFORM_OPTIONS,
+      PROMO_PLATFORM_ALIASES,
+    ).matched,
+  );
+  const initialTargetSites = joinMultiValues(
+    matchContractValues(
+      initialContracts.flatMap((contract) => contract.targetSites),
+      TARGET_SITE_OPTIONS,
+      TARGET_SITE_ALIASES,
+    ).matched,
+  );
   const [invoiceId, setInvoiceId] = useState(initialInvoice?.id ?? "");
   const [invoiceNo, setInvoiceNo] = useState(initialInvoice?.invoiceNo ?? "");
   const [status, setStatus] = useState(initialInvoice?.status ?? "DRAFT");
-  const [customerId, setCustomerId] = useState(initialInvoice?.customerId ?? "");
+  const [customerId, setCustomerId] = useState(
+    initialInvoice?.customerId ?? "",
+  );
   const [contractIds, setContractIds] = useState<string[]>(
-    initialInvoice?.contractIds?.length
-      ? initialInvoice.contractIds
-      : initialInvoice?.contractId
-        ? [initialInvoice.contractId]
-        : [],
+    initialContractIds,
   );
   const [accountsReceivableId, setAccountsReceivableId] = useState(
     initialInvoice?.accountsReceivableId ?? "",
@@ -245,44 +292,76 @@ export function InvoiceEditor({
   const [dueDate, setDueDate] = useState(
     initialInvoice?.dueDate?.slice(0, 10) || addDays(initialDate, 15),
   );
-  const [periodType, setPeriodType] = useState<"MONTH" | "DATE_RANGE">(
-    initialPeriodType as "MONTH" | "DATE_RANGE",
+  const [clientName, setClientName] = useState(
+    initialInvoice?.clientName ?? "",
   );
-  const [month, setMonth] = useState(
-    initialPeriodType === "MONTH" ? initialPeriodLabel.slice(0, 7) : today.slice(0, 7),
+  const [clientAddress, setClientAddress] = useState(
+    initialInvoice?.clientAddress ?? "",
   );
-  const periodParts = initialPeriodType === "DATE_RANGE" ? initialPeriodLabel.split(" ~ ") : [];
-  const [periodStart, setPeriodStart] = useState(periodParts[0] ?? "");
-  const [periodEnd, setPeriodEnd] = useState(periodParts[1] ?? "");
-  const [clientName, setClientName] = useState(initialInvoice?.clientName ?? "");
-  const [clientAddress, setClientAddress] = useState(initialInvoice?.clientAddress ?? "");
-  const [currency, setCurrency] = useState(initialInvoice?.currency ?? "USD");
-  const [bankAccountKey, setBankAccountKey] = useState(initialInvoice?.bankAccountKey ?? "");
-  const [bankSnapshot, setBankSnapshot] = useState(initialInvoice?.bankSnapshot ?? null);
+  const [bankAccountKey, setBankAccountKey] = useState(
+    isNewInvoice
+      ? (initialPrimaryBank?.key ?? "")
+      : (initialInvoice?.bankAccountKey ?? ""),
+  );
+  const [bankSnapshot, setBankSnapshot] = useState(
+    isNewInvoice
+      ? (initialPrimaryBank ?? null)
+      : (initialInvoice?.bankSnapshot ?? null),
+  );
   const [terms, setTerms] = useState(initialInvoice?.terms ?? DEFAULT_TERMS);
   const [items, setItems] = useState<EditorItem[]>(
     initialInvoice?.items?.length
-      ? initialInvoice.items.map((item, index) => ({
-          feeType: item.feeType
-            ?? (initialInvoice.feeType === "SALES_COMMISSION"
+      ? initialInvoice.items.map((item, index) => {
+          const feeType =
+            item.feeType ??
+            (initialInvoice.feeType === "SALES_COMMISSION"
               ? "SALES_COMMISSION"
-              : "MONTHLY_FEE"),
-          description: item.description,
-          promoPlatform: item.promoPlatform ?? "",
-          targetSite: item.targetSite ?? "",
-          affiliatePlatform: item.affiliatePlatform ?? "",
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          sortOrder: item.sortOrder ?? index,
-          localId: item.id ?? `saved-${index}`,
-          autoDescription: false,
-        }))
+              : "MONTHLY_FEE");
+          const promoPlatform = populateNewInvoiceFromContracts
+            ? initialPromoPlatforms
+            : (item.promoPlatform ?? "");
+          const targetSite = populateNewInvoiceFromContracts
+            ? initialTargetSites
+            : (item.targetSite ?? "");
+          const affiliatePlatform = item.affiliatePlatform ?? "";
+          const periodLabel =
+            item.periodLabel ??
+            initialInvoice.periodLabel ??
+            today.slice(0, 7);
+
+          return {
+            feeType,
+            description: isNewInvoice
+              ? composeDescription({
+                  customerName: initialDescriptionCustomerName,
+                  promoPlatform,
+                  targetSite,
+                  affiliatePlatform,
+                  periodLabel,
+                  feeType,
+                })
+              : item.description,
+            promoPlatform,
+            targetSite,
+            affiliatePlatform,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            currency: item.currency ?? initialInvoice.currency ?? "USD",
+            periodType: item.periodType ?? initialInvoice.periodType ?? "MONTH",
+            periodLabel,
+            sortOrder: item.sortOrder ?? index,
+            localId: item.id ?? `saved-${index}`,
+            autoDescription: isNewInvoice,
+          };
+        })
       : [newItem()],
   );
-  const [error, setError] = useState("");
+  const [error, setError] = useState(initialError);
   const [success, setSuccess] = useState("");
 
-  const selectedCustomer = options.customers.find((item) => item.id === customerId);
+  const selectedCustomer = options.customers.find(
+    (item) => item.id === customerId,
+  );
   const contractOptions = useMemo(
     () => options.contracts.filter((item) => item.customerId === customerId),
     [customerId, options.contracts],
@@ -290,21 +369,37 @@ export function InvoiceEditor({
   const contractId = contractIds[0] ?? "";
   const selectedContracts = contractIds
     .map((id) => options.contracts.find((item) => item.id === id))
-    .filter((item): item is InvoiceFormOptions["contracts"][number] => Boolean(item));
+    .filter((item): item is InvoiceFormOptions["contracts"][number] =>
+      Boolean(item),
+    );
   const selectedContract = selectedContracts[0];
   const receivableOptions = useMemo(
-    () => options.accountsReceivables.filter(
-      (item) => item.customerId === customerId,
-    ),
+    () =>
+      options.accountsReceivables.filter(
+        (item) => item.customerId === customerId,
+      ),
     [customerId, options.accountsReceivables],
   );
-  const periodLabel = periodType === "MONTH"
-    ? month
-    : [periodStart, periodEnd].filter(Boolean).join(" ~ ");
   const total = items.reduce(
-    (sum, item) => sum + (Number(item.quantity) || 0) * (Number(item.unitPrice) || 0),
+    (sum, item) =>
+      sum + (Number(item.quantity) || 0) * (Number(item.unitPrice) || 0),
     0,
   );
+  const totalsByCurrency = items.reduce<Record<string, number>>(
+    (totals, item) => {
+      const itemCurrency = item.currency || "USD";
+      totals[itemCurrency] =
+        (totals[itemCurrency] ?? 0) +
+        (Number(item.quantity) || 0) * (Number(item.unitPrice) || 0);
+      return totals;
+    },
+    {},
+  );
+  const currencies = Object.keys(totalsByCurrency);
+  const mixedCurrency = currencies.length > 1;
+  const summaryCurrency = mixedCurrency ? "MIXED" : currencies[0] || "USD";
+  const summaryPeriodType = items[0]?.periodType || "MONTH";
+  const summaryPeriodLabel = items[0]?.periodLabel || "";
 
   const contractPromoValues = matchContractValues(
     selectedContracts.flatMap((contract) => contract.platforms),
@@ -329,39 +424,44 @@ export function InvoiceEditor({
     force = false,
     context?: { customerName?: string; periodLabel?: string },
   ) {
-    return nextItems.map((item) => (
+    return nextItems.map((item) =>
       force || item.autoDescription
         ? {
             ...item,
             description: composeDescription({
-              customerName: context?.customerName
-                ?? selectedCustomer?.brandName
-                ?? "",
+              customerName:
+                context?.customerName ?? selectedCustomer?.brandName ?? "",
               promoPlatform: item.promoPlatform,
               targetSite: item.targetSite,
               affiliatePlatform: item.affiliatePlatform,
-              periodLabel: context?.periodLabel ?? periodLabel,
+              periodLabel: context?.periodLabel ?? item.periodLabel ?? "",
               feeType: item.feeType,
             }),
             autoDescription: true,
           }
-        : item
-    ));
+        : item,
+    );
   }
 
   function handleCustomerChange(nextId: string) {
     setCustomerId(nextId);
     setAccountsReceivableId("");
     const customer = options.customers.find((item) => item.id === nextId);
-    const relatedContracts = options.contracts.filter((item) => item.customerId === nextId);
+    const relatedContracts = options.contracts.filter(
+      (item) => item.customerId === nextId,
+    );
     setClientName(customer?.brandName ?? "");
-    setItems((current) => rebuildDescriptions(
-      current,
-      false,
-      { customerName: customer?.brandName ?? "" },
-    ));
+    setItems((current) =>
+      rebuildDescriptions(current, false, {
+        customerName: customer?.brandName ?? "",
+      }),
+    );
     if (relatedContracts.length === 1) {
-      applyContracts([relatedContracts[0].id], customer?.brandName ?? "", nextId);
+      applyContracts(
+        [relatedContracts[0].id],
+        customer?.brandName ?? "",
+        nextId,
+      );
     } else {
       setContractIds([]);
       setClientAddress("");
@@ -380,10 +480,14 @@ export function InvoiceEditor({
         .filter((contract) => contract.customerId === scopeCustomerId)
         .map((contract) => contract.id),
     );
-    const orderedIds = Array.from(new Set(nextIds.filter((id) => allowedIds.has(id))));
+    const orderedIds = Array.from(
+      new Set(nextIds.filter((id) => allowedIds.has(id))),
+    );
     const contracts = orderedIds
       .map((id) => options.contracts.find((contract) => contract.id === id))
-      .filter((contract): contract is InvoiceFormOptions["contracts"][number] => Boolean(contract));
+      .filter((contract): contract is InvoiceFormOptions["contracts"][number] =>
+        Boolean(contract),
+      );
     const primaryContract = contracts[0];
     const primaryChanged = contractIds[0] !== orderedIds[0];
     setContractIds(orderedIds);
@@ -391,6 +495,13 @@ export function InvoiceEditor({
     if (!primaryContract) {
       setBankAccountKey("");
       setBankSnapshot(null);
+      setItems((current) =>
+        current.map((item) => ({
+          ...item,
+          promoPlatform: "",
+          targetSite: "",
+        })),
+      );
       return;
     }
     if (primaryChanged) {
@@ -400,47 +511,59 @@ export function InvoiceEditor({
       setBankAccountKey(firstBank?.key ?? "");
       setBankSnapshot(firstBank ?? null);
     }
-    const platforms = joinMultiValues(matchContractValues(
-      contracts.flatMap((contract) => contract.platforms),
-      PROMO_PLATFORM_OPTIONS,
-      PROMO_PLATFORM_ALIASES,
-    ).matched);
-    const sites = joinMultiValues(matchContractValues(
-      contracts.flatMap((contract) => contract.targetSites),
-      TARGET_SITE_OPTIONS,
-      TARGET_SITE_ALIASES,
-    ).matched);
-    const affiliates = joinMultiValues(matchContractValues(
-      contracts.flatMap((contract) => contract.affiliatePlatforms),
-      AFFILIATE_PLATFORM_OPTIONS,
-    ).matched);
-    setItems((current) => current.map((item) => {
-      const nextItem = {
-        ...item,
-        promoPlatform: item.promoPlatform || platforms,
-        targetSite: item.targetSite || sites,
-        affiliatePlatform: item.affiliatePlatform || affiliates,
-      };
-      return nextItem.autoDescription
-        ? {
-            ...nextItem,
-            description: composeDescription({
-              customerName,
-              promoPlatform: nextItem.promoPlatform,
-              targetSite: nextItem.targetSite,
-              affiliatePlatform: nextItem.affiliatePlatform,
-              periodLabel,
-              feeType: nextItem.feeType,
-            }),
-          }
-        : nextItem;
-    }));
+    const platforms = joinMultiValues(
+      matchContractValues(
+        contracts.flatMap((contract) => contract.platforms),
+        PROMO_PLATFORM_OPTIONS,
+        PROMO_PLATFORM_ALIASES,
+      ).matched,
+    );
+    const sites = joinMultiValues(
+      matchContractValues(
+        contracts.flatMap((contract) => contract.targetSites),
+        TARGET_SITE_OPTIONS,
+        TARGET_SITE_ALIASES,
+      ).matched,
+    );
+    const affiliates = joinMultiValues(
+      matchContractValues(
+        contracts.flatMap((contract) => contract.affiliatePlatforms),
+        AFFILIATE_PLATFORM_OPTIONS,
+      ).matched,
+    );
+    setItems((current) =>
+      current.map((item) => {
+        const nextItem = {
+          ...item,
+          promoPlatform: platforms,
+          targetSite: sites,
+          affiliatePlatform: item.affiliatePlatform || affiliates,
+        };
+        return nextItem.autoDescription
+          ? {
+              ...nextItem,
+              description: composeDescription({
+                customerName,
+                promoPlatform: nextItem.promoPlatform,
+                targetSite: nextItem.targetSite,
+                affiliatePlatform: nextItem.affiliatePlatform,
+                periodLabel: nextItem.periodLabel ?? "",
+                feeType: nextItem.feeType,
+              }),
+            }
+          : nextItem;
+      }),
+    );
   }
 
   function updateItem(localId: string, patch: Partial<EditorItem>) {
-    setItems((current) => rebuildDescriptions(current.map((item) => (
-      item.localId === localId ? { ...item, ...patch } : item
-    ))));
+    setItems((current) =>
+      rebuildDescriptions(
+        current.map((item) =>
+          item.localId === localId ? { ...item, ...patch } : item,
+        ),
+      ),
+    );
   }
 
   function addItem() {
@@ -460,22 +583,40 @@ export function InvoiceEditor({
     if (!contractId) return "请选择关联合同。";
     if (!invoiceDate || !dueDate) return "请填写发票日期和付款截止日。";
     if (dueDate < invoiceDate) return "付款截止日不能早于 Invoice 日期。";
-    if (!periodLabel) return "请填写费用期间。";
-    if (periodType === "DATE_RANGE" && (!periodStart || !periodEnd || periodEnd < periodStart)) {
-      return "费用结束日期不能早于开始日期。";
-    }
+    if (items.some((item) => !item.currency || !item.periodLabel))
+      return "请为每个项目填写币种和费用期间。";
+    if (
+      items.some((item) => {
+        if (item.periodType !== "DATE_RANGE") return false;
+        const [start, end] = String(item.periodLabel).split(" ~ ");
+        return !start || !end || end < start;
+      })
+    )
+      return "项目费用结束日期不能早于开始日期。";
     if (!clientName.trim()) return "请填写 BILL TO 客户名称。";
     if (!bankSnapshot) return "请选择收款账户。";
     if (!items.length || items.some((item) => !item.description.trim())) {
       return "每个项目明细都需要填写描述。";
     }
-    if (items.some((item) => !["MONTHLY_FEE", "SALES_COMMISSION"].includes(item.feeType))) {
+    if (
+      items.some(
+        (item) => !["MONTHLY_FEE", "SALES_COMMISSION"].includes(item.feeType),
+      )
+    ) {
       return "请为每个项目选择费用类型。";
     }
-    if (items.some((item) => Number(item.quantity) <= 0 || Number(item.unitPrice) < 0)) {
+    if (
+      items.some(
+        (item) => Number(item.quantity) <= 0 || Number(item.unitPrice) < 0,
+      )
+    ) {
       return "项目数量必须大于 0，单价不能为负数。";
     }
-    if (!Number.isFinite(total) || total <= 0) return "Invoice 总金额必须大于 0。";
+    if (items.some((item) => String(item.unitPrice).trim() === "")) {
+      return "请为每个项目填写单价；金额为零时请明确输入 0。";
+    }
+    if (!Number.isFinite(total) || total <= 0)
+      return "Invoice 总金额必须大于 0。";
     return "";
   }
 
@@ -484,18 +625,21 @@ export function InvoiceEditor({
       customerId,
       contractId,
       contractIds,
-      accountsReceivableId: accountsReceivableId || null,
+      accountsReceivableId: mixedCurrency
+        ? null
+        : accountsReceivableId || null,
       invoiceDate,
       dueDate,
-      periodType,
-      periodLabel,
+      periodType: summaryPeriodType,
+      periodLabel: summaryPeriodLabel,
       clientName: clientName.trim(),
       clientAddress: clientAddress.trim() || null,
-      currency,
+      currency: summaryCurrency,
       bankAccountKey: bankAccountKey || null,
       bankSnapshot,
       terms: terms.trim() || null,
       status: nextStatus,
+      reconciliationIds: initialInvoice?.reconciliationIds ?? [],
       items: items.map((item, index) => ({
         feeType: item.feeType,
         description: item.description.trim(),
@@ -504,6 +648,9 @@ export function InvoiceEditor({
         affiliatePlatform: item.affiliatePlatform?.trim() || null,
         quantity: Number(item.quantity),
         unitPrice: Number(item.unitPrice),
+        currency: item.currency || "USD",
+        periodType: item.periodType || "MONTH",
+        periodLabel: item.periodLabel || "",
         sortOrder: index,
       })),
     };
@@ -518,8 +665,10 @@ export function InvoiceEditor({
       return;
     }
     if (
-      nextStatus === "ISSUED"
-      && !window.confirm(`确认正式开具 ${invoiceNo || "这张 Invoice"}？开具后将不能直接修改。`)
+      nextStatus === "ISSUED" &&
+      !window.confirm(
+        `确认正式开具 ${invoiceNo || "这张 Invoice"}？开具后将不能直接修改。`,
+      )
     ) {
       return;
     }
@@ -535,7 +684,9 @@ export function InvoiceEditor({
         setInvoiceId(result.id);
         setInvoiceNo(result.invoiceNo ?? invoiceNo);
         setStatus(nextStatus);
-        setSuccess(nextStatus === "ISSUED" ? "Invoice 已开具。" : "草稿已保存。");
+        setSuccess(
+          nextStatus === "ISSUED" ? "Invoice 已开具。" : "草稿已保存。",
+        );
         router.replace(`/invoices/${result.id}`);
         router.refresh();
       } catch (saveError) {
@@ -591,7 +742,11 @@ export function InvoiceEditor({
           )}
           {canEdit && status === "DRAFT" && (
             <>
-              <Button className="flex-1 sm:flex-none" loading={pending} onClick={() => save("DRAFT")}>
+              <Button
+                className="flex-1 sm:flex-none"
+                loading={pending}
+                onClick={() => save("DRAFT")}
+              >
                 保存草稿
               </Button>
               <Button
@@ -622,7 +777,10 @@ export function InvoiceEditor({
       )}
 
       <div className="grid items-start gap-5 xl:grid-cols-[minmax(460px,0.9fr)_minmax(620px,1.25fr)]">
-        <fieldset disabled={!canEdit || status !== "DRAFT"} className="space-y-4 disabled:opacity-75">
+        <fieldset
+          disabled={!canEdit || status !== "DRAFT"}
+          className="space-y-4 disabled:opacity-75"
+        >
           <EditorSection icon={Building2} title="关联与抬头">
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="关联客户" required>
@@ -633,7 +791,9 @@ export function InvoiceEditor({
                 >
                   <option value="">请选择客户</option>
                   {options.customers.map((customer) => (
-                    <option key={customer.id} value={customer.id}>{customer.brandName}</option>
+                    <option key={customer.id} value={customer.id}>
+                      {customer.brandName}
+                    </option>
                   ))}
                 </select>
               </Field>
@@ -649,14 +809,23 @@ export function InvoiceEditor({
                 <select
                   className="input"
                   value={accountsReceivableId}
-                  disabled={!contractIds.length}
-                  onChange={(event) => setAccountsReceivableId(event.target.value)}
+                  disabled={!contractIds.length || mixedCurrency}
+                  onChange={(event) =>
+                    setAccountsReceivableId(event.target.value)
+                  }
                 >
                   <option value="">不关联</option>
                   {receivableOptions.map((receivable) => (
-                    <option key={receivable.id} value={receivable.id}>{receivable.label}</option>
+                    <option key={receivable.id} value={receivable.id}>
+                      {receivable.label}
+                    </option>
                   ))}
                 </select>
+                {mixedCurrency && (
+                  <span className="mt-1 block text-xs text-amber-700">
+                    混合币种 Invoice 不能关联单一应收账款。
+                  </span>
+                )}
               </Field>
               <Field label="Invoice 编号">
                 <input
@@ -684,8 +853,16 @@ export function InvoiceEditor({
                   onChange={(event) => setDueDate(event.target.value)}
                 />
               </Field>
-              <Field label="BILL TO 客户名称" required className="sm:col-span-2">
-                <input className="input" value={clientName} onChange={(event) => setClientName(event.target.value)} />
+              <Field
+                label="BILL TO 客户名称"
+                required
+                className="sm:col-span-2"
+              >
+                <input
+                  className="input"
+                  value={clientName}
+                  onChange={(event) => setClientName(event.target.value)}
+                />
               </Field>
               <Field label="客户地址（可选）" className="sm:col-span-2">
                 <input
@@ -701,102 +878,38 @@ export function InvoiceEditor({
           <EditorSection
             icon={CircleDollarSign}
             title="费用与项目明细"
-            action={(
+            action={
               <button
                 type="button"
                 className="btn-ghost btn-sm"
-                onClick={() => setItems((current) => rebuildDescriptions(current, true))}
+                onClick={() =>
+                  setItems((current) => rebuildDescriptions(current, true))
+                }
               >
                 <RotateCcw className="h-3.5 w-3.5" /> 按规则重组描述
               </button>
-            )}
+            }
           >
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="币种" required>
-                <select className="input" value={currency} onChange={(event) => setCurrency(event.target.value)}>
-                  <option value="USD">USD — 美元</option>
-                  <option value="CNY">CNY — 人民币</option>
-                  <option value="HKD">HKD — 港币</option>
-                  <option value="EUR">EUR — 欧元</option>
-                  <option value="GBP">GBP — 英镑</option>
-                </select>
-              </Field>
-              <Field label="费用期间" required className="sm:col-span-2">
-                <div className="mb-2 flex gap-2" role="group" aria-label="费用期间类型">
-                  <button
-                    type="button"
-                    onClick={() => setPeriodType("MONTH")}
-                    className={periodType === "MONTH" ? "btn-primary btn-sm" : "btn-secondary btn-sm"}
-                  >
-                    按月份
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPeriodType("DATE_RANGE")}
-                    className={periodType === "DATE_RANGE" ? "btn-primary btn-sm" : "btn-secondary btn-sm"}
-                  >
-                    按日期范围
-                  </button>
-                </div>
-                {periodType === "MONTH" ? (
-                  <input
-                    type="month"
-                    className="input"
-                    value={month}
-                    onChange={(event) => {
-                      setMonth(event.target.value);
-                      setItems((current) => rebuildDescriptions(
-                        current,
-                        false,
-                        { periodLabel: event.target.value },
-                      ));
-                    }}
-                  />
-                ) : (
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <input
-                      type="date"
-                      aria-label="费用开始日期"
-                      className="input"
-                      value={periodStart}
-                      onChange={(event) => {
-                        const nextStart = event.target.value;
-                        setPeriodStart(nextStart);
-                        setItems((current) => rebuildDescriptions(
-                          current,
-                          false,
-                          { periodLabel: [nextStart, periodEnd].filter(Boolean).join(" ~ ") },
-                        ));
-                      }}
-                    />
-                    <input
-                      type="date"
-                      aria-label="费用结束日期"
-                      className="input"
-                      value={periodEnd}
-                      onChange={(event) => {
-                        const nextEnd = event.target.value;
-                        setPeriodEnd(nextEnd);
-                        setItems((current) => rebuildDescriptions(
-                          current,
-                          false,
-                          { periodLabel: [periodStart, nextEnd].filter(Boolean).join(" ~ ") },
-                        ));
-                      }}
-                    />
-                  </div>
-                )}
-              </Field>
-            </div>
-            <div className="mt-5 space-y-3 border-t border-[#e7e0ef] pt-5">
+            <div className="space-y-3">
               {items.map((item, index) => (
-                <div key={item.localId} className="rounded-lg border border-[#e7e0ef] bg-[#fbfaff] p-3">
+                <div
+                  key={item.localId}
+                  className="rounded-lg border border-[#e7e0ef] bg-[#fbfaff] p-3"
+                >
                   <div className="mb-3 flex items-center justify-between">
-                    <span className="text-xs font-semibold text-slate-500">项目 {index + 1}</span>
+                    <span className="text-xs font-semibold text-slate-500">
+                      项目 {index + 1}
+                    </span>
                     <button
                       type="button"
                       disabled={items.length === 1}
-                      onClick={() => setItems((current) => current.filter((entry) => entry.localId !== item.localId))}
+                      onClick={() =>
+                        setItems((current) =>
+                          current.filter(
+                            (entry) => entry.localId !== item.localId,
+                          ),
+                        )
+                      }
                       aria-label={`删除项目 ${index + 1}`}
                       className="inline-flex h-9 w-9 items-center justify-center rounded-md text-rose-500 hover:bg-rose-50 hover:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 disabled:cursor-not-allowed disabled:opacity-40"
                     >
@@ -808,18 +921,131 @@ export function InvoiceEditor({
                       <select
                         className="input"
                         value={item.feeType}
-                        onChange={(event) => updateItem(item.localId, {
-                          feeType: event.target.value as EditorItem["feeType"],
-                        })}
+                        onChange={(event) =>
+                          updateItem(item.localId, {
+                            feeType: event.target
+                              .value as EditorItem["feeType"],
+                          })
+                        }
                       >
                         <option value="MONTHLY_FEE">月度服务费</option>
                         <option value="SALES_COMMISSION">销售佣金</option>
                       </select>
                     </Field>
+                    <Field label="币种" required>
+                      <select
+                        className="input"
+                        value={item.currency || "USD"}
+                        onChange={(event) =>
+                          updateItem(item.localId, {
+                            currency: event.target.value,
+                          })
+                        }
+                      >
+                        <option value="USD">USD — 美元</option>
+                        <option value="CNY">CNY — 人民币</option>
+                        <option value="HKD">HKD — 港币</option>
+                        <option value="EUR">EUR — 欧元</option>
+                        <option value="GBP">GBP — 英镑</option>
+                      </select>
+                    </Field>
+                    <Field
+                      label="费用期间"
+                      required
+                      className="sm:col-span-2"
+                    >
+                      <div
+                        className="mb-2 flex gap-2"
+                        role="group"
+                        aria-label={`项目 ${index + 1} 费用期间类型`}
+                      >
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateItem(item.localId, {
+                              periodType: "MONTH",
+                              periodLabel: today.slice(0, 7),
+                            })
+                          }
+                          className={
+                            item.periodType === "MONTH"
+                              ? "btn-primary btn-sm"
+                              : "btn-secondary btn-sm"
+                          }
+                        >
+                          按月份
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateItem(item.localId, {
+                              periodType: "DATE_RANGE",
+                              periodLabel: `${today} ~ ${today}`,
+                            })
+                          }
+                          className={
+                            item.periodType === "DATE_RANGE"
+                              ? "btn-primary btn-sm"
+                              : "btn-secondary btn-sm"
+                          }
+                        >
+                          按日期范围
+                        </button>
+                      </div>
+                      {item.periodType === "DATE_RANGE" ? (
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <input
+                            type="date"
+                            aria-label={`项目 ${index + 1} 费用开始日期`}
+                            className="input"
+                            value={String(item.periodLabel ?? "").split(" ~ ")[0] ?? ""}
+                            onChange={(event) => {
+                              const end =
+                                String(item.periodLabel ?? "").split(" ~ ")[1] ??
+                                "";
+                              updateItem(item.localId, {
+                                periodLabel: [event.target.value, end]
+                                  .filter(Boolean)
+                                  .join(" ~ "),
+                              });
+                            }}
+                          />
+                          <input
+                            type="date"
+                            aria-label={`项目 ${index + 1} 费用结束日期`}
+                            className="input"
+                            value={String(item.periodLabel ?? "").split(" ~ ")[1] ?? ""}
+                            onChange={(event) => {
+                              const start =
+                                String(item.periodLabel ?? "").split(" ~ ")[0] ??
+                                "";
+                              updateItem(item.localId, {
+                                periodLabel: [start, event.target.value]
+                                  .filter(Boolean)
+                                  .join(" ~ "),
+                              });
+                            }}
+                          />
+                        </div>
+                      ) : (
+                        <input
+                          type="month"
+                          className="input"
+                          value={item.periodLabel ?? ""}
+                          onChange={(event) =>
+                            updateItem(item.localId, {
+                              periodLabel: event.target.value,
+                            })
+                          }
+                        />
+                      )}
+                    </Field>
                     <Field label="推广平台">
                       <MultiEditableSelect
                         value={item.promoPlatform ?? ""}
-                        onChange={(value) => updateItem(item.localId, { promoPlatform: value })}
+                        onChange={(value) =>
+                          updateItem(item.localId, { promoPlatform: value })
+                        }
                         options={promoCandidates}
                         placeholder="请选择推广平台"
                         customPlaceholder="手动输入其他推广平台"
@@ -829,7 +1055,9 @@ export function InvoiceEditor({
                     <Field label="目标站点">
                       <MultiEditableSelect
                         value={item.targetSite ?? ""}
-                        onChange={(value) => updateItem(item.localId, { targetSite: value })}
+                        onChange={(value) =>
+                          updateItem(item.localId, { targetSite: value })
+                        }
                         options={targetCandidates}
                         placeholder="请选择目标站点"
                         customPlaceholder="手动输入其他目标站点"
@@ -839,11 +1067,15 @@ export function InvoiceEditor({
                     <Field label="联盟平台">
                       <MultiEditableSelect
                         value={item.affiliatePlatform ?? ""}
-                        onChange={(value) => updateItem(item.localId, { affiliatePlatform: value })}
+                        onChange={(value) =>
+                          updateItem(item.localId, { affiliatePlatform: value })
+                        }
                         options={affiliateCandidates}
                         placeholder="请选择联盟平台"
                         customPlaceholder="手动输入其他联盟平台"
-                        unmatchedContractValues={contractAffiliateValues.unmatched}
+                        unmatchedContractValues={
+                          contractAffiliateValues.unmatched
+                        }
                       />
                     </Field>
                     <div className="grid grid-cols-2 gap-2">
@@ -854,17 +1086,26 @@ export function InvoiceEditor({
                           step="0.01"
                           className="input"
                           value={item.quantity}
-                          onChange={(event) => updateItem(item.localId, { quantity: Number(event.target.value) })}
+                          onChange={(event) =>
+                            updateItem(item.localId, {
+                              quantity: Number(event.target.value),
+                            })
+                          }
                         />
                       </Field>
-                      <Field label={`单价 (${currency})`}>
+                      <Field label={`单价 (${item.currency || "USD"})`}>
                         <input
                           type="number"
                           min="0"
                           step="0.01"
                           className="input"
                           value={item.unitPrice}
-                          onChange={(event) => updateItem(item.localId, { unitPrice: Number(event.target.value) })}
+                          onChange={(event) =>
+                            updateItem(item.localId, {
+                              unitPrice: event.target.value,
+                            })
+                          }
+                          placeholder="0.00"
                         />
                       </Field>
                     </div>
@@ -872,20 +1113,19 @@ export function InvoiceEditor({
                       <textarea
                         className="input min-h-20 resize-y"
                         value={item.description}
-                        onChange={(event) => updateItem(item.localId, {
-                          description: event.target.value,
-                          autoDescription: false,
-                        })}
+                        onChange={(event) =>
+                          updateItem(item.localId, {
+                            description: event.target.value,
+                            autoDescription: false,
+                          })
+                        }
                         placeholder="客户/品牌 · 推广平台 · 目标站点 · 联盟平台 · 期间 · 费用类型"
                       />
                     </Field>
                   </div>
                 </div>
               ))}
-              <Button
-                className="w-full"
-                onClick={addItem}
-              >
+              <Button className="w-full" onClick={addItem}>
                 <Plus className="h-4 w-4" /> 增加项目
               </Button>
             </div>
@@ -901,16 +1141,25 @@ export function InvoiceEditor({
                   onChange={(event) => {
                     setBankAccountKey(event.target.value);
                     setBankSnapshot(
-                      options.bankAccounts.find((item) => item.key === event.target.value) ?? null,
+                      options.bankAccounts.find(
+                        (item) => item.key === event.target.value,
+                      ) ?? null,
                     );
                   }}
                 >
-                  <option value="">{selectedContracts.length ? "请选择收款账户" : "请先选择合同"}</option>
+                  <option value="">
+                    {selectedContracts.length
+                      ? "请选择收款账户"
+                      : "请先选择合同"}
+                  </option>
                   {options.bankAccounts.map((account) => (
                     <option key={account.key} value={account.key}>
                       {account.label}
                       {selectedContracts.some((contract) =>
-                        contract.bankAccounts?.some((item) => item.key === account.key))
+                        contract.bankAccounts?.some(
+                          (item) => item.key === account.key,
+                        ),
+                      )
                         ? "（合同账户）"
                         : ""}
                     </option>
@@ -926,7 +1175,11 @@ export function InvoiceEditor({
                 </dl>
               )}
               <Field label="附加条款">
-                <textarea className="input min-h-24 resize-y" value={terms} onChange={(event) => setTerms(event.target.value)} />
+                <textarea
+                  className="input min-h-24 resize-y"
+                  value={terms}
+                  onChange={(event) => setTerms(event.target.value)}
+                />
               </Field>
             </div>
           </EditorSection>
@@ -935,7 +1188,8 @@ export function InvoiceEditor({
         <div className="xl:sticky xl:top-0">
           <div className="mb-2 flex items-center justify-between">
             <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-              <ReceiptText className="h-4 w-4 text-brand-600" /> Invoice 实时预览
+              <ReceiptText className="h-4 w-4 text-brand-600" /> Invoice
+              实时预览
             </div>
             <span className="text-xs text-slate-400">PDF 将使用相同内容</span>
           </div>
@@ -945,9 +1199,8 @@ export function InvoiceEditor({
             dueDate={dueDate}
             clientName={clientName}
             clientAddress={clientAddress}
-            currency={currency}
             items={items}
-            total={total}
+            totalsByCurrency={totalsByCurrency}
             terms={terms}
             bank={bank}
           />
@@ -995,7 +1248,8 @@ function Field({
   return (
     <label className={className}>
       <span className="label">
-        {label}{required && <span className="ml-1 text-rose-600">*</span>}
+        {label}
+        {required && <span className="ml-1 text-rose-600">*</span>}
       </span>
       {children}
     </label>
@@ -1019,9 +1273,7 @@ function MultiContractSelect({
 
   function toggle(id: string) {
     onChange(
-      value.includes(id)
-        ? value.filter((item) => item !== id)
-        : [...value, id],
+      value.includes(id) ? value.filter((item) => item !== id) : [...value, id],
     );
   }
 
@@ -1030,37 +1282,49 @@ function MultiContractSelect({
       <summary
         className={cn(
           "input flex list-none items-center justify-between gap-2",
-          disabled ? "cursor-not-allowed bg-slate-50 text-slate-400" : "cursor-pointer",
+          disabled
+            ? "cursor-not-allowed bg-slate-50 text-slate-400"
+            : "cursor-pointer",
         )}
         onClick={(event) => {
           if (disabled) event.preventDefault();
         }}
       >
-        <span className={selectedLabels.length ? "truncate text-slate-700" : "text-slate-400"}>
+        <span
+          className={
+            selectedLabels.length ? "truncate text-slate-700" : "text-slate-400"
+          }
+        >
           {disabled
             ? "请先选择客户"
             : selectedLabels.length
               ? selectedLabels.join("、")
               : "请选择合同"}
         </span>
-        <span className="shrink-0 text-xs text-slate-400 transition-transform group-open:rotate-180">▼</span>
+        <span className="shrink-0 text-xs text-slate-400 transition-transform group-open:rotate-180">
+          ▼
+        </span>
       </summary>
       {!disabled && (
         <div className="absolute z-40 mt-1 w-full min-w-72 space-y-1 rounded-lg border border-[#dcd4e7] bg-white p-3 shadow-lg">
-          {options.length ? options.map((contract) => (
-            <label
-              key={contract.id}
-              className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm hover:bg-[#faf8ff]"
-            >
-              <input
-                type="checkbox"
-                checked={value.includes(contract.id)}
-                onChange={() => toggle(contract.id)}
-              />
-              <span>{contract.contractNo}</span>
-            </label>
-          )) : (
-            <div className="px-2 py-2 text-sm text-slate-400">该客户暂无有效合同</div>
+          {options.length ? (
+            options.map((contract) => (
+              <label
+                key={contract.id}
+                className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm hover:bg-[#faf8ff]"
+              >
+                <input
+                  type="checkbox"
+                  checked={value.includes(contract.id)}
+                  onChange={() => toggle(contract.id)}
+                />
+                <span>{contract.contractNo}</span>
+              </label>
+            ))
+          ) : (
+            <div className="px-2 py-2 text-sm text-slate-400">
+              该客户暂无有效合同
+            </div>
           )}
         </div>
       )}
@@ -1088,11 +1352,13 @@ function MultiEditableSelect({
   const customSelected = selected.filter((item) => !options.includes(item));
 
   function toggle(option: string) {
-    onChange(joinMultiValues(
-      selected.includes(option)
-        ? selected.filter((item) => item !== option)
-        : [...selected, option],
-    ));
+    onChange(
+      joinMultiValues(
+        selected.includes(option)
+          ? selected.filter((item) => item !== option)
+          : [...selected, option],
+      ),
+    );
   }
 
   function addCustomValue() {
@@ -1106,10 +1372,16 @@ function MultiEditableSelect({
     <div>
       <details className="group relative">
         <summary className="input flex cursor-pointer list-none items-center justify-between gap-2">
-          <span className={selected.length ? "truncate text-slate-700" : "text-slate-400"}>
+          <span
+            className={
+              selected.length ? "truncate text-slate-700" : "text-slate-400"
+            }
+          >
             {selected.length ? selected.join("、") : placeholder}
           </span>
-          <span className="shrink-0 text-xs text-slate-400 transition-transform group-open:rotate-180">▼</span>
+          <span className="shrink-0 text-xs text-slate-400 transition-transform group-open:rotate-180">
+            ▼
+          </span>
         </summary>
         <div className="absolute z-30 mt-1 w-full min-w-60 space-y-2 rounded-lg border border-[#dcd4e7] bg-white p-3 shadow-lg">
           <div className="max-h-52 space-y-1 overflow-y-auto">
@@ -1131,13 +1403,19 @@ function MultiEditableSelect({
                 key={option}
                 className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-[#faf8ff]"
               >
-                <input type="checkbox" checked onChange={() => toggle(option)} />
+                <input
+                  type="checkbox"
+                  checked
+                  onChange={() => toggle(option)}
+                />
                 <span>{option}（手动新增）</span>
               </label>
             ))}
           </div>
           <div className="border-t border-[#eee8f5] pt-2">
-            <div className="mb-1 text-xs font-medium text-slate-500">其他（手动新增）</div>
+            <div className="mb-1 text-xs font-medium text-slate-500">
+              其他（手动新增）
+            </div>
             <div className="flex gap-2">
               <input
                 className="input min-w-0 flex-1"
@@ -1151,7 +1429,11 @@ function MultiEditableSelect({
                 }}
                 placeholder={customPlaceholder}
               />
-              <Button size="sm" onClick={addCustomValue} disabled={!customValue.trim()}>
+              <Button
+                size="sm"
+                onClick={addCustomValue}
+                disabled={!customValue.trim()}
+              >
                 添加
               </Button>
             </div>
@@ -1161,7 +1443,9 @@ function MultiEditableSelect({
       {unmatchedContractValues.length > 0 && (
         <div className="mt-1.5 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs leading-5 text-amber-800">
           合同包含未匹配值：
-          <span className="font-semibold">{unmatchedContractValues.join("、")}</span>
+          <span className="font-semibold">
+            {unmatchedContractValues.join("、")}
+          </span>
           。未自动加入；如需使用，请在“其他（手动新增）”中添加。
         </div>
       )}
@@ -1173,18 +1457,22 @@ function BankInfo({ label, value }: { label: string; value?: string }) {
   return (
     <div>
       <dt className="text-slate-500">{label}</dt>
-      <dd className="mt-0.5 break-all font-medium text-slate-700">{value || "—"}</dd>
+      <dd className="mt-0.5 break-all font-medium text-slate-700">
+        {value || "—"}
+      </dd>
     </div>
   );
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const styles = status === "ISSUED"
-    ? "bg-emerald-100 text-emerald-700"
-    : status === "VOID"
-      ? "bg-slate-200 text-slate-600"
-      : "bg-amber-100 text-amber-700";
-  const label = status === "ISSUED" ? "已开具" : status === "VOID" ? "已作废" : "草稿";
+  const styles =
+    status === "ISSUED"
+      ? "bg-emerald-100 text-emerald-700"
+      : status === "VOID"
+        ? "bg-slate-200 text-slate-600"
+        : "bg-amber-100 text-amber-700";
+  const label =
+    status === "ISSUED" ? "已开具" : status === "VOID" ? "已作废" : "草稿";
   return <span className={cn("badge", styles)}>{label}</span>;
 }
 
@@ -1194,9 +1482,8 @@ function InvoicePreview({
   dueDate,
   clientName,
   clientAddress,
-  currency,
   items,
-  total,
+  totalsByCurrency,
   terms,
   bank,
 }: {
@@ -1205,9 +1492,8 @@ function InvoicePreview({
   dueDate: string;
   clientName: string;
   clientAddress: string;
-  currency: string;
   items: EditorItem[];
-  total: number;
+  totalsByCurrency: Record<string, number>;
   terms: string;
   bank: {
     beneficiary?: string;
@@ -1222,9 +1508,14 @@ function InvoicePreview({
       <div className="min-w-[660px] p-8 font-serif text-[13px] leading-5 text-slate-950 sm:p-10">
         <header className="flex items-center justify-between border-b-2 border-slate-950 pb-4">
           <div className="flex items-center gap-3">
-            <img src="/thraive-logo.png" alt="Thraive" className="h-16 w-16 object-contain" />
+            <img
+              src="/thraive-logo.png"
+              alt="Thraive"
+              className="h-16 w-16 object-contain"
+            />
             <div className="max-w-[270px] font-sans text-sm font-semibold leading-5 text-slate-800">
-              {bank?.beneficiary || "HONG KONG THRAIVE DIGITAL MARKETING TECHNOLOGY CO., LIMITED"}
+              {bank?.beneficiary ||
+                "HONG KONG THRAIVE DIGITAL MARKETING TECHNOLOGY CO., LIMITED"}
             </div>
           </div>
           <div className="text-3xl font-bold tracking-[0.08em]">INVOICE</div>
@@ -1233,7 +1524,11 @@ function InvoicePreview({
         <div className="grid grid-cols-[1fr_1.35fr] gap-8 py-6">
           <div>
             <p className="font-bold">BILL TO {clientName || "—"}</p>
-            {clientAddress && <p className="mt-1 text-xs leading-5 text-slate-700">{clientAddress}</p>}
+            {clientAddress && (
+              <p className="mt-1 text-xs leading-5 text-slate-700">
+                {clientAddress}
+              </p>
+            )}
           </div>
           <dl className="grid grid-cols-[auto_1fr] gap-x-5 gap-y-2 text-xs">
             <dt className="font-bold">Invoice Number:</dt>
@@ -1242,18 +1537,30 @@ function InvoicePreview({
             <dd className="text-right">{formatInvoiceDate(invoiceDate)}</dd>
             <dt className="font-bold">Payment Due:</dt>
             <dd className="text-right">{formatInvoiceDate(dueDate)}</dd>
-            <dt className="font-bold">Amount Due ({currency}):</dt>
-            <dd className="text-right font-bold">{money(total, currency)}</dd>
+            <dt className="font-bold">Amount Due:</dt>
+            <dd className="text-right font-bold">
+              {Object.entries(totalsByCurrency).map(([currency, amount]) => (
+                <div key={currency}>{money(amount, currency)}</div>
+              ))}
+            </dd>
           </dl>
         </div>
 
         <table className="w-full border-collapse text-xs">
           <thead>
             <tr>
-              <th className="border border-slate-500 px-3 py-2 text-left">Items</th>
-              <th className="w-20 border border-slate-500 px-3 py-2 text-center">Quantity</th>
-              <th className="w-28 border border-slate-500 px-3 py-2 text-right">Price</th>
-              <th className="w-28 border border-slate-500 px-3 py-2 text-right">Amount</th>
+              <th className="border border-slate-500 px-3 py-2 text-left">
+                Items
+              </th>
+              <th className="w-20 border border-slate-500 px-3 py-2 text-center">
+                Quantity
+              </th>
+              <th className="w-28 border border-slate-500 px-3 py-2 text-right">
+                Price
+              </th>
+              <th className="w-28 border border-slate-500 px-3 py-2 text-right">
+                Amount
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -1261,24 +1568,44 @@ function InvoicePreview({
               const amount = Number(item.quantity) * Number(item.unitPrice);
               return (
                 <tr key={item.localId}>
-                  <td className="border border-slate-500 px-3 py-2">{item.description || "—"}</td>
-                  <td className="border border-slate-500 px-3 py-2 text-center">{item.quantity}</td>
-                  <td className="border border-slate-500 px-3 py-2 text-right">{money(item.unitPrice, currency)}</td>
-                  <td className="border border-slate-500 px-3 py-2 text-right">{money(amount, currency)}</td>
+                  <td className="border border-slate-500 px-3 py-2">
+                    {item.description || "—"}
+                  </td>
+                  <td className="border border-slate-500 px-3 py-2 text-center">
+                    {item.quantity}
+                  </td>
+                  <td className="border border-slate-500 px-3 py-2 text-right">
+                    {money(Number(item.unitPrice) || 0, item.currency || "USD")}
+                  </td>
+                  <td className="border border-slate-500 px-3 py-2 text-right">
+                    {money(amount, item.currency || "USD")}
+                  </td>
                 </tr>
               );
             })}
           </tbody>
           <tfoot>
-            <tr>
-              <td colSpan={3} className="border border-slate-500 px-3 py-2 text-right font-bold">Total:</td>
-              <td className="border border-slate-500 px-3 py-2 text-right font-bold">{money(total, currency)}</td>
-            </tr>
+            {Object.entries(totalsByCurrency).map(([currency, amount]) => (
+              <tr key={currency}>
+                <td
+                  colSpan={3}
+                  className="border border-slate-500 px-3 py-2 text-right font-bold"
+                >
+                  Total ({currency}):
+                </td>
+                <td className="border border-slate-500 px-3 py-2 text-right font-bold">
+                  {money(amount, currency)}
+                </td>
+              </tr>
+            ))}
           </tfoot>
         </table>
 
         <div className="mt-6 border-t border-dashed border-slate-400 py-4 text-right text-base font-bold">
-          Amount Due ({currency}): {money(total, currency)}
+          <div>Amount Due:</div>
+          {Object.entries(totalsByCurrency).map(([currency, amount]) => (
+            <div key={currency}>{money(amount, currency)}</div>
+          ))}
         </div>
 
         <section className="border-t border-slate-300 py-4">
@@ -1288,16 +1615,28 @@ function InvoicePreview({
 
         <section className="mt-2 text-xs leading-5">
           <h3 className="font-bold">Wire Instruction</h3>
-          <p><strong>BENEFICIARY:</strong> {bank?.beneficiary || "—"}</p>
-          <p><strong>Bank Name:</strong> {bank?.bankName || "—"}</p>
-          {bank?.bankAddress && <p><strong>Bank Address:</strong> {bank.bankAddress}</p>}
-          <p><strong>Swift Code:</strong> {bank?.swiftCode || "—"}</p>
-          <p><strong>Account no.:</strong> {bank?.accountNo || "—"}</p>
+          <p>
+            <strong>BENEFICIARY:</strong> {bank?.beneficiary || "—"}
+          </p>
+          <p>
+            <strong>Bank Name:</strong> {bank?.bankName || "—"}
+          </p>
+          {bank?.bankAddress && (
+            <p>
+              <strong>Bank Address:</strong> {bank.bankAddress}
+            </p>
+          )}
+          <p>
+            <strong>Swift Code:</strong> {bank?.swiftCode || "—"}
+          </p>
+          <p>
+            <strong>Account no.:</strong> {bank?.accountNo || "—"}
+          </p>
         </section>
 
         <p className="mt-5 border-t border-slate-300 pt-3 text-[10px] text-slate-600">
-          This is a Proforma Invoice for digital marketing consulting estimation.
-          Final commercial invoice will be issued upon payment.
+          This is a Proforma Invoice for digital marketing consulting
+          estimation. Final commercial invoice will be issued upon payment.
         </p>
       </div>
     </article>

@@ -7,7 +7,7 @@ import { requireSession } from "@/lib/session";
 import { InvoiceListClient } from "./InvoiceListClient";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Invoice 开具 · Thraive 联盟营销系统" };
+export const metadata = { title: "开票与收款 · Thraive 联盟营销系统" };
 
 export default async function InvoicesPage({
   searchParams,

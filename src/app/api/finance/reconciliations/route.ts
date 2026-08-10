@@ -56,7 +56,20 @@ export async function POST(req: Request) {
     } = body;
 
     if (!customerId || !contractId || !periodStart || !periodEnd) {
-      return NextResponse.json({ error: "缺少必填字段" }, { status: 400 });
+      return NextResponse.json({ error: "客户、合同、周期开始时间和结束时间均为必填项" }, { status: 400 });
+    }
+
+    const normalizedType = reconcileType ?? "BOTH";
+    if (!NEW_RECONCILIATION_TYPES.includes(normalizedType)) {
+      return NextResponse.json({ error: "新建对账必须分开选择固费或销售佣金，不再支持合并对账" }, { status: 400 });
+    }
+    const start = new Date(periodStart);
+    const end = new Date(periodEnd);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+      return NextResponse.json({ error: "对账周期日期格式无效" }, { status: 400 });
+    }
+    if (start > end) {
+      return NextResponse.json({ error: "对账周期结束时间不能早于开始时间" }, { status: 400 });
     }
 
     // 获取合同信息，快照到对账记录
@@ -73,6 +86,16 @@ export async function POST(req: Request) {
     }
     if (contract.status !== "COMPLETED") {
       return NextResponse.json({ error: "只能对已签署完成的合同创建对账" }, { status: 400 });
+    }
+
+    const conflictingTypes = [normalizedType, "BOTH"];
+    const overlap = await prisma.customerReconciliation.findFirst({
+      where: { customerId, deletedAt: null, reconcileType: { in: conflictingTypes }, periodStart: { lte: end }, periodEnd: { gte: start } },
+      select: { periodStart: true, periodEnd: true },
+    });
+    if (overlap) {
+      const streamName = normalizedType === "FEE_ONLY" ? "固费" : "销售佣金";
+      return NextResponse.json({ error: `该客户的${streamName}周期与已有对账记录（${formatDate(overlap.periodStart)} 至 ${formatDate(overlap.periodEnd)}）重叠，请调整周期后重试` }, { status: 409 });
     }
 
     // 解析合同金额字段
@@ -105,8 +128,8 @@ export async function POST(req: Request) {
       data: {
         customerId,
         contractId,
-        periodStart: new Date(periodStart),
-        periodEnd: new Date(periodEnd),
+        periodStart: start,
+        periodEnd: end,
         // 快照合同条款
         partyA: contract.partyA,
         accountingPeriod: contract.accountingPeriod,
@@ -122,7 +145,7 @@ export async function POST(req: Request) {
         betType,
         betOrderCount,
         betSalesAmount,
-        reconcileType: reconcileType ?? "BOTH",
+        reconcileType: normalizedType,
         createdById: session.userId,
         updatedAt: new Date(),
       },
@@ -141,6 +164,12 @@ export async function POST(req: Request) {
     console.error(e);
     return NextResponse.json({ error: "创建失败" }, { status: 500 });
   }
+}
+
+const NEW_RECONCILIATION_TYPES = ["FEE_ONLY", "COMMISSION_ONLY"] as const;
+
+function formatDate(value: Date): string {
+  return value.toISOString().slice(0, 10);
 }
 
 /**

@@ -17,9 +17,12 @@ export async function POST(
     const { id } = await params;
 
     const rec = await prisma.customerReconciliation.findFirst({ where: scopedReconciliationWhere(id, access.scope) });
-    if (!rec) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    if (!rec) return NextResponse.json({ error: "对账记录不存在或您无权访问" }, { status: 404 });
     if (rec.status !== "DRAFT") {
       return NextResponse.json({ error: "只有草稿状态可以重新拉取 BI 数据" }, { status: 400 });
+    }
+    if (rec.reconcileType === "FEE_ONLY") {
+      return NextResponse.json({ error: "固费对账不关联销售数据，无需拉取 BI；请在销售佣金对账中执行此操作" }, { status: 400 });
     }
 
     // 聚合该客户在对账周期内的销售数据
@@ -64,6 +67,6 @@ export async function POST(
   } catch (e) {
     if (e instanceof FeaturePermissionError) return NextResponse.json({ error: "无权限" }, { status: 403 });
     console.error(e);
-    return NextResponse.json({ error: "拉取失败" }, { status: 500 });
+    return NextResponse.json({ error: "拉取 BI 数据失败，请稍后重试" }, { status: 500 });
   }
 }
