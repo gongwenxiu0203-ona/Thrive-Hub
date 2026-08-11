@@ -95,6 +95,7 @@ function mapExtractedToContract(fields: Record<string, unknown>): Record<string,
     feeCycle: get("feeCycle"),
     commissionRate: get("commissionRate"),
     commissionType: get("commissionType"),
+    commissionConfig: get("commissionConfig"),
     thresholdAmount: get("thresholdAmount"),
     thresholdCurrency: get("thresholdCurrency"),
     thresholdReachedRate: get("thresholdReachedRate"),
@@ -377,12 +378,26 @@ export async function uploadExistingContract(
     excessBaseMonths: typeof mapped.excessBaseMonths === "string" ? mapped.excessBaseMonths : null,
     excessCommissionRate: typeof mapped.excessCommissionRate === "string" ? mapped.excessCommissionRate : null,
     specialCommissionTerms: typeof mapped.specialCommissionTerms === "string" ? mapped.specialCommissionTerms : null,
+    commissionConfig: mapped.commissionConfig,
   });
+  commissionConfig.templateKey = templateKey;
   if (templateKey === "THRESHOLD") {
+    const hasConfigOverride = fd.has("override:commissionConfig");
+    const configThreshold = commissionConfig.threshold;
+    const thresholdValue = (
+      key: "thresholdCurrency" | "thresholdAmount" | "thresholdReachedRate" | "thresholdUnreachedRate",
+      configValue: unknown,
+    ) => {
+      if (fd.has(`override:${key}`)) return mapped[key];
+      if (hasConfigOverride) return configValue ?? mapped[key];
+      return mapped[key] ?? configValue;
+    };
     commissionConfig.threshold = {
-      ...commissionConfig.threshold,
-      reachedRate: String(mapped.thresholdReachedRate ?? commissionConfig.threshold?.reachedRate ?? ""),
-      unreachedRate: String(mapped.thresholdUnreachedRate ?? commissionConfig.threshold?.unreachedRate ?? ""),
+      ...configThreshold,
+      currency: String(thresholdValue("thresholdCurrency", configThreshold?.currency) ?? "USD"),
+      amount: String(thresholdValue("thresholdAmount", configThreshold?.amount) ?? ""),
+      reachedRate: String(thresholdValue("thresholdReachedRate", configThreshold?.reachedRate) ?? ""),
+      unreachedRate: String(thresholdValue("thresholdUnreachedRate", configThreshold?.unreachedRate) ?? ""),
     };
   }
   if (templateKey === "SPECIAL") {
@@ -413,19 +428,25 @@ export async function uploadExistingContract(
     };
   }
   const primaryRate = primaryRateFromCommissionConfig(commissionConfig);
-  const persistedMapped = contractCreateFields(mapped);
 
   // 重算缺失的必填字段：以最终落库值为准（模板派生的 commissionType、AI 识别的
   // feeCycle 等已算作已填）。仅这些缺失才强制补填，其余字段未识别可忽略。
-  const finalForMissing: Record<string, unknown> = {
+  const canonicalMapped: Record<string, unknown> = {
     ...mapped,
     commissionType: templateKey,
     commissionRate: primaryRate ?? mapped.commissionRate,
     commissionConfig: stringifyCommissionConfig(commissionConfig),
+    thresholdCurrency: commissionConfig.threshold?.currency ?? mapped.thresholdCurrency,
+    thresholdAmount: commissionConfig.threshold?.amount ?? mapped.thresholdAmount,
+    thresholdReachedRate: commissionConfig.threshold?.reachedRate ?? mapped.thresholdReachedRate,
+    thresholdUnreachedRate: commissionConfig.threshold?.unreachedRate ?? mapped.thresholdUnreachedRate,
   };
+  const finalMappedError = validateMappedContractFields(canonicalMapped);
+  if (finalMappedError) return { ok: false, error: finalMappedError };
+  const persistedMapped = contractCreateFields(canonicalMapped);
   const requiredFields = uploadRequiredFields(uploadArchiveMode, templateKey);
   const missing = requiredFields.filter((f) => {
-    const v = finalForMissing[f.key];
+    const v = canonicalMapped[f.key];
     return valueMissing(v);
   });
   const needsTemplate = !resolvedTemplateId;
@@ -441,7 +462,7 @@ export async function uploadExistingContract(
         archived: false,
         needsTemplate,
         needsSupplement: true,
-        fields: finalForMissing,
+        fields: canonicalMapped,
         sourceTextPreview: text,
         sourcePreviewHtml,
         sourceFileType: ext,
@@ -544,7 +565,7 @@ export async function uploadExistingContract(
       archived,
       needsTemplate,
       needsSupplement: false,
-      fields: finalForMissing,
+      fields: canonicalMapped,
       sourceTextPreview: text,
       sourcePreviewHtml,
       sourceFileType: ext,

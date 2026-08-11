@@ -316,7 +316,7 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
     if (!feeCycle) return "请选择固费支付周期";
     if (!gmvCycle) return "请选择 GMV 结算周期";
     if (activeCommissionType === "FIXED" && !commissionRate.trim()) return "请填写 GMV 抽佣比例";
-    if (activeCommissionType === "THRESHOLD" && (!thresholdAmount.trim() || !(thresholdReachedRate || commissionRate).trim() || !thresholdUnreachedRate.trim())) return "请填写 GMV 门槛金额、达标后比例和未达标比例";
+    if (activeCommissionType === "THRESHOLD" && (!thresholdAmount.trim() || !thresholdReachedRate.trim() || !thresholdUnreachedRate.trim())) return "请填写 GMV 门槛金额、达标后比例和未达标比例";
     if (activeCommissionType === "TIERED" && tieredRows.some((r) => !r.from.trim() || !r.rate.trim())) return "请填写完整的阶梯区间和佣金比例";
     if (activeCommissionType === "INCREMENTAL" && (!excessBaseMonths.trim() || !excessRate.trim())) return "请填写增量佣金的基准月数及比例";
     if (activeCommissionType === "SPECIAL" && !specialTotalCommissionRate.trim()) return "请填写总包佣金";
@@ -408,7 +408,7 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
       threshold: {
         currency: thresholdCurrency,
         amount: thresholdAmount,
-        reachedRate: thresholdReachedRate || commissionRate,
+        reachedRate: thresholdReachedRate,
         unreachedRate: thresholdUnreachedRate,
       },
       tiered: {
@@ -450,9 +450,11 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
       firstPeriodFee: computedFirstPeriodFee ?? undefined,
       feeCycle,
       commissionType: activeCommissionType,
-      commissionRate: activeCommissionType === "THRESHOLD" ? (thresholdReachedRate || commissionRate) : commissionRate,
+      commissionRate: activeCommissionType === "THRESHOLD" ? thresholdReachedRate : commissionRate,
       thresholdAmount,
       thresholdCurrency,
+      thresholdReachedRate,
+      thresholdUnreachedRate,
       tieredRules: stringifyCommissionConfig({ tiered: commissionConfig.tiered }),
       excessBaseMonths,
       excessCommissionRate: excessRate,
@@ -854,7 +856,7 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
                   </div>
                   <div>
                     <label className="label text-xs">达标后抽佣比例</label>
-                    <PercentInput value={commissionRate} onChange={setCommissionRate} placeholder="如：8" />
+                    <PercentInput value={thresholdReachedRate} onChange={setThresholdReachedRate} placeholder="如：8" />
                   </div>
                 </div>
               )}

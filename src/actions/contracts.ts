@@ -558,6 +558,8 @@ export interface ContractV4Payload {
   commissionRate?: string;
   thresholdAmount?: string;
   thresholdCurrency?: string;
+  thresholdReachedRate?: string;
+  thresholdUnreachedRate?: string;
   tieredRules?: string;
   excessBaseMonths?: string;
   excessCommissionRate?: string;
