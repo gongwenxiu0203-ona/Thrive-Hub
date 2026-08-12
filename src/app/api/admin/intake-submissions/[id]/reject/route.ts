@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
-  if (!await adminHasFeature(session, "intake.review", "EDIT")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!await adminHasFeature(session, "intake.review", "EDIT")) return NextResponse.json({ error: "当前账号没有拒绝客户资料的权限" }, { status: 403 });
   const { id } = await params;
   const body = await req.json().catch(() => ({})) as { reviewNote?: string };
   const submission = await prisma.customerIntakeSubmission.findUnique({ where: { id } });

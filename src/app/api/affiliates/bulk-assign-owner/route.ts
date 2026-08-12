@@ -12,9 +12,9 @@ import { resolveUserPermission } from "@/lib/permissionResolver";
 //   - "__unassigned__" / null → match affiliates without any owner
 export async function POST(req: NextRequest) {
   const auth = await getSession();
-  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!auth) return NextResponse.json({ error: "登录状态已失效，请重新登录后再操作" }, { status: 401 });
   const affiliatePermission = await resolveUserPermission(auth.userId, "affiliates.records");
-  if (!hasPermissionLevel(affiliatePermission, "MANAGE")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!hasPermissionLevel(affiliatePermission, "MANAGE")) return NextResponse.json({ error: "当前账号没有批量分配联盟商负责人的权限" }, { status: 403 });
 
   const { fromPersonInChargeIds, toPersonInChargeId } = await req.json();
   if (!toPersonInChargeId) {

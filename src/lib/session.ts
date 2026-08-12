@@ -35,13 +35,12 @@ export async function requireAdminFeature(
   return session;
 }
 
-/** API-friendly ADMIN + leaf check; callers retain control over 401/403 responses. */
+/** API-friendly leaf check; callers retain control over 401/403 responses. */
 export async function adminHasFeature(
   session: SessionPayload,
   feature: string,
   required: PermLevel = "READ",
 ): Promise<boolean> {
-  if (session.role !== "ADMIN") return false;
   return hasPermissionLevel(
     await resolveUserPermission(session.userId, feature),
     required,

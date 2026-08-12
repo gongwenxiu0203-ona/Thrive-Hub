@@ -1,6 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
-import { isRouteBlocked, getRoleLanding } from "@/lib/permissions";
+import { resolveUserPermissionsMap } from "@/lib/permissionResolver";
+import { canAccessRoute, permissionLanding } from "@/lib/routePermissions";
+
+export const runtime = "nodejs";
 
 // Routes accessible without a session.
 const PUBLIC_PREFIXES = [
@@ -54,7 +57,8 @@ export async function middleware(req: NextRequest) {
     if (userStatus === "PENDING") {
       return NextResponse.redirect(new URL("/pending", req.url));
     }
-    return NextResponse.redirect(new URL(getRoleLanding(session.role), req.url));
+    const permissions = await resolveUserPermissionsMap(session.userId);
+    return NextResponse.redirect(new URL(permissionLanding(permissions), req.url));
   }
 
   if (isPublic) return NextResponse.next();
@@ -77,9 +81,15 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(new URL("/pending", req.url));
   }
 
-  // Block roles from pages they shouldn't access (BRAND / CHANNEL restrictions).
-  if (!pathname.startsWith("/api/") && isRouteBlocked(pathname, session.role)) {
-    return NextResponse.redirect(new URL(getRoleLanding(session.role), req.url));
+  if (!pathname.startsWith("/api/")) {
+    const permissions = await resolveUserPermissionsMap(session.userId);
+    if (!canAccessRoute(pathname, req.nextUrl.searchParams, permissions)) {
+      const landing = permissionLanding(permissions);
+      if (pathname !== landing) {
+        return NextResponse.redirect(new URL(landing, req.url));
+      }
+      return new NextResponse(null, { status: 403 });
+    }
   }
 
   return NextResponse.next();

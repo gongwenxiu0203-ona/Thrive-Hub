@@ -17,7 +17,7 @@ async function notifyNewCustomer(customerId: string, brandName: string) {
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
-  if (!await adminHasFeature(session, "intake.review", "EDIT")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!await adminHasFeature(session, "intake.review", "EDIT")) return NextResponse.json({ error: "当前账号没有批准客户资料的权限" }, { status: 403 });
   const { id } = await params;
   const body = await req.json().catch(() => ({})) as { appliedFields?: unknown; mergeCustomerId?: string; reviewNote?: string };
   const submission = await prisma.customerIntakeSubmission.findUnique({ where: { id } });

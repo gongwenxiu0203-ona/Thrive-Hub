@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { requireFeaturePermission } from "@/lib/permissionGuard";
+import { AppError } from "@/lib/appError";
 
 export type ProjectSaveResult = { ok: boolean; error?: string; projectId?: string };
 
@@ -11,9 +12,9 @@ function normalizeProjectMultiValues(values: string[] | undefined, label: string
   const normalized = Array.from(new Set(
     (values ?? []).map((value) => value.trim()).filter(Boolean),
   ));
-  if (normalized.length > 20) throw new Error(`${label}最多选择 20 项`);
+  if (normalized.length > 20) throw new AppError(`${label}最多选择 20 项`, 400, "PROJECT_MULTI_VALUE_LIMIT");
   if (normalized.some((value) => value.length > 80)) {
-    throw new Error(`${label}单项不能超过 80 个字符`);
+    throw new AppError(`${label}单项不能超过 80 个字符`, 400, "PROJECT_MULTI_VALUE_TOO_LONG");
   }
   return normalized;
 }
@@ -56,7 +57,9 @@ export async function createIntegratedProject(payload: {
     promoPlatforms = normalizeProjectMultiValues(payload.promoPlatforms, "推广平台");
     targetSites = normalizeProjectMultiValues(payload.targetSites, "目标站点");
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : "项目字段格式错误" };
+    return error instanceof AppError
+      ? { ok: false, error: error.message }
+      : { ok: false, error: "项目字段格式错误" };
   }
 
   // 关联合同（可选）：若选了，校验属于该客户
@@ -164,7 +167,9 @@ export async function updateProjectBasicInfo(payload: {
       );
     }
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : "项目字段格式错误" };
+    return error instanceof AppError
+      ? { ok: false, error: error.message }
+      : { ok: false, error: "项目字段格式错误" };
   }
 
   if (payload.contractId !== undefined) {

@@ -43,7 +43,6 @@ export function AppShell({ children, name, role, email, userId, unreadCount, can
   return (
     <div className="flex h-dvh min-h-0 overflow-hidden bg-[#fbfaff]">
       <Sidebar
-        role={role}
         userId={userId}
         permissions={permissions}
         mobileOpen={sidebarOpen}

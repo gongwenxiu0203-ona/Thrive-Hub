@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { generateReceivableTasks } from "@/lib/receivableTaskAutomation";
+import { errorResponse } from "@/lib/appError";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -29,15 +30,14 @@ async function run(request: NextRequest) {
     );
   }
   if (!safeEqual(suppliedSecret(request), expectedSecret)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: "定时任务密钥无效" }, { status: 401 });
   }
 
   try {
     const result = await generateReceivableTasks();
     return NextResponse.json({ ok: true, ...result });
   } catch (error) {
-    console.error("[receivable-tasks] generation failed", error);
-    return NextResponse.json({ error: "Failed to generate receivable tasks" }, { status: 500 });
+    return errorResponse(error, "cron.receivable-tasks");
   }
 }
 

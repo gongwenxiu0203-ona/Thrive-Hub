@@ -17,14 +17,14 @@ type TransferImpact = {
 async function requireAdminPermission(required: "READ" | "EDIT" | "MANAGE") {
   const session = await getSession();
   if (!session) return { error: NextResponse.json({ error: "未登录" }, { status: 401 }) };
-  if (!await adminHasFeature(session, "admin.users", required)) return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
+  if (!await adminHasFeature(session, "admin.users", required)) return { error: NextResponse.json({ error: "当前账号没有执行该用户管理操作的权限" }, { status: 403 }) };
   return { session };
 }
 
 async function requireAdminRole() {
   const session = await getSession();
   if (!session) return { error: NextResponse.json({ error: "未登录" }, { status: 401 }) };
-  if (session.role !== "ADMIN") return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
+  if (session.role !== "ADMIN") return { error: NextResponse.json({ error: "该操作仅限系统管理员执行" }, { status: 403 }) };
   return { session };
 }
 
@@ -164,7 +164,7 @@ export async function PATCH(
     !isStatusOnly
     && !await adminHasFeature(auth.session, "admin.users", "EDIT")
   ) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    return NextResponse.json({ error: "当前账号没有编辑用户资料的权限" }, { status: 403 });
   }
   const previous = await prisma.user.findUnique({
     where: { id },
@@ -176,14 +176,14 @@ export async function PATCH(
     && previous.status === "PENDING"
     && !await adminHasFeature(auth.session, "admin.registration_review", "EDIT")
   ) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    return NextResponse.json({ error: "当前账号没有审核注册申请的权限" }, { status: 403 });
   }
   if (
     isStatusOnly
     && previous.status !== "PENDING"
     && !await adminHasFeature(auth.session, "admin.users", "EDIT")
   ) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    return NextResponse.json({ error: "当前账号没有编辑用户状态的权限" }, { status: 403 });
   }
   const removesPermissionAdmin =
     previous.role === "ADMIN"

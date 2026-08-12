@@ -1,7 +1,8 @@
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { isStaff } from "@/lib/permissions";
+import { resolveUserPermissionsMap } from "@/lib/permissionResolver";
+import { hasPermissionLevel } from "@/lib/permissionGuard";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState } from "@/components/ui/EmptyState";
 import {
@@ -26,7 +27,9 @@ type Item = {
 
 export default async function RecycleBinPage() {
   const session = await requireSession();
-  if (!isStaff(session.role)) redirect("/dashboard");
+  const permissions = await resolveUserPermissionsMap(session.userId);
+  const recycleFeatures = ["customers.records", "contracts.records", "affiliates.records", "tasks.board", "worklogs.records", "reminders.records", "bi.manage", "projects.records"];
+  if (!recycleFeatures.every((feature) => hasPermissionLevel(permissions[feature] ?? "NONE", "MANAGE"))) redirect("/dashboard");
   const isAdmin = session.role === "ADMIN";
 
   // 访问时惰性物理清理超过 7 天的记录

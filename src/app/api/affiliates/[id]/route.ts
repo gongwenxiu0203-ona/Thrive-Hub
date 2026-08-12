@@ -11,9 +11,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const auth = await getSession();
-  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!auth) return NextResponse.json({ error: "登录状态已失效，请重新登录后再操作" }, { status: 401 });
   const affiliatePermission = await resolveUserPermission(auth.userId, "affiliates.records");
-  if (!hasPermissionLevel(affiliatePermission, "READ")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!hasPermissionLevel(affiliatePermission, "READ")) return NextResponse.json({ error: "当前账号没有查看联盟商资料的权限" }, { status: 403 });
 
   const { id } = await params;
   const affiliate = await prisma.affiliate.findFirst({
@@ -23,7 +23,7 @@ export async function GET(
       coopReviews: { orderBy: { createdAt: "desc" } },
     },
   });
-  if (!affiliate) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!affiliate) return NextResponse.json({ error: "联盟商资料不存在、已删除或无权访问" }, { status: 404 });
 
   // Linked sub-accounts (same internalAffiliateName)
   let linkedAccounts: { id: string; platformAffiliateName: string }[] = [];
@@ -56,9 +56,9 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const auth = await getSession();
-  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!auth) return NextResponse.json({ error: "登录状态已失效，请重新登录后再操作" }, { status: 401 });
   const affiliatePermission = await resolveUserPermission(auth.userId, "affiliates.records");
-  if (!hasPermissionLevel(affiliatePermission, "EDIT")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!hasPermissionLevel(affiliatePermission, "EDIT")) return NextResponse.json({ error: "当前账号没有编辑联盟商资料的权限" }, { status: 403 });
 
   const { id } = await params;
   const body = await req.json();
@@ -105,9 +105,9 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const auth = await getSession();
-  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!auth) return NextResponse.json({ error: "登录状态已失效，请重新登录后再操作" }, { status: 401 });
   const affiliatePermission = await resolveUserPermission(auth.userId, "affiliates.records");
-  if (!hasPermissionLevel(affiliatePermission, "MANAGE")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!hasPermissionLevel(affiliatePermission, "MANAGE")) return NextResponse.json({ error: "当前账号没有删除联盟商资料的权限" }, { status: 403 });
 
   const { id } = await params;
   // 软删除：进回收站，7 天内可恢复

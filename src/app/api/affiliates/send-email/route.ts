@@ -4,12 +4,13 @@ import { getSession } from "@/lib/session";
 import { sendMail } from "@/lib/mailer";
 import { hasPermissionLevel } from "@/lib/permissionGuard";
 import { resolveUserPermission } from "@/lib/permissionResolver";
+import { errorResponse } from "@/lib/appError";
 
 /** 返回默认发件邮箱（操作用户的注册邮箱）*/
 export async function GET() {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
-  if (!hasPermissionLevel(await resolveUserPermission(session.userId, "affiliates.records"), "READ")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!hasPermissionLevel(await resolveUserPermission(session.userId, "affiliates.records"), "READ")) return NextResponse.json({ error: "当前账号没有查看联盟商资料的权限" }, { status: 403 });
   const user = await prisma.user.findUnique({
     where: { id: session.userId },
     select: { email: true, name: true },
@@ -22,7 +23,7 @@ export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
 
-  if (!hasPermissionLevel(await resolveUserPermission(session.userId, "affiliates.records"), "EDIT")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!hasPermissionLevel(await resolveUserPermission(session.userId, "affiliates.records"), "EDIT")) return NextResponse.json({ error: "当前账号没有发送联盟商邮件的权限" }, { status: 403 });
   const body = await req.json().catch(() => ({}));
   const to = String(body.to ?? "").trim();
   const fromEmail = String(body.fromEmail ?? "").trim();
@@ -53,8 +54,7 @@ export async function POST(req: NextRequest) {
     });
     return NextResponse.json({ ok: true });
   } catch (e) {
-    console.error("[affiliate send-email]", e);
-    return NextResponse.json({ error: "邮件发送失败，请检查 SMTP 配置或稍后重试" }, { status: 500 });
+    return errorResponse(e, "affiliates.send-email");
   }
 }
 

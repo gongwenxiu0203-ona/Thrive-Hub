@@ -4,6 +4,7 @@ import { requireSession } from "@/lib/session";
 import { getReconciliationAccess } from "@/lib/reconciliationAccess";
 import { FeaturePermissionError } from "@/lib/permissionGuard";
 import { parseDateOnlyUtc } from "@/lib/dateRange";
+import { errorResponse } from "@/lib/appError";
 
 // GET /api/finance/reconciliations — 获取对账列表
 export async function GET(req: Request) {
@@ -36,7 +37,7 @@ export async function GET(req: Request) {
     if (e instanceof FeaturePermissionError) {
       return NextResponse.json({ error: "无权限" }, { status: 403 });
     }
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: "登录状态已失效，请重新登录后再操作" }, { status: 401 });
   }
 }
 
@@ -162,8 +163,7 @@ export async function POST(req: Request) {
     if (e instanceof FeaturePermissionError) {
       return NextResponse.json({ error: "无权限" }, { status: 403 });
     }
-    console.error(e);
-    return NextResponse.json({ error: "创建失败" }, { status: 500 });
+    return errorResponse(e, "finance.reconciliation.create");
   }
 }
 

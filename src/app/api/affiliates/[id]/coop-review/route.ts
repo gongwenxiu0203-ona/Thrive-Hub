@@ -9,8 +9,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const auth = await getSession();
-  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!hasPermissionLevel(await resolveUserPermission(auth.userId, "affiliates.reviews"), "EDIT")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!auth) return NextResponse.json({ error: "登录状态已失效，请重新登录后再操作" }, { status: 401 });
+  if (!hasPermissionLevel(await resolveUserPermission(auth.userId, "affiliates.reviews"), "EDIT")) return NextResponse.json({ error: "当前账号没有编辑联盟商合作复盘的权限" }, { status: 403 });
 
   const { id } = await params;
   const body = await req.json();
@@ -132,8 +132,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const auth = await getSession();
-  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!hasPermissionLevel(await resolveUserPermission(auth.userId, "affiliates.reviews"), "READ")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!auth) return NextResponse.json({ error: "登录状态已失效，请重新登录后再操作" }, { status: 401 });
+  if (!hasPermissionLevel(await resolveUserPermission(auth.userId, "affiliates.reviews"), "READ")) return NextResponse.json({ error: "当前账号没有查看联盟商合作复盘的权限" }, { status: 403 });
   const { id } = await params;
   const reviews = await prisma.affiliateCoopReview.findMany({
     where: { affiliateId: id },

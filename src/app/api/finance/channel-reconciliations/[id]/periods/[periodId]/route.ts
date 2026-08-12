@@ -6,6 +6,7 @@ import {
   FeaturePermissionError,
   requireFeaturePermission,
 } from "@/lib/permissionGuard";
+import { errorResponse } from "@/lib/appError";
 import {
   appendAuditEntry,
   calculateShareAmount,
@@ -562,7 +563,7 @@ export async function PATCH(
     }
     if (error instanceof Error) {
       if (error.message === "NOT_FOUND") {
-        return NextResponse.json({ error: "Not found" }, { status: 404 });
+        return NextResponse.json({ error: "渠道商对账周期不存在、已删除或无权访问" }, { status: 404 });
       }
       if (error.message === "RULE_MISSING") {
         return NextResponse.json(
@@ -681,7 +682,6 @@ export async function PATCH(
         return NextResponse.json({ error: error.message }, { status: 400 });
       }
     }
-    console.error(error);
-    return NextResponse.json({ error: "更新失败" }, { status: 500 });
+    return errorResponse(error, "finance.channel-reconciliation.period.update");
   }
 }

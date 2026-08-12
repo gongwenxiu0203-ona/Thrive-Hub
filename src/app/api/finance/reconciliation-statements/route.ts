@@ -11,6 +11,7 @@ import {
   type ReconciliationStatementRow,
 } from "@/lib/reconciliationStatementPdf";
 import { reconciliationSalesRecordWhere } from "@/lib/activeSalesScope";
+import { errorResponse } from "@/lib/appError";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -187,10 +188,6 @@ export async function POST(request: Request) {
         { status: 403 },
       );
     }
-    console.error("[reconciliation-statement-pdf] generation failed", error);
-    return NextResponse.json(
-      { error: "对账明细 PDF 生成失败，请稍后重试" },
-      { status: 500 },
-    );
+    return errorResponse(error, "finance.reconciliation-statement.generate");
   }
 }

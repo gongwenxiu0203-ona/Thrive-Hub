@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
+import { clientUnknownError, readApiError } from "@/lib/clientError";
 
 type CustomerOption = { id: string; brandName: string };
 type Submission = {
@@ -66,12 +67,16 @@ export function IntakeReviewPanel({ canWrite }: { canWrite: boolean }) {
   async function load() {
     try {
       const response = await fetch("/api/admin/intake-submissions?status=PENDING");
+      if (!response.ok) {
+        setError(await readApiError(response));
+        return;
+      }
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? "读取失败");
       setItems(data.submissions ?? []);
       setCustomers(data.customers ?? []);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "读取失败");
+      console.error("[intake-review-load]", loadError);
+      setError(clientUnknownError());
     }
   }
 
@@ -80,17 +85,23 @@ export function IntakeReviewPanel({ canWrite }: { canWrite: boolean }) {
   }, []);
 
   async function open(item: Submission) {
-    const response = await fetch(`/api/admin/intake-submissions/${item.id}`);
-    const data = await response.json();
-    if (!response.ok) {
-      setError(data.error ?? "读取失败");
-      return;
+    setError("");
+    try {
+      const response = await fetch(`/api/admin/intake-submissions/${item.id}`);
+      if (!response.ok) {
+        setError(await readApiError(response));
+        return;
+      }
+      const data = await response.json();
+      const submission = data.submission as Submission;
+      setSelected(submission);
+      setFields(new Set(Object.keys(submission.payload ?? {})));
+      setMergeCustomerId("");
+      setReviewNote("");
+    } catch (openError) {
+      console.error("[intake-review-open]", openError);
+      setError(clientUnknownError());
     }
-    const submission = data.submission as Submission;
-    setSelected(submission);
-    setFields(new Set(Object.keys(submission.payload ?? {})));
-    setMergeCustomerId("");
-    setReviewNote("");
   }
 
   async function action(kind: "approve" | "reject") {
@@ -104,19 +115,24 @@ export function IntakeReviewPanel({ canWrite }: { canWrite: boolean }) {
           reviewNote: reviewNote || undefined,
         }
       : { reviewNote: reviewNote || undefined };
-    const response = await fetch(`/api/admin/intake-submissions/${selected.id}/${kind}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const data = await response.json();
-    setBusy(false);
-    if (!response.ok) {
-      setError(data.error ?? "操作失败");
-      return;
+    try {
+      const response = await fetch(`/api/admin/intake-submissions/${selected.id}/${kind}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        setError(await readApiError(response));
+        return;
+      }
+      setSelected(null);
+      await load();
+    } catch (actionError) {
+      console.error("[intake-review-action]", actionError);
+      setError(clientUnknownError());
+    } finally {
+      setBusy(false);
     }
-    setSelected(null);
-    await load();
   }
 
   const diff = useMemo(() => {

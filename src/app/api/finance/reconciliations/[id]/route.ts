@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { errorResponse } from "@/lib/appError";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { getReconciliationAccess, scopedReconciliationWhere } from "@/lib/reconciliationAccess";
@@ -42,11 +43,11 @@ export async function GET(
       },
     });
 
-    if (!rec) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    if (!rec) return NextResponse.json({ error: "客户对账记录不存在、已删除或无权访问" }, { status: 404 });
     return NextResponse.json(rec);
   } catch (e) {
     if (e instanceof FeaturePermissionError) return NextResponse.json({ error: "无权限" }, { status: 403 });
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: "登录状态已失效，请重新登录后再操作" }, { status: 401 });
   }
 }
 
@@ -136,8 +137,7 @@ export async function PATCH(
     return NextResponse.json(result);
   } catch (e) {
     if (e instanceof FeaturePermissionError) return NextResponse.json({ error: "无权限" }, { status: 403 });
-    console.error(e);
-    return NextResponse.json({ error: "更新失败" }, { status: 500 });
+    return errorResponse(e, "finance.reconciliation.update");
   }
 }
 
@@ -173,7 +173,6 @@ export async function DELETE(
     return NextResponse.json({ success: true });
   } catch (e) {
     if (e instanceof FeaturePermissionError) return NextResponse.json({ error: "无权限" }, { status: 403 });
-    console.error(e);
-    return NextResponse.json({ error: "删除失败" }, { status: 500 });
+    return errorResponse(e, "finance.reconciliation.delete");
   }
 }

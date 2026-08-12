@@ -1,4 +1,4 @@
-import { requireAdmin } from "@/lib/session";
+import { requireSession } from "@/lib/session";
 import { resolveUserPermissionsMap } from "@/lib/permissionResolver";
 import { hasPermissionLevel } from "@/lib/permissionGuard";
 import { redirect } from "next/navigation";
@@ -8,7 +8,7 @@ import { AdminClient } from "./AdminClient";
 export const metadata = { title: "管理员面板 · Thraive联盟营销系统" };
 
 export default async function AdminPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
-  const session = await requireAdmin();
+  const session = await requireSession();
   const permissions = await resolveUserPermissionsMap(session.userId);
   const canRead = (feature: string) => hasPermissionLevel(permissions[feature] ?? "NONE", "READ");
   const canSeeUsers = canRead("admin.users") || canRead("admin.registration_review") || canRead("admin.permissions");

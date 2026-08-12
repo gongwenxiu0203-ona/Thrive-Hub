@@ -10,6 +10,7 @@ import {
   requireAttachmentEntityAccess,
 } from "@/lib/attachmentAccess";
 import { FeaturePermissionError } from "@/lib/permissionGuard";
+import { errorResponse } from "@/lib/appError";
 
 function accessErrorResponse(error: unknown): NextResponse | null {
   if (error instanceof FeaturePermissionError) {
@@ -25,7 +26,12 @@ export async function POST(req: Request) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
 
-  const form = await req.formData();
+  let form: FormData;
+  try {
+    form = await req.formData();
+  } catch {
+    return NextResponse.json({ error: "请求格式错误，请重新选择文件后重试" }, { status: 400 });
+  }
   const file = form.get("file");
   const entityType = String(form.get("entityType") ?? "");
   const entityId = String(form.get("entityId") ?? "");
@@ -60,10 +66,7 @@ export async function POST(req: Request) {
   } catch (error) {
     const accessResponse = accessErrorResponse(error);
     if (accessResponse) return accessResponse;
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "上传失败" },
-      { status: 400 },
-    );
+    return errorResponse(error, "attachment.upload");
   }
 }
 
@@ -74,7 +77,12 @@ export async function DELETE(req: Request) {
   const id = new URL(req.url).searchParams.get("id");
   if (!id) return NextResponse.json({ error: "缺少 id" }, { status: 400 });
 
-  const attachment = await prisma.attachment.findUnique({ where: { id } });
+  let attachment;
+  try {
+    attachment = await prisma.attachment.findUnique({ where: { id } });
+  } catch (error) {
+    return errorResponse(error, "attachment.delete.lookup");
+  }
   if (!attachment) {
     return NextResponse.json({ error: "附件不存在" }, { status: 404 });
   }
@@ -93,10 +101,14 @@ export async function DELETE(req: Request) {
   } catch (error) {
     const accessResponse = accessErrorResponse(error);
     if (accessResponse) return accessResponse;
-    throw error;
+    return errorResponse(error, "attachment.delete.authorization");
   }
 
-  await prisma.attachment.delete({ where: { id } });
+  try {
+    await prisma.attachment.delete({ where: { id } });
+  } catch (error) {
+    return errorResponse(error, "attachment.delete");
+  }
 
   try {
     const fileName = path.basename(attachment.fileUrl);

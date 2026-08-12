@@ -4,6 +4,7 @@ import { requireSession } from "@/lib/session";
 import { channelReconciliationScope } from "@/lib/dataScope";
 import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
 import { appendAuditEntry, splitCommissionServicePeriods, splitFixedFeeServicePeriods } from "@/lib/channelSplit";
+import { errorResponse } from "@/lib/appError";
 
 const PAYEE_FIELD_LIMITS = {
   paymentMethod: 50,
@@ -81,7 +82,7 @@ export async function PATCH(
       include: { periods: true },
     });
     if (!existing) {
-      return NextResponse.json({ error: "Not found" }, { status: 404 });
+      return NextResponse.json({ error: "渠道商对账记录不存在、已删除或无权访问" }, { status: 404 });
     }
 
     if (existing.recordMode === "RULE_DRIVEN" && body.action === "restore") {
@@ -302,8 +303,7 @@ export async function PATCH(
         );
       }
     }
-    console.error(e);
-    return NextResponse.json({ error: "更新失败" }, { status: 500 });
+    return errorResponse(e, "finance.channel-reconciliation.update");
   }
 }
 
@@ -348,7 +348,7 @@ export async function DELETE(
         },
       },
     });
-    if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    if (!existing) return NextResponse.json({ error: "渠道商对账记录不存在、已删除或无权访问" }, { status: 404 });
     if (existing.periods.length > 0) {
       return NextResponse.json(
         { error: "该分账已有向渠道商付款的锁定期，不能删除" },
@@ -360,7 +360,6 @@ export async function DELETE(
     return NextResponse.json({ success: true, record: updated });
   } catch (e) {
     if (e instanceof FeaturePermissionError) return NextResponse.json({ error: "无权限" }, { status: 403 });
-    console.error(e);
-    return NextResponse.json({ error: "删除失败" }, { status: 500 });
+    return errorResponse(e, "finance.channel-reconciliation.delete");
   }
 }

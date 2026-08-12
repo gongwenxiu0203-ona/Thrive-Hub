@@ -6,9 +6,9 @@ import { resolveUserPermission } from "@/lib/permissionResolver";
 
 export async function GET(req: NextRequest) {
   const auth = await getSession();
-  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!auth) return NextResponse.json({ error: "登录状态已失效，请重新登录后再操作" }, { status: 401 });
   const affiliatePermission = await resolveUserPermission(auth.userId, "affiliates.records");
-  if (!hasPermissionLevel(affiliatePermission, "READ")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!hasPermissionLevel(affiliatePermission, "READ")) return NextResponse.json({ error: "当前账号没有查看联盟资源统计的权限" }, { status: 403 });
 
   const sp = req.nextUrl.searchParams;
   const multi = (key: string) =>

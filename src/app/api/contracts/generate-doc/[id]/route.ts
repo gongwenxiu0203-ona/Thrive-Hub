@@ -14,6 +14,7 @@ import {
   FeaturePermissionError,
   requireFeaturePermission,
 } from "@/lib/permissionGuard";
+import { errorResponse } from "@/lib/appError";
 
 export async function GET(
   req: NextRequest,
@@ -32,17 +33,22 @@ export async function GET(
     if (error instanceof FeaturePermissionError) {
       return NextResponse.json({ error: "无权访问合同" }, { status: 403 });
     }
-    throw error;
+    return errorResponse(error, "contracts.generate-doc.authorization");
   }
 
-  const contract = await prisma.contract.findFirst({
-    where: {
-      id,
-      ...contractScope(session, session.role === "ADMIN" ? "all" : "mine"),
-      deletedAt: null,
-    },
-    include: { template: true, customer: { select: { brandName: true } } },
-  });
+  let contract;
+  try {
+    contract = await prisma.contract.findFirst({
+      where: {
+        id,
+        ...contractScope(session, session.role === "ADMIN" ? "all" : "mine"),
+        deletedAt: null,
+      },
+      include: { template: true, customer: { select: { brandName: true } } },
+    });
+  } catch (error) {
+    return errorResponse(error, "contracts.generate-doc.lookup");
+  }
 
   if (!contract) {
     return NextResponse.json({ error: "合同不存在" }, { status: 404 });
@@ -78,11 +84,9 @@ export async function GET(
           pdfPath = await convertDocxToPdf(docxPath, tmpDir);
         } catch (convertError) {
           console.error("[generate-doc] pdf conversion error:", convertError);
-          const detail = convertError instanceof Error ? convertError.message : "未知错误";
           return NextResponse.json(
             {
               error: "PDF 生成失败：当前环境未正确配置 LibreOffice / SOFFICE_PATH。请先下载 Word，或在服务器/本机安装 LibreOffice 后重试。",
-              detail,
             },
             { status: 503 },
           );
@@ -112,7 +116,6 @@ export async function GET(
       },
     });
   } catch (err) {
-    console.error("[generate-doc] error:", err);
-    return NextResponse.json({ error: "合同生成失败，请重试" }, { status: 500 });
+    return errorResponse(err, "contracts.generate-doc");
   }
 }

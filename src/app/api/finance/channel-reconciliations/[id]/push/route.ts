@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { channelReconciliationScope } from "@/lib/dataScope";
 import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
+import { errorResponse } from "@/lib/appError";
 
 // POST /api/finance/channel-reconciliations/[id]/push
 // body: { side: "FIXED_FEE" | "COMMISSION" }
@@ -35,7 +36,7 @@ export async function POST(
       },
     });
     if (!rec) {
-      return NextResponse.json({ error: "Not found" }, { status: 404 });
+      return NextResponse.json({ error: "渠道商对账记录不存在、已删除或无权推送" }, { status: 404 });
     }
     if (rec.recordMode === "RULE_DRIVEN") {
       return NextResponse.json(
@@ -83,7 +84,6 @@ export async function POST(
     return NextResponse.json({ success: true });
   } catch (e) {
     if (e instanceof FeaturePermissionError) return NextResponse.json({ error: "无权限" }, { status: 403 });
-    console.error(e);
-    return NextResponse.json({ error: "推送失败" }, { status: 500 });
+    return errorResponse(e, "finance.channel-reconciliation.push");
   }
 }

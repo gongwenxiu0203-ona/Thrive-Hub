@@ -4,6 +4,7 @@ import { requireSession } from "@/lib/session";
 import { channelReconciliationScope } from "@/lib/dataScope";
 import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
 import { appendAuditEntry } from "@/lib/channelSplit";
+import { errorResponse } from "@/lib/appError";
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string; periodId: string }> }) {
   try {
@@ -37,10 +38,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   } catch (error) {
     if (error instanceof FeaturePermissionError) return NextResponse.json({ error: '无权限' }, { status: 403 });
     const code = error instanceof Error ? error.message : '';
-    if (code === 'NOT_FOUND') return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    if (code === 'NOT_FOUND') return NextResponse.json({ error: '渠道商对账周期不存在、已删除或无权访问' }, { status: 404 });
     if (code === 'PAID_LOCKED') return NextResponse.json({ error: '该期已付款，不能再次操作' }, { status: 409 });
     if (code === 'STALE_STATE') return NextResponse.json({ error: '记录状态已变化，请刷新后重试' }, { status: 409 });
     if (code === 'ENTRY_REQUIRED') return NextResponse.json({ error: '请先完成本期分账录入' }, { status: 409 });
-    console.error('channel period review-flow failed', error); return NextResponse.json({ error: '操作失败' }, { status: 500 });
+    return errorResponse(error, "finance.channel-reconciliation.period.review-flow");
   }
 }

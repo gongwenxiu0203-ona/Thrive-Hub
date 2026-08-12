@@ -18,13 +18,13 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const auth = await getSession();
-  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!auth) return NextResponse.json({ error: "登录状态已失效，请重新登录后再操作" }, { status: 401 });
 
   const { id } = await params;
   const body = await req.json();
 
   const record = await prisma.affiliateReconciliation.findUnique({ where: { id } });
-  if (!record) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!record) return NextResponse.json({ error: "联盟商对账记录不存在、已删除或无权访问" }, { status: 404 });
 
   const {
     promotionAsin, paymentMethod, paymentAccountName, paymentAccount,

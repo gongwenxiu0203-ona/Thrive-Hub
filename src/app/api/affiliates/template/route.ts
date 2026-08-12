@@ -7,8 +7,8 @@ import { resolveUserPermission } from "@/lib/permissionResolver";
 
 export async function GET() {
   const session = await getSession();
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!hasPermissionLevel(await resolveUserPermission(session.userId, "affiliates.batches"), "READ")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!session) return NextResponse.json({ error: "登录状态已失效，请重新登录后再操作" }, { status: 401 });
+  if (!hasPermissionLevel(await resolveUserPermission(session.userId, "affiliates.batches"), "READ")) return NextResponse.json({ error: "当前账号没有下载联盟资源模板的权限" }, { status: 403 });
   // Build header row with exact Excel labels
   const headers = TEMPLATE_AFFILIATE_FIELDS.map((f) => f.label);
 

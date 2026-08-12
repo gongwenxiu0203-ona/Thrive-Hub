@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { isStaff } from "@/lib/permissions";
 import { customerScope, projectScope } from "@/lib/dataScope";
 import { currentMonthKey, monthRange } from "@/lib/financeOperations";
 import { OperationsClient } from "./OperationsClient";
@@ -27,7 +26,6 @@ export default async function FinanceOperationsPage({
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const session = await requireSession();
-  if (!isStaff(session.role)) redirect("/finance");
   const sp = await searchParams;
   const permissionEntries = await Promise.all(
     Object.entries({

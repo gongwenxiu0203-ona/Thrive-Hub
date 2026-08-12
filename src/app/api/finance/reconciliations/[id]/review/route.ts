@@ -7,6 +7,7 @@ import {
 } from "@/lib/reconciliationAccess";
 import { FeaturePermissionError } from "@/lib/permissionGuard";
 import { recalcReconciliation } from "@/lib/reconciliationCalc";
+import { errorResponse } from "@/lib/appError";
 
 // POST /api/finance/reconciliations/[id]/review
 // 客户负责人确认或提出异议
@@ -213,10 +214,6 @@ export async function POST(
     }
     if (e instanceof FeaturePermissionError)
       return NextResponse.json({ error: "无权限" }, { status: 403 });
-    console.error(e);
-    return NextResponse.json(
-      { error: "审核对账失败，请稍后重试" },
-      { status: 500 },
-    );
+    return errorResponse(e, "finance.reconciliation.review");
   }
 }

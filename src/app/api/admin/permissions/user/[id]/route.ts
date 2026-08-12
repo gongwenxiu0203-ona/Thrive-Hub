@@ -11,6 +11,7 @@ import {
   FEATURES,
   PERM_LEVELS,
 } from "@/lib/featurePermissions";
+import { errorResponse } from "@/lib/appError";
 
 // GET /api/admin/permissions/user/[id] — 返回该用户的实际权限（已应用覆盖）
 // + 覆盖明细列表
@@ -20,9 +21,9 @@ export async function GET(
 ) {
   try {
     const session = await getSession();
-    if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!session) return NextResponse.json({ error: "登录状态已失效，请重新登录" }, { status: 401 });
     if (!await adminHasFeature(session, "admin.permissions", "READ")) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      return NextResponse.json({ error: "当前账号没有查看用户权限的权限" }, { status: 403 });
     }
     const { id } = await params;
     const user = await prisma.user.findUnique({
@@ -30,7 +31,7 @@ export async function GET(
       select: { id: true, name: true, role: true },
     });
     if (!user) {
-      return NextResponse.json({ error: "Not found" }, { status: 404 });
+      return NextResponse.json({ error: "目标用户不存在或已被删除" }, { status: 404 });
     }
     const effective = await resolveUserPermissionsMap(id);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -51,7 +52,7 @@ export async function GET(
       overrideKeys,
     });
   } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: "登录状态已失效，请重新登录" }, { status: 401 });
   }
 }
 
@@ -64,9 +65,9 @@ export async function POST(
 ) {
   try {
     const session = await getSession();
-    if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!session) return NextResponse.json({ error: "登录状态已失效，请重新登录" }, { status: 401 });
     if (!await adminHasFeature(session, "admin.permissions", "MANAGE")) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      return NextResponse.json({ error: "当前账号没有管理用户权限的权限" }, { status: 403 });
     }
     const { id } = await params;
     const { feature, level, reset } = await req.json();
@@ -79,7 +80,7 @@ export async function POST(
       where: { id },
       select: { role: true, status: true },
     });
-    if (!target) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    if (!target) return NextResponse.json({ error: "目标用户不存在或已被删除" }, { status: 404 });
 
     if (target.role === "ADMIN" && target.status === "APPROVED" && feature === "admin.permissions") {
       const currentLevel = await resolveUserPermission(id, feature);
@@ -126,7 +127,6 @@ export async function POST(
     });
     return NextResponse.json({ success: true });
   } catch (e) {
-    console.error(e);
-    return NextResponse.json({ error: "更新失败" }, { status: 500 });
+    return errorResponse(e, "admin.permissions.user.update");
   }
 }

@@ -6,6 +6,7 @@ import {
   scopedReconciliationWhere,
 } from "@/lib/reconciliationAccess";
 import { FeaturePermissionError } from "@/lib/permissionGuard";
+import { errorResponse } from "@/lib/appError";
 
 // POST /api/finance/reconciliations/[id]/confirm
 // 双方最终确认（争议后的最终版本），锁定数据 + 创建结算记录
@@ -124,10 +125,6 @@ export async function POST(
     }
     if (e instanceof FeaturePermissionError)
       return NextResponse.json({ error: "无权限" }, { status: 403 });
-    console.error(e);
-    return NextResponse.json(
-      { error: "最终确认失败，请稍后重试" },
-      { status: 500 },
-    );
+    return errorResponse(e, "finance.reconciliation.confirm");
   }
 }

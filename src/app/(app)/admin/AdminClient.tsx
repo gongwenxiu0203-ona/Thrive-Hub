@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
 import { formatDate } from "@/lib/utils";
+import { clientUnknownError, readApiError } from "@/lib/clientError";
 import {
   PERM_LEVELS,
   type PermLevel,
@@ -47,15 +48,6 @@ type TransferPreview = {
   total: number;
   requiresChannelRecipient: boolean;
 };
-
-async function readApiResponse(response: Response) {
-  const content = await response.text();
-  try {
-    return content ? JSON.parse(content) : {};
-  } catch {
-    return { error: `请求失败（HTTP ${response.status}）` };
-  }
-}
 
 function InviteButton() {
   const [copied, setCopied] = useState(false);
@@ -182,10 +174,17 @@ export function AdminClient({
   const canReviewIntake = hasAtLeast("intake.review", "EDIT");
 
   async function refreshUsers() {
-    const res = await fetch("/api/admin/users");
-    if (res.ok) {
+    try {
+      const res = await fetch("/api/admin/users");
+      if (!res.ok) {
+        setError(await readApiError(res));
+        return;
+      }
       const data = await res.json();
       setUsers(data.users);
+    } catch (refreshError) {
+      console.error("[admin-users-refresh]", refreshError);
+      setError(clientUnknownError());
     }
   }
 
@@ -201,53 +200,77 @@ export function AdminClient({
   function saveEdit(id: string) {
     startTransition(async () => {
       setError("");
-      const body: Record<string, unknown> = {
-        role: editRole,
-        status: editStatus,
-        brandName: editBrandName || null,
-      };
-      if (editNewPassword.trim()) {
-        if (editNewPassword.length < 6) {
-          setError("新密码至少需要 6 位字符");
+      try {
+        const body: Record<string, unknown> = {
+          role: editRole,
+          status: editStatus,
+          brandName: editBrandName || null,
+        };
+        if (editNewPassword.trim()) {
+          if (editNewPassword.length < 6) {
+            setError("新密码至少需要 6 位字符");
+            return;
+          }
+          body.newPassword = editNewPassword.trim();
+        }
+        const res = await fetch(`/api/admin/users/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          setError(await readApiError(res));
           return;
         }
-        body.newPassword = editNewPassword.trim();
-      }
-      const res = await fetch(`/api/admin/users/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (res.ok) {
         setEditingId(null);
         setEditNewPassword("");
         await refreshUsers();
-      } else {
-        const d = await res.json();
-        setError(d.error ?? "保存失败");
+      } catch (saveError) {
+        console.error("[admin-user-save]", saveError);
+        setError(clientUnknownError());
       }
     });
   }
 
   function approve(id: string) {
     startTransition(async () => {
-      const res = await fetch(`/api/admin/users/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "APPROVED" }),
-      });
-      if (res.ok) await refreshUsers();
+      setError("");
+      try {
+        const res = await fetch(`/api/admin/users/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "APPROVED" }),
+        });
+        if (!res.ok) {
+          setError(await readApiError(res));
+          return;
+        }
+        await refreshUsers();
+      } catch (approveError) {
+        console.error("[admin-user-approve]", approveError);
+        setError(clientUnknownError());
+      }
     });
   }
 
   function reject(id: string) {
     startTransition(async () => {
-      const res = await fetch(`/api/admin/users/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "REJECTED" }),
-      });
-      if (res.ok) await refreshUsers();
+      setError("");
+      try {
+        const res = await fetch(`/api/admin/users/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "REJECTED" }),
+        });
+        if (!res.ok) {
+          setError(await readApiError(res));
+          return;
+        }
+        await refreshUsers();
+      } catch (rejectError) {
+        console.error("[admin-user-reject]", rejectError);
+        setError(clientUnknownError());
+      }
     });
   }
 
@@ -259,15 +282,16 @@ export function AdminClient({
     startTransition(async () => {
       try {
         const res = await fetch(`/api/admin/users/${user.id}`);
-        const data = await readApiResponse(res);
         if (!res.ok) {
-          setError(data.error ?? "无法读取该用户的关联数据");
+          setError(await readApiError(res));
           setRemovalUser(null);
           return;
         }
+        const data = await res.json();
         setRemovalPreview(data as TransferPreview);
-      } catch {
-        setError("读取关联数据失败，请稍后重试");
+      } catch (previewError) {
+        console.error("[admin-user-removal-preview]", previewError);
+        setError(clientUnknownError());
         setRemovalUser(null);
       }
     });
@@ -290,15 +314,15 @@ export function AdminClient({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ transferToUserId }),
         });
-        const data = await readApiResponse(res);
         if (!res.ok) {
-          setError(data.error ?? "移除失败");
+          setError(await readApiError(res));
           return;
         }
         closeRemoval();
         await refreshUsers();
-      } catch {
-        setError("移除失败，请稍后重试");
+      } catch (removeError) {
+        console.error("[admin-user-remove]", removeError);
+        setError(clientUnknownError());
       }
     });
   }
@@ -310,18 +334,22 @@ export function AdminClient({
   function createAdmin() {
     startTransition(async () => {
       setError("");
-      const res = await fetch("/api/admin/users", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: newName,
-          email: newEmail,
-          password: newPassword,
-          role: newRole,
-          brandName: newBrandName || null,
-        }),
-      });
-      if (res.ok) {
+      try {
+        const res = await fetch("/api/admin/users", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: newName,
+            email: newEmail,
+            password: newPassword,
+            role: newRole,
+            brandName: newBrandName || null,
+          }),
+        });
+        if (!res.ok) {
+          setError(await readApiError(res));
+          return;
+        }
         setShowCreate(false);
         setNewName("");
         setNewEmail("");
@@ -329,9 +357,9 @@ export function AdminClient({
         setNewRole("ADMIN");
         setNewBrandName("");
         await refreshUsers();
-      } else {
-        const d = await res.json();
-        setError(d.error ?? "创建失败");
+      } catch (createError) {
+        console.error("[admin-user-create]", createError);
+        setError(clientUnknownError());
       }
     });
   }

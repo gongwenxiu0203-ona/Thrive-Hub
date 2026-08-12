@@ -8,14 +8,15 @@ import {
   PERM_LEVELS,
   PermLevel,
 } from "@/lib/featurePermissions";
+import { errorResponse } from "@/lib/appError";
 
 // GET /api/admin/permissions/role — 返回所有角色全部功能权限的当前配置
 export async function GET() {
   try {
     const session = await getSession();
-    if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!session) return NextResponse.json({ error: "登录状态已失效，请重新登录" }, { status: 401 });
     if (!await adminHasFeature(session, "admin.permissions", "READ")) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      return NextResponse.json({ error: "当前账号没有查看角色权限的权限" }, { status: 403 });
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const list = await (prisma as any).rolePermission.findMany();
@@ -38,7 +39,7 @@ export async function GET() {
     }
     return NextResponse.json(result);
   } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: "登录状态已失效，请重新登录" }, { status: 401 });
   }
 }
 
@@ -47,9 +48,9 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const session = await getSession();
-    if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!session) return NextResponse.json({ error: "登录状态已失效，请重新登录" }, { status: 401 });
     if (!await adminHasFeature(session, "admin.permissions", "MANAGE")) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      return NextResponse.json({ error: "当前账号没有管理角色权限的权限" }, { status: 403 });
     }
     const { role, feature, level } = await req.json();
     if (!ALL_ROLES.includes(role)) {
@@ -90,7 +91,6 @@ export async function POST(req: Request) {
     });
     return NextResponse.json({ success: true });
   } catch (e) {
-    console.error(e);
-    return NextResponse.json({ error: "更新失败" }, { status: 500 });
+    return errorResponse(e, "admin.permissions.role.update");
   }
 }

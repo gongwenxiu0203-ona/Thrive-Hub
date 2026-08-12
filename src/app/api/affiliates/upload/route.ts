@@ -11,14 +11,14 @@ export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
   const auth = await getSession();
-  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!hasPermissionLevel(await resolveUserPermission(auth.userId, "affiliates.batches"), "EDIT")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!auth) return NextResponse.json({ error: "登录状态已失效，请重新登录后再操作" }, { status: 401 });
+  if (!hasPermissionLevel(await resolveUserPermission(auth.userId, "affiliates.batches"), "EDIT")) return NextResponse.json({ error: "当前账号没有上传联盟资源批次的权限" }, { status: 403 });
 
   const formData = await req.formData();
   const file = formData.get("file") as File | null;
   const mappingRaw = formData.get("mapping") as string | null; // JSON: {colIndex: systemKey}
 
-  if (!file) return NextResponse.json({ error: "No file" }, { status: 400 });
+  if (!file) return NextResponse.json({ error: "请选择需要上传的联盟资源文件" }, { status: 400 });
 
   const buf = Buffer.from(await file.arrayBuffer());
   const wb = XLSX.read(buf, { type: "buffer" });

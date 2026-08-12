@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { errorResponse } from "@/lib/appError";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { getReconciliationAccess, scopedReconciliationWhere } from "@/lib/reconciliationAccess";
@@ -19,7 +20,7 @@ export async function POST(
       where: scopedReconciliationWhere(id, access.scope),
     });
     if (!existing) {
-      return NextResponse.json({ error: "Not found" }, { status: 404 });
+      return NextResponse.json({ error: "客户对账记录不存在、已删除或无权恢复" }, { status: 404 });
     }
     if (!existing.deletedAt) {
       return NextResponse.json(
@@ -42,7 +43,6 @@ export async function POST(
     return NextResponse.json({ success: true });
   } catch (e) {
     if (e instanceof FeaturePermissionError) return NextResponse.json({ error: "无权限" }, { status: 403 });
-    console.error(e);
-    return NextResponse.json({ error: "恢复失败" }, { status: 500 });
+    return errorResponse(e, "finance.reconciliation.restore");
   }
 }

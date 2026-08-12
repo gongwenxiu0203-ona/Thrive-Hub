@@ -12,16 +12,16 @@ const ARRAY_FIELDS = new Set(["tags", "cooperationMode"]);
 
 export async function PATCH(req: NextRequest) {
   const auth = await getSession();
-  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!hasPermissionLevel(await resolveUserPermission(auth.userId, "affiliates.batches"), "EDIT")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!auth) return NextResponse.json({ error: "登录状态已失效，请重新登录后再操作" }, { status: 401 });
+  if (!hasPermissionLevel(await resolveUserPermission(auth.userId, "affiliates.batches"), "EDIT")) return NextResponse.json({ error: "当前账号没有批量修改联盟资源的权限" }, { status: 403 });
 
   const { ids, field, value } = await req.json();
 
   if (!Array.isArray(ids) || ids.length === 0 || !field) {
-    return NextResponse.json({ error: "Invalid request" }, { status: 400 });
+    return NextResponse.json({ error: "请求内容无效，请提供记录编号和需要修改的字段" }, { status: 400 });
   }
   if (!ALLOWED.has(field)) {
-    return NextResponse.json({ error: "Field not allowed" }, { status: 400 });
+    return NextResponse.json({ error: "该字段不支持批量修改" }, { status: 400 });
   }
 
   if (ARRAY_FIELDS.has(field)) {

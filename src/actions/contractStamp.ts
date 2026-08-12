@@ -26,6 +26,7 @@ import {
   FeaturePermissionError,
   requireFeaturePermission,
 } from "@/lib/permissionGuard";
+import { actionError, AppError } from "@/lib/appError";
 
 type Result<T = void> = { ok: true; data?: T } | { ok: false; error: string };
 
@@ -94,7 +95,7 @@ export async function stampContract(contractId: string, sealCompany?: SealCompan
 
   try {
     const latestAbs = await resolveContractFilePath(latest.fileUrl, ["contracts-generated", "contracts-stamped"]);
-    if (!latestAbs) throw new Error("合同版本文件不存在");
+    if (!latestAbs) throw new AppError("合同版本文件不存在", 404, "CONTRACT_VERSION_FILE_MISSING");
 
     const sealBytes = await fs.readFile(sealPath);
     const versionNo = await nextVersionNo(contractId);
@@ -128,7 +129,11 @@ export async function stampContract(contractId: string, sealCompany?: SealCompan
         });
       } catch (convertError) {
         console.warn("[stampContract] LibreOffice conversion failed:", convertError);
-        throw new Error("LibreOffice 转换失败，已停止盖章以避免生成乱码合同。请确认服务器已安装 LibreOffice 且 SOFFICE_PATH 正确。");
+        throw new AppError(
+          "LibreOffice 转换失败，已停止盖章以避免生成乱码合同。请确认服务器已安装 LibreOffice 且 SOFFICE_PATH 正确。",
+          503,
+          "CONTRACT_PDF_CONVERSION_FAILED",
+        );
       } finally {
         await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
       }
@@ -157,12 +162,16 @@ export async function stampContract(contractId: string, sealCompany?: SealCompan
     revalidatePath(`/contracts/${contractId}`);
     return { ok: true, data: { fileUrl } };
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "盖章失败";
-    await prisma.contract.update({
-      where: { id: contractId },
-      data: { stampStatus: "FAILED" },
-    });
+    const tracked = actionError(e, "contract.stamp");
+    try {
+      await prisma.contract.update({
+        where: { id: contractId },
+        data: { stampStatus: "FAILED" },
+      });
+    } catch (statusError) {
+      actionError(statusError, "contract.stamp.mark-failed");
+    }
     revalidatePath(`/contracts/${contractId}`);
-    return { ok: false, error: msg };
+    return tracked;
   }
 }

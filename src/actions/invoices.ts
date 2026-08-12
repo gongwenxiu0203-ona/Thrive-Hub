@@ -12,10 +12,12 @@ import {
   type InvoiceBankAccount,
 } from "@/lib/invoiceBankAccounts";
 import {
+  FeaturePermissionError,
   requireFeaturePermission,
   resolveSafeViewScope,
 } from "@/lib/permissionGuard";
 import { requireSession } from "@/lib/session";
+import { actionError } from "@/lib/appError";
 
 const INVOICE_FEATURE = "operations.invoices";
 const INVOICE_STATUSES = ["DRAFT", "ISSUED", "VOID"] as const;
@@ -315,8 +317,33 @@ function normalizeItems(items: InvoiceItemInput[]) {
 }
 
 function errorMessage(error: unknown): string {
-  if (error instanceof Error && error.message) return error.message;
-  return "Invoice 操作失败，请稍后重试";
+  if (error instanceof FeaturePermissionError) {
+    return "当前账号没有执行此 Invoice 操作的权限";
+  }
+  if (error instanceof Error) {
+    const message = error.message.trim();
+    const publicBusinessError = [
+      /仅内部员工可以访问 Invoice/,
+      /格式不正确/,
+      /币种/,
+      /第 \d+ 行/,
+      /单张 Invoice 最多/,
+      /关联合同/,
+      /主合同/,
+      /应收账款/,
+      /请选择关联客户/,
+      /账期类型/,
+      /付款截止日/,
+      /合计金额超出允许范围/,
+      /费用期间/,
+      /正式开具前/,
+      /客户名称不能为空/,
+      /对账记录/,
+      /Invoice 状态已变更/,
+    ].some((pattern) => pattern.test(message));
+    if (publicBusinessError) return message;
+  }
+  return actionError(error, "invoice.action").error;
 }
 
 async function validateRelations(

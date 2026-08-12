@@ -7,6 +7,7 @@ import { writeFile, readdir, unlink, stat } from "fs/promises";
 import path from "path";
 import os from "os";
 import { hasBiPermission } from "@/lib/biAuthorization";
+import { errorResponse } from "@/lib/appError";
 
 // Allow up to 5 minutes for large file parsing
 export const maxDuration = 300;
@@ -108,11 +109,7 @@ export async function POST(req: Request) {
   try {
     await writeFile(tempPath, Buffer.from(rawBuffer));
   } catch (e) {
-    console.error("[sales/parse] failed to write temp file:", e);
-    return NextResponse.json(
-      { error: "服务器临时存储失败，请重试" },
-      { status: 500 },
-    );
+    return errorResponse(e, "sales.parse.temp-file");
   }
 
   // Fire-and-forget cleanup of stale temp files.

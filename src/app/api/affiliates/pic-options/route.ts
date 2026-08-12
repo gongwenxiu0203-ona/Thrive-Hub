@@ -11,8 +11,8 @@ import { resolveUserPermission } from "@/lib/permissionResolver";
 //      (id = "name:<text>" so bulk-assign-owner can disambiguate from real ids)
 export async function GET() {
   const session = await getSession();
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!hasPermissionLevel(await resolveUserPermission(session.userId, "affiliates.records"), "READ")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!session) return NextResponse.json({ error: "登录状态已失效，请重新登录后再操作" }, { status: 401 });
+  if (!hasPermissionLevel(await resolveUserPermission(session.userId, "affiliates.records"), "READ")) return NextResponse.json({ error: "当前账号没有查看联盟商负责人选项的权限" }, { status: 403 });
 
   // 1. Distinct assigned User ids
   const assignedRows = await prisma.affiliate.findMany({

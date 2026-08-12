@@ -44,7 +44,7 @@ export async function POST(
   if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
 
   const permission = await resolveUserPermission(session.userId, "affiliates.media");
-  if (!hasPermissionLevel(permission, "EDIT")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!hasPermissionLevel(permission, "EDIT")) return NextResponse.json({ error: "当前账号没有上传联盟商媒体资料的权限" }, { status: 403 });
   const { id } = await params;
   const form = await req.formData();
   const file = form.get("file");
@@ -109,7 +109,7 @@ export async function PATCH(
   if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
 
   const permission = await resolveUserPermission(session.userId, "affiliates.media");
-  if (!hasPermissionLevel(permission, "EDIT")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!hasPermissionLevel(permission, "EDIT")) return NextResponse.json({ error: "当前账号没有编辑联盟商媒体资料的权限" }, { status: 403 });
   const { id } = await params;
   const { itemId, text } = await req.json();
   const affiliate = await prisma.affiliate.findUnique({
@@ -135,7 +135,7 @@ export async function DELETE(
   if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
 
   const permission = await resolveUserPermission(session.userId, "affiliates.media");
-  if (!hasPermissionLevel(permission, "MANAGE")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!hasPermissionLevel(permission, "MANAGE")) return NextResponse.json({ error: "当前账号没有删除联盟商媒体资料的权限" }, { status: 403 });
   const { id } = await params;
   const itemId = req.nextUrl.searchParams.get("itemId");
   if (!itemId) return NextResponse.json({ error: "缺少 itemId" }, { status: 400 });

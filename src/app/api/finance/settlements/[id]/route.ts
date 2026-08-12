@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { reconciliationScope } from "@/lib/dataScope";
 import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
+import { errorResponse } from "@/lib/appError";
 
 // PATCH /api/finance/settlements/[id]
 // 更新结算记录（预计结算时间、实际结算时间、备注）
@@ -25,7 +26,7 @@ export async function PATCH(
         createdBy: { select: { id: true, name: true } },
       },
     });
-    if (!settlement) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    if (!settlement) return NextResponse.json({ error: "结算记录不存在、已删除或无权访问" }, { status: 404 });
 
     const data: Record<string, unknown> = { updatedAt: new Date() };
 
@@ -72,7 +73,6 @@ export async function PATCH(
     return NextResponse.json(updated);
   } catch (e) {
     if (e instanceof FeaturePermissionError) return NextResponse.json({ error: "无权限" }, { status: 403 });
-    console.error(e);
-    return NextResponse.json({ error: "更新失败" }, { status: 500 });
+    return errorResponse(e, "finance.settlement.update");
   }
 }

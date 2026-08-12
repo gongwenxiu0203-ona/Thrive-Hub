@@ -8,10 +8,10 @@ import { activeSalesRecordWhere } from "@/lib/activeSalesScope";
 
 export async function GET(req: NextRequest) {
   const auth = await getSession();
-  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!auth) return NextResponse.json({ error: "登录状态已失效，请重新登录后再操作" }, { status: 401 });
   const affiliatePermission = await resolveUserPermission(auth.userId, "affiliates.records");
   if (!hasPermissionLevel(affiliatePermission, "READ")) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    return NextResponse.json({ error: "当前账号没有查看联盟商资料的权限" }, { status: 403 });
   }
 
   const sp = req.nextUrl.searchParams;
@@ -179,10 +179,10 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const auth = await getSession();
-  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!auth) return NextResponse.json({ error: "登录状态已失效，请重新登录后再操作" }, { status: 401 });
   const affiliatePermission = await resolveUserPermission(auth.userId, "affiliates.records");
   if (!hasPermissionLevel(affiliatePermission, "EDIT")) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    return NextResponse.json({ error: "当前账号没有创建联盟商资料的权限" }, { status: 403 });
   }
 
   const body = await req.json();

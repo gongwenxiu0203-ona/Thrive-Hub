@@ -6,6 +6,7 @@ import { requireSession } from "@/lib/session";
 import { projectScope } from "@/lib/dataScope";
 import type { SessionPayload } from "@/lib/auth";
 import { requireFeaturePermission } from "@/lib/permissionGuard";
+import { actionError } from "@/lib/appError";
 
 type Result<T = void> = { ok: true; data?: T } | { ok: false; error: string };
 
@@ -140,8 +141,7 @@ export async function setProjectGmvTarget(
     revalidatePath("/dashboard");
     return { ok: true, data: { targetId } };
   } catch (e) {
-    console.error("[setProjectGmvTarget]", e);
-    return { ok: false, error: "保存失败，请重试" };
+    return actionError(e, "project.gmv-target.save");
   }
 }
 

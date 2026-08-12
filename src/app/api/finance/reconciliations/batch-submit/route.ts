@@ -4,6 +4,7 @@ import { requireSession } from "@/lib/session";
 import { getReconciliationAccess } from "@/lib/reconciliationAccess";
 import { FeaturePermissionError } from "@/lib/permissionGuard";
 import { recalcReconciliation } from "@/lib/reconciliationCalc";
+import { errorResponse } from "@/lib/appError";
 
 const MAX_BATCH_SIZE = 100;
 type SubmitMode = "CUSTOMER_REVIEW" | "SKIP_CUSTOMER";
@@ -305,13 +306,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "无权提交客户对账" }, { status: 403 });
     if (error instanceof BatchSubmitConflict)
       return NextResponse.json({ error: error.message }, { status: 409 });
-    console.error("[reconciliation-batch-submit] failed", error);
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error ? error.message : "批量提交失败，请稍后重试",
-      },
-      { status: 500 },
-    );
+    return errorResponse(error, "finance.reconciliation.batch-submit");
   }
 }

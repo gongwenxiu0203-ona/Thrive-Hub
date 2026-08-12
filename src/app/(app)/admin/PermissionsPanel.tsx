@@ -2,6 +2,7 @@
 
 import { Fragment, useState, useEffect, useTransition } from "react";
 import { Badge } from "@/components/ui/Badge";
+import { clientUnknownError, readApiError } from "@/lib/clientError";
 import {
   FEATURES,
   FEATURE_GROUPS,
@@ -63,12 +64,26 @@ function RolePermissionsTab({ canEdit }: { canEdit: boolean }) {
   const [loading, setLoading] = useState(true);
   const [, startTransition] = useTransition();
   const [savedKey, setSavedKey] = useState<string | null>(null);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     fetch("/api/admin/permissions/role")
-      .then((r) => r.json())
+      .then(async (response) => {
+        if (!response.ok) {
+          setError(await readApiError(response));
+          setLoading(false);
+          return null;
+        }
+        return response.json();
+      })
       .then((d) => {
+        if (!d) return;
         setData(d);
+        setLoading(false);
+      })
+      .catch((loadError) => {
+        console.error("[role-permissions-load]", loadError);
+        setError(clientUnknownError());
         setLoading(false);
       });
   }, []);
@@ -79,17 +94,23 @@ function RolePermissionsTab({ canEdit }: { canEdit: boolean }) {
       [role]: { ...(prev[role] ?? {}), [feature]: level },
     }));
     startTransition(async () => {
-      const res = await fetch("/api/admin/permissions/role", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role, feature, level }),
-      });
-      if (res.ok) {
+      setError("");
+      try {
+        const res = await fetch("/api/admin/permissions/role", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ role, feature, level }),
+        });
+        if (!res.ok) {
+          setError(await readApiError(res));
+          return;
+        }
         const k = `${role}::${feature}`;
         setSavedKey(k);
         setTimeout(() => setSavedKey((c) => (c === k ? null : c)), 1500);
-      } else {
-        alert("保存失败");
+      } catch (saveError) {
+        console.error("[role-permissions-save]", saveError);
+        setError(clientUnknownError());
       }
     });
   }
@@ -102,6 +123,7 @@ function RolePermissionsTab({ canEdit }: { canEdit: boolean }) {
 
   return (
     <div className="card overflow-x-auto">
+      {error && <p className="m-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
       <p className="border-b border-slate-100 px-4 py-3 text-xs text-slate-500">
         💡 修改某角色的某个功能权限后会即时生效，影响所有未单独设置过覆盖的用户
       </p>
@@ -251,14 +273,29 @@ function UserPermissionEditor({ user, canEdit }: { user: UserRecord; canEdit: bo
   const [overrideKeys, setOverrideKeys] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [, startTransition] = useTransition();
+  const [error, setError] = useState("");
 
   function load() {
     setLoading(true);
+    setError("");
     fetch(`/api/admin/permissions/user/${user.id}`)
-      .then((r) => r.json())
+      .then(async (response) => {
+        if (!response.ok) {
+          setError(await readApiError(response));
+          setLoading(false);
+          return null;
+        }
+        return response.json();
+      })
       .then((d) => {
+        if (!d) return;
         setEffective(d.effective ?? {});
         setOverrideKeys(new Set<string>(d.overrideKeys ?? []));
+        setLoading(false);
+      })
+      .catch((loadError) => {
+        console.error("[user-permissions-load]", loadError);
+        setError(clientUnknownError());
         setLoading(false);
       });
   }
@@ -271,27 +308,43 @@ function UserPermissionEditor({ user, canEdit }: { user: UserRecord; canEdit: bo
   function update(feature: string, level: PermLevel) {
     setEffective((prev) => ({ ...prev, [feature]: level }));
     startTransition(async () => {
-      const res = await fetch(`/api/admin/permissions/user/${user.id}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ feature, level }),
-      });
-      if (res.ok) {
+      setError("");
+      try {
+        const res = await fetch(`/api/admin/permissions/user/${user.id}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ feature, level }),
+        });
+        if (!res.ok) {
+          setError(await readApiError(res));
+          return;
+        }
         load();
-      } else {
-        alert("保存失败");
+      } catch (saveError) {
+        console.error("[user-permissions-save]", saveError);
+        setError(clientUnknownError());
       }
     });
   }
 
   function reset(feature: string) {
     startTransition(async () => {
-      const res = await fetch(`/api/admin/permissions/user/${user.id}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ feature, reset: true }),
-      });
-      if (res.ok) load();
+      setError("");
+      try {
+        const res = await fetch(`/api/admin/permissions/user/${user.id}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ feature, reset: true }),
+        });
+        if (!res.ok) {
+          setError(await readApiError(res));
+          return;
+        }
+        load();
+      } catch (resetError) {
+        console.error("[user-permissions-reset]", resetError);
+        setError(clientUnknownError());
+      }
     });
   }
 
@@ -301,6 +354,7 @@ function UserPermissionEditor({ user, canEdit }: { user: UserRecord; canEdit: bo
 
   return (
     <div className="card overflow-hidden">
+      {error && <p className="m-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
       <div className="border-b border-slate-100 px-4 py-3">
         <div className="flex items-center justify-between">
           <div>

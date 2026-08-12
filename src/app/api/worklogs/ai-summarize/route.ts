@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
+import { AppError, errorResponse } from "@/lib/appError";
 
 /** AI 总结/优化工作日志内容 */
 export async function POST(req: Request) {
@@ -47,10 +48,9 @@ ${text.slice(0, 6000)}`;
     }
     const data = await res.json();
     const result = data.content?.[0]?.text ?? "";
-    if (!result.trim()) return NextResponse.json({ error: "AI 返回为空" }, { status: 500 });
+    if (!result.trim()) throw new AppError("AI 服务未返回可用内容，请稍后重试", 502);
     return NextResponse.json({ ok: true, content: result.trim() });
   } catch (e) {
-    console.error("[worklogs ai-summarize]", e);
-    return NextResponse.json({ error: "AI 总结失败，请重试" }, { status: 500 });
+    return errorResponse(e, "worklogs.ai-summarize");
   }
 }

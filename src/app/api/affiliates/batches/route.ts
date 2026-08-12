@@ -6,8 +6,8 @@ import { resolveUserPermission } from "@/lib/permissionResolver";
 
 export async function GET() {
   const session = await getSession();
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!hasPermissionLevel(await resolveUserPermission(session.userId, "affiliates.batches"), "READ")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!session) return NextResponse.json({ error: "登录状态已失效，请重新登录后再操作" }, { status: 401 });
+  if (!hasPermissionLevel(await resolveUserPermission(session.userId, "affiliates.batches"), "READ")) return NextResponse.json({ error: "当前账号没有查看联盟资源批次的权限" }, { status: 403 });
   const batches = await prisma.affiliateBatch.findMany({
     orderBy: { createdAt: "desc" },
     include: { uploader: { select: { id: true, name: true } } },

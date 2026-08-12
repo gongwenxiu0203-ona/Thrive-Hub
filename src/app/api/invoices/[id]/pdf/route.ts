@@ -12,6 +12,7 @@ import {
   requireFeaturePermission,
 } from "@/lib/permissionGuard";
 import { getSession } from "@/lib/session";
+import { errorResponse } from "@/lib/appError";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -59,27 +60,32 @@ export async function GET(
         { status: 403 },
       );
     }
-    throw error;
+    return errorResponse(error, "invoices.pdf.authorization");
   }
 
   const { id } = await params;
-  const invoice = await prisma.invoice.findFirst({
-    where: {
-      id,
-      deletedAt: null,
-      ...(session.role === "ADMIN"
-        ? {}
-        : {
-            OR: [
-              { createdById: session.userId },
-              { customer: customerScope(session, "mine") },
-            ],
-          }),
-    },
-    include: {
-      items: { orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] },
-    },
-  });
+  let invoice;
+  try {
+    invoice = await prisma.invoice.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        ...(session.role === "ADMIN"
+          ? {}
+          : {
+              OR: [
+                { createdById: session.userId },
+                { customer: customerScope(session, "mine") },
+              ],
+            }),
+      },
+      include: {
+        items: { orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] },
+      },
+    });
+  } catch (error) {
+    return errorResponse(error, "invoices.pdf.lookup");
+  }
   if (!invoice) {
     return NextResponse.json({ error: "Invoice 不存在" }, { status: 404 });
   }
@@ -130,13 +136,6 @@ export async function GET(
       },
     });
   } catch (error) {
-    console.error("[invoice-pdf] generation failed", {
-      invoiceId: invoice.id,
-      error,
-    });
-    return NextResponse.json(
-      { error: "Invoice PDF 生成失败，请稍后重试" },
-      { status: 500 },
-    );
+    return errorResponse(error, `invoices.pdf:${invoice.id}`);
   }
 }

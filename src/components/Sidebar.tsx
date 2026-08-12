@@ -21,7 +21,6 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { visibleNavForRole, isStaff } from "@/lib/permissions";
 import { IntakeLinkButton } from "@/components/IntakeLinkButton";
 import { Modal } from "@/components/ui/Modal";
 import {
@@ -41,31 +40,25 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     label: "\u5de5\u4f5c\u6d41",
     items: [
       { href: "/dashboard", label: "\u5de5\u4f5c\u53f0", icon: LayoutDashboard, features: ["dashboard.view"] },
-      { href: "/customers", label: "\u5ba2\u6237\u7ba1\u7406", icon: Users, features: ["customers.records", "customers.followup"] },
+      { href: "/customers", label: "\u5ba2\u6237\u7ba1\u7406", icon: Users, features: ["customers.records"] },
       {
         href: "/contracts",
         label: "\u5408\u540c\u7ba1\u7406",
         icon: FileText,
-        features: [
-          "contracts.records",
-          "contracts.create_upload",
-          "contracts.reviews",
-          "contracts.templates",
-          "contracts.signing",
-        ],
+        features: ["contracts.records"],
       },
-      { href: "/projects", label: "\u9879\u76ee\u7ba1\u7406", icon: FolderKanban, features: ["projects.records", "projects.kpi"] },
+      { href: "/projects", label: "\u9879\u76ee\u7ba1\u7406", icon: FolderKanban, features: ["projects.records"] },
     ],
   },
   {
     label: "\u6570\u636e\u4e0e\u8d44\u6e90",
     items: [
-      { href: "/bi", label: "\u63a8\u5e7f\u6570\u636e BI", icon: BarChart3, features: ["bi.view", "bi.import", "bi.export", "bi.manage"] },
+      { href: "/bi", label: "\u63a8\u5e7f\u6570\u636e BI", icon: BarChart3, features: ["bi.view"] },
       {
         href: "/affiliates",
         label: "\u8054\u76df\u8d44\u6e90\u5e93",
         icon: Handshake,
-        features: ["affiliates.records", "affiliates.reviews", "affiliates.batches", "affiliates.media"],
+        features: ["affiliates.records"],
       },
     ],
   },
@@ -107,20 +100,17 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
 ];
 
 export function Sidebar({
-  role = "",
   userId = "",
   permissions = {},
   mobileOpen = false,
   onMobileClose,
 }: {
-  role?: string;
   userId?: string;
   permissions?: Record<string, PermLevel>;
   mobileOpen?: boolean;
   onMobileClose?: () => void;
 }) {
   const pathname = usePathname();
-  const visibleHrefs = visibleNavForRole(role);
   const searchParams = useSearchParams();
   const hasAtLeast = (feature: string, required: PermLevel) =>
     PERM_LEVELS.indexOf(permissions[feature] ?? "NONE") >=
@@ -131,7 +121,6 @@ export function Sidebar({
     ...group,
     items: group.items.filter(
       (item) =>
-        (!visibleHrefs || visibleHrefs.includes(item.href)) &&
         canReadAny(item.features),
     ),
   })).filter((group) => group.items.length > 0);
@@ -145,7 +134,7 @@ export function Sidebar({
     "reminders.records",
     "bi.manage",
     "projects.records",
-  ].some((feature) => hasAtLeast(feature, "MANAGE"));
+  ].every((feature) => hasAtLeast(feature, "MANAGE"));
   const canOpenAdmin = [
     "admin.users",
     "admin.registration_review",
@@ -153,6 +142,7 @@ export function Sidebar({
     "admin.data_quality",
     "admin.audit",
     "admin.api_access",
+    "intake.review",
   ].some((feature) => hasAtLeast(feature, "READ"));
 
   return (
@@ -227,8 +217,8 @@ export function Sidebar({
       </nav>
 
       <div className="space-y-1 border-t border-[#e7e0ef] px-3 py-4">
-        {isStaff(role) && userId && canUseIntakeLinks && <InviteButton userId={userId} />}
-        {isStaff(role) && canManageRecycleBin && (
+        {userId && canUseIntakeLinks && <InviteButton userId={userId} />}
+        {canManageRecycleBin && (
           <Link
             href="/recycle-bin"
             onClick={onMobileClose}
@@ -243,8 +233,8 @@ export function Sidebar({
             {"\u56de\u6536\u7ad9"}
           </Link>
         )}
-        {(isStaff(role) || role === "CHANNEL") && canUseIntakeLinks && <IntakeLinkButton compact />}
-        {role === "ADMIN" && canOpenAdmin && (
+        {canUseIntakeLinks && <IntakeLinkButton compact />}
+        {canOpenAdmin && (
           <Link
             href="/admin"
             onClick={onMobileClose}

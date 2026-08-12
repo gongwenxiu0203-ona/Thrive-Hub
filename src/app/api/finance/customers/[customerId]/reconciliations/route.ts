@@ -4,6 +4,7 @@ import { requireSession } from "@/lib/session";
 import { customerScope, reconciliationScope } from "@/lib/dataScope";
 import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
 import { RECONCILIATION_FEATURE } from "@/lib/reconciliationAccess";
+import { errorResponse } from "@/lib/appError";
 
 // DELETE /api/finance/customers/[customerId]/reconciliations
 // 删除该客户的全部月度对账记录（含级联的 settlements/reviews）
@@ -51,7 +52,6 @@ export async function DELETE(
     return NextResponse.json({ success: true, deleted: count });
   } catch (e) {
     if (e instanceof FeaturePermissionError) return NextResponse.json({ error: "无权限" }, { status: 403 });
-    console.error(e);
-    return NextResponse.json({ error: "删除失败" }, { status: 500 });
+    return errorResponse(e, "finance.customer-reconciliations.delete-all");
   }
 }

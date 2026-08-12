@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
 import { getInvoiceFormOptions, getInvoiceReconciliationPrefill } from "@/actions/invoices";
-import { isStaff } from "@/lib/permissions";
 import { hasPermissionLevel } from "@/lib/permissionGuard";
 import { resolveUserPermission } from "@/lib/permissionResolver";
 import { requireSession } from "@/lib/session";
@@ -15,7 +14,6 @@ export default async function NewInvoicePage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const session = await requireSession();
-  if (!isStaff(session.role)) redirect("/operations");
   const permission = await resolveUserPermission(session.userId, "operations.invoices");
   if (!hasPermissionLevel(permission, "EDIT")) redirect("/invoices");
   const params = await searchParams;

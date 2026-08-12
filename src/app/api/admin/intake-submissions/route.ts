@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 export async function GET(req: Request) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
-  if (!await adminHasFeature(session, "intake.review", "READ")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!await adminHasFeature(session, "intake.review", "READ")) return NextResponse.json({ error: "当前账号没有查看客户资料审核的权限" }, { status: 403 });
   const url = new URL(req.url);
   const status = url.searchParams.get("status");
   const type = url.searchParams.get("type");

@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
 import { listInvoices } from "@/actions/invoices";
-import { isStaff } from "@/lib/permissions";
 import { hasPermissionLevel } from "@/lib/permissionGuard";
 import { resolveUserPermission } from "@/lib/permissionResolver";
 import { requireSession } from "@/lib/session";
@@ -15,20 +14,18 @@ export default async function InvoicesPage({
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const session = await requireSession();
-  if (!isStaff(session.role)) redirect("/operations");
   const params = await searchParams;
+  const permission = await resolveUserPermission(session.userId, "operations.invoices");
+  if (!hasPermissionLevel(permission, "READ")) redirect("/operations");
   const search = params.search?.trim() ?? "";
   const status = params.status ?? "";
   const invoiceStatus = status === "DRAFT" || status === "ISSUED" || status === "VOID"
     ? status
     : undefined;
-  const [invoices, permission] = await Promise.all([
-    listInvoices({
-      search: search || undefined,
-      status: invoiceStatus,
-    }),
-    resolveUserPermission(session.userId, "operations.invoices"),
-  ]);
+  const invoices = await listInvoices({
+    search: search || undefined,
+    status: invoiceStatus,
+  });
 
   return (
     <InvoiceListClient

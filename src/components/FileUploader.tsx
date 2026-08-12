@@ -4,6 +4,7 @@ import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Upload, FileText, Download, Trash2 } from "lucide-react";
 import { formatDateTime } from "@/lib/utils";
+import { clientUnknownError, readApiError } from "@/lib/clientError";
 
 export type AttachmentItem = {
   id: string;
@@ -41,22 +42,40 @@ export function FileUploader({
     if (!file) return;
     setError(null);
     startTransition(async () => {
-      const fd = new FormData();
-      fd.append("file", file);
-      fd.append("entityType", entityType);
-      fd.append("entityId", entityId);
-      const res = await fetch("/api/upload", { method: "POST", body: fd });
-      const data = await res.json();
-      if (!res.ok) setError(data.error ?? "上传失败");
-      else router.refresh();
-      if (inputRef.current) inputRef.current.value = "";
+      try {
+        const fd = new FormData();
+        fd.append("file", file);
+        fd.append("entityType", entityType);
+        fd.append("entityId", entityId);
+        const res = await fetch("/api/upload", { method: "POST", body: fd });
+        if (!res.ok) {
+          setError(await readApiError(res));
+          return;
+        }
+        router.refresh();
+      } catch (uploadError) {
+        console.error("[attachment-upload]", uploadError);
+        setError(clientUnknownError());
+      } finally {
+        if (inputRef.current) inputRef.current.value = "";
+      }
     });
   }
 
   function onDelete(id: string) {
+    setError(null);
     startTransition(async () => {
-      const res = await fetch(`/api/upload?id=${id}`, { method: "DELETE" });
-      if (res.ok) router.refresh();
+      try {
+        const res = await fetch(`/api/upload?id=${id}`, { method: "DELETE" });
+        if (!res.ok) {
+          setError(await readApiError(res));
+          return;
+        }
+        router.refresh();
+      } catch (deleteError) {
+        console.error("[attachment-delete]", deleteError);
+        setError(clientUnknownError());
+      }
     });
   }
 

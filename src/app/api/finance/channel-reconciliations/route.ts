@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { channelReconciliationScope, customerScope } from "@/lib/dataScope";
 import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
+import { errorResponse } from "@/lib/appError";
 import {
   splitCommissionServicePeriods,
   splitFixedFeeServicePeriods,
@@ -29,7 +30,7 @@ export async function GET() {
     if (error instanceof FeaturePermissionError) {
       return NextResponse.json({ error: "无权限" }, { status: 403 });
     }
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: "登录状态已失效，请重新登录后再操作" }, { status: 401 });
   }
 }
 
@@ -202,7 +203,6 @@ export async function POST(req: Request) {
     if (error instanceof FeaturePermissionError) {
       return NextResponse.json({ error: "无权限" }, { status: 403 });
     }
-    console.error(error);
-    return NextResponse.json({ error: "创建失败" }, { status: 500 });
+    return errorResponse(error, "finance.channel-reconciliations.create");
   }
 }

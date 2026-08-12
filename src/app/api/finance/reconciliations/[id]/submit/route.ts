@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { getReconciliationAccess, scopedReconciliationWhere } from "@/lib/reconciliationAccess";
 import { FeaturePermissionError } from "@/lib/permissionGuard";
+import { errorResponse } from "@/lib/appError";
 
 // POST /api/finance/reconciliations/[id]/submit
 // 提交对账，状态变为 PENDING_REVIEW，通知指定审核人（或客户负责人）
@@ -25,7 +26,7 @@ export async function POST(
         customer: { select: { id: true, brandName: true, businessOwnerId: true } },
       },
     });
-    if (!rec) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    if (!rec) return NextResponse.json({ error: "客户对账记录不存在、已删除或无权访问" }, { status: 404 });
     if (rec.status !== "DRAFT" && rec.status !== "DISPUTED") {
       return NextResponse.json({ error: "只有草稿或争议状态可以提交对账" }, { status: 400 });
     }
@@ -80,7 +81,6 @@ export async function POST(
     return NextResponse.json({ success: true });
   } catch (e) {
     if (e instanceof FeaturePermissionError) return NextResponse.json({ error: "无权限" }, { status: 403 });
-    console.error(e);
-    return NextResponse.json({ error: "提交失败" }, { status: 500 });
+    return errorResponse(e, "finance.reconciliation.submit");
   }
 }

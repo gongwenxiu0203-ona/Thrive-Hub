@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { errorResponse } from "@/lib/appError";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 import { convertRow, getMappableFields, FIELD_HINTS } from "@/lib/salesImport";
@@ -337,8 +338,6 @@ export async function POST(req: Request) {
       newAffiliateCount,
     });
   } catch (err) {
-    console.error("[sales/upload] unhandled error:", err);
-    const msg = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: `服务器错误：${msg}` }, { status: 500 });
+    return errorResponse(err, "sales.upload");
   }
 }

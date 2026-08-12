@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { isStaff } from "@/lib/permissions";
 import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
+import { AppError, errorResponse } from "@/lib/appError";
 
 /** 从粘贴文本中用 AI 提取 v4 合同字段 */
 export async function POST(req: Request) {
@@ -9,7 +10,10 @@ export async function POST(req: Request) {
   if (session && !isStaff(session.role)) return NextResponse.json({ error: "无权解析合同" }, { status: 403 });
   if (session) {
     try { await requireFeaturePermission(session, "contracts.create_upload", "EDIT"); }
-    catch (error) { if (error instanceof FeaturePermissionError) return NextResponse.json({ error: "无权解析合同" }, { status: 403 }); throw error; }
+    catch (error) {
+      if (error instanceof FeaturePermissionError) return NextResponse.json({ error: "无权解析合同" }, { status: 403 });
+      return errorResponse(error, "contracts.v4-extract.authorization");
+    }
   }
   if (!session) return NextResponse.json({ error: "未登录" }, { status: 401 });
 
@@ -80,12 +84,11 @@ ${text.slice(0, 8000)}`;
     const data = await res.json();
     const raw = data.content?.[0]?.text ?? "";
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return NextResponse.json({ error: "AI 返回格式异常" }, { status: 500 });
+    if (!jsonMatch) throw new AppError("AI 返回格式异常，请稍后重试", 502);
 
     const extracted = JSON.parse(jsonMatch[0]);
     return NextResponse.json({ ok: true, data: extracted });
   } catch (err) {
-    console.error("[v4-extract]", err);
-    return NextResponse.json({ error: "提取失败，请重试" }, { status: 500 });
+    return errorResponse(err, "contracts.v4-extract");
   }
 }

@@ -5,6 +5,7 @@ import { getReconciliationAccess, scopedReconciliationWhere } from "@/lib/reconc
 import { FeaturePermissionError } from "@/lib/permissionGuard";
 import { calcBetAndCommission } from "@/lib/reconciliationCalc";
 import { reconciliationSalesRecordWhere } from "@/lib/activeSalesScope";
+import { errorResponse } from "@/lib/appError";
 
 // POST /api/finance/reconciliations/[id]/pull-bi
 // 根据对账周期从 SalesRecord 自动拉取该客户的销售单量和销售额
@@ -64,7 +65,6 @@ export async function POST(
     return NextResponse.json(updated);
   } catch (e) {
     if (e instanceof FeaturePermissionError) return NextResponse.json({ error: "无权限" }, { status: 403 });
-    console.error(e);
-    return NextResponse.json({ error: "拉取 BI 数据失败，请稍后重试" }, { status: 500 });
+    return errorResponse(e, "finance.reconciliation.pull-bi");
   }
 }
