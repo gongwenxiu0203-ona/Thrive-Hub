@@ -1,7 +1,12 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { PDFDocument } from "pdf-lib";
-import sharp from "sharp";
+import {
+  createCanvas,
+  loadImage,
+  GlobalFonts,
+  type Image,
+} from "@napi-rs/canvas";
 
 const PAGE_WIDTH = 1240;
 const PAGE_HEIGHT = 1754;
@@ -9,7 +14,14 @@ const A4_WIDTH = 595.28;
 const A4_HEIGHT = 841.89;
 const PAGE_MARGIN = 72;
 const TABLE_WIDTH = PAGE_WIDTH - PAGE_MARGIN * 2;
-const BODY_FONT = "'Thraive Source Han Sans CN',sans-serif";
+const FONT_FAMILY = "ThraiveSourceHanSansCN";
+const FONT_PATH = path.join(
+  process.cwd(),
+  "public",
+  "fonts",
+  "SourceHanSansCN-Regular.otf",
+);
+const LOGO_PATH = path.join(process.cwd(), "public", "thraive-logo.png");
 
 export type InvoicePdfItem = {
   feeType: string;
@@ -58,16 +70,20 @@ type InvoicePage = {
   summary: boolean;
 };
 
-let logoDataPromise: Promise<string> | null = null;
-let bodyFontDataPromise: Promise<string> | null = null;
+let fontReady: Promise<void> | null = null;
+function ensureFont(): Promise<void> {
+  if (!fontReady) {
+    fontReady = Promise.resolve().then(() => {
+      GlobalFonts.registerFromPath(FONT_PATH, FONT_FAMILY);
+    });
+  }
+  return fontReady;
+}
 
-function escapeXml(value: unknown): string {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&apos;");
+let logoPromise: Promise<Image> | null = null;
+function logoImage(): Promise<Image> {
+  logoPromise ??= loadImage(LOGO_PATH);
+  return logoPromise;
 }
 
 function estimateCharacterWidth(character: string, fontSize: number): number {
@@ -107,31 +123,6 @@ function wrapText(value: unknown, maxWidth: number, fontSize: number): string[] 
   return result.length ? result : [""];
 }
 
-function textLines(
-  lines: string[],
-  x: number,
-  y: number,
-  options?: {
-    fontSize?: number;
-    lineHeight?: number;
-    fill?: string;
-    weight?: number;
-    anchor?: "start" | "middle" | "end";
-  },
-): string {
-  const fontSize = options?.fontSize ?? 24;
-  const lineHeight = options?.lineHeight ?? Math.round(fontSize * 1.4);
-  const fill = options?.fill ?? "#18212f";
-  const weight = options?.weight ?? 400;
-  const anchor = options?.anchor ?? "start";
-  return lines
-    .map(
-      (line, index) =>
-        `<text x="${x}" y="${y + index * lineHeight}" font-family="${BODY_FONT}" font-size="${fontSize}" font-weight="${weight}" fill="${fill}" text-anchor="${anchor}">${escapeXml(line)}</text>`,
-    )
-    .join("");
-}
-
 function formatDate(date: Date): string {
   return new Intl.DateTimeFormat("en-US", {
     year: "numeric",
@@ -155,25 +146,6 @@ function formatMoney(value: number, currency: string): string {
   }
 }
 
-async function logoDataUri(): Promise<string> {
-  logoDataPromise ??= fs
-    .readFile(path.join(process.cwd(), "public", "thraive-logo.png"))
-    .then((bytes) => `data:image/png;base64,${bytes.toString("base64")}`);
-  return logoDataPromise;
-}
-
-async function bodyFontDataUri(): Promise<string> {
-  bodyFontDataPromise ??= fs
-    .readFile(
-      path.join(process.cwd(), "public", "fonts", "SourceHanSansCN-Regular.otf"),
-    )
-    .then(
-      (bytes) =>
-        `data:font/otf;charset=utf-8;base64,${bytes.toString("base64")}`,
-    );
-  return bodyFontDataPromise;
-}
-
 function normalizeItems(items: InvoicePdfItem[]): RenderedItem[] {
   return items.map((item) => {
     const lines = wrapText(item.description, 590, 23);
@@ -188,7 +160,9 @@ function normalizeItems(items: InvoicePdfItem[]): RenderedItem[] {
   });
 }
 
-function currencyTotals(invoice: InvoicePdfData): Array<{ currency: string; amount: number }> {
+function currencyTotals(
+  invoice: InvoicePdfData,
+): Array<{ currency: string; amount: number }> {
   if (invoice.currencyTotals?.length) return invoice.currencyTotals;
   const totals = new Map<string, number>();
   for (const item of invoice.items) {
@@ -212,8 +186,6 @@ function paginate(items: RenderedItem[]): InvoicePage[] {
     while (index < items.length) {
       const item = items[index];
       if (pageItems.length && used + item.height > bottom) break;
-      // A single extremely long row is capped by wrapText's available page
-      // height. Descriptions beyond that are split across physical rows.
       if (!pageItems.length && item.height > bottom - startY) {
         const maxLines = Math.max(1, Math.floor((bottom - startY - 28) / 31));
         const headLines = item.lines.slice(0, maxLines);
@@ -222,7 +194,6 @@ function paginate(items: RenderedItem[]): InvoicePage[] {
           ...item,
           lines: headLines,
           height: Math.max(74, 32 + headLines.length * 31),
-          // Monetary values belong to the final fragment only.
           quantity: tailLines.length ? 0 : item.quantity,
           unitPrice: tailLines.length ? 0 : item.unitPrice,
           amount: tailLines.length ? 0 : item.amount,
@@ -263,84 +234,159 @@ function paginate(items: RenderedItem[]): InvoicePage[] {
   return pages;
 }
 
-function renderCompanyHeader(logo: string, compact = false): string {
-  const top = compact ? 54 : 70;
-  return `
-    <image href="${logo}" x="${PAGE_MARGIN}" y="${top}" width="150" height="62" preserveAspectRatio="xMidYMid meet"/>
-    <text x="${PAGE_MARGIN + 170}" y="${top + 23}" font-family="${BODY_FONT}" font-size="20" font-weight="700" fill="#101828">HONG KONG THRAIVE DIGITAL</text>
-    <text x="${PAGE_MARGIN + 170}" y="${top + 50}" font-family="${BODY_FONT}" font-size="20" font-weight="700" fill="#101828">MARKETING TECHNOLOGY CO.</text>
-    <text x="${PAGE_WIDTH - PAGE_MARGIN}" y="${top + 34}" font-family="Georgia,serif" font-size="${compact ? 43 : 52}" font-weight="700" fill="#101828" text-anchor="end">INVOICE</text>
-    <line x1="${PAGE_MARGIN}" y1="${top + 82}" x2="${PAGE_WIDTH - PAGE_MARGIN}" y2="${top + 82}" stroke="#101828" stroke-width="3"/>
-  `;
+/* ----------------------------- canvas drawing ----------------------------- */
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Ctx = any;
+
+function cnFont(size: number, weight = 400): string {
+  return `${weight} ${size}px "${FONT_FAMILY}", sans-serif`;
 }
 
-function renderInvoiceMeta(invoice: InvoicePdfData): string {
+function serifFont(size: number, weight = 400): string {
+  return `${weight} ${size}px Georgia, "Times New Roman", serif`;
+}
+
+function text(
+  ctx: Ctx,
+  value: string,
+  x: number,
+  y: number,
+  font: string,
+  fill: string,
+  align: "left" | "center" | "right" = "left",
+): void {
+  ctx.font = font;
+  ctx.fillStyle = fill;
+  ctx.textAlign = align;
+  ctx.textBaseline = "alphabetic";
+  ctx.fillText(value, x, y);
+}
+
+function lines(
+  ctx: Ctx,
+  values: string[],
+  x: number,
+  y: number,
+  fontSize: number,
+  lineHeight: number,
+  font: string,
+  fill: string,
+  align: "left" | "center" | "right" = "left",
+): void {
+  ctx.font = font;
+  ctx.fillStyle = fill;
+  ctx.textAlign = align;
+  ctx.textBaseline = "alphabetic";
+  values.forEach((line, index) => {
+    ctx.fillText(line, x, y + index * lineHeight);
+  });
+}
+
+function hline(ctx: Ctx, x1: number, y: number, x2: number, color: string, width = 1): void {
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.beginPath();
+  ctx.moveTo(x1, y);
+  ctx.lineTo(x2, y);
+  ctx.stroke();
+}
+
+function cell(
+  ctx: Ctx,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  fill: string,
+  stroke: string,
+): void {
+  ctx.fillStyle = fill;
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x, y, w, h);
+}
+
+function drawCompanyHeader(ctx: Ctx, logo: Image | null, compact: boolean): void {
+  const top = compact ? 54 : 70;
+  if (logo) ctx.drawImage(logo, PAGE_MARGIN, top, 150, 62);
+  text(ctx, "HONG KONG THRAIVE DIGITAL", PAGE_MARGIN + 170, top + 23, cnFont(20, 700), "#101828");
+  text(ctx, "MARKETING TECHNOLOGY CO.", PAGE_MARGIN + 170, top + 50, cnFont(20, 700), "#101828");
+  text(ctx, "INVOICE", PAGE_WIDTH - PAGE_MARGIN, top + 34, serifFont(compact ? 43 : 52, 700), "#101828", "right");
+  hline(ctx, PAGE_MARGIN, top + 82, PAGE_WIDTH - PAGE_MARGIN, "#101828", 3);
+}
+
+function drawInvoiceMeta(ctx: Ctx, invoice: InvoicePdfData): void {
   const left = 650;
   const right = PAGE_WIDTH - PAGE_MARGIN;
   const totals = currencyTotals(invoice);
-  return `
-    <text x="${left}" y="218" font-family="${BODY_FONT}" font-size="16" font-weight="700" fill="#667085">INVOICE NUMBER</text>
-    <text x="${right}" y="218" font-family="${BODY_FONT}" font-size="18" fill="#101828" text-anchor="end">${escapeXml(invoice.invoiceNo)}</text>
-    <text x="${left}" y="252" font-family="${BODY_FONT}" font-size="16" font-weight="700" fill="#667085">INVOICE DATE</text>
-    <text x="${right}" y="252" font-family="${BODY_FONT}" font-size="18" fill="#101828" text-anchor="end">${escapeXml(formatDate(invoice.invoiceDate))}</text>
-    <text x="${left}" y="286" font-family="${BODY_FONT}" font-size="16" font-weight="700" fill="#667085">PAYMENT DUE</text>
-    <text x="${right}" y="286" font-family="${BODY_FONT}" font-size="18" fill="#101828" text-anchor="end">${escapeXml(formatDate(invoice.dueDate))}</text>
-    <line x1="${left}" y1="302" x2="${right}" y2="302" stroke="#d0d5dd" stroke-width="1"/>
-    <text x="${left}" y="332" font-family="${BODY_FONT}" font-size="16" font-weight="700" fill="#344054">AMOUNT DUE</text>
-    <text x="${right}" y="332" font-family="${BODY_FONT}" font-size="20" font-weight="700" fill="#101828" text-anchor="end">${escapeXml(totals.length === 1 ? formatMoney(totals[0].amount, totals[0].currency) : "Multiple currencies — see summary")}</text>
-  `;
+  text(ctx, "INVOICE NUMBER", left, 218, cnFont(16, 700), "#667085");
+  text(ctx, invoice.invoiceNo, right, 218, cnFont(18), "#101828", "right");
+  text(ctx, "INVOICE DATE", left, 252, cnFont(16, 700), "#667085");
+  text(ctx, formatDate(invoice.invoiceDate), right, 252, cnFont(18), "#101828", "right");
+  text(ctx, "PAYMENT DUE", left, 286, cnFont(16, 700), "#667085");
+  text(ctx, formatDate(invoice.dueDate), right, 286, cnFont(18), "#101828", "right");
+  hline(ctx, left, 302, right, "#d0d5dd");
+  text(ctx, "AMOUNT DUE", left, 332, cnFont(16, 700), "#344054");
+  const amountDue =
+    totals.length === 1
+      ? formatMoney(totals[0].amount, totals[0].currency)
+      : "Multiple currencies — see summary";
+  text(ctx, amountDue, right, 332, cnFont(20, 700), "#101828", "right");
 }
 
-function renderBillTo(invoice: InvoicePdfData): string {
+function drawBillTo(ctx: Ctx, invoice: InvoicePdfData): void {
   const nameLines = wrapText(invoice.clientName, 490, 24);
   const addressLines = wrapText(invoice.clientAddress || "-", 490, 20);
-  return `
-    <text x="${PAGE_MARGIN}" y="220" font-family="${BODY_FONT}" font-size="18" font-weight="700" fill="#667085">BILL TO</text>
-    ${textLines(nameLines, PAGE_MARGIN, 260, { fontSize: 24, lineHeight: 32, weight: 700 })}
-    ${textLines(addressLines, PAGE_MARGIN, 260 + nameLines.length * 32 + 14, { fontSize: 20, lineHeight: 28, fill: "#475467" })}
-  `;
+  text(ctx, "BILL TO", PAGE_MARGIN, 220, cnFont(18, 700), "#667085");
+  lines(ctx, nameLines, PAGE_MARGIN, 260, 24, 32, cnFont(24, 700), "#101828");
+  lines(
+    ctx,
+    addressLines,
+    PAGE_MARGIN,
+    260 + nameLines.length * 32 + 14,
+    20,
+    28,
+    cnFont(20),
+    "#475467",
+  );
 }
 
-function renderTableHeader(y: number): string {
+function drawTableHeader(ctx: Ctx, y: number): void {
   const descriptionEnd = 735;
   const quantityEnd = 850;
   const priceEnd = 1020;
-  return `
-    <rect x="${PAGE_MARGIN}" y="${y}" width="${TABLE_WIDTH}" height="54" fill="#f2f4f7" stroke="#98a2b3" stroke-width="1"/>
-    <line x1="${descriptionEnd}" y1="${y}" x2="${descriptionEnd}" y2="${y + 54}" stroke="#98a2b3"/>
-    <line x1="${quantityEnd}" y1="${y}" x2="${quantityEnd}" y2="${y + 54}" stroke="#98a2b3"/>
-    <line x1="${priceEnd}" y1="${y}" x2="${priceEnd}" y2="${y + 54}" stroke="#98a2b3"/>
-    <text x="${PAGE_MARGIN + 18}" y="${y + 35}" font-family="${BODY_FONT}" font-size="20" font-weight="700" fill="#101828">Items</text>
-    <text x="${(descriptionEnd + quantityEnd) / 2}" y="${y + 35}" font-family="${BODY_FONT}" font-size="20" font-weight="700" fill="#101828" text-anchor="middle">Quantity</text>
-    <text x="${(quantityEnd + priceEnd) / 2}" y="${y + 35}" font-family="${BODY_FONT}" font-size="20" font-weight="700" fill="#101828" text-anchor="middle">Price</text>
-    <text x="${PAGE_WIDTH - PAGE_MARGIN - 18}" y="${y + 35}" font-family="${BODY_FONT}" font-size="20" font-weight="700" fill="#101828" text-anchor="end">Amount</text>
-  `;
+  cell(ctx, PAGE_MARGIN, y, TABLE_WIDTH, 54, "#f2f4f7", "#98a2b3");
+  hline(ctx, descriptionEnd, y, descriptionEnd, "#98a2b3");
+  hline(ctx, quantityEnd, y, quantityEnd, "#98a2b3");
+  hline(ctx, priceEnd, y, priceEnd, "#98a2b3");
+  text(ctx, "Items", PAGE_MARGIN + 18, y + 35, cnFont(20, 700), "#101828");
+  text(ctx, "Quantity", (descriptionEnd + quantityEnd) / 2, y + 35, cnFont(20, 700), "#101828", "center");
+  text(ctx, "Price", (quantityEnd + priceEnd) / 2, y + 35, cnFont(20, 700), "#101828", "center");
+  text(ctx, "Amount", PAGE_WIDTH - PAGE_MARGIN - 18, y + 35, cnFont(20, 700), "#101828", "right");
 }
 
-function renderItems(
-  items: RenderedItem[],
-  startY: number,
-): { svg: string; bottom: number } {
+function drawItems(ctx: Ctx, items: RenderedItem[], startY: number): number {
   let y = startY;
-  let svg = "";
   for (const item of items) {
     const bottom = y + item.height;
-    svg += `
-      <rect x="${PAGE_MARGIN}" y="${y}" width="${TABLE_WIDTH}" height="${item.height}" fill="#ffffff" stroke="#d0d5dd" stroke-width="1"/>
-      <line x1="735" y1="${y}" x2="735" y2="${bottom}" stroke="#d0d5dd"/>
-      <line x1="850" y1="${y}" x2="850" y2="${bottom}" stroke="#d0d5dd"/>
-      <line x1="1020" y1="${y}" x2="1020" y2="${bottom}" stroke="#d0d5dd"/>
-      ${textLines(item.lines, PAGE_MARGIN + 18, y + 35, { fontSize: 20, lineHeight: 27 })}
-      ${item.quantity ? `<text x="792" y="${y + 35}" font-family="${BODY_FONT}" font-size="21" fill="#101828" text-anchor="middle">${escapeXml(item.quantity)}</text>` : ""}
-      ${item.quantity ? `<text x="1000" y="${y + 35}" font-family="${BODY_FONT}" font-size="21" fill="#101828" text-anchor="end">${escapeXml(formatMoney(item.unitPrice, item.currency))}</text>` : ""}
-      ${item.quantity ? `<text x="${PAGE_WIDTH - PAGE_MARGIN - 18}" y="${y + 35}" font-family="${BODY_FONT}" font-size="21" fill="#101828" text-anchor="end">${escapeXml(formatMoney(item.amount, item.currency))}</text>` : ""}
-    `;
+    cell(ctx, PAGE_MARGIN, y, TABLE_WIDTH, item.height, "#ffffff", "#d0d5dd");
+    hline(ctx, 735, y, 735, "#d0d5dd");
+    hline(ctx, 850, y, 850, "#d0d5dd");
+    hline(ctx, 1020, y, 1020, "#d0d5dd");
+    lines(ctx, item.lines, PAGE_MARGIN + 18, y + 35, 20, 27, cnFont(20), "#101828");
+    if (item.quantity) {
+      text(ctx, String(item.quantity), 792, y + 35, cnFont(21), "#101828", "center");
+      text(ctx, formatMoney(item.unitPrice, item.currency), 1000, y + 35, cnFont(21), "#101828", "right");
+      text(ctx, formatMoney(item.amount, item.currency), PAGE_WIDTH - PAGE_MARGIN - 18, y + 35, cnFont(21), "#101828", "right");
+    }
     y = bottom;
   }
-  return { svg, bottom: y };
+  return y;
 }
 
-function renderSummary(invoice: InvoicePdfData, startY: number): string {
+function drawSummary(ctx: Ctx, invoice: InvoicePdfData, startY: number): void {
   const y = startY;
   const totals = currencyTotals(invoice);
   const totalsHeight = Math.max(54, totals.length * 54);
@@ -356,52 +402,75 @@ function renderSummary(invoice: InvoicePdfData, startY: number): string {
   const terms = invoice.terms?.trim() || "Write transfer only.";
   const termsLines = wrapText(terms, 1020, 18);
 
-  return `
-    ${totals.map((total, index) => `<rect x="${PAGE_MARGIN}" y="${y + index * 54}" width="${TABLE_WIDTH}" height="54" fill="#ffffff" stroke="#98a2b3"/><line x1="1020" y1="${y + index * 54}" x2="1020" y2="${y + (index + 1) * 54}" stroke="#98a2b3"/><text x="1000" y="${y + 35 + index * 54}" font-family="${BODY_FONT}" font-size="20" font-weight="700" fill="#101828" text-anchor="end">Total (${escapeXml(total.currency)}):</text><text x="${PAGE_WIDTH - PAGE_MARGIN - 18}" y="${y + 35 + index * 54}" font-family="${BODY_FONT}" font-size="20" font-weight="700" fill="#101828" text-anchor="end">${escapeXml(formatMoney(total.amount, total.currency))}</text>`).join("")}
-    <line x1="${PAGE_MARGIN}" y1="${y + totalsHeight + 34}" x2="${PAGE_WIDTH - PAGE_MARGIN}" y2="${y + totalsHeight + 34}" stroke="#98a2b3" stroke-width="1" stroke-dasharray="5 4"/>
-    <text x="930" y="${y + totalsHeight + 76}" font-family="${BODY_FONT}" font-size="20" font-weight="700" fill="#101828" text-anchor="end">Amount Due:</text>
-    ${totals.map((total, index) => `<text x="${PAGE_WIDTH - PAGE_MARGIN}" y="${y + totalsHeight + 76 + index * 30}" font-family="${BODY_FONT}" font-size="20" font-weight="700" fill="#101828" text-anchor="end">${escapeXml(formatMoney(total.amount, total.currency))}</text>`).join("")}
-    <line x1="${PAGE_MARGIN}" y1="${y + totalsHeight + 108 + Math.max(0, totals.length - 1) * 30}" x2="${PAGE_WIDTH - PAGE_MARGIN}" y2="${y + totalsHeight + 108 + Math.max(0, totals.length - 1) * 30}" stroke="#d0d5dd"/>
-    <text x="${PAGE_MARGIN}" y="${y + totalsHeight + 157 + Math.max(0, totals.length - 1) * 30}" font-family="${BODY_FONT}" font-size="18" font-weight="700" fill="#344054"># Notes / Terms</text>
-    ${textLines(termsLines, PAGE_MARGIN, y + totalsHeight + 191 + Math.max(0, totals.length - 1) * 30, { fontSize: 18, lineHeight: 26, fill: "#475467" })}
-    <text x="${PAGE_MARGIN}" y="${y + totalsHeight + 261 + Math.max(0, totals.length - 1) * 30 + Math.max(0, termsLines.length - 1) * 26}" font-family="${BODY_FONT}" font-size="18" font-weight="700" fill="#344054">Wire Instruction</text>
-    ${textLines(wrappedBankLines, PAGE_MARGIN, y + totalsHeight + 295 + Math.max(0, totals.length - 1) * 30 + Math.max(0, termsLines.length - 1) * 26, { fontSize: 18, lineHeight: 26, fill: "#344054" })}
-  `;
+  totals.forEach((total, index) => {
+    cell(ctx, PAGE_MARGIN, y + index * 54, TABLE_WIDTH, 54, "#ffffff", "#98a2b3");
+    text(ctx, `Total (${total.currency}):`, 1000, y + 35 + index * 54, cnFont(20, 700), "#101828", "right");
+    text(ctx, formatMoney(total.amount, total.currency), PAGE_WIDTH - PAGE_MARGIN - 18, y + 35 + index * 54, cnFont(20, 700), "#101828", "right");
+  });
+
+  hline(ctx, PAGE_MARGIN, y + totalsHeight + 34, PAGE_WIDTH - PAGE_MARGIN, "#98a2b3", 1);
+  text(ctx, "Amount Due:", 930, y + totalsHeight + 76, cnFont(20, 700), "#101828", "right");
+  totals.forEach((total, index) => {
+    text(ctx, formatMoney(total.amount, total.currency), PAGE_WIDTH - PAGE_MARGIN, y + totalsHeight + 76 + index * 30, cnFont(20, 700), "#101828", "right");
+  });
+  hline(ctx, PAGE_MARGIN, y + totalsHeight + 108 + Math.max(0, totals.length - 1) * 30, PAGE_WIDTH - PAGE_MARGIN, "#d0d5dd");
+
+  const notesY = y + totalsHeight + 157 + Math.max(0, totals.length - 1) * 30;
+  text(ctx, "# Notes / Terms", PAGE_MARGIN, notesY, cnFont(18, 700), "#344054");
+  lines(ctx, termsLines, PAGE_MARGIN, notesY + 34, 18, 26, cnFont(18), "#475467");
+
+  const wireY = y + totalsHeight + 261 + Math.max(0, totals.length - 1) * 30 + Math.max(0, termsLines.length - 1) * 26;
+  text(ctx, "Wire Instruction", PAGE_MARGIN, wireY, cnFont(18, 700), "#344054");
+  lines(
+    ctx,
+    wrappedBankLines,
+    PAGE_MARGIN,
+    wireY + 34,
+    18,
+    26,
+    cnFont(18),
+    "#344054",
+  );
 }
 
-function renderPageSvg(
+async function drawPage(
+  ctx: Ctx,
   invoice: InvoicePdfData,
   page: InvoicePage,
   pageIndex: number,
   pageCount: number,
-  logo: string,
-  bodyFont: string,
-): string {
+  logo: Image | null,
+): Promise<void> {
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, PAGE_WIDTH, PAGE_HEIGHT);
+
   const tableHeaderY = page.first ? 488 : 208;
   const itemStartY = tableHeaderY + 54;
-  const renderedItems = renderItems(page.items, itemStartY);
-  return `<?xml version="1.0" encoding="UTF-8"?>
-  <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${PAGE_WIDTH}" height="${PAGE_HEIGHT}" viewBox="0 0 ${PAGE_WIDTH} ${PAGE_HEIGHT}">
-    <style>@font-face { font-family: 'Thraive Source Han Sans CN'; src: url('${bodyFont}') format('opentype'); font-style: normal; font-weight: 100 900; }</style>
-    <rect width="${PAGE_WIDTH}" height="${PAGE_HEIGHT}" fill="#ffffff"/>
-    ${renderCompanyHeader(logo, !page.first)}
-    ${page.first ? renderBillTo(invoice) + renderInvoiceMeta(invoice) : ""}
-    ${renderTableHeader(tableHeaderY)}
-    ${renderedItems.svg}
-    ${page.summary ? renderSummary(invoice, renderedItems.bottom) : ""}
-    <line x1="${PAGE_MARGIN}" y1="1660" x2="${PAGE_WIDTH - PAGE_MARGIN}" y2="1660" stroke="#eaecf0"/>
-    <text x="${PAGE_MARGIN}" y="1698" font-family="${BODY_FONT}" font-size="16" fill="#98a2b3">Thraive Hub · Invoice ${escapeXml(invoice.invoiceNo)}</text>
-    <text x="${PAGE_WIDTH - PAGE_MARGIN}" y="1698" font-family="${BODY_FONT}" font-size="16" fill="#98a2b3" text-anchor="end">Page ${pageIndex + 1} of ${pageCount}</text>
-  </svg>`;
+  drawCompanyHeader(ctx, logo, !page.first);
+  if (page.first) {
+    drawBillTo(ctx, invoice);
+    drawInvoiceMeta(ctx, invoice);
+  }
+  drawTableHeader(ctx, tableHeaderY);
+  const bottom = drawItems(ctx, page.items, itemStartY);
+  if (page.summary) drawSummary(ctx, invoice, bottom);
+
+  hline(ctx, PAGE_MARGIN, 1660, PAGE_WIDTH - PAGE_MARGIN, "#eaecf0");
+  text(ctx, `Thraive Hub · Invoice ${invoice.invoiceNo}`, PAGE_MARGIN, 1698, cnFont(16), "#98a2b3");
+  text(ctx, `Page ${pageIndex + 1} of ${pageCount}`, PAGE_WIDTH - PAGE_MARGIN, 1698, cnFont(16), "#98a2b3", "right");
 }
 
 /**
- * Renders each A4 page as a high-resolution PNG before embedding it into the
- * PDF. This avoids pdf-lib's WinAnsi font limitation and preserves CJK text.
+ * Renders each A4 page with @napi-rs/canvas (which loads the CJK OTF directly)
+ * and embeds the PNG into the PDF. This reliably preserves Chinese text, unlike
+ * SVG @font-face which is ignored by the sharp/resvg renderer.
  */
 export async function generateInvoicePdf(
   invoice: InvoicePdfData,
 ): Promise<Uint8Array> {
+  await ensureFont();
+  const logo = await logoImage().catch(() => null);
+
   const pdf = await PDFDocument.create();
   pdf.setTitle(`Invoice ${invoice.invoiceNo}`);
   pdf.setAuthor("HONG KONG THRAIVE DIGITAL MARKETING TECHNOLOGY CO., LIMITED");
@@ -409,25 +478,15 @@ export async function generateInvoicePdf(
   pdf.setCreator("Thraive Hub");
   pdf.setProducer("Thraive Hub");
 
-  const [logo, bodyFont] = await Promise.all([
-    logoDataUri(),
-    bodyFontDataUri(),
-  ]);
   const pages = paginate(normalizeItems([...invoice.items]));
   for (let index = 0; index < pages.length; index += 1) {
-    const svg = renderPageSvg(invoice, pages[index], index, pages.length, logo, bodyFont);
-    const pngBytes = await sharp(Buffer.from(svg))
-      .flatten({ background: "#ffffff" })
-      .png({ compressionLevel: 9 })
-      .toBuffer();
+    const canvas = createCanvas(PAGE_WIDTH, PAGE_HEIGHT);
+    const ctx = canvas.getContext("2d");
+    await drawPage(ctx, invoice, pages[index], index, pages.length, logo);
+    const pngBytes = canvas.toBuffer("image/png");
     const image = await pdf.embedPng(pngBytes);
     const page = pdf.addPage([A4_WIDTH, A4_HEIGHT]);
-    page.drawImage(image, {
-      x: 0,
-      y: 0,
-      width: A4_WIDTH,
-      height: A4_HEIGHT,
-    });
+    page.drawImage(image, { x: 0, y: 0, width: A4_WIDTH, height: A4_HEIGHT });
   }
   return pdf.save({ useObjectStreams: true });
 }
