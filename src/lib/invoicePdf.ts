@@ -1,6 +1,5 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 import { PDFDocument } from "pdf-lib";
 import sharp from "sharp";
 
@@ -60,6 +59,7 @@ type InvoicePage = {
 };
 
 let logoDataPromise: Promise<string> | null = null;
+let bodyFontDataPromise: Promise<string> | null = null;
 
 function escapeXml(value: unknown): string {
   return String(value ?? "")
@@ -162,10 +162,16 @@ async function logoDataUri(): Promise<string> {
   return logoDataPromise;
 }
 
-function bodyFontUrl(): string {
-  return pathToFileURL(
-    path.join(process.cwd(), "public", "fonts", "SourceHanSansCN-Regular.otf"),
-  ).toString();
+async function bodyFontDataUri(): Promise<string> {
+  bodyFontDataPromise ??= fs
+    .readFile(
+      path.join(process.cwd(), "public", "fonts", "SourceHanSansCN-Regular.otf"),
+    )
+    .then(
+      (bytes) =>
+        `data:font/otf;charset=utf-8;base64,${bytes.toString("base64")}`,
+    );
+  return bodyFontDataPromise;
 }
 
 function normalizeItems(items: InvoicePdfItem[]): RenderedItem[] {
@@ -403,8 +409,10 @@ export async function generateInvoicePdf(
   pdf.setCreator("Thraive Hub");
   pdf.setProducer("Thraive Hub");
 
-  const logo = await logoDataUri();
-  const bodyFont = bodyFontUrl();
+  const [logo, bodyFont] = await Promise.all([
+    logoDataUri(),
+    bodyFontDataUri(),
+  ]);
   const pages = paginate(normalizeItems([...invoice.items]));
   for (let index = 0; index < pages.length; index += 1) {
     const svg = renderPageSvg(invoice, pages[index], index, pages.length, logo, bodyFont);
