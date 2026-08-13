@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { PDFDocument } from "pdf-lib";
 import sharp from "sharp";
 
@@ -9,8 +10,7 @@ const A4_WIDTH = 595.28;
 const A4_HEIGHT = 841.89;
 const PAGE_MARGIN = 72;
 const TABLE_WIDTH = PAGE_WIDTH - PAGE_MARGIN * 2;
-const BODY_FONT =
-  "'Noto Sans CJK SC','Noto Sans SC','Microsoft YaHei','WenQuanYi Micro Hei',Arial,sans-serif";
+const BODY_FONT = "'Thraive Source Han Sans CN',sans-serif";
 
 export type InvoicePdfItem = {
   feeType: string;
@@ -162,6 +162,12 @@ async function logoDataUri(): Promise<string> {
   return logoDataPromise;
 }
 
+function bodyFontUrl(): string {
+  return pathToFileURL(
+    path.join(process.cwd(), "public", "fonts", "SourceHanSansCN-Regular.otf"),
+  ).toString();
+}
+
 function normalizeItems(items: InvoicePdfItem[]): RenderedItem[] {
   return items.map((item) => {
     const lines = wrapText(item.description, 590, 23);
@@ -171,7 +177,7 @@ function normalizeItems(items: InvoicePdfItem[]): RenderedItem[] {
       periodType: item.periodType || "MONTH",
       periodLabel: item.periodLabel?.trim() || "-",
       lines,
-      height: Math.max(112, 80 + lines.length * 31),
+      height: Math.max(74, 32 + lines.length * 31),
     };
   });
 }
@@ -209,7 +215,7 @@ function paginate(items: RenderedItem[]): InvoicePage[] {
         pageItems.push({
           ...item,
           lines: headLines,
-          height: Math.max(112, 80 + headLines.length * 31),
+          height: Math.max(74, 32 + headLines.length * 31),
           // Monetary values belong to the final fragment only.
           quantity: tailLines.length ? 0 : item.quantity,
           unitPrice: tailLines.length ? 0 : item.unitPrice,
@@ -220,7 +226,7 @@ function paginate(items: RenderedItem[]): InvoicePage[] {
             ...item,
             description: tailLines.join(""),
             lines: tailLines,
-            height: Math.max(112, 80 + tailLines.length * 31),
+            height: Math.max(74, 32 + tailLines.length * 31),
           };
         } else {
           index += 1;
@@ -299,7 +305,7 @@ function renderTableHeader(y: number): string {
     <line x1="${quantityEnd}" y1="${y}" x2="${quantityEnd}" y2="${y + 54}" stroke="#98a2b3"/>
     <line x1="${priceEnd}" y1="${y}" x2="${priceEnd}" y2="${y + 54}" stroke="#98a2b3"/>
     <text x="${PAGE_MARGIN + 18}" y="${y + 35}" font-family="${BODY_FONT}" font-size="20" font-weight="700" fill="#101828">Items</text>
-    <text x="${(descriptionEnd + quantityEnd) / 2}" y="${y + 35}" font-family="${BODY_FONT}" font-size="20" font-weight="700" fill="#101828" text-anchor="middle">Qty</text>
+    <text x="${(descriptionEnd + quantityEnd) / 2}" y="${y + 35}" font-family="${BODY_FONT}" font-size="20" font-weight="700" fill="#101828" text-anchor="middle">Quantity</text>
     <text x="${(quantityEnd + priceEnd) / 2}" y="${y + 35}" font-family="${BODY_FONT}" font-size="20" font-weight="700" fill="#101828" text-anchor="middle">Price</text>
     <text x="${PAGE_WIDTH - PAGE_MARGIN - 18}" y="${y + 35}" font-family="${BODY_FONT}" font-size="20" font-weight="700" fill="#101828" text-anchor="end">Amount</text>
   `;
@@ -313,17 +319,12 @@ function renderItems(
   let svg = "";
   for (const item of items) {
     const bottom = y + item.height;
-    const feeTypeLabel = item.feeType === "SALES_COMMISSION"
-      ? "销售佣金 / Sales Commission"
-      : "月度服务费 / Monthly Service Fee";
     svg += `
       <rect x="${PAGE_MARGIN}" y="${y}" width="${TABLE_WIDTH}" height="${item.height}" fill="#ffffff" stroke="#d0d5dd" stroke-width="1"/>
       <line x1="735" y1="${y}" x2="735" y2="${bottom}" stroke="#d0d5dd"/>
       <line x1="850" y1="${y}" x2="850" y2="${bottom}" stroke="#d0d5dd"/>
       <line x1="1020" y1="${y}" x2="1020" y2="${bottom}" stroke="#d0d5dd"/>
-      <text x="${PAGE_MARGIN + 18}" y="${y + 27}" font-family="${BODY_FONT}" font-size="15" font-weight="700" fill="#6941c6">${escapeXml(feeTypeLabel)}</text>
-      <text x="${PAGE_MARGIN + 18}" y="${y + 52}" font-family="${BODY_FONT}" font-size="15" fill="#667085">${escapeXml(`${item.periodType === "DATE_RANGE" ? "Date range" : "Month"}: ${item.periodLabel} · ${item.currency}`)}</text>
-      ${textLines(item.lines, PAGE_MARGIN + 18, y + 82, { fontSize: 23, lineHeight: 31 })}
+      ${textLines(item.lines, PAGE_MARGIN + 18, y + 35, { fontSize: 20, lineHeight: 27 })}
       ${item.quantity ? `<text x="792" y="${y + 35}" font-family="${BODY_FONT}" font-size="21" fill="#101828" text-anchor="middle">${escapeXml(item.quantity)}</text>` : ""}
       ${item.quantity ? `<text x="1000" y="${y + 35}" font-family="${BODY_FONT}" font-size="21" fill="#101828" text-anchor="end">${escapeXml(formatMoney(item.unitPrice, item.currency))}</text>` : ""}
       ${item.quantity ? `<text x="${PAGE_WIDTH - PAGE_MARGIN - 18}" y="${y + 35}" font-family="${BODY_FONT}" font-size="21" fill="#101828" text-anchor="end">${escapeXml(formatMoney(item.amount, item.currency))}</text>` : ""}
@@ -334,9 +335,9 @@ function renderItems(
 }
 
 function renderSummary(invoice: InvoicePdfData, startY: number): string {
-  const y = Math.max(startY + 26, 640);
+  const y = startY;
   const totals = currencyTotals(invoice);
-  const totalsHeight = Math.max(58, totals.length * 44 + 18);
+  const totalsHeight = Math.max(54, totals.length * 54);
   const bank = invoice.bankSnapshot;
   const bankLines = [
     bank.beneficiary ? `BENEFICIARY: ${bank.beneficiary}` : "",
@@ -350,13 +351,15 @@ function renderSummary(invoice: InvoicePdfData, startY: number): string {
   const termsLines = wrapText(terms, 1020, 18);
 
   return `
-    <rect x="790" y="${y}" width="${PAGE_WIDTH - PAGE_MARGIN - 790}" height="${totalsHeight}" fill="#f2f4f7"/>
-    ${totals.map((total, index) => `<text x="810" y="${y + 39 + index * 44}" font-family="${BODY_FONT}" font-size="21" font-weight="700" fill="#101828">Total (${escapeXml(total.currency)})</text><text x="${PAGE_WIDTH - PAGE_MARGIN - 18}" y="${y + 39 + index * 44}" font-family="${BODY_FONT}" font-size="21" font-weight="700" fill="#101828" text-anchor="end">${escapeXml(formatMoney(total.amount, total.currency))}</text>`).join("")}
-    <line x1="${PAGE_MARGIN}" y1="${y + totalsHeight + 32}" x2="${PAGE_WIDTH - PAGE_MARGIN}" y2="${y + totalsHeight + 32}" stroke="#d0d5dd" stroke-width="2"/>
-    <text x="${PAGE_MARGIN}" y="${y + totalsHeight + 81}" font-family="${BODY_FONT}" font-size="18" font-weight="700" fill="#344054"># Notes / Terms</text>
-    ${textLines(termsLines, PAGE_MARGIN, y + totalsHeight + 115, { fontSize: 18, lineHeight: 26, fill: "#475467" })}
-    <text x="${PAGE_MARGIN}" y="${y + totalsHeight + 185 + Math.max(0, termsLines.length - 1) * 26}" font-family="${BODY_FONT}" font-size="18" font-weight="700" fill="#344054">Wire Instruction</text>
-    ${textLines(wrappedBankLines, PAGE_MARGIN, y + totalsHeight + 219 + Math.max(0, termsLines.length - 1) * 26, { fontSize: 18, lineHeight: 26, fill: "#344054" })}
+    ${totals.map((total, index) => `<rect x="${PAGE_MARGIN}" y="${y + index * 54}" width="${TABLE_WIDTH}" height="54" fill="#ffffff" stroke="#98a2b3"/><line x1="1020" y1="${y + index * 54}" x2="1020" y2="${y + (index + 1) * 54}" stroke="#98a2b3"/><text x="1000" y="${y + 35 + index * 54}" font-family="${BODY_FONT}" font-size="20" font-weight="700" fill="#101828" text-anchor="end">Total (${escapeXml(total.currency)}):</text><text x="${PAGE_WIDTH - PAGE_MARGIN - 18}" y="${y + 35 + index * 54}" font-family="${BODY_FONT}" font-size="20" font-weight="700" fill="#101828" text-anchor="end">${escapeXml(formatMoney(total.amount, total.currency))}</text>`).join("")}
+    <line x1="${PAGE_MARGIN}" y1="${y + totalsHeight + 34}" x2="${PAGE_WIDTH - PAGE_MARGIN}" y2="${y + totalsHeight + 34}" stroke="#98a2b3" stroke-width="1" stroke-dasharray="5 4"/>
+    <text x="930" y="${y + totalsHeight + 76}" font-family="${BODY_FONT}" font-size="20" font-weight="700" fill="#101828" text-anchor="end">Amount Due:</text>
+    ${totals.map((total, index) => `<text x="${PAGE_WIDTH - PAGE_MARGIN}" y="${y + totalsHeight + 76 + index * 30}" font-family="${BODY_FONT}" font-size="20" font-weight="700" fill="#101828" text-anchor="end">${escapeXml(formatMoney(total.amount, total.currency))}</text>`).join("")}
+    <line x1="${PAGE_MARGIN}" y1="${y + totalsHeight + 108 + Math.max(0, totals.length - 1) * 30}" x2="${PAGE_WIDTH - PAGE_MARGIN}" y2="${y + totalsHeight + 108 + Math.max(0, totals.length - 1) * 30}" stroke="#d0d5dd"/>
+    <text x="${PAGE_MARGIN}" y="${y + totalsHeight + 157 + Math.max(0, totals.length - 1) * 30}" font-family="${BODY_FONT}" font-size="18" font-weight="700" fill="#344054"># Notes / Terms</text>
+    ${textLines(termsLines, PAGE_MARGIN, y + totalsHeight + 191 + Math.max(0, totals.length - 1) * 30, { fontSize: 18, lineHeight: 26, fill: "#475467" })}
+    <text x="${PAGE_MARGIN}" y="${y + totalsHeight + 261 + Math.max(0, totals.length - 1) * 30 + Math.max(0, termsLines.length - 1) * 26}" font-family="${BODY_FONT}" font-size="18" font-weight="700" fill="#344054">Wire Instruction</text>
+    ${textLines(wrappedBankLines, PAGE_MARGIN, y + totalsHeight + 295 + Math.max(0, totals.length - 1) * 30 + Math.max(0, termsLines.length - 1) * 26, { fontSize: 18, lineHeight: 26, fill: "#344054" })}
   `;
 }
 
@@ -366,12 +369,14 @@ function renderPageSvg(
   pageIndex: number,
   pageCount: number,
   logo: string,
+  bodyFont: string,
 ): string {
   const tableHeaderY = page.first ? 488 : 208;
   const itemStartY = tableHeaderY + 54;
   const renderedItems = renderItems(page.items, itemStartY);
   return `<?xml version="1.0" encoding="UTF-8"?>
   <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${PAGE_WIDTH}" height="${PAGE_HEIGHT}" viewBox="0 0 ${PAGE_WIDTH} ${PAGE_HEIGHT}">
+    <style>@font-face { font-family: 'Thraive Source Han Sans CN'; src: url('${bodyFont}') format('opentype'); font-style: normal; font-weight: 100 900; }</style>
     <rect width="${PAGE_WIDTH}" height="${PAGE_HEIGHT}" fill="#ffffff"/>
     ${renderCompanyHeader(logo, !page.first)}
     ${page.first ? renderBillTo(invoice) + renderInvoiceMeta(invoice) : ""}
@@ -399,9 +404,10 @@ export async function generateInvoicePdf(
   pdf.setProducer("Thraive Hub");
 
   const logo = await logoDataUri();
+  const bodyFont = bodyFontUrl();
   const pages = paginate(normalizeItems([...invoice.items]));
   for (let index = 0; index < pages.length; index += 1) {
-    const svg = renderPageSvg(invoice, pages[index], index, pages.length, logo);
+    const svg = renderPageSvg(invoice, pages[index], index, pages.length, logo, bodyFont);
     const pngBytes = await sharp(Buffer.from(svg))
       .flatten({ background: "#ffffff" })
       .png({ compressionLevel: 9 })
