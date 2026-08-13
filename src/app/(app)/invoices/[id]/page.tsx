@@ -14,19 +14,22 @@ export default async function InvoiceDetailPage({
 }) {
   const session = await requireSession();
   const { id } = await params;
-  const [invoice, options, permission] = await Promise.all([
+  const [invoice, permission] = await Promise.all([
     getInvoiceById(id),
-    getInvoiceFormOptions(),
     resolveUserPermission(session.userId, "operations.invoices"),
   ]);
   if (!hasPermissionLevel(permission, "READ")) redirect("/operations");
   if (!invoice) notFound();
+  const canEdit = hasPermissionLevel(permission, "EDIT");
+  const options = await getInvoiceFormOptions(
+    canEdit && invoice.status === "DRAFT",
+  );
 
   return (
     <InvoiceEditor
       options={options}
       initialInvoice={invoice}
-      canEdit={hasPermissionLevel(permission, "EDIT")}
+      canEdit={canEdit}
     />
   );
 }

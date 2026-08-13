@@ -3,7 +3,12 @@
 import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { customerScope, isStaff, reconciliationScope } from "@/lib/dataScope";
+import {
+  customerScope,
+  financeReferenceCustomerScope,
+  isStaff,
+  reconciliationScope,
+} from "@/lib/dataScope";
 import type { PermLevel } from "@/lib/featurePermissions";
 import {
   INVOICE_BANK_ACCOUNTS,
@@ -353,6 +358,7 @@ async function validateRelations(
   accountsReceivableId?: string | null,
   expectedCurrency?: string,
 ) {
+  const referenceCustomerScope = financeReferenceCustomerScope(session);
   const contracts = await prisma.contract.findMany({
     where: {
       id: { in: contractIds },
@@ -361,7 +367,7 @@ async function validateRelations(
       customer: {
         id: customerId,
         deletedAt: null,
-        ...customerScope(session, session.role === "ADMIN" ? "all" : "mine"),
+        ...referenceCustomerScope,
       },
     },
     select: {
@@ -559,15 +565,25 @@ function invoiceScope(
   };
 }
 
-export async function getInvoiceFormOptions(): Promise<InvoiceFormOptions> {
-  const session = await requireInvoicePermission("READ");
-  const scopedCustomers = customerScope(
+export async function getInvoiceFormOptions(
+  includeAllFinanceReferences = false,
+): Promise<InvoiceFormOptions> {
+  const session = await requireInvoicePermission(
+    includeAllFinanceReferences ? "EDIT" : "READ",
+  );
+  const referenceCustomerScope = includeAllFinanceReferences
+    ? financeReferenceCustomerScope(session)
+    : customerScope(
+        session,
+        session.role === "ADMIN" ? "all" : "mine",
+      );
+  const receivableCustomerScope = customerScope(
     session,
     session.role === "ADMIN" ? "all" : "mine",
   );
   const [customers, contracts, accountsReceivables] = await Promise.all([
     prisma.customer.findMany({
-      where: { deletedAt: null, ...scopedCustomers },
+      where: { deletedAt: null, ...referenceCustomerScope },
       orderBy: { brandName: "asc" },
       select: { id: true, brandName: true },
     }),
@@ -575,7 +591,7 @@ export async function getInvoiceFormOptions(): Promise<InvoiceFormOptions> {
       where: {
         deletedAt: null,
         customerId: { not: null },
-        customer: { deletedAt: null, ...scopedCustomers },
+        customer: { deletedAt: null, ...referenceCustomerScope },
       },
       orderBy: { createdAt: "desc" },
       select: {
@@ -593,7 +609,7 @@ export async function getInvoiceFormOptions(): Promise<InvoiceFormOptions> {
     prisma.accountsReceivable.findMany({
       where: {
         customerId: { not: null },
-        customer: { deletedAt: null, ...scopedCustomers },
+        customer: { deletedAt: null, ...receivableCustomerScope },
       },
       orderBy: { createdAt: "desc" },
       select: {

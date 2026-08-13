@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { channelReconciliationScope, customerScope } from "@/lib/dataScope";
+import {
+  channelReconciliationScope,
+  financeReferenceCustomerScope,
+} from "@/lib/dataScope";
 import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
 import { errorResponse } from "@/lib/appError";
 import {
@@ -49,9 +52,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "客户和合同为必填项" }, { status: 400 });
     }
 
-    const view = session.role === "ADMIN" ? "all" : "mine";
+    const referenceCustomerScope = financeReferenceCustomerScope(session);
     const customer = await prisma.customer.findFirst({
-      where: { AND: [{ id: customerId, deletedAt: null }, customerScope(session, view)] },
+      where: {
+        AND: [{ id: customerId, deletedAt: null }, referenceCustomerScope],
+      },
       select: {
         id: true,
         channelUserId: true,

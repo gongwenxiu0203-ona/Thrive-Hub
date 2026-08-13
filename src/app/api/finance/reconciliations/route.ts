@@ -5,6 +5,7 @@ import { getReconciliationAccess } from "@/lib/reconciliationAccess";
 import { FeaturePermissionError } from "@/lib/permissionGuard";
 import { parseDateOnlyUtc } from "@/lib/dateRange";
 import { errorResponse } from "@/lib/appError";
+import { financeReferenceCustomerScope } from "@/lib/dataScope";
 
 // GET /api/finance/reconciliations — 获取对账列表
 export async function GET(req: Request) {
@@ -47,7 +48,8 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     const session = await requireSession();
-    const access = await getReconciliationAccess(session, "EDIT", req);
+    await getReconciliationAccess(session, "EDIT", req);
+    const referenceCustomerScope = financeReferenceCustomerScope(session);
     const body = await req.json();
     const {
       customerId,
@@ -80,7 +82,7 @@ export async function POST(req: Request) {
         id: contractId,
         customerId,
         deletedAt: null,
-        customer: { ...access.customerScope, deletedAt: null },
+        customer: { ...referenceCustomerScope, deletedAt: null },
       },
     });
     if (!contract) {

@@ -89,8 +89,6 @@ type ChannelReconciliation = Omit<ChannelReconciliationRecord, "periods"> & {
 type Customer = {
   id: string;
   brandName: string;
-  businessOwnerId: string | null;
-  contactPhone: string | null;
   contracts: {
     id: string;
     contractNo: string;
@@ -98,16 +96,12 @@ type Customer = {
   }[];
 };
 
-type User = { id: string; name: string; email: string | null };
-
 type Props = {
   reconciliations: Reconciliation[];
   trashedReconciliations: TrashedReconciliation[];
   channelReconciliations: ChannelReconciliation[];
   customers: Customer[];
   channelUsers: { id: string; name: string }[];
-  allUsers: User[];
-  currentUserId: string;
   channelReconciliationCustomers: ChannelReconciliationCustomerOption[];
   affiliateReconciliations: AffiliateRec[];
   canToggleScope?: boolean;
@@ -350,8 +344,6 @@ export function FinanceClient({
   channelReconciliations,
   customers,
   channelUsers,
-  allUsers,
-  currentUserId,
   channelReconciliationCustomers,
   affiliateReconciliations,
   canToggleScope = false,
@@ -419,8 +411,6 @@ export function FinanceClient({
           {tab === "customers" && canEditCustomerReconciliations && (
             <NewReconciliationModal
               customers={customers}
-              users={allUsers}
-              currentUserId={currentUserId}
               onCreated={() => router.refresh()}
             />
           )}

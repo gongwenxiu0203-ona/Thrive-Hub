@@ -113,9 +113,9 @@ export async function getEmployeeKpiByMonth(
   const effectiveView: ViewScope = session.role === "ADMIN" ? view : "mine";
   const targetScope = kpiScope(sessForScope, effectiveView);
 
-  // 普通员工：除了 amOwner 匹配，还要让 channelOwner 匹配能进入 scope
+  // 内部员工：除了 amOwner 匹配，还要让 channelOwner 匹配能进入 scope
   // 这里改用一个稍宽的 OR：作为 amOwner、作为渠道负责人、或项目 owner/customer.backendOwner 已被 kpiScope 覆盖
-  // 为了让普通员工看到自己作为 channelOwner 的项目，扩展 scope
+  // 为了让内部员工看到自己作为 channelOwner 的项目，扩展 scope
   const scopeForUser =
     effectiveView === "all"
       ? {}

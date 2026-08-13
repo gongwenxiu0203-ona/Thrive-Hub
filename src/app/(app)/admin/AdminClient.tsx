@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
 import { formatDate } from "@/lib/utils";
 import { clientUnknownError, readApiError } from "@/lib/clientError";
+import { ROLE_LABELS } from "@/lib/constants";
 import {
   PERM_LEVELS,
   type PermLevel,
@@ -86,13 +87,6 @@ function InviteButton() {
     </>
   );
 }
-
-const ROLE_LABELS: Record<string, string> = {
-  ADMIN: "管理员",
-  USER: "内部员工",
-  BRAND: "品牌方",
-  CHANNEL: "渠道商",
-};
 
 const STATUS_LABELS: Record<string, string> = {
   PENDING: "审核中",
@@ -632,7 +626,7 @@ export function AdminClient({
                           onChange={(e) => setEditRole(e.target.value)}
                         >
                           <option value="ADMIN">管理员</option>
-                          <option value="USER">普通员工</option>
+                          <option value="USER">内部员工</option>
                           <option value="BRAND">品牌方</option>
                           <option value="CHANNEL">渠道商</option>
                         </select>

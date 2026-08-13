@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CONTRACT_TYPE_LABELS } from "@/lib/constants";
-import { setupFinanceCustomerOwner } from "@/actions/customers";
+import { clientUnknownError, readApiError } from "@/lib/clientError";
 import { Modal } from "@/components/ui/Modal";
 
 type Contract = {
@@ -15,209 +15,238 @@ type Contract = {
 type Customer = {
   id: string;
   brandName: string;
-  businessOwnerId: string | null;
-  contactPhone: string | null;
   contracts: Contract[];
 };
 
-type User = { id: string; name: string; email: string | null };
-
 type Props = {
   customers: Customer[];
-  users: User[];
-  currentUserId: string;
   onCreated: () => void;
 };
 
-export function NewReconciliationModal({
-  customers,
-  users,
-  currentUserId,
-}: Props) {
+type ReconcileType = "FEE_ONLY" | "COMMISSION_ONLY";
+
+export function NewReconciliationModal({ customers, onCreated }: Props) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
   const [selectedContractId, setSelectedContractId] = useState("");
-  const [ownerId, setOwnerId] = useState(currentUserId);
-  const [contactPhone, setContactPhone] = useState("");
+  const [reconcileType, setReconcileType] =
+    useState<ReconcileType>("FEE_ONLY");
+  const [periodStart, setPeriodStart] = useState("");
+  const [periodEnd, setPeriodEnd] = useState("");
   const [loading, setLoading] = useState(false);
-  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
 
-  const selectedCustomer = customers.find((c) => c.id === selectedCustomerId);
-  const selectedOwner = users.find((u) => u.id === ownerId);
+  const selectedCustomer = useMemo(
+    () => customers.find((customer) => customer.id === selectedCustomerId),
+    [customers, selectedCustomerId],
+  );
 
-  function handleCustomerChange(id: string) {
-    setSelectedCustomerId(id);
-    const cust = customers.find((c) => c.id === id);
-    if (cust?.contracts.length === 1) {
-      setSelectedContractId(cust.contracts[0].id);
-    } else {
-      setSelectedContractId("");
-    }
-    // 预填客户已有的负责人和电话
-    if (cust?.businessOwnerId) setOwnerId(cust.businessOwnerId);
-    else setOwnerId(currentUserId);
-    setContactPhone(cust?.contactPhone ?? "");
-  }
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!selectedCustomerId || !selectedContractId) return;
-
-    setLoading(true);
-    try {
-      const result = await setupFinanceCustomerOwner(
-        selectedCustomerId,
-        ownerId,
-        contactPhone,
-      );
-      if (!result.ok) {
-        alert(result.error ?? "保存失败");
-        return;
-      }
-      setOpen(false);
-      resetForm();
-      router.push(
-        `/finance/customers/${selectedCustomerId}?contractId=${selectedContractId}`,
-      );
-    } finally {
-      setLoading(false);
-    }
+  function handleCustomerChange(customerId: string) {
+    setSelectedCustomerId(customerId);
+    const customer = customers.find((item) => item.id === customerId);
+    setSelectedContractId(
+      customer?.contracts.length === 1 ? customer.contracts[0].id : "",
+    );
+    setError(null);
   }
 
   function resetForm() {
     setSelectedCustomerId("");
     setSelectedContractId("");
-    setOwnerId(currentUserId);
-    setContactPhone("");
+    setReconcileType("FEE_ONLY");
+    setPeriodStart("");
+    setPeriodEnd("");
+    setError(null);
+  }
+
+  async function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    if (
+      !selectedCustomerId ||
+      !selectedContractId ||
+      !periodStart ||
+      !periodEnd
+    ) {
+      setError("请选择客户、合同并填写完整的对账周期");
+      return;
+    }
+    if (periodEnd < periodStart) {
+      setError("对账周期结束日期不能早于开始日期");
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/finance/reconciliations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customerId: selectedCustomerId,
+          contractId: selectedContractId,
+          reconcileType,
+          periodStart,
+          periodEnd,
+        }),
+      });
+      if (!response.ok) {
+        setError(await readApiError(response, "创建客户对账失败"));
+        return;
+      }
+      const created = (await response.json()) as { id: string };
+      setOpen(false);
+      resetForm();
+      onCreated();
+      router.push(`/finance/reconciliations/${created.id}`);
+    } catch (cause) {
+      console.error("[finance-reconciliation-create]", cause);
+      setError(clientUnknownError());
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
     <>
-      <button onClick={() => setOpen(true)} className="btn-primary">
+      <button type="button" onClick={() => setOpen(true)} className="btn-primary">
         + 新建对账
       </button>
       <Modal
         open={open}
         onClose={() => {
+          if (loading) return;
           setOpen(false);
           resetForm();
         }}
         title="新建客户对账"
+        description="在财务流程中选择客户和合同不会修改客户负责人或客户所属关系。"
       >
-        <div>
-          <p className="mb-4 text-xs text-slate-500">
-            仅需选择客户、合同和负责人，详情页将展示合同已确认字段
-          </p>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {/* 客户选择 */}
-            <div>
-              <label className="label">客户 *</label>
-              <select
-                className="input"
-                value={selectedCustomerId}
-                onChange={(e) => handleCustomerChange(e.target.value)}
-                required
-              >
-                <option value="">请选择客户</option>
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.brandName}
-                  </option>
-                ))}
-              </select>
-              <p className="mt-1 text-xs text-slate-400">
-                仅显示已签署完成合同的客户
-              </p>
-            </div>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="label">客户 *</label>
+            <select
+              className="input"
+              value={selectedCustomerId}
+              onChange={(event) => handleCustomerChange(event.target.value)}
+              required
+            >
+              <option value="">请选择客户</option>
+              {customers.map((customer) => (
+                <option key={customer.id} value={customer.id}>
+                  {customer.brandName}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-slate-400">
+              显示系统内拥有已完成合同的有效客户
+            </p>
+          </div>
 
-            {/* 合同选择 */}
-            {selectedCustomer && (
-              <div>
-                <label className="label">关联合同 *</label>
-                <select
-                  className="input"
-                  value={selectedContractId}
-                  onChange={(e) => setSelectedContractId(e.target.value)}
-                  required
-                >
-                  <option value="">请选择合同</option>
-                  {selectedCustomer.contracts.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.contractNo}（{CONTRACT_TYPE_LABELS[c.type] ?? c.type}）
-                    </option>
-                  ))}
-                </select>
-                {selectedCustomer.contracts.length === 0 && (
-                  <p className="mt-1 text-xs text-rose-500">
-                    该客户暂无已签署完成的合同
-                  </p>
-                )}
-              </div>
-            )}
+          <div>
+            <label className="label">关联合同 *</label>
+            <select
+              className="input"
+              value={selectedContractId}
+              onChange={(event) => setSelectedContractId(event.target.value)}
+              disabled={!selectedCustomer}
+              required
+            >
+              <option value="">
+                {selectedCustomer ? "请选择合同" : "请先选择客户"}
+              </option>
+              {selectedCustomer?.contracts.map((contract) => (
+                <option key={contract.id} value={contract.id}>
+                  {contract.contractNo}（
+                  {CONTRACT_TYPE_LABELS[contract.type] ?? contract.type}）
+                </option>
+              ))}
+            </select>
+          </div>
 
-            {/* 负责人 */}
-            <div>
-              <label className="label">负责人 *</label>
-              <select
-                className="input"
-                value={ownerId}
-                onChange={(e) => setOwnerId(e.target.value)}
-                required
-              >
-                {users.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name}
-                  </option>
-                ))}
-              </select>
-              <p className="mt-1 text-xs text-slate-400">
-                默认为当前用户，可选择其他用户作为负责人
-              </p>
-            </div>
-
-            {/* 负责人邮箱（自动关联，只读） */}
-            <div>
-              <label className="label">负责人邮箱</label>
-              <input
-                className="input bg-slate-50 text-slate-600"
-                value={selectedOwner?.email ?? ""}
-                readOnly
-                placeholder="—"
-              />
-            </div>
-
-            {/* 联系电话（选填） */}
-            <div>
-              <label className="label">联系电话（选填）</label>
-              <input
-                className="input"
-                value={contactPhone}
-                onChange={(e) => setContactPhone(e.target.value)}
-                placeholder="如 13800138000"
-              />
-            </div>
-
-            <div className="flex justify-end gap-3 pt-2">
+          <div>
+            <label className="label">对账类型 *</label>
+            <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
-                onClick={() => {
-                  setOpen(false);
-                  resetForm();
-                }}
-                className="btn-secondary"
+                className={
+                  reconcileType === "FEE_ONLY" ? "btn-primary" : "btn-secondary"
+                }
+                onClick={() => setReconcileType("FEE_ONLY")}
               >
-                取消
+                固费
               </button>
               <button
-                type="submit"
-                disabled={loading || !selectedCustomerId || !selectedContractId}
-                className="btn-primary"
+                type="button"
+                className={
+                  reconcileType === "COMMISSION_ONLY"
+                    ? "btn-primary"
+                    : "btn-secondary"
+                }
+                onClick={() => setReconcileType("COMMISSION_ONLY")}
               >
-                {loading ? "创建中…" : "进入对账详情"}
+                销售佣金
               </button>
             </div>
-          </form>
-        </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label">对账开始日期 *</label>
+              <input
+                type="date"
+                className="input"
+                value={periodStart}
+                onChange={(event) => setPeriodStart(event.target.value)}
+                required
+              />
+            </div>
+            <div>
+              <label className="label">对账结束日期 *</label>
+              <input
+                type="date"
+                className="input"
+                min={periodStart || undefined}
+                value={periodEnd}
+                onChange={(event) => setPeriodEnd(event.target.value)}
+                required
+              />
+            </div>
+          </div>
+
+          {error && (
+            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
+              {error}
+            </p>
+          )}
+
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                resetForm();
+              }}
+              className="btn-secondary"
+              disabled={loading}
+            >
+              取消
+            </button>
+            <button
+              type="submit"
+              disabled={
+                loading ||
+                !selectedCustomerId ||
+                !selectedContractId ||
+                !periodStart ||
+                !periodEnd
+              }
+              className="btn-primary"
+            >
+              {loading ? "创建中…" : "创建并进入对账"}
+            </button>
+          </div>
+        </form>
       </Modal>
     </>
   );

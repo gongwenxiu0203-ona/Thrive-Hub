@@ -63,6 +63,19 @@ export function customerScope(
   return { id: "__NO_ACCESS__" };
 }
 
+/**
+ * Customer scope for finance form references only.
+ *
+ * Internal staff may select any active customer/contract while creating a
+ * finance record. External roles retain their hard customer isolation. This
+ * helper must not be used for finance record lists or detail-page access.
+ */
+export function financeReferenceCustomerScope(
+  session: Session,
+): Record<string, unknown> {
+  return customerScope(session, isStaff(session.role) ? "all" : "mine");
+}
+
 /** Contract 行级权限 */
 export function contractScope(
   session: Session,

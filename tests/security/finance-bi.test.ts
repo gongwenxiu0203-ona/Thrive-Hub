@@ -18,6 +18,9 @@ const ids = {
   ownedReconciliation: "security-finance-owned-reconciliation",
   otherReconciliation: "security-finance-other-reconciliation",
   deletedReconciliation: "security-finance-deleted-reconciliation",
+  crossOwnedReconciliation: "security-finance-cross-owned-reconciliation",
+  draftContract: "security-finance-draft-contract",
+  deletedContract: "security-finance-deleted-contract",
   ownedBatch: "security-bi-owned-batch",
   otherBatch: "security-bi-other-batch",
   ownedSale: "security-bi-owned-sale",
@@ -91,6 +94,21 @@ before(async () => {
         contractNo: "SECURITY-FINANCE-OTHER",
         customerId: otherCustomerId,
         status: "COMPLETED",
+        createdById: ids.otherUser,
+      },
+      {
+        id: ids.draftContract,
+        contractNo: "SECURITY-FINANCE-DRAFT",
+        customerId: otherCustomerId,
+        status: "DRAFT",
+        createdById: ids.otherUser,
+      },
+      {
+        id: ids.deletedContract,
+        contractNo: "SECURITY-FINANCE-DELETED",
+        customerId: otherCustomerId,
+        status: "COMPLETED",
+        deletedAt: new Date("2026-05-01T00:00:00.000Z"),
         createdById: ids.otherUser,
       },
     ],
@@ -179,11 +197,22 @@ after(async () => {
   await prisma.customerReconciliation.deleteMany({
     where: {
       id: {
-        in: [ids.ownedReconciliation, ids.otherReconciliation, ids.deletedReconciliation],
+        in: [ids.ownedReconciliation, ids.otherReconciliation, ids.deletedReconciliation, ids.crossOwnedReconciliation],
       },
     },
   });
-  await prisma.contract.deleteMany({ where: { id: { in: [ids.ownedContract, ids.otherContract] } } });
+  await prisma.contract.deleteMany({
+    where: {
+      id: {
+        in: [
+          ids.ownedContract,
+          ids.otherContract,
+          ids.draftContract,
+          ids.deletedContract,
+        ],
+      },
+    },
+  });
   await prisma.userPermissionOverride.deleteMany({
     where: { userId: { in: [actors.user.id, actors.brand.id] } },
   });
@@ -240,6 +269,58 @@ test("reconciliation detail returns 404 for cross-scope and soft-deleted rows", 
     userCookie,
   );
   assert.equal(deleted.status, 404);
+});
+
+test("USER reconciliation EDIT can create for an unrelated active customer without changing ownership", async () => {
+  const before = await prisma.customer.findUniqueOrThrow({
+    where: { id: otherCustomerId },
+    select: { businessOwnerId: true, backendOwnerId: true, createdById: true },
+  });
+  const userCookie = await sessionCookie(actors.user);
+  const response = await jsonRequest(
+    "/api/finance/reconciliations",
+    "POST",
+    {
+      customerId: otherCustomerId,
+      contractId: ids.otherContract,
+      periodStart: "2026-08-01",
+      periodEnd: "2026-08-31",
+      reconcileType: "FEE_ONLY",
+    },
+    userCookie,
+  );
+  assert.equal(response.status, 201);
+  const created = await response.json() as { id: string; createdById: string };
+  assert.equal(created.createdById, actors.user.id);
+  assert.equal(
+    (await prisma.customerReconciliation.findUniqueOrThrow({ where: { id: created.id } })).createdById,
+    actors.user.id,
+  );
+  const afterCustomer = await prisma.customer.findUniqueOrThrow({
+    where: { id: otherCustomerId },
+    select: { businessOwnerId: true, backendOwnerId: true, createdById: true },
+  });
+  assert.deepEqual(afterCustomer, before);
+  await prisma.customerReconciliation.update({
+    where: { id: created.id },
+    data: { id: ids.crossOwnedReconciliation },
+  });
+});
+
+test("customer reconciliation creation rejects external actors and invalid contract references", async () => {
+  const userCookie = await sessionCookie(actors.user);
+  const brandCookie = await sessionCookie(actors.brand);
+  const body = {
+    customerId: otherCustomerId,
+    contractId: ids.otherContract,
+    periodStart: "2026-09-01",
+    periodEnd: "2026-09-30",
+    reconcileType: "COMMISSION_ONLY",
+  };
+  assert.equal((await jsonRequest("/api/finance/reconciliations", "POST", body, brandCookie)).status, 403);
+  assert.equal((await jsonRequest("/api/finance/reconciliations", "POST", { ...body, contractId: ids.ownedContract }, userCookie)).status, 404);
+  assert.equal((await jsonRequest("/api/finance/reconciliations", "POST", { ...body, contractId: ids.draftContract }, userCookie)).status, 400);
+  assert.equal((await jsonRequest("/api/finance/reconciliations", "POST", { ...body, contractId: ids.deletedContract }, userCookie)).status, 404);
 });
 
 test("BI clear requires internal MANAGE permission", async () => {

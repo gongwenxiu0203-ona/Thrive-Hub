@@ -5,6 +5,7 @@ import {
   reconciliationScope,
   channelReconciliationScope,
   customerScope,
+  financeReferenceCustomerScope,
   isStaff,
   parseViewScope,
 } from "@/lib/dataScope";
@@ -69,10 +70,10 @@ export default async function FinancePage({
   };
   const recScope = reconciliationScope(sess, canManageCustomer ? view : "mine");
   const chRecScope = channelReconciliationScope(sess, canManageChannel ? view : "mine");
-  const customerRecCustomerScope = customerScope(sess, canManageCustomer ? view : "mine");
-  const channelCustomerScope = customerScope(sess, canManageChannel ? view : "mine");
+  const customerRecCustomerScope = financeReferenceCustomerScope(sess);
+  const channelCustomerScope = financeReferenceCustomerScope(sess);
 
-  const [reconciliations, trashedReconciliations, channelReconciliations, customers, channelUsers, allUsers, affiliateReconciliations] = await Promise.all([
+  const [reconciliations, trashedReconciliations, channelReconciliations, customers, channelUsers, affiliateReconciliations] = await Promise.all([
     // 未删除的对账记录（带行级权限）
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     canViewCustomer ? prisma.customerReconciliation.findMany({
@@ -153,8 +154,6 @@ export default async function FinancePage({
       select: {
         id: true,
         brandName: true,
-        businessOwnerId: true,
-        contactPhone: true,
         contracts: {
           where: { status: "COMPLETED", deletedAt: null },
           select: {
@@ -171,13 +170,6 @@ export default async function FinancePage({
     canWriteChannel ? prisma.user.findMany({
       where: { role: "CHANNEL", status: "APPROVED" },
       select: { id: true, name: true },
-      orderBy: { name: "asc" },
-    }) : Promise.resolve([]),
-
-    // 所有用户（用于新建对账时选择负责人，需带邮箱）
-    canEditCustomer ? prisma.user.findMany({
-      where: { status: "APPROVED" },
-      select: { id: true, name: true, email: true },
       orderBy: { name: "asc" },
     }) : Promise.resolve([]),
 
@@ -280,8 +272,6 @@ export default async function FinancePage({
       channelReconciliations={channelReconciliations}
       customers={customers}
       channelUsers={channelUsers}
-      allUsers={allUsers}
-      currentUserId={session.userId}
       channelReconciliationCustomers={channelReconciliationCustomers}
       affiliateReconciliations={affiliateReconciliations}
       canToggleScope={isStaff(session.role)}

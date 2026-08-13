@@ -25,7 +25,7 @@ export default async function NewInvoicePage({
     .map((value) => value.trim())
     .filter(Boolean);
   const [options, prefill] = await Promise.all([
-    getInvoiceFormOptions(),
+    getInvoiceFormOptions(true),
     reconciliationIds.length
       ? getInvoiceReconciliationPrefill(reconciliationIds, requestedScope)
       : Promise.resolve(null),
