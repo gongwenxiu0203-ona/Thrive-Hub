@@ -41,9 +41,6 @@ export default async function LoginPage({
             注册新账号
           </Link>
         </p>
-        <p className="mt-2 text-center text-xs text-slate-400">
-          演示账号：admin@demo.com / admin123
-        </p>
       </div>
     </div>
   );
