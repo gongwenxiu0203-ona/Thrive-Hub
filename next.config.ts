@@ -1,7 +1,13 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["bcryptjs", "pdf-parse", "nodemailer", "xlsx"],
+  serverExternalPackages: [
+    "bcryptjs",
+    "pdf-parse",
+    "nodemailer",
+    "xlsx",
+    "@napi-rs/canvas",
+  ],
   experimental: {
     // Allow API route FormData up to the 100 MB contract limit plus multipart overhead.
     middlewareClientMaxBodySize: "110mb",
