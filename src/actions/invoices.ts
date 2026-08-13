@@ -555,8 +555,12 @@ async function normalizedDraft(
 
 function invoiceScope(
   session: Awaited<ReturnType<typeof requireInvoicePermission>>,
+  readOnly = false,
 ): Prisma.InvoiceWhereInput {
   if (session.role === "ADMIN") return {};
+  // 读操作：内部员工全量可见（requireInvoicePermission 已确保仅 staff 可访问）。
+  // 写操作：仍限创建人 / 自己名下客户。
+  if (readOnly) return {};
   return {
     OR: [
       { createdById: session.userId },
@@ -1030,7 +1034,7 @@ export async function listInvoices(input?: {
   const rows = await prisma.invoice.findMany({
     where: {
       deletedAt: null,
-      ...invoiceScope(session),
+      ...invoiceScope(session, true),
       ...(status ? { status } : {}),
       ...(search
         ? {
@@ -1087,7 +1091,7 @@ export async function getInvoiceById(
 ): Promise<InvoiceDetail | null> {
   const session = await requireInvoicePermission("READ");
   const row = await prisma.invoice.findFirst({
-    where: { id, deletedAt: null, ...invoiceScope(session) },
+    where: { id, deletedAt: null, ...invoiceScope(session, true) },
     include: {
       createdBy: { select: { name: true } },
       items: { orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] },

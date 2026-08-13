@@ -11,7 +11,7 @@ import { financeReferenceCustomerScope } from "@/lib/dataScope";
 export async function GET(req: Request) {
   try {
     const session = await requireSession();
-    const access = await getReconciliationAccess(session, "READ", req);
+    const access = await getReconciliationAccess(session, "READ", req, true);
     const { searchParams } = new URL(req.url);
     const status = searchParams.get("status");
     const customerId = searchParams.get("customerId");

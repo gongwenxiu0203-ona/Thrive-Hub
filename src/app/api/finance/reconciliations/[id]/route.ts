@@ -14,7 +14,7 @@ export async function GET(
 ) {
   try {
     const session = await requireSession();
-    const access = await getReconciliationAccess(session, "READ", req);
+    const access = await getReconciliationAccess(session, "READ", req, true);
     const { id } = await params;
 
     const rec = await prisma.customerReconciliation.findFirst({

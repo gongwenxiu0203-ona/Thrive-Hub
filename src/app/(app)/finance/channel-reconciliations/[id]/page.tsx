@@ -53,14 +53,13 @@ export default async function ChannelReconciliationDetailPage({
   const session = await requireSession();
   const permission = await requireFeaturePermission(session, "finance.channel_reconciliation", "READ");
   const canEdit = hasPermissionLevel(permission, "EDIT") && isStaff(session.role);
-  const canManage = hasPermissionLevel(permission, "MANAGE");
   const { id } = await params;
 
   const rec = await prisma.channelReconciliation.findFirst({
     where: {
       AND: [
         { id, deletedAt: null },
-        channelReconciliationScope(session, canManage ? "all" : "mine"),
+        channelReconciliationScope(session, isStaff(session.role) ? "all" : "mine"),
       ],
     },
     include: {

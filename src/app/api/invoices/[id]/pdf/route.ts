@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { customerScope } from "@/lib/dataScope";
 import { isStaff } from "@/lib/permissions";
 import {
   generateInvoicePdf,
@@ -66,18 +65,11 @@ export async function GET(
   const { id } = await params;
   let invoice;
   try {
+    // 读操作（PDF 下载）：上方已确保仅内部员工可访问，此处 staff 全量可见
     invoice = await prisma.invoice.findFirst({
       where: {
         id,
         deletedAt: null,
-        ...(session.role === "ADMIN"
-          ? {}
-          : {
-              OR: [
-                { createdById: session.userId },
-                { customer: customerScope(session, "mine") },
-              ],
-            }),
       },
       include: {
         items: { orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] },

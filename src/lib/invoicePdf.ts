@@ -21,6 +21,12 @@ const FONT_PATH = path.join(
   "fonts",
   "SourceHanSansCN-Regular.otf",
 );
+const FONT_BOLD_PATH = path.join(
+  process.cwd(),
+  "public",
+  "fonts",
+  "SourceHanSansCN-Bold.otf",
+);
 const LOGO_PATH = path.join(process.cwd(), "public", "thraive-logo.png");
 
 export type InvoicePdfItem = {
@@ -75,6 +81,7 @@ function ensureFont(): Promise<void> {
   if (!fontReady) {
     fontReady = Promise.resolve().then(() => {
       GlobalFonts.registerFromPath(FONT_PATH, FONT_FAMILY);
+      GlobalFonts.registerFromPath(FONT_BOLD_PATH, FONT_FAMILY);
     });
   }
   return fontReady;
@@ -283,12 +290,39 @@ function lines(
   });
 }
 
-function hline(ctx: Ctx, x1: number, y: number, x2: number, color: string, width = 1): void {
+function hline(
+  ctx: Ctx,
+  x1: number,
+  y: number,
+  x2: number,
+  color: string,
+  width = 1,
+  dash?: number[],
+): void {
   ctx.strokeStyle = color;
   ctx.lineWidth = width;
+  ctx.setLineDash(dash ?? []);
   ctx.beginPath();
   ctx.moveTo(x1, y);
   ctx.lineTo(x2, y);
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+function vline(
+  ctx: Ctx,
+  x: number,
+  y1: number,
+  y2: number,
+  color: string,
+  width = 1,
+): void {
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.moveTo(x, y1);
+  ctx.lineTo(x, y2);
   ctx.stroke();
 }
 
@@ -358,9 +392,9 @@ function drawTableHeader(ctx: Ctx, y: number): void {
   const quantityEnd = 850;
   const priceEnd = 1020;
   cell(ctx, PAGE_MARGIN, y, TABLE_WIDTH, 54, "#f2f4f7", "#98a2b3");
-  hline(ctx, descriptionEnd, y, descriptionEnd, "#98a2b3");
-  hline(ctx, quantityEnd, y, quantityEnd, "#98a2b3");
-  hline(ctx, priceEnd, y, priceEnd, "#98a2b3");
+  vline(ctx, descriptionEnd, y, y + 54, "#98a2b3");
+  vline(ctx, quantityEnd, y, y + 54, "#98a2b3");
+  vline(ctx, priceEnd, y, y + 54, "#98a2b3");
   text(ctx, "Items", PAGE_MARGIN + 18, y + 35, cnFont(20, 700), "#101828");
   text(ctx, "Quantity", (descriptionEnd + quantityEnd) / 2, y + 35, cnFont(20, 700), "#101828", "center");
   text(ctx, "Price", (quantityEnd + priceEnd) / 2, y + 35, cnFont(20, 700), "#101828", "center");
@@ -372,9 +406,9 @@ function drawItems(ctx: Ctx, items: RenderedItem[], startY: number): number {
   for (const item of items) {
     const bottom = y + item.height;
     cell(ctx, PAGE_MARGIN, y, TABLE_WIDTH, item.height, "#ffffff", "#d0d5dd");
-    hline(ctx, 735, y, 735, "#d0d5dd");
-    hline(ctx, 850, y, 850, "#d0d5dd");
-    hline(ctx, 1020, y, 1020, "#d0d5dd");
+    vline(ctx, 735, y, bottom, "#d0d5dd");
+    vline(ctx, 850, y, bottom, "#d0d5dd");
+    vline(ctx, 1020, y, bottom, "#d0d5dd");
     lines(ctx, item.lines, PAGE_MARGIN + 18, y + 35, 20, 27, cnFont(20), "#101828");
     if (item.quantity) {
       text(ctx, String(item.quantity), 792, y + 35, cnFont(21), "#101828", "center");
@@ -404,11 +438,12 @@ function drawSummary(ctx: Ctx, invoice: InvoicePdfData, startY: number): void {
 
   totals.forEach((total, index) => {
     cell(ctx, PAGE_MARGIN, y + index * 54, TABLE_WIDTH, 54, "#ffffff", "#98a2b3");
+    vline(ctx, 1020, y + index * 54, y + (index + 1) * 54, "#98a2b3");
     text(ctx, `Total (${total.currency}):`, 1000, y + 35 + index * 54, cnFont(20, 700), "#101828", "right");
     text(ctx, formatMoney(total.amount, total.currency), PAGE_WIDTH - PAGE_MARGIN - 18, y + 35 + index * 54, cnFont(20, 700), "#101828", "right");
   });
 
-  hline(ctx, PAGE_MARGIN, y + totalsHeight + 34, PAGE_WIDTH - PAGE_MARGIN, "#98a2b3", 1);
+  hline(ctx, PAGE_MARGIN, y + totalsHeight + 34, PAGE_WIDTH - PAGE_MARGIN, "#98a2b3", 1, [5, 4]);
   text(ctx, "Amount Due:", 930, y + totalsHeight + 76, cnFont(20, 700), "#101828", "right");
   totals.forEach((total, index) => {
     text(ctx, formatMoney(total.amount, total.currency), PAGE_WIDTH - PAGE_MARGIN, y + totalsHeight + 76 + index * 30, cnFont(20, 700), "#101828", "right");

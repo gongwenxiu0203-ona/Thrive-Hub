@@ -68,8 +68,9 @@ export default async function FinancePage({
     role: session.role,
     brandName: session.brandName,
   };
-  const recScope = reconciliationScope(sess, canManageCustomer ? view : "mine");
-  const chRecScope = channelReconciliationScope(sess, canManageChannel ? view : "mine");
+  // 读操作（列表页）：内部员工（ADMIN/USER）全量可见；外部角色仍由 scope 硬隔离
+  const recScope = reconciliationScope(sess, canViewCustomer && isStaff(sess.role) ? "all" : "mine");
+  const chRecScope = channelReconciliationScope(sess, canViewChannel && isStaff(sess.role) ? "all" : "mine");
   const customerRecCustomerScope = financeReferenceCustomerScope(sess);
   const channelCustomerScope = financeReferenceCustomerScope(sess);
 

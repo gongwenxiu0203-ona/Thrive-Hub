@@ -15,7 +15,7 @@ export default async function CustomerReconciliationPage({
   searchParams: Promise<{ contractId?: string }>;
 }) {
   const session = await requireSession();
-  const access = await getReconciliationAccess(session, "READ");
+  const access = await getReconciliationAccess(session, "READ", undefined, true);
   const canEdit = hasPermissionLevel(access.permission, "EDIT");
   const canManage = hasPermissionLevel(access.permission, "MANAGE");
   const { customerId } = await params;

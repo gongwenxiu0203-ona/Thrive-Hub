@@ -4,6 +4,7 @@ import { requireSession } from "@/lib/session";
 import {
   channelReconciliationScope,
   financeReferenceCustomerScope,
+  isStaff,
 } from "@/lib/dataScope";
 import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
 import { errorResponse } from "@/lib/appError";
@@ -17,7 +18,7 @@ export async function GET() {
     const session = await requireSession();
     await requireFeaturePermission(session, "finance.channel_reconciliation", "READ");
     const list = await prisma.channelReconciliation.findMany({
-      where: { AND: [{ deletedAt: null }, channelReconciliationScope(session, session.role === "ADMIN" ? "all" : "mine")] },
+      where: { AND: [{ deletedAt: null }, channelReconciliationScope(session, isStaff(session.role) ? "all" : "mine")] },
       include: {
         customer: { select: { id: true, brandName: true } },
         contract: { select: { id: true, contractNo: true } },
