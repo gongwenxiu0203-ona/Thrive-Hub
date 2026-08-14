@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { customerScope, reconciliationScope } from "@/lib/dataScope";
+import { customerScope, reconciliationScope, financeDataView } from "@/lib/dataScope";
 import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
 import { RECONCILIATION_FEATURE } from "@/lib/reconciliationAccess";
 import { errorResponse } from "@/lib/appError";
@@ -17,7 +17,7 @@ export async function DELETE(
     await requireFeaturePermission(session, RECONCILIATION_FEATURE, "MANAGE");
     const { customerId } = await params;
 
-    const view = session.role === "ADMIN" ? "all" : "mine";
+    const view = financeDataView(session);
     const customer = await prisma.customer.findFirst({
       where: { AND: [{ id: customerId }, customerScope(session, view)] },
     });

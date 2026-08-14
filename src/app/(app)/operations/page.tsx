@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { customerScope, projectScope } from "@/lib/dataScope";
+import { isStaff } from "@/lib/dataScope";
 import { currentMonthKey, monthRange } from "@/lib/financeOperations";
 import { OperationsClient } from "./OperationsClient";
 import { getEmployeeKpiByMonth } from "@/actions/employeeKpi";
@@ -26,6 +26,7 @@ export default async function FinanceOperationsPage({
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const session = await requireSession();
+  if (!isStaff(session.role)) redirect("/dashboard");
   const sp = await searchParams;
   const permissionEntries = await Promise.all(
     Object.entries({
@@ -66,9 +67,7 @@ export default async function FinanceOperationsPage({
   const kpiCustomerId = sp.customerId || "";
   const kpiProjectId = sp.projectId || "";
   // ADMIN 在员工 KPI tab 默认看全部员工（除非显式 ?scope=mine）；其他 tab 仍走 mine 默认
-  const isAdmin = session.role === "ADMIN";
-  const kpiDefaultsAll = isAdmin && initialTab === "kpi" && sp.scope !== "mine";
-  const scopeView: "mine" | "all" = sp.scope === "all" || kpiDefaultsAll ? "all" : "mine";
+  const scopeView: "all" = "all";
   const needsSnapshots = initialTab === "revenue" || initialTab === "count";
 
   const [snapshots, reconciliations, ars, pipelines, customers, users] = await Promise.all([
@@ -149,17 +148,11 @@ export default async function FinanceOperationsPage({
       )
     : [];
   // 非 ADMIN 的下拉用 scope 过滤；ADMIN 看全部（codex review：防止泄漏全量名单）
-  const sessForScope = {
-    userId: session.userId,
-    role: session.role,
-    brandName: session.brandName,
-  };
   const kpiProjects = initialTab === "kpi"
     ? await prisma.project.findMany({
         where: {
           type: "INTEGRATED",
           deletedAt: null,
-          ...(isAdmin ? {} : projectScope(sessForScope, "mine")),
         },
         select: { id: true, name: true },
         orderBy: { name: "asc" },
@@ -169,8 +162,6 @@ export default async function FinanceOperationsPage({
     ? await prisma.customer.findMany({
         where: {
           deletedAt: null,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          ...(isAdmin ? {} : (customerScope(sessForScope, "mine") as any)),
         },
         select: { id: true, brandName: true },
         orderBy: { brandName: "asc" },
@@ -260,7 +251,6 @@ export default async function FinanceOperationsPage({
       customers={customers}
       users={users}
       countSummary={countSummary}
-      isAdmin={isAdmin}
       kpiRows={kpiRows}
       kpiAmOwnerId={kpiAmOwnerId}
       kpiCustomerId={kpiCustomerId}

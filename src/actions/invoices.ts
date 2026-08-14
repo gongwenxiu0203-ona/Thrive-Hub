@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import {
   customerScope,
+  financeDataView,
   financeReferenceCustomerScope,
   isStaff,
   reconciliationScope,
@@ -19,7 +20,6 @@ import {
 import {
   FeaturePermissionError,
   requireFeaturePermission,
-  resolveSafeViewScope,
 } from "@/lib/permissionGuard";
 import { requireSession } from "@/lib/session";
 import { actionError } from "@/lib/appError";
@@ -395,7 +395,7 @@ async function validateRelations(
         customerId,
         customer: {
           deletedAt: null,
-          ...customerScope(session, session.role === "ADMIN" ? "all" : "mine"),
+          ...financeReferenceCustomerScope(session),
         },
       },
       select: { id: true, currency: true },
@@ -555,18 +555,8 @@ async function normalizedDraft(
 
 function invoiceScope(
   session: Awaited<ReturnType<typeof requireInvoicePermission>>,
-  readOnly = false,
 ): Prisma.InvoiceWhereInput {
-  if (session.role === "ADMIN") return {};
-  // 读操作：内部员工全量可见（requireInvoicePermission 已确保仅 staff 可访问）。
-  // 写操作：仍限创建人 / 自己名下客户。
-  if (readOnly) return {};
-  return {
-    OR: [
-      { createdById: session.userId },
-      { customer: customerScope(session, "mine") as Prisma.CustomerWhereInput },
-    ],
-  };
+  return isStaff(session.role) ? {} : { id: "__NO_ACCESS__" };
 }
 
 export async function getInvoiceFormOptions(
@@ -581,10 +571,9 @@ export async function getInvoiceFormOptions(
         session,
         session.role === "ADMIN" ? "all" : "mine",
       );
-  const receivableCustomerScope = customerScope(
-    session,
-    session.role === "ADMIN" ? "all" : "mine",
-  );
+  const receivableCustomerScope = includeAllFinanceReferences
+    ? financeReferenceCustomerScope(session)
+    : customerScope(session, session.role === "ADMIN" ? "all" : "mine");
   const [customers, contracts, accountsReceivables] = await Promise.all([
     prisma.customer.findMany({
       where: { deletedAt: null, ...referenceCustomerScope },
@@ -712,13 +701,12 @@ function reconciliationPeriod(start: Date, end: Date): {
 
 export async function getInvoiceReconciliationPrefill(
   reconciliationIds: string[],
-  requestedScope?: string | null,
+  _requestedScope?: string | null,
 ): Promise<InvoiceReconciliationPrefillResult> {
   try {
     const session = await requireInvoicePermission("EDIT");
-    let reconciliationPermission: PermLevel;
     try {
-      reconciliationPermission = await requireFeaturePermission(
+      await requireFeaturePermission(
         session,
         RECONCILIATION_FEATURE,
         "READ",
@@ -743,12 +731,7 @@ export async function getInvoiceReconciliationPrefill(
       };
     }
 
-    const dataView = await resolveSafeViewScope(
-      session,
-      RECONCILIATION_FEATURE,
-      session.role === "ADMIN" ? "all" : requestedScope,
-      reconciliationPermission,
-    );
+    const dataView = financeDataView(session);
     const rows = await prisma.customerReconciliation.findMany({
       where: {
         AND: [
@@ -1034,7 +1017,7 @@ export async function listInvoices(input?: {
   const rows = await prisma.invoice.findMany({
     where: {
       deletedAt: null,
-      ...invoiceScope(session, true),
+      ...invoiceScope(session),
       ...(status ? { status } : {}),
       ...(search
         ? {
@@ -1091,7 +1074,7 @@ export async function getInvoiceById(
 ): Promise<InvoiceDetail | null> {
   const session = await requireInvoicePermission("READ");
   const row = await prisma.invoice.findFirst({
-    where: { id, deletedAt: null, ...invoiceScope(session, true) },
+    where: { id, deletedAt: null, ...invoiceScope(session) },
     include: {
       createdBy: { select: { name: true } },
       items: { orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] },

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { channelReconciliationScope } from "@/lib/dataScope";
+import { channelReconciliationScope, financeDataView } from "@/lib/dataScope";
 import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
 import { saveUploadedFile } from "@/lib/upload";
 import { errorResponse } from "@/lib/appError";
@@ -14,7 +14,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const session = await requireSession(); await requireFeaturePermission(session, 'finance.channel_reconciliation', 'EDIT');
     if (!['ADMIN','USER'].includes(session.role)) return NextResponse.json({ error: '仅内部员工可上传付款回单' }, { status: 403 });
     const { id, periodId } = await params;
-    const period = await prisma.channelReconciliationPeriod.findFirst({ where: { id: periodId, reconciliationId: id, reconciliation: channelReconciliationScope(session, session.role === 'ADMIN' ? 'all' : 'mine') }, select: { fixedFeePaidAt: true, commissionPaidAt: true, channelReviewStatus: true } });
+    const period = await prisma.channelReconciliationPeriod.findFirst({ where: { id: periodId, reconciliationId: id, reconciliation: channelReconciliationScope(session, financeDataView(session)) }, select: { fixedFeePaidAt: true, commissionPaidAt: true, channelReviewStatus: true } });
     if (!period) return NextResponse.json({ error: '渠道商对账周期不存在、已删除或无权上传回单' }, { status: 404 });
     if (period.fixedFeePaidAt || period.commissionPaidAt) return NextResponse.json({ error: '该期已付款，不能替换回单' }, { status: 409 });
     if (!['CONFIRMED','SKIPPED'].includes(period.channelReviewStatus)) return NextResponse.json({ error: '渠道确认完成或跳过确认后才能上传付款回单' }, { status: 409 });

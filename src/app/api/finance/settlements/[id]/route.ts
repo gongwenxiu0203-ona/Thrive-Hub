@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { reconciliationScope } from "@/lib/dataScope";
+import { reconciliationScope, financeDataView } from "@/lib/dataScope";
 import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
 import { errorResponse } from "@/lib/appError";
 
@@ -18,7 +18,7 @@ export async function PATCH(
     const body = await req.json();
 
     const settlement = await prisma.settlement.findFirst({
-      where: { id, reconciliation: reconciliationScope(session, session.role === "ADMIN" ? "all" : "mine") },
+      where: { id, reconciliation: reconciliationScope(session, financeDataView(session)) },
       include: {
         reconciliation: {
           include: { customer: { select: { brandName: true } } },

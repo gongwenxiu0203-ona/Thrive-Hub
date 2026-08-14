@@ -4,6 +4,7 @@ import { requireSession } from "@/lib/session";
 import { saveUploadedFile } from "@/lib/upload";
 import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
 import { errorResponse } from "@/lib/appError";
+import { isStaff } from "@/lib/dataScope";
 
 export async function POST(
   req: NextRequest,
@@ -12,6 +13,9 @@ export async function POST(
   try {
     const session = await requireSession();
     await requireFeaturePermission(session, "finance.affiliate_reconciliation", "EDIT");
+    if (!isStaff(session.role)) {
+      return NextResponse.json({ error: "仅内部员工可上传联盟商结算凭证" }, { status: 403 });
+    }
 
     const { id } = await params;
     const form = await req.formData();

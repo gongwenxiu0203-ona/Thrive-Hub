@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { channelReconciliationScope } from "@/lib/dataScope";
+import { channelReconciliationScope, financeDataView } from "@/lib/dataScope";
 import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
 import { appendAuditEntry } from "@/lib/channelSplit";
 import { errorResponse } from "@/lib/appError";
@@ -18,7 +18,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     if (!action) return NextResponse.json({ error: "操作类型无效" }, { status: 400 });
     if (!Number.isInteger(expectedVersion) || expectedVersion < 0) return NextResponse.json({ error: "确认版本无效，请刷新后重试" }, { status: 400 });
     const result = await prisma.$transaction(async (tx) => {
-      const period = await tx.channelReconciliationPeriod.findFirst({ where: { id: periodId, reconciliationId: id, reconciliation: channelReconciliationScope(session, session.role === 'ADMIN' ? 'all' : 'mine') }, include: { reconciliation: { include: { customer: { select: { brandName: true } }, channelUser: { select: { id: true } }, contract: { select: { contractNo: true } } } } } });
+      const period = await tx.channelReconciliationPeriod.findFirst({ where: { id: periodId, reconciliationId: id, reconciliation: channelReconciliationScope(session, financeDataView(session)) }, include: { reconciliation: { include: { customer: { select: { brandName: true } }, channelUser: { select: { id: true } }, contract: { select: { contractNo: true } } } } } });
       if (!period) throw new Error('NOT_FOUND');
       if (period.fixedFeePaidAt || period.commissionPaidAt) throw new Error('PAID_LOCKED');
       if (period.channelReviewStatus !== 'DRAFT' || period.channelReviewVersion !== expectedVersion) throw new Error('STALE_STATE');

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { channelReconciliationScope, customerScope } from "@/lib/dataScope";
+import { channelReconciliationScope, financeDataView, financeReferenceCustomerScope } from "@/lib/dataScope";
 import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
 import {
   parseTieredRules,
@@ -66,7 +66,7 @@ export async function upsertChannelSplitRule(input: SplitRuleInput): Promise<Res
   if (err) return { ok: false, error: err };
 
   const customer = await prisma.customer.findFirst({
-    where: { AND: [{ id: input.customerId }, customerScope(session, session.role === "ADMIN" ? "all" : "mine")] },
+    where: { AND: [{ id: input.customerId }, financeReferenceCustomerScope(session)] },
     select: { id: true, deletedAt: true, channelUserId: true },
   });
   if (!customer || customer.deletedAt) return { ok: false, error: "客户不存在" };
@@ -122,7 +122,7 @@ export async function deleteChannelSplitRule(customerId: string, contractId?: st
     if (error instanceof FeaturePermissionError) return { ok: false, error: "无权删除分账规则" };
     throw error;
   }
-  const customer = await prisma.customer.findFirst({ where: { AND: [{ id: customerId }, customerScope(session, session.role === "ADMIN" ? "all" : "mine")] }, select: { id: true } });
+  const customer = await prisma.customer.findFirst({ where: { AND: [{ id: customerId }, financeReferenceCustomerScope(session)] }, select: { id: true } });
   if (!customer) return { ok: false, error: "客户不存在或无权操作" };
   if (contractId) {
     const contract = await prisma.contract.findFirst({
@@ -172,7 +172,7 @@ export async function ensureChannelDueDateReminders(
   const reconciliation = await prisma.channelReconciliation.findFirst({
     where: {
       id: reconciliationId,
-      ...channelReconciliationScope(session, session.role === "ADMIN" ? "all" : "mine"),
+      ...channelReconciliationScope(session, financeDataView(session)),
     },
     select: { id: true },
   });

@@ -100,7 +100,7 @@ interface Filters {
  *  - 总评按项目优先（产品规则） */
 export async function getEmployeeKpiByMonth(
   filters: Filters,
-  view: ViewScope = "mine",
+  _view: ViewScope = "mine",
 ): Promise<EmployeeKpiRow[]> {
   const session = await requireSession();
   if (!isStaff(session.role)) return [];
@@ -110,7 +110,7 @@ export async function getEmployeeKpiByMonth(
     role: session.role,
     brandName: session.brandName,
   };
-  const effectiveView: ViewScope = session.role === "ADMIN" ? view : "mine";
+  const effectiveView: ViewScope = "all";
   const targetScope = kpiScope(sessForScope, effectiveView);
 
   // 内部员工：除了 amOwner 匹配，还要让 channelOwner 匹配能进入 scope

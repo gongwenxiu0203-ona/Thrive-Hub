@@ -1,8 +1,8 @@
 import type { Prisma } from "@prisma/client";
 import type { SessionPayload } from "@/lib/auth";
 import type { PermLevel } from "@/lib/featurePermissions";
-import { reconciliationScope, customerScope, isStaff, type ViewScope } from "@/lib/dataScope";
-import { requireFeaturePermission, resolveSafeViewScope } from "@/lib/permissionGuard";
+import { reconciliationScope, customerScope, financeDataView, type ViewScope } from "@/lib/dataScope";
+import { requireFeaturePermission } from "@/lib/permissionGuard";
 
 export const RECONCILIATION_FEATURE = "finance.customer_reconciliation";
 
@@ -11,8 +11,8 @@ type ReconciliationSession = Pick<SessionPayload, "userId" | "role" | "brandName
 export async function getReconciliationAccess(
   session: ReconciliationSession,
   required: PermLevel,
-  request?: Request,
-  readOnly = false,
+  _request?: Request,
+  _readOnly = false,
 ): Promise<{
   permission: PermLevel;
   view: ViewScope;
@@ -20,19 +20,10 @@ export async function getReconciliationAccess(
   customerScope: Prisma.CustomerWhereInput;
 }> {
   const permission = await requireFeaturePermission(session, RECONCILIATION_FEATURE, required);
-  const requested = request ? new URL(request.url).searchParams.get("scope") : null;
-  // 读操作：内部员工（ADMIN/USER）全量可见；写操作仍走 resolveSafeViewScope
-  //（ADMIN all，其余默认 mine = 创建人/提交人/负责人）。外部角色不受 readOnly 影响。
-  const view: ViewScope =
-    readOnly && isStaff(session.role)
-      ? "all"
-      : await resolveSafeViewScope(
-          session,
-          RECONCILIATION_FEATURE,
-          session.role === "ADMIN" ? "all" : requested,
-          permission,
-        );
   const scopeSession = { userId: session.userId, role: session.role, brandName: session.brandName };
+  // Finance data scope is independent from the action level checked above.
+  // ADMIN/USER share all records; external roles retain tenant isolation.
+  const view = financeDataView(scopeSession);
   return {
     permission,
     view,

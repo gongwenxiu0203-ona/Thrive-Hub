@@ -53,6 +53,7 @@ export default async function ChannelReconciliationDetailPage({
   const session = await requireSession();
   const permission = await requireFeaturePermission(session, "finance.channel_reconciliation", "READ");
   const canEdit = hasPermissionLevel(permission, "EDIT") && isStaff(session.role);
+  const canManage = hasPermissionLevel(permission, "MANAGE") && isStaff(session.role);
   const { id } = await params;
 
   const rec = await prisma.channelReconciliation.findFirst({
@@ -149,7 +150,7 @@ export default async function ChannelReconciliationDetailPage({
     await ensureChannelDueDateReminders(rec.id, derivedPeriods);
   } catch {}
 
-  const adminCustomerOptions = session.role === "ADMIN"
+  const adminCustomerOptions = canManage
     ? await prisma.customer.findMany({
         where: { deletedAt: null, channelUserId: { not: null } },
         select: {
@@ -167,7 +168,7 @@ export default async function ChannelReconciliationDetailPage({
     : [];
   return (
     <ChannelReconciliationDetail
-      isAdmin={session.role === "ADMIN"}
+      isAdmin={canManage}
       adminCustomerOptions={adminCustomerOptions.map((customer) => ({
         id: customer.id,
         brandName: customer.brandName,

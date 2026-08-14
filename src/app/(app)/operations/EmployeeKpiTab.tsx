@@ -16,7 +16,7 @@ export function EmployeeKpiTab({
   amOwnerId,
   customerId,
   projectId,
-  isAdmin,
+  showEmployeeFilter,
   users,
   customers,
   projects,
@@ -26,7 +26,7 @@ export function EmployeeKpiTab({
   amOwnerId: string;
   customerId: string;
   projectId: string;
-  isAdmin: boolean;
+  showEmployeeFilter: boolean;
   users: UserOption[];
   customers: CustomerOption[];
   projects: { id: string; name: string }[];
@@ -56,7 +56,7 @@ export function EmployeeKpiTab({
           onChange={(e) => navigate("month", e.target.value)}
           className="rounded border border-slate-200 px-2 py-1 text-sm"
         />
-        {isAdmin && (
+        {showEmployeeFilter && (
           <>
             <label className="text-xs text-slate-500">员工</label>
             <select

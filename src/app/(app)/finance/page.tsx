@@ -4,10 +4,8 @@ import { purgeExpiredTrashedReconciliations } from "@/lib/reconciliationTrash";
 import {
   reconciliationScope,
   channelReconciliationScope,
-  customerScope,
   financeReferenceCustomerScope,
   isStaff,
-  parseViewScope,
 } from "@/lib/dataScope";
 import { FinanceClient } from "./FinanceClient";
 import { resolveUserPermission } from "@/lib/permissionResolver";
@@ -28,11 +26,7 @@ function toShanghaiDateString(value: Date | null): string | null {
   return `${part("year")}-${part("month")}-${part("day")}`;
 }
 
-export default async function FinancePage({
-  searchParams,
-}: {
-  searchParams: Promise<Record<string, string | undefined>>;
-}) {
+export default async function FinancePage() {
   const session = await requireSession();
   const [customerPermission, channelPermission, affiliatePermission] =
     await Promise.all([
@@ -49,15 +43,12 @@ export default async function FinancePage({
   const canEditChannel = can(channelPermission, "EDIT");
   const canManageChannel = can(channelPermission, "MANAGE");
   const canWriteChannel = canEditChannel && isStaff(session.role);
-  const canViewAffiliate = can(affiliatePermission, "READ");
-  const canEditAffiliate = can(affiliatePermission, "EDIT");
-  const canManageAffiliate = can(affiliatePermission, "MANAGE");
+  const canViewAffiliate = isStaff(session.role) && can(affiliatePermission, "READ");
+  const canEditAffiliate = isStaff(session.role) && can(affiliatePermission, "EDIT");
+  const canManageAffiliate = isStaff(session.role) && can(affiliatePermission, "MANAGE");
   if (!canViewCustomer && !canViewChannel && !canViewAffiliate) {
     redirect("/dashboard");
   }
-  const sp = await searchParams;
-  const view = parseViewScope(sp);
-
   // 懒清理：仅内部员工触发
   if (isStaff(session.role) && canManageCustomer) {
     await purgeExpiredTrashedReconciliations();
@@ -275,8 +266,8 @@ export default async function FinancePage({
       channelUsers={channelUsers}
       channelReconciliationCustomers={channelReconciliationCustomers}
       affiliateReconciliations={affiliateReconciliations}
-      canToggleScope={isStaff(session.role)}
-      currentView={view}
+      canToggleScope={false}
+      currentView="all"
       isChannel={session.role === "CHANNEL"}
       canViewCustomerReconciliations={canViewCustomer}
       canEditCustomerReconciliations={canEditCustomer}

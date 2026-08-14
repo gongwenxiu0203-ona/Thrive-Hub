@@ -235,12 +235,15 @@ test("customer reconciliation endpoints reject unauthenticated and permission-NO
   assert.equal(forbidden.status, 403);
 });
 
-test("USER reconciliation READ stays in mine scope even when scope=all is requested", async () => {
+test("USER reconciliation READ uses the full internal finance data scope", async () => {
   const userCookie = await sessionCookie(actors.user);
   const response = await request("/api/finance/reconciliations?scope=all", {}, userCookie);
   assert.equal(response.status, 200);
   const rows = await response.json() as Array<{ id: string }>;
-  assert.deepEqual(rows.map((row) => row.id), [ids.ownedReconciliation]);
+  const returned = new Set(rows.map((row) => row.id));
+  assert.equal(returned.has(ids.ownedReconciliation), true);
+  assert.equal(returned.has(ids.otherReconciliation), true);
+  assert.equal(returned.has(ids.deletedReconciliation), false);
 });
 
 test("ADMIN reconciliation list can read all active rows but not soft-deleted rows", async () => {
@@ -254,14 +257,14 @@ test("ADMIN reconciliation list can read all active rows but not soft-deleted ro
   assert.equal(returned.has(ids.deletedReconciliation), false);
 });
 
-test("reconciliation detail returns 404 for cross-scope and soft-deleted rows", async () => {
+test("USER can read unrelated active reconciliation but not soft-deleted rows", async () => {
   const userCookie = await sessionCookie(actors.user);
   const crossScope = await request(
     `/api/finance/reconciliations/${ids.otherReconciliation}`,
     {},
     userCookie,
   );
-  assert.equal(crossScope.status, 404);
+  assert.equal(crossScope.status, 200);
 
   const deleted = await request(
     `/api/finance/reconciliations/${ids.deletedReconciliation}`,
@@ -269,6 +272,32 @@ test("reconciliation detail returns 404 for cross-scope and soft-deleted rows", 
     userCookie,
   );
   assert.equal(deleted.status, 404);
+});
+
+test("USER reconciliation EDIT applies to unrelated records, while MANAGE remains required for deletion", async () => {
+  const userCookie = await sessionCookie(actors.user);
+  const edit = await jsonRequest(
+    `/api/finance/reconciliations/${ids.otherReconciliation}`,
+    "PATCH",
+    { commissionCurrency: "EUR" },
+    userCookie,
+  );
+  assert.equal(edit.status, 200);
+  assert.equal(
+    (await prisma.customerReconciliation.findUniqueOrThrow({
+      where: { id: ids.otherReconciliation },
+      select: { commissionCurrency: true },
+    })).commissionCurrency,
+    "EUR",
+  );
+
+  const remove = await jsonRequest(
+    `/api/finance/reconciliations/${ids.otherReconciliation}`,
+    "DELETE",
+    { reason: "security permission boundary" },
+    userCookie,
+  );
+  assert.equal(remove.status, 403);
 });
 
 test("USER reconciliation EDIT can create for an unrelated active customer without changing ownership", async () => {

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { channelReconciliationScope } from "@/lib/dataScope";
+import { channelReconciliationScope, financeDataView } from "@/lib/dataScope";
 import {
   FeaturePermissionError,
   requireFeaturePermission,
@@ -121,7 +121,7 @@ export async function PATCH(
           reconciliationId: id,
           reconciliation: channelReconciliationScope(
             session,
-            session.role === "ADMIN" ? "all" : "mine",
+            financeDataView(session),
           ),
         },
         include: {

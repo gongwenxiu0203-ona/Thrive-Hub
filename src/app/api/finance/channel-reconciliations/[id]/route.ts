@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { channelReconciliationScope } from "@/lib/dataScope";
+import { channelReconciliationScope, financeDataView, isStaff } from "@/lib/dataScope";
 import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
 import { appendAuditEntry, splitCommissionServicePeriods, splitFixedFeeServicePeriods } from "@/lib/channelSplit";
 import { errorResponse } from "@/lib/appError";
@@ -78,7 +78,7 @@ export async function PATCH(
     const body = await req.json();
 
     const existing = await prisma.channelReconciliation.findFirst({
-      where: { AND: [{ id }, channelReconciliationScope(session, session.role === "ADMIN" ? "all" : "mine")] },
+      where: { AND: [{ id }, channelReconciliationScope(session, financeDataView(session))] },
       include: { periods: true },
     });
     if (!existing) {
@@ -86,7 +86,8 @@ export async function PATCH(
     }
 
     if (existing.recordMode === "RULE_DRIVEN" && body.action === "restore") {
-      if (session.role !== "ADMIN") return NextResponse.json({ error: "仅管理员可恢复渠道商分账" }, { status: 403 });
+      await requireFeaturePermission(session, "finance.channel_reconciliation", "MANAGE");
+      if (!isStaff(session.role)) return NextResponse.json({ error: "仅内部员工可恢复渠道商分账" }, { status: 403 });
       if (!existing.deletedAt) return NextResponse.json({ error: "该记录未被删除" }, { status: 409 });
       const reason = typeof body.correctionReason === "string" ? body.correctionReason.trim() : "";
       if (!reason) return NextResponse.json({ error: "请填写恢复原因" }, { status: 400 });
@@ -95,7 +96,8 @@ export async function PATCH(
     }
 
     if (existing.recordMode === "RULE_DRIVEN" && ("customerId" in body || "contractId" in body)) {
-      if (session.role !== "ADMIN") return NextResponse.json({ error: "仅管理员可重新编辑主记录，请联系管理员" }, { status: 403 });
+      await requireFeaturePermission(session, "finance.channel_reconciliation", "MANAGE");
+      if (!isStaff(session.role)) return NextResponse.json({ error: "仅内部员工可重新编辑主记录" }, { status: 403 });
       const reason = typeof body.correctionReason === "string" ? body.correctionReason.trim() : "";
       if (!reason) return NextResponse.json({ error: "请填写修改原因" }, { status: 400 });
       const customerId = typeof body.customerId === "string" ? body.customerId : existing.customerId;
@@ -315,8 +317,8 @@ export async function DELETE(
   try {
     const session = await requireSession();
     await requireFeaturePermission(session, "finance.channel_reconciliation", "MANAGE");
-    if (session.role !== "ADMIN") {
-      return NextResponse.json({ error: "仅管理员可删除渠道商分账，请联系管理员" }, { status: 403 });
+    if (!isStaff(session.role)) {
+      return NextResponse.json({ error: "仅内部员工可删除渠道商分账" }, { status: 403 });
     }
     const { id } = await params;
     const body = await req.json().catch(() => ({}));
@@ -328,10 +330,7 @@ export async function DELETE(
       where: {
         AND: [
           { id, deletedAt: null },
-          channelReconciliationScope(
-            session,
-            session.role === "ADMIN" ? "all" : "mine",
-          ),
+          channelReconciliationScope(session, financeDataView(session)),
         ],
       },
       select: {

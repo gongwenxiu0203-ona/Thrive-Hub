@@ -118,7 +118,6 @@ export function OperationsClient({
   customers,
   users,
   countSummary,
-  isAdmin,
   kpiRows,
   kpiAmOwnerId,
   kpiCustomerId,
@@ -135,7 +134,6 @@ export function OperationsClient({
   customers: Customer[];
   users: UserOption[];
   countSummary: CountSummary;
-  isAdmin: boolean;
   kpiRows: EmployeeKpiRow[];
   kpiAmOwnerId: string;
   kpiCustomerId: string;
@@ -213,16 +211,16 @@ export function OperationsClient({
         ))}
       </div>
       {tab === "revenue" && (
-        <RevenueTab snapshots={snapshots} month={month} onMonthChange={setMonth} canEdit={canEdit("revenue") && isAdmin} canManage={canManage("revenue") && isAdmin} />
+        <RevenueTab snapshots={snapshots} month={month} onMonthChange={setMonth} canEdit={canEdit("revenue")} canManage={canManage("revenue")} />
       )}
       {tab === "count" && (
         <ClientCountTab summary={countSummary} month={month} onMonthChange={setMonth} />
       )}
       {tab === "ar" && (
-        <ARTab ars={ars} customers={customers} users={users} canEdit={canEdit("ar")} canManage={canManage("ar") && isAdmin} />
+        <ARTab ars={ars} customers={customers} users={users} canEdit={canEdit("ar")} canManage={canManage("ar")} />
       )}
       {tab === "pipeline" && (
-        <PipelineTab pipelines={pipelines} users={users} canEdit={canEdit("pipeline")} canManage={canManage("pipeline") && isAdmin} />
+        <PipelineTab pipelines={pipelines} users={users} canEdit={canEdit("pipeline")} canManage={canManage("pipeline")} />
       )}
       {tab === "kpi" && (
         <EmployeeKpiTab
@@ -231,7 +229,7 @@ export function OperationsClient({
           amOwnerId={kpiAmOwnerId}
           customerId={kpiCustomerId}
           projectId={kpiProjectId}
-          isAdmin={isAdmin && canEdit("kpi")}
+          showEmployeeFilter
           users={users}
           customers={kpiCustomers}
           projects={kpiProjects}

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
 import { errorResponse } from "@/lib/appError";
+import { isStaff } from "@/lib/dataScope";
 
 function addBusinessDays(date: Date, days: number): Date {
   const result = new Date(date);
@@ -22,6 +23,9 @@ export async function PATCH(
   try {
     const session = await requireSession();
     await requireFeaturePermission(session, "finance.affiliate_reconciliation", "EDIT");
+    if (!isStaff(session.role)) {
+      return NextResponse.json({ error: "仅内部员工可修改联盟商结算" }, { status: 403 });
+    }
 
     const { id } = await params;
     const body = await req.json();

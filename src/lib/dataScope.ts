@@ -23,6 +23,14 @@ export function isExternalRole(role: string): boolean {
   return role === "BRAND" || role === "CHANNEL";
 }
 
+/**
+ * Finance and operations use one shared data domain for internal staff.
+ * Leaf permissions control actions; ownership only remains an audit field.
+ */
+export function financeDataView(session: Session): ViewScope {
+  return isStaff(session.role) ? "all" : "mine";
+}
+
 /** 从查询参数读取 ViewScope（默认 "mine"） */
 export function parseViewScope(
   sp: Record<string, string | undefined>,
@@ -223,7 +231,7 @@ export function kpiScope(
     return { id: "__NO_ACCESS__" };
   }
   if (isStaff(session.role)) {
-    if (view === "all" && session.role === "ADMIN") return {};
+    if (view === "all") return {};
     return {
       OR: [
         { amOwnerId: session.userId },

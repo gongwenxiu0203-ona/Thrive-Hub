@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { channelReconciliationScope } from "@/lib/dataScope";
+import { channelReconciliationScope, financeDataView } from "@/lib/dataScope";
 import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
 import { errorResponse } from "@/lib/appError";
 
@@ -28,7 +28,7 @@ export async function POST(
     }
 
     const rec = await prisma.channelReconciliation.findFirst({
-      where: { AND: [{ id }, channelReconciliationScope(session, session.role === "ADMIN" ? "all" : "mine")] },
+      where: { AND: [{ id }, channelReconciliationScope(session, financeDataView(session))] },
       include: {
         customer: { select: { brandName: true } },
         channelUser: { select: { id: true, name: true } },
