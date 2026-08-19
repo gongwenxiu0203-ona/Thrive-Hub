@@ -40,6 +40,7 @@
     "react-dom": "^19.0.0",
     "recharts": "^2.15.0",
     "sharp": "^0.34.5",
+    "tencentcloud-sdk-nodejs-ses": "^4.1.271",
     "xlsx": "^0.18.5",
     "zod": "^3.24.1"
   },

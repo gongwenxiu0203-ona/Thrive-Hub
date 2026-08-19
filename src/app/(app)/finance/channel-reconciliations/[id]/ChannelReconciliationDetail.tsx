@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import type { PeriodDerived } from "@/lib/channelSplit";
+import { EmailSendButton } from "@/components/EmailSendButton";
 import {
   ChannelReconciliationDetailModal,
   type ChannelReconciliationRecord,
@@ -489,6 +490,19 @@ function RuleDrivenPeriodCard({
       </dl>
       {period.channelDisputeReason && <div className="mt-3 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-700"><strong>渠道商异议：</strong>{period.channelDisputeReason}</div>}
       {parsePaymentProofUrls(period.paymentProofUrl).map((url, index) => <a key={`${url}-${index}`} href={url} target="_blank" rel="noreferrer" className="mr-3 mt-3 inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline"><ImageIcon className="h-3.5 w-3.5" />查看付款回单 {index + 1}</a>)}
+
+      {!isChannel && canEdit && ["PENDING", "CONFIRMED", "DISPUTED", "SKIPPED"].includes(reviewStatus) && (
+        <div className="mt-3 flex justify-end border-t border-slate-100 pt-3">
+          <EmailSendButton
+            endpoint={`/api/finance/channel-reconciliations/${reconciliationId}/email`}
+            label={reviewStatus === "PENDING" ? "发送待确认邮件" : "发送确认结果邮件"}
+            payload={{
+              kind: reviewStatus === "PENDING" ? "REVIEW" : "RESULT",
+              periodId: period.id,
+            }}
+          />
+        </div>
+      )}
 
       {!isChannel && canEdit && !paidAt && !reviewLocked && <div className="mt-3 flex flex-wrap justify-end gap-2">
         <button type="button" className="btn-secondary text-xs" onClick={() => { setEditingPayment(false); setEditing((v) => !v); setError(null); }}>{editing ? "收起" : isFirstEntry ? "录入" : reviewStatus === "DISPUTED" ? "纠错" : "修改"}</button>

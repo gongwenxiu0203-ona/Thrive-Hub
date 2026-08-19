@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
+import { EmailSendButton } from "@/components/EmailSendButton";
 import {
   RECONCILIATION_STATUS_LABELS,
   RECONCILIATION_STATUS_COLORS,
@@ -1235,6 +1236,32 @@ function MonthlyRecordRow({
                     `，截止 ${formatDate(rec.submittedDeadline)}`}
                 </span>
               )}
+            </div>
+          )}
+
+          {!readOnly && canOperateRecord && (isPendingReview || isDisputed || isConfirmed) && (
+            <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-4">
+              {isPendingReview ? (
+                <EmailSendButton
+                  endpoint={`/api/finance/reconciliations/${rec.id}/email`}
+                  label="发送待确认邮件"
+                  payload={{ kind: "REVIEW" }}
+                />
+              ) : null}
+              {isDisputed || isConfirmed ? (
+                <EmailSendButton
+                  endpoint={`/api/finance/reconciliations/${rec.id}/email`}
+                  label="发送确认结果邮件"
+                  payload={{ kind: "RESULT" }}
+                />
+              ) : null}
+              {isConfirmed && invoiceState?.invoiceStatus !== "ISSUED" ? (
+                <EmailSendButton
+                  endpoint={`/api/finance/reconciliations/${rec.id}/email`}
+                  label="发送 Invoice 逾期提醒"
+                  payload={{ kind: "INVOICE_OVERDUE" }}
+                />
+              ) : null}
             </div>
           )}
 

@@ -78,6 +78,9 @@ model User {
   bulkOperationLogs                   BulkOperationLog[]          @relation("BulkOperationOperator")
   adminAuditLogs                      AdminAuditLog[]             @relation("AdminAuditActor")
   apiAccessLogs                       ApiAccessLog[]              @relation("ApiAccessActor")
+  emailReplySettingsAsTarget         EmailReplySetting[]         @relation("EmailReplyTarget")
+  emailReplySettingsUpdated          EmailReplySetting[]         @relation("EmailReplyUpdater")
+  emailDeliveryLogsCreated           EmailDeliveryLog[]          @relation("EmailDeliveryCreator")
   intakeSubmissionsShared            CustomerIntakeSubmission[]  @relation("IntakeSharedBy")
   intakeSubmissionsAsChannel         CustomerIntakeSubmission[]  @relation("IntakeChannel")
   intakeSubmissionsReviewed          CustomerIntakeSubmission[]  @relation("IntakeReviewer")
@@ -691,6 +694,54 @@ model ApiAccessLog {
   @@index([actorId])
   @@index([route])
   @@index([outcome])
+}
+
+// 管理员可配置的邮件回复地址。category 唯一，replyToUserId 始终指向一个
+// 已审核的网站账号；腾讯云密钥和模板参数不会写入数据库。
+model EmailReplySetting {
+  id            String   @id @default(cuid())
+  category      String   @unique // DEFAULT | SECURITY | CUSTOMER_RECONCILIATION | CHANNEL_RECONCILIATION | INVOICE | AFFILIATE
+  replyToUserId String
+  enabled       Boolean  @default(true)
+  updatedById   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  replyToUser User  @relation("EmailReplyTarget", fields: [replyToUserId], references: [id], onDelete: Cascade)
+  updatedBy   User? @relation("EmailReplyUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([replyToUserId])
+  @@index([updatedById])
+}
+
+// 腾讯云邮件投递审计。只记录投递元数据和安全错误摘要，不保存邮件正文、
+// 密码重置 token 或腾讯云密钥。
+model EmailDeliveryLog {
+  id                String    @id @default(cuid())
+  eventKey          String
+  templateId        Int
+  recipientEmail    String
+  replyToEmail      String?
+  businessType      String?
+  businessId        String?
+  providerMessageId String?
+  status            String    @default("PENDING") // PENDING | SENT | FAILED
+  errorCode         String?
+  errorSummary      String?
+  idempotencyKey    String?   @unique
+  createdById       String?
+  sentAt            DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  createdBy User? @relation("EmailDeliveryCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([eventKey])
+  @@index([recipientEmail])
+  @@index([businessType, businessId])
+  @@index([providerMessageId])
+  @@index([status])
+  @@index([createdAt])
 }
 
 // Parent Asin / 链接标签匹配表 —— 品牌+店铺+地区+ASIN 唯一

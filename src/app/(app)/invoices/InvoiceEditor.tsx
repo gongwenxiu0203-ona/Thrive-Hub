@@ -21,6 +21,7 @@ import {
   type InvoiceFormOptions,
 } from "@/actions/invoices";
 import { Button } from "@/components/ui/Button";
+import { EmailSendButton } from "@/components/EmailSendButton";
 import { cn } from "@/lib/utils";
 
 type EditorItem = Omit<
@@ -740,6 +741,12 @@ export function InvoiceEditor({
               <FileDown className="h-4 w-4" /> 下载 PDF
             </a>
           )}
+          {invoiceId && status === "ISSUED" && canEdit ? (
+            <EmailSendButton
+              endpoint={`/api/invoices/${invoiceId}/email`}
+              label="发送给客户"
+            />
+          ) : null}
           {canEdit && status === "DRAFT" && (
             <>
               <Button

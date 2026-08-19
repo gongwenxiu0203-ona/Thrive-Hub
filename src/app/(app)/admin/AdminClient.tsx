@@ -14,6 +14,7 @@ import {
 } from "@/lib/featurePermissions";
 import { PermissionsPanel } from "./PermissionsPanel";
 import { IntakeReviewPanel } from "./IntakeReviewPanel";
+import { EmailSettingsPanel } from "./EmailSettingsPanel";
 import {
   AdminOverviewPanel,
   ApiAccessPanel,
@@ -107,7 +108,7 @@ const ROLE_COLORS: Record<string, string> = {
   CHANNEL: "bg-teal-100 text-teal-700",
 };
 
-type AdminTab = "overview" | "intake" | "pending" | "all" | "permissions" | "quality" | "audit" | "api";
+type AdminTab = "overview" | "intake" | "pending" | "all" | "permissions" | "quality" | "audit" | "api" | "email";
 
 export function AdminClient({
   initialUsers,
@@ -137,6 +138,7 @@ export function AdminClient({
     ...(hasAtLeast("admin.data_quality", "READ") ? ["quality" as const] : []),
     ...(hasAtLeast("admin.audit", "READ") ? ["audit" as const] : []),
     ...(hasAtLeast("admin.api_access", "READ") ? ["api" as const] : []),
+    ...(hasAtLeast("admin.api_access", "READ") ? ["email" as const] : []),
   ];
   const safeInitialTab = readableTabs.includes(initialTab) ? initialTab : readableTabs[0] ?? "overview";
   const [users, setUsers] = useState<UserRecord[]>(initialUsers);
@@ -576,6 +578,9 @@ export function AdminClient({
         {hasAtLeast("admin.api_access", "READ") && (
           <button type="button" onClick={() => setTab("api")} className={tab === "api" ? "tab-trigger tab-trigger-active" : "tab-trigger"}>{"API \u8bbf\u95ee"}</button>
         )}
+        {hasAtLeast("admin.api_access", "READ") && (
+          <button type="button" onClick={() => setTab("email")} className={tab === "email" ? "tab-trigger tab-trigger-active" : "tab-trigger"}>邮件配置</button>
+        )}
       </div>
 
       {tab === "overview" && hasAtLeast("admin.users", "READ") && <AdminOverviewPanel overview={overview} issues={qualityIssues} auditLogs={auditLogs} apiLogs={apiLogs} />}
@@ -584,6 +589,7 @@ export function AdminClient({
       {tab === "quality" && hasAtLeast("admin.data_quality", "READ") && <DataQualityPanel issues={qualityIssues} />}
       {tab === "audit" && hasAtLeast("admin.audit", "READ") && <AuditLogPanel logs={auditLogs} />}
       {tab === "api" && hasAtLeast("admin.api_access", "READ") && <ApiAccessPanel logs={apiLogs} />}
+      {tab === "email" && hasAtLeast("admin.api_access", "READ") && <EmailSettingsPanel canManage={hasAtLeast("admin.api_access", "MANAGE")} />}
 
       {error && !showCreate && (
         <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">
