@@ -31,10 +31,13 @@ export async function POST(
       action,
       disputedSalesAmount,
       correctedSalesAmount,
+      disputedFeeAmount,
+      correctedFeeAmount,
       salesAmountCurrency,
       note,
     } = body;
     const correctedSales = correctedSalesAmount ?? disputedSalesAmount;
+    const correctedFee = correctedFeeAmount ?? disputedFeeAmount;
 
     if (action !== "APPROVED" && action !== "DISPUTED") {
       return NextResponse.json(
@@ -60,20 +63,27 @@ export async function POST(
         { status: 400 },
       );
     }
-    if (action === "DISPUTED" && rec.reconcileType === "FEE_ONLY") {
-      return NextResponse.json(
-        { error: "固费对账不包含销售额，不能提交销售额异议" },
-        { status: 400 },
-      );
-    }
     if (
       action === "DISPUTED" &&
+      rec.reconcileType !== "FEE_ONLY" &&
       (typeof correctedSales !== "number" ||
         !Number.isFinite(correctedSales) ||
         correctedSales < 0)
     ) {
       return NextResponse.json(
         { error: "提出异议时必须填写有效的纠正后销售额" },
+        { status: 400 },
+      );
+    }
+    if (
+      action === "DISPUTED" &&
+      rec.reconcileType === "FEE_ONLY" &&
+      (typeof correctedFee !== "number" ||
+        !Number.isFinite(correctedFee) ||
+        correctedFee < 0)
+    ) {
+      return NextResponse.json(
+        { error: "固费有异议时必须填写有效的异议固费金额" },
         { status: 400 },
       );
     }
@@ -84,6 +94,7 @@ export async function POST(
         const finalOrders = rec.actualOrders;
         const finalSalesAmount = rec.actualSalesAmount;
         const finalCommissionAmount = rec.commissionAmount;
+        const finalFeeAmount = rec.finalFeeAmount ?? rec.feeAmount;
 
         const transition = await tx.customerReconciliation.updateMany({
           where: { id, status: { in: ["PENDING_REVIEW", "DISPUTED"] } },
@@ -92,6 +103,7 @@ export async function POST(
             finalOrders,
             finalSalesAmount,
             finalCommissionAmount,
+            finalFeeAmount,
             settlementReminderSent: false,
             updatedAt: new Date(),
           },
@@ -112,8 +124,8 @@ export async function POST(
         // 按对账流生成结算记录；查存在后再创建，避免重试产生重复结算。
         const now = new Date();
         const settlementSpecs = [
-          ...(rec.reconcileType !== "COMMISSION_ONLY" && rec.feeAmount > 0
-            ? [{ type: "FIXED_FEE", amount: rec.feeAmount }]
+          ...(rec.reconcileType !== "COMMISSION_ONLY" && finalFeeAmount > 0
+            ? [{ type: "FIXED_FEE", amount: finalFeeAmount }]
             : []),
           ...(rec.reconcileType !== "FEE_ONLY" && finalCommissionAmount > 0
             ? [{ type: "COMMISSION", amount: finalCommissionAmount }]
@@ -166,6 +178,8 @@ export async function POST(
           const calc = await recalcReconciliation(id, { actualSalesAmount });
           Object.assign(updateData, { actualSalesAmount, ...calc });
         }
+        if (rec.reconcileType === "FEE_ONLY")
+          updateData.finalFeeAmount = Number(correctedFee);
         // 同步更新销售额/抽佣货币（如果审核人指定）
         if (rec.reconcileType !== "FEE_ONLY" && salesAmountCurrency) {
           updateData.commissionCurrency = salesAmountCurrency;
@@ -181,7 +195,10 @@ export async function POST(
             reconciliationId: id,
             reviewerId: session.userId,
             action: "DISPUTED",
-            disputedSalesAmount: Number(correctedSales),
+            disputedSalesAmount:
+              rec.reconcileType === "FEE_ONLY" ? null : Number(correctedSales),
+            disputedFeeAmount:
+              rec.reconcileType === "FEE_ONLY" ? Number(correctedFee) : null,
             note,
             createdAt: new Date(),
           },

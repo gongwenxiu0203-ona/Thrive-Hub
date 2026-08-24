@@ -29,6 +29,7 @@ import {
 import { formatDate, formatDateTime } from "@/lib/utils";
 import { calcCommission } from "@/lib/commissionCalc";
 import type { ReconciliationInvoiceState } from "@/lib/reconciliationInvoice";
+import { submitBillingRequest } from "@/actions/billingRequests";
 
 // ── types ──────────────────────────────────────────────────────────────────────
 
@@ -36,6 +37,7 @@ type Review = {
   id: string;
   action: string;
   disputedSalesAmount: number | null;
+  disputedFeeAmount: number | null;
   note: string | null;
   createdAt: Date | string;
   reviewer: { id: string; name: string };
@@ -45,6 +47,9 @@ type Rec = {
   id: string;
   createdAt: Date | string;
   status: string;
+  planStatus?: string;
+  source?: string;
+  periodIndex?: number | null;
   reconcileType?: string;
   periodStart: Date | string;
   periodEnd: Date | string;
@@ -63,6 +68,7 @@ type Rec = {
   finalOrders: number | null;
   finalSalesAmount: number | null;
   finalCommissionAmount: number | null;
+  finalFeeAmount: number | null;
   submittedById: string | null;
   submittedToUserId: string | null;
   submittedDeadline: Date | string | null;
@@ -140,7 +146,21 @@ type Props = {
 
 // ── currency symbol ───────────────────────────────────────────────────────────
 function currencySymbol(c: string) {
-  return c === "美金" ? "$" : "¥";
+  const code = c.trim().toUpperCase();
+  if (["USD", "美金", "美元", "$"].includes(code)) return "$";
+  if (["CNY", "RMB", "人民币", "¥"].includes(code)) return "¥";
+  if (code === "EUR") return "€";
+  if (code === "GBP") return "£";
+  if (code === "HKD") return "HK$";
+  if (code === "JPY") return "¥";
+  return `${code} `;
+}
+
+function currencyCode(c: string | null | undefined) {
+  const value = String(c ?? "").trim().toUpperCase();
+  if (["美金", "美元", "US$", "$"].includes(value)) return "USD";
+  if (["人民币", "人民币元", "RMB", "¥", "￥"].includes(value)) return "CNY";
+  return value || "USD";
 }
 
 function summarizeSelectedAmounts(
@@ -156,8 +176,8 @@ function summarizeSelectedAmounts(
     if (!belongsToStream) continue;
     const currency =
       streamKind === "fixed"
-        ? rec.fixedFeeCurrency || "人民币"
-        : rec.commissionCurrency || "人民币";
+        ? rec.fixedFeeCurrency || "USD"
+        : rec.commissionCurrency || "USD";
     const amount =
       streamKind === "fixed"
         ? rec.feeAmount
@@ -229,6 +249,8 @@ export function CustomerReconciliationDetailClient({
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [showBatchSubmitModal, setShowBatchSubmitModal] = useState(false);
+  const [showBatchFixedFeeModal, setShowBatchFixedFeeModal] = useState(false);
+  const [showBillingRequestModal, setShowBillingRequestModal] = useState(false);
   const [downloadingStatement, setDownloadingStatement] = useState(false);
   const selectedRecords = reconciliations.filter((rec) =>
     selectedIds.includes(rec.id),
@@ -268,14 +290,14 @@ export function CustomerReconciliationDetailClient({
     setShowBatchSubmitModal(true);
   }
 
-  function openInvoice() {
+  function openBillingRequest() {
     if (readOnly) {
-      alert("当前权限仅允许查看和下载对账明细，不能开具 Invoice");
+      alert("当前权限仅允许查看和下载对账明细，不能提交开票申请");
       return;
     }
     if (selectedRecords.some((rec) => rec.reconcileType === "BOTH")) {
       alert(
-        "历史合并记录不能直接开具 Invoice，请仅选择独立的固费或销售佣金对账",
+        "历史合并记录不能直接提交开票申请，请仅选择独立的固费或销售佣金对账",
       );
       return;
     }
@@ -284,13 +306,11 @@ export function CustomerReconciliationDetailClient({
     );
     if (unconfirmed.length > 0) {
       alert(
-        `开具 Invoice 前必须完成对账确认；当前有 ${unconfirmed.length} 条记录尚未确认`,
+        `提交开票申请前必须完成对账确认；当前有 ${unconfirmed.length} 条记录尚未确认`,
       );
       return;
     }
-    router.push(
-      `/invoices/new?reconciliationIds=${encodeURIComponent(selectedIds.join(","))}${scopeAll ? "&scope=all" : ""}`,
-    );
+    setShowBillingRequestModal(true);
   }
 
   async function downloadStatement() {
@@ -398,6 +418,22 @@ export function CustomerReconciliationDetailClient({
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            {!readOnly &&
+              selectedRecords.length > 0 &&
+              selectedRecords.every(
+                (rec) =>
+                  rec.reconcileType === "FEE_ONLY" &&
+                  ["DRAFT", "DISPUTED"].includes(rec.status),
+              ) && (
+                <button
+                  type="button"
+                  className="btn-secondary text-sm"
+                  onClick={() => setShowBatchFixedFeeModal(true)}
+                >
+                  <Pencil className="h-4 w-4" />
+                  批量修改固费
+                </button>
+              )}
             <button
               type="button"
               className="btn-secondary text-sm"
@@ -409,11 +445,18 @@ export function CustomerReconciliationDetailClient({
             <button
               type="button"
               className="btn-secondary text-sm"
-              onClick={openInvoice}
+              onClick={openBillingRequest}
             >
               <FileText className="h-4 w-4" />
-              开具 Invoice
+              提交开票申请
             </button>
+            <Link
+              className="btn-secondary text-sm"
+              href={`/finance/workbench?tab=requests&action=new-billing&customerId=${customer.id}`}
+            >
+              <Plus className="h-4 w-4" />
+              普通开票申请
+            </Link>
             <button
               type="button"
               className="btn-primary text-sm"
@@ -454,7 +497,262 @@ export function CustomerReconciliationDetailClient({
           }}
         />
       )}
+      {showBatchFixedFeeModal && !readOnly && (
+        <BatchFixedFeeModal
+          records={selectedRecords.filter(
+            (rec) => rec.reconcileType === "FEE_ONLY",
+          )}
+          scopeAll={scopeAll}
+          onClose={() => setShowBatchFixedFeeModal(false)}
+          onDone={() => {
+            setShowBatchFixedFeeModal(false);
+            setSelectedIds([]);
+            refresh();
+          }}
+        />
+      )}
+      {showBillingRequestModal && !readOnly && (
+        <BillingRequestModal
+          records={selectedRecords}
+          onClose={() => setShowBillingRequestModal(false)}
+          onDone={() => {
+            setShowBillingRequestModal(false);
+            setSelectedIds([]);
+            refresh();
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+function BatchFixedFeeModal({
+  records,
+  scopeAll,
+  onClose,
+  onDone,
+}: {
+  records: Rec[];
+  scopeAll: boolean;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [amount, setAmount] = useState(records[0]?.feeAmount?.toFixed(2) ?? "");
+  const [currency, setCurrency] = useState(
+    currencyCode(records[0]?.fixedFeeCurrency),
+  );
+  const [loading, setLoading] = useState(false);
+  async function submit() {
+    const value = Number(amount);
+    if (!Number.isFinite(value) || value < 0)
+      return alert("请输入有效的固费金额");
+    setLoading(true);
+    try {
+      const response = await fetch(
+        `/api/finance/reconciliations/batch-fixed-fee${scopeAll ? "?scope=all" : ""}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            reconciliationIds: records.map((record) => record.id),
+            feeAmount: value,
+            currency,
+          }),
+        },
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) return alert(payload.error ?? "批量修改失败");
+      onDone();
+    } finally {
+      setLoading(false);
+    }
+  }
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`批量修改 ${records.length} 条固费对账`}
+      description="仅影响尚未提交确认或处于异议状态的记录。"
+      size="sm"
+    >
+      <div className="space-y-4">
+        <label className="block space-y-1.5">
+          <span className="label">每期固费金额</span>
+          <input
+            className="input"
+            type="number"
+            min="0"
+            step="0.01"
+            value={amount}
+            onChange={(event) => setAmount(event.target.value)}
+          />
+        </label>
+        <label className="block space-y-1.5">
+          <span className="label">币种</span>
+          <input
+            className="input uppercase"
+            list="reconciliation-currencies"
+            maxLength={8}
+            value={currency}
+            onChange={(event) => setCurrency(event.target.value.toUpperCase())}
+            placeholder="USD"
+          />
+          <datalist id="reconciliation-currencies">
+            <option value="USD" />
+            <option value="CNY" />
+            <option value="EUR" />
+            <option value="GBP" />
+            <option value="HKD" />
+            <option value="JPY" />
+          </datalist>
+          <p className="text-xs text-slate-600">
+            可直接输入其他 ISO 货币代码。
+          </p>
+        </label>
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            className="btn-secondary"
+            disabled={loading}
+            onClick={onClose}
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={loading || !currency.trim()}
+            onClick={() => void submit()}
+          >
+            {loading ? "保存中…" : "批量保存"}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function BillingRequestModal({
+  records,
+  onClose,
+  onDone,
+}: {
+  records: Rec[];
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [documentType, setDocumentType] = useState<"INVOICE" | "DOMESTIC">(
+    "INVOICE",
+  );
+  const [mergeMode, setMergeMode] = useState<"MERGED" | "SEPARATE">("MERGED");
+  const [billingNote, setBillingNote] = useState("");
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState("");
+  const currencies = new Set(
+    records.map((rec) =>
+      rec.reconcileType === "FEE_ONLY"
+        ? rec.fixedFeeCurrency
+        : rec.commissionCurrency,
+    ),
+  );
+  const canMerge = currencies.size === 1;
+  function submit() {
+    startTransition(async () => {
+      setError("");
+      const result = await submitBillingRequest({
+        reconciliationIds: records.map((rec) => rec.id),
+        documentType,
+        mergeMode,
+        note: billingNote,
+      });
+      if (!result.ok) setError(result.error ?? "提交开票申请失败。");
+      else onDone();
+    });
+  }
+  return (
+    <Modal open title="提交开票申请" onClose={onClose}>
+      <div className="space-y-5">
+        <div className="rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
+          已选择 <strong>{records.length}</strong>{" "}
+          条已确认对账。提交后由财务在开票工作台受理并开票。
+        </div>
+        <fieldset className="space-y-2">
+          <legend className="text-sm font-medium text-slate-800">
+            票据类型
+          </legend>
+          <label className="mr-5 inline-flex items-center gap-2">
+            <input
+              type="radio"
+              checked={documentType === "INVOICE"}
+              onChange={() => setDocumentType("INVOICE")}
+            />
+            Invoice
+          </label>
+          <label className="inline-flex items-center gap-2">
+            <input
+              type="radio"
+              checked={documentType === "DOMESTIC"}
+              onChange={() => setDocumentType("DOMESTIC")}
+            />
+            国内发票
+          </label>
+        </fieldset>
+        <fieldset className="space-y-2">
+          <legend className="text-sm font-medium text-slate-800">
+            开票方式
+          </legend>
+          <label className="mr-5 inline-flex items-center gap-2">
+            <input
+              type="radio"
+              checked={mergeMode === "MERGED"}
+              disabled={!canMerge}
+              onChange={() => setMergeMode("MERGED")}
+            />
+            合并开票
+          </label>
+          <label className="inline-flex items-center gap-2">
+            <input
+              type="radio"
+              checked={mergeMode === "SEPARATE"}
+              onChange={() => setMergeMode("SEPARATE")}
+            />
+            分别开票
+          </label>
+          {!canMerge && (
+            <p className="text-xs text-amber-700">
+              所选记录币种不同，不能合并开票。
+            </p>
+          )}
+        </fieldset>
+        <label className="block space-y-1.5 text-sm text-slate-700">
+          <span className="font-medium">补充开票内容和备注</span>
+          <textarea
+            className="input min-h-24 resize-y"
+            value={billingNote}
+            onChange={(event) => setBillingNote(event.target.value)}
+            placeholder="可填写开票内容、客户要求、寄送方式或其他需要财务注意的信息"
+          />
+        </label>
+        {error && (
+          <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
+            {error}
+          </p>
+        )}
+        <div className="flex justify-end gap-2">
+          <button type="button" className="btn-secondary" onClick={onClose}>
+            取消
+          </button>
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={pending || (mergeMode === "MERGED" && !canMerge)}
+            onClick={submit}
+          >
+            {pending ? "提交中…" : "确认提交"}
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -491,6 +789,22 @@ function ReconciliationStreamSection({
   invoiceStates: Record<string, ReconciliationInvoiceState>;
   scopeAll: boolean;
 }) {
+  const [showAllFuturePlans, setShowAllFuturePlans] = useState(false);
+  const activeRecords = records.filter(
+    (record) => record.planStatus !== "PLANNED",
+  );
+  const futurePlans = records
+    .filter((record) => record.planStatus === "PLANNED")
+    .sort(
+      (left, right) =>
+        new Date(left.periodStart).getTime() -
+        new Date(right.periodStart).getTime(),
+    );
+  const visibleFuturePlans = showAllFuturePlans
+    ? futurePlans
+    : futurePlans.slice(0, 1);
+  const visibleRecords = [...activeRecords, ...visibleFuturePlans];
+
   return (
     <section className="card p-5">
       <div className="mb-4 flex items-start justify-between gap-3">
@@ -511,12 +825,12 @@ function ReconciliationStreamSection({
         </div>
       ) : (
         <div className="space-y-3">
-          {records.map((rec, index) => (
+          {visibleRecords.map((rec, index) => (
             <MonthlyRecordRow
               key={streamKind + "-" + rec.id}
               rec={rec}
               streamKind={streamKind}
-              defaultOpen={index === 0}
+              defaultOpen={index === 0 && rec.planStatus !== "PLANNED"}
               currentUserId={currentUserId}
               users={users}
               readOnly={readOnly}
@@ -528,6 +842,24 @@ function ReconciliationStreamSection({
               scopeAll={scopeAll}
             />
           ))}
+          {futurePlans.length > 1 && (
+            <button
+              type="button"
+              className="flex w-full items-center justify-between rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-left text-sm text-slate-600 hover:border-brand-300 hover:bg-brand-50/40 hover:text-brand-700"
+              onClick={() => setShowAllFuturePlans((current) => !current)}
+            >
+              <span>
+                {showAllFuturePlans
+                  ? "收起未来对账计划"
+                  : `展开其余 ${futurePlans.length - 1} 条未来对账计划`}
+              </span>
+              {showAllFuturePlans ? (
+                <ChevronUp className="h-4 w-4" />
+              ) : (
+                <ChevronDown className="h-4 w-4" />
+              )}
+            </button>
+          )}
         </div>
       )}
     </section>
@@ -557,14 +889,14 @@ function BasicInfoSection({
     promoPlatform: contract?.promoPlatform ?? "",
     targetSite: contract?.targetSite ?? "",
     feeAmount: contract?.feeAmount
-      ? `${currencySymbol(contract.feeCurrency ?? "人民币")}${contract.feeAmount}`
+      ? `${currencySymbol(contract.feeCurrency ?? "USD")}${contract.feeAmount}`
       : "",
     feeCurrency: contract?.feeCurrency ?? "",
     paymentMethod: contract?.paymentMethod ?? "",
     commissionType: ct ? (COMMISSION_TYPE_LABELS[ct] ?? ct) : "",
     commissionRate: contract?.commissionRate ?? "",
     thresholdAmount: contract?.thresholdAmount
-      ? `${currencySymbol(contract.thresholdCurrency ?? "人民币")}${contract.thresholdAmount}`
+      ? `${currencySymbol(contract.thresholdCurrency ?? "USD")}${contract.thresholdAmount}`
       : "",
     thresholdCurrency: contract?.thresholdCurrency ?? "",
     tieredRules: tieredText,
@@ -746,10 +1078,11 @@ function MonthlyRecordRow({
   const isConfirmed = rec.status === "CONFIRMED";
   const isFixedStream = streamKind === "fixed";
   const isHistoricalCombined = rec.reconcileType === "BOTH";
+  const isFuturePlan = rec.planStatus === "PLANNED";
   const canOperateRecord = !isHistoricalCombined;
 
-  const fixedSym = currencySymbol(rec.fixedFeeCurrency || "人民币");
-  const commSym = currencySymbol(rec.commissionCurrency || "人民币");
+  const fixedSym = currencySymbol(rec.fixedFeeCurrency || "USD");
+  const commSym = currencySymbol(rec.commissionCurrency || "USD");
 
   // ── 实时计算抽佣（基于合同 v3 字段 + 当前 actualSalesAmount）─────────────────
   // 不依赖 DB 快照的 actualCommissionRate / commissionAmount，避免历史数据陈旧
@@ -860,6 +1193,9 @@ function MonthlyRecordRow({
           <Badge className={RECONCILIATION_STATUS_COLORS[rec.status]}>
             {RECONCILIATION_STATUS_LABELS[rec.status] ?? rec.status}
           </Badge>
+          {isFuturePlan && (
+            <Badge className="bg-sky-50 text-sky-700">未来计划</Badge>
+          )}
           {isHistoricalCombined && (
             <Badge className="bg-indigo-50 text-indigo-600">历史合并记录</Badge>
           )}
@@ -939,30 +1275,38 @@ function MonthlyRecordRow({
                 <dd className="mt-1 flex items-center gap-2">
                   <strong className="text-sm text-slate-800">
                     {isFixedStream
-                      ? `${fixedSym}${rec.feeAmount.toLocaleString("zh-CN", { minimumFractionDigits: 2 })}`
+                      ? `${fixedSym}${(rec.finalFeeAmount ?? rec.feeAmount).toLocaleString("zh-CN", { minimumFractionDigits: 2 })}`
                       : `${commSym}${liveAmount.toLocaleString("zh-CN", { minimumFractionDigits: 2 })}`}
                   </strong>
                   {!isConfirmed && !readOnly && (
-                    <select
-                      className="h-7 rounded-md border border-[#dcd4e7] bg-white px-2 text-xs text-slate-700 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
-                      value={
-                        (isFixedStream
-                          ? rec.fixedFeeCurrency
-                          : rec.commissionCurrency) || "人民币"
-                      }
-                      disabled={updatingCurrency}
-                      onChange={(event) =>
-                        updateCurrency(
-                          isFixedStream
-                            ? "fixedFeeCurrency"
-                            : "commissionCurrency",
-                          event.target.value,
-                        )
-                      }
-                    >
-                      <option>人民币</option>
-                      <option>美金</option>
-                    </select>
+                    <>
+                      <input
+                        className="h-7 w-20 rounded-md border border-[#dcd4e7] bg-white px-2 text-xs uppercase text-slate-700 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
+                        list="reconciliation-currency-options"
+                        value={
+                          (isFixedStream
+                            ? rec.fixedFeeCurrency
+                            : rec.commissionCurrency) || "USD"
+                        }
+                        disabled={updatingCurrency}
+                        onChange={(event) =>
+                          updateCurrency(
+                            isFixedStream
+                              ? "fixedFeeCurrency"
+                              : "commissionCurrency",
+                            event.target.value.toUpperCase(),
+                          )
+                        }
+                      />
+                      <datalist id="reconciliation-currency-options">
+                        <option value="USD" />
+                        <option value="CNY" />
+                        <option value="EUR" />
+                        <option value="GBP" />
+                        <option value="HKD" />
+                        <option value="JPY" />
+                      </datalist>
+                    </>
                   )}
                 </dd>
               </div>
@@ -1006,7 +1350,7 @@ function MonthlyRecordRow({
                         label="GMV门槛金额"
                         value={
                           rec.contract.thresholdAmount
-                            ? `${currencySymbol(rec.contract.thresholdCurrency ?? "人民币")}${rec.contract.thresholdAmount}`
+                            ? `${currencySymbol(rec.contract.thresholdCurrency ?? "USD")}${rec.contract.thresholdAmount}`
                             : "—"
                         }
                       />
@@ -1077,20 +1421,18 @@ function MonthlyRecordRow({
                             : `${commSym}${rec.actualSalesAmount.toLocaleString("zh-CN", { minimumFractionDigits: 2 })}`}
                         </span>
                         {!isConfirmed && !readOnly && (
-                          <select
-                            className="h-6 rounded border border-slate-200 px-1 text-xs text-slate-600"
-                            value={rec.commissionCurrency || "人民币"}
+                          <input
+                            className="h-6 w-20 rounded border border-slate-200 px-1 text-xs uppercase text-slate-600"
+                            list="reconciliation-currency-options"
+                            value={rec.commissionCurrency || "USD"}
                             disabled={updatingCurrency}
                             onChange={(e) =>
                               updateCurrency(
                                 "commissionCurrency",
-                                e.target.value,
+                                e.target.value.toUpperCase(),
                               )
                             }
-                          >
-                            <option>人民币</option>
-                            <option>美金</option>
-                          </select>
+                          />
                         )}
                       </span>
                     }
@@ -1208,17 +1550,15 @@ function MonthlyRecordRow({
                   >
                     ✅ 无异议确认
                   </button>
-                  {!isFixedStream && (
-                    <button
-                      onClick={() => {
-                        setReviewAction("DISPUTED");
-                        setShowReviewModal(true);
-                      }}
-                      className="btn-secondary text-sm text-rose-600"
-                    >
-                      销售额有异议
-                    </button>
-                  )}
+                  <button
+                    onClick={() => {
+                      setReviewAction("DISPUTED");
+                      setShowReviewModal(true);
+                    }}
+                    className="btn-secondary text-sm text-rose-600"
+                  >
+                    {isFixedStream ? "固费金额有异议" : "销售额有异议"}
+                  </button>
                 </>
               )}
               {isDisputed && rec.submittedById === currentUserId && (
@@ -1239,31 +1579,33 @@ function MonthlyRecordRow({
             </div>
           )}
 
-          {!readOnly && canOperateRecord && (isPendingReview || isDisputed || isConfirmed) && (
-            <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-4">
-              {isPendingReview ? (
-                <EmailSendButton
-                  endpoint={`/api/finance/reconciliations/${rec.id}/email`}
-                  label="发送待确认邮件"
-                  payload={{ kind: "REVIEW" }}
-                />
-              ) : null}
-              {isDisputed || isConfirmed ? (
-                <EmailSendButton
-                  endpoint={`/api/finance/reconciliations/${rec.id}/email`}
-                  label="发送确认结果邮件"
-                  payload={{ kind: "RESULT" }}
-                />
-              ) : null}
-              {isConfirmed && invoiceState?.invoiceStatus !== "ISSUED" ? (
-                <EmailSendButton
-                  endpoint={`/api/finance/reconciliations/${rec.id}/email`}
-                  label="发送 Invoice 逾期提醒"
-                  payload={{ kind: "INVOICE_OVERDUE" }}
-                />
-              ) : null}
-            </div>
-          )}
+          {!readOnly &&
+            canOperateRecord &&
+            (isPendingReview || isDisputed || isConfirmed) && (
+              <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-4">
+                {isPendingReview ? (
+                  <EmailSendButton
+                    endpoint={`/api/finance/reconciliations/${rec.id}/email`}
+                    label="发送待确认邮件"
+                    payload={{ kind: "REVIEW" }}
+                  />
+                ) : null}
+                {isDisputed || isConfirmed ? (
+                  <EmailSendButton
+                    endpoint={`/api/finance/reconciliations/${rec.id}/email`}
+                    label="发送确认结果邮件"
+                    payload={{ kind: "RESULT" }}
+                  />
+                ) : null}
+                {isConfirmed && invoiceState?.invoiceStatus !== "ISSUED" ? (
+                  <EmailSendButton
+                    endpoint={`/api/finance/reconciliations/${rec.id}/email`}
+                    label="发送 Invoice 逾期提醒"
+                    payload={{ kind: "INVOICE_OVERDUE" }}
+                  />
+                ) : null}
+              </div>
+            )}
 
           {/* ── 对账记录 ── */}
           {rec.reviews.length > 0 && (
@@ -1297,6 +1639,14 @@ function MonthlyRecordRow({
                         <div className="mt-1 text-sm text-rose-600">
                           纠正后销售额：{commSym}
                           {r.disputedSalesAmount.toLocaleString("zh-CN", {
+                            minimumFractionDigits: 2,
+                          })}
+                        </div>
+                      )}
+                      {r.disputedFeeAmount != null && (
+                        <div className="mt-1 text-sm text-rose-600">
+                          异议固费金额：{fixedSym}
+                          {r.disputedFeeAmount.toLocaleString("zh-CN", {
                             minimumFractionDigits: 2,
                           })}
                         </div>
@@ -1347,7 +1697,12 @@ function MonthlyRecordRow({
         <ReviewModal
           recId={rec.id}
           action={reviewAction}
-          defaultCurrency={rec.commissionCurrency || "人民币"}
+          isFixed={rec.reconcileType === "FEE_ONLY"}
+          defaultCurrency={
+            (rec.reconcileType === "FEE_ONLY"
+              ? rec.fixedFeeCurrency
+              : rec.commissionCurrency) || "USD"
+          }
           onClose={() => setShowReviewModal(false)}
           onDone={() => {
             setShowReviewModal(false);
@@ -1578,11 +1933,13 @@ function BatchSubmitModal({
   const [correctedSalesAmounts, setCorrectedSalesAmounts] = useState<
     Record<string, string>
   >({});
+  const [correctedFeeAmounts, setCorrectedFeeAmounts] = useState<
+    Record<string, string>
+  >({});
   const [loading, setLoading] = useState(false);
   const single = records.length === 1;
 
   function setDecision(record: Rec, decision: "APPROVED" | "DISPUTED") {
-    if (record.reconcileType === "FEE_ONLY" && decision === "DISPUTED") return;
     setDecisions((current) => ({ ...current, [record.id]: decision }));
   }
 
@@ -1595,7 +1952,11 @@ function BatchSubmitModal({
       const missingCorrection = records.find(
         (record) =>
           decisions[record.id] === "DISPUTED" &&
-          !correctedSalesAmounts[record.id]?.trim(),
+          !(
+            record.reconcileType === "FEE_ONLY"
+              ? correctedFeeAmounts[record.id]
+              : correctedSalesAmounts[record.id]
+          )?.trim(),
       );
       if (missingCorrection) {
         alert(
@@ -1628,8 +1989,14 @@ function BatchSubmitModal({
                     reconciliationId: record.id,
                     decision: decisions[record.id] ?? "APPROVED",
                     correctedSalesAmount:
-                      decisions[record.id] === "DISPUTED"
+                      decisions[record.id] === "DISPUTED" &&
+                      record.reconcileType !== "FEE_ONLY"
                         ? Number(correctedSalesAmounts[record.id])
+                        : undefined,
+                    correctedFeeAmount:
+                      decisions[record.id] === "DISPUTED" &&
+                      record.reconcileType === "FEE_ONLY"
+                        ? Number(correctedFeeAmounts[record.id])
                         : undefined,
                   }))
                 : undefined,
@@ -1745,9 +2112,7 @@ function BatchSubmitModal({
             {records.map((record) => {
               const fixedFee = record.reconcileType === "FEE_ONLY";
               const disputed = decisions[record.id] === "DISPUTED";
-              const symbol = currencySymbol(
-                record.commissionCurrency || "人民币",
-              );
+              const symbol = currencySymbol(record.commissionCurrency || "USD");
               return (
                 <div
                   key={record.id}
@@ -1781,25 +2146,24 @@ function BatchSubmitModal({
                       >
                         确认无异议
                       </button>
-                      {!fixedFee && (
-                        <button
-                          type="button"
-                          className={
-                            disputed
-                              ? "btn-primary btn-sm"
-                              : "btn-secondary btn-sm"
-                          }
-                          onClick={() => setDecision(record, "DISPUTED")}
-                        >
-                          销售额有异议
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        className={
+                          disputed
+                            ? "btn-primary btn-sm"
+                            : "btn-secondary btn-sm"
+                        }
+                        onClick={() => setDecision(record, "DISPUTED")}
+                      >
+                        {fixedFee ? "固费金额有异议" : "销售额有异议"}
+                      </button>
                     </div>
                   </div>
-                  {disputed && !fixedFee && (
+                  {disputed && (
                     <div className="mt-3 max-w-sm">
                       <label className="label">
-                        纠正后的销售额 <span className="text-rose-600">*</span>
+                        {fixedFee ? "异议固费金额" : "纠正后的销售额"}{" "}
+                        <span className="text-rose-600">*</span>
                       </label>
                       <div className="relative">
                         <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-500">
@@ -1810,14 +2174,27 @@ function BatchSubmitModal({
                           min={0}
                           step="0.01"
                           className="input pl-7"
-                          value={correctedSalesAmounts[record.id] ?? ""}
-                          onChange={(event) =>
-                            setCorrectedSalesAmounts((current) => ({
-                              ...current,
-                              [record.id]: event.target.value,
-                            }))
+                          value={
+                            (fixedFee
+                              ? correctedFeeAmounts
+                              : correctedSalesAmounts)[record.id] ?? ""
                           }
-                          placeholder="输入核实后的销售额"
+                          onChange={(event) =>
+                            fixedFee
+                              ? setCorrectedFeeAmounts((current) => ({
+                                  ...current,
+                                  [record.id]: event.target.value,
+                                }))
+                              : setCorrectedSalesAmounts((current) => ({
+                                  ...current,
+                                  [record.id]: event.target.value,
+                                }))
+                          }
+                          placeholder={
+                            fixedFee
+                              ? "输入核实后的固费金额"
+                              : "输入核实后的销售额"
+                          }
                         />
                       </div>
                     </div>
@@ -1868,17 +2245,19 @@ function BatchSubmitModal({
 function ReviewModal({
   recId,
   action,
+  isFixed,
   defaultCurrency,
   onClose,
   onDone,
 }: {
   recId: string;
   action: "APPROVED" | "DISPUTED";
+  isFixed: boolean;
   defaultCurrency: string;
   onClose: () => void;
   onDone: () => void;
 }) {
-  const [correctedSalesAmount, setCorrectedSalesAmount] = useState("");
+  const [correctedAmount, setCorrectedAmount] = useState("");
   const [note, setNote] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -1886,12 +2265,13 @@ function ReviewModal({
     setLoading(true);
     const body: Record<string, unknown> = { action, note };
     if (action === "DISPUTED") {
-      if (!correctedSalesAmount.trim()) {
-        alert("请填写纠正后的销售额");
+      if (!correctedAmount.trim()) {
+        alert(isFixed ? "请填写异议固费金额" : "请填写纠正后的销售额");
         setLoading(false);
         return;
       }
-      body.correctedSalesAmount = Number(correctedSalesAmount);
+      if (isFixed) body.correctedFeeAmount = Number(correctedAmount);
+      else body.correctedSalesAmount = Number(correctedAmount);
     }
     const res = await fetch(`/api/finance/reconciliations/${recId}/review`, {
       method: "POST",
@@ -1913,7 +2293,9 @@ function ReviewModal({
       title={action === "APPROVED" ? "确认对账" : "提出异议"}
       description={
         action === "DISPUTED"
-          ? "销售数据如有差异，请填写核实后应采用的销售额。"
+          ? isFixed
+            ? "固费金额如有差异，请填写核实后应采用的固费金额。"
+            : "销售数据如有差异，请填写核实后应采用的销售额。"
           : undefined
       }
       size="sm"
@@ -1924,7 +2306,8 @@ function ReviewModal({
         {action === "DISPUTED" && (
           <div>
             <label className="label">
-              纠正后的销售额 <span className="text-rose-600">*</span>
+              {isFixed ? "异议固费金额" : "纠正后的销售额"}{" "}
+              <span className="text-rose-600">*</span>
             </label>
             <div className="relative">
               <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-500">
@@ -1933,9 +2316,13 @@ function ReviewModal({
               <input
                 type="number"
                 className="input pl-7"
-                placeholder="输入核实后应采用的销售额"
-                value={correctedSalesAmount}
-                onChange={(e) => setCorrectedSalesAmount(e.target.value)}
+                placeholder={
+                  isFixed
+                    ? "输入核实后应采用的固费金额"
+                    : "输入核实后应采用的销售额"
+                }
+                value={correctedAmount}
+                onChange={(e) => setCorrectedAmount(e.target.value)}
                 min={0}
                 step="0.01"
               />

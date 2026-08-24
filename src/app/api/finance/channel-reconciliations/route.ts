@@ -8,10 +8,6 @@ import {
 } from "@/lib/dataScope";
 import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
 import { errorResponse } from "@/lib/appError";
-import {
-  splitCommissionServicePeriods,
-  splitFixedFeeServicePeriods,
-} from "@/lib/channelSplit";
 
 export async function GET() {
   try {
@@ -113,12 +109,6 @@ export async function POST(req: Request) {
     if (end.getTime() < start.getTime()) {
       return NextResponse.json({ error: "分账开始时间不能晚于结束时间" }, { status: 400 });
     }
-    const fixedFeePeriods = splitFixedFeeServicePeriods(start, end);
-    const commissionPeriods = splitCommissionServicePeriods(start, end);
-    if (fixedFeePeriods.length === 0 || commissionPeriods.length === 0) {
-      return NextResponse.json({ error: "没有可生成的分账服务周期" }, { status: 400 });
-    }
-
     const similarRecords = await prisma.channelReconciliation.findMany({
       where: { customerId, recordMode: "RULE_DRIVEN", deletedAt: null },
       select: {
@@ -157,7 +147,7 @@ export async function POST(req: Request) {
           periodEnd: end,
           periodNo: 1,
           periodType: "monthly",
-          totalPeriods: fixedFeePeriods.length + commissionPeriods.length,
+          totalPeriods: 0,
           fixedFeeShareRate: splitRule.fixedFeeRate,
           commissionShareRate:
             splitRule.ruleType === "A"
@@ -169,29 +159,6 @@ export async function POST(req: Request) {
           commissionShareCurrency: "USD",
           note: typeof body.note === "string" ? body.note.trim() || null : null,
           createdById: session.userId,
-          periods: {
-            create: [
-              ...fixedFeePeriods.map((period) => ({
-                streamType: "FIXED_FEE",
-                periodIndex: period.periodIndex,
-                periodLabel: period.label,
-                periodStart: period.start,
-                periodEnd: period.end,
-                fixedFeeShareRate: splitRule.fixedFeeRate,
-              })),
-              ...commissionPeriods.map((period) => ({
-                streamType: "COMMISSION",
-                periodIndex: fixedFeePeriods.length + period.periodIndex,
-                periodLabel: period.label,
-                periodStart: period.start,
-                periodEnd: period.end,
-                commissionShareRate:
-                  splitRule.ruleType === "A"
-                    ? splitRule.commissionBelowRate
-                    : null,
-              })),
-            ],
-          },
         },
         include: {
           customer: { select: { id: true, brandName: true } },

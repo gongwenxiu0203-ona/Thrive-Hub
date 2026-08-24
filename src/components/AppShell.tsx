@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { Sidebar } from "@/components/Sidebar";
 import { Topbar } from "@/components/Topbar";
 import type { PermLevel } from "@/lib/featurePermissions";
@@ -20,6 +20,8 @@ type AppShellProps = {
 export function AppShell({ children, name, role, email, userId, unreadCount, canViewReminders, permissions }: AppShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const invoiceFocusMode = pathname.startsWith("/invoices/") && searchParams.get("focus") === "invoice";
 
   useEffect(() => {
     setSidebarOpen(false);
@@ -42,14 +44,16 @@ export function AppShell({ children, name, role, email, userId, unreadCount, can
 
   return (
     <div className="flex h-dvh min-h-0 overflow-hidden bg-[#fbfaff]">
-      <Sidebar
-        userId={userId}
-        permissions={permissions}
-        mobileOpen={sidebarOpen}
-        onMobileClose={() => setSidebarOpen(false)}
-      />
+      {!invoiceFocusMode && (
+        <Sidebar
+          userId={userId}
+          permissions={permissions}
+          mobileOpen={sidebarOpen}
+          onMobileClose={() => setSidebarOpen(false)}
+        />
+      )}
 
-      {sidebarOpen && (
+      {!invoiceFocusMode && sidebarOpen && (
         <button
           type="button"
           aria-label="关闭导航菜单"
@@ -59,16 +63,18 @@ export function AppShell({ children, name, role, email, userId, unreadCount, can
       )}
 
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-white">
-        <Topbar
-          name={name}
-          role={role}
-          email={email}
-          unreadCount={unreadCount}
-          canViewReminders={canViewReminders}
-          menuOpen={sidebarOpen}
-          onMenuOpen={() => setSidebarOpen(true)}
-        />
-        <main className="flex-1 overflow-y-auto overscroll-contain bg-[#fbfaff] p-4 sm:p-6 lg:p-7">
+        {!invoiceFocusMode && (
+          <Topbar
+            name={name}
+            role={role}
+            email={email}
+            unreadCount={unreadCount}
+            canViewReminders={canViewReminders}
+            menuOpen={sidebarOpen}
+            onMenuOpen={() => setSidebarOpen(true)}
+          />
+        )}
+        <main className={`flex-1 overflow-y-auto overscroll-contain bg-[#fbfaff] ${invoiceFocusMode ? "p-4 lg:p-5" : "p-4 sm:p-6 lg:p-7"}`}>
           {children}
         </main>
       </div>

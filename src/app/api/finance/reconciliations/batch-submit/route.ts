@@ -12,6 +12,7 @@ type Decision = {
   reconciliationId: string;
   decision: "APPROVED" | "DISPUTED";
   correctedSalesAmount?: number;
+  correctedFeeAmount?: number;
 };
 class BatchSubmitConflict extends Error {}
 
@@ -138,6 +139,10 @@ export async function POST(request: Request) {
             value.correctedSalesAmount == null
               ? undefined
               : Number(value.correctedSalesAmount),
+          correctedFeeAmount:
+            value.correctedFeeAmount == null
+              ? undefined
+              : Number(value.correctedFeeAmount),
         });
       }
       if (
@@ -152,11 +157,17 @@ export async function POST(request: Request) {
       for (const record of records) {
         const decision = decisionMap.get(record.id)!;
         if (decision.decision !== "DISPUTED") continue;
-        if (record.reconcileType === "FEE_ONLY")
-          return NextResponse.json(
-            { error: "固费对账没有销售额异议，请选择无异议" },
-            { status: 400 },
-          );
+        if (record.reconcileType === "FEE_ONLY") {
+          if (
+            !Number.isFinite(decision.correctedFeeAmount) ||
+            Number(decision.correctedFeeAmount) < 0
+          )
+            return NextResponse.json(
+              { error: "固费有异议时必须填写有效的异议固费金额" },
+              { status: 400 },
+            );
+          continue;
+        }
         if (
           !Number.isFinite(decision.correctedSalesAmount) ||
           Number(decision.correctedSalesAmount) < 0
@@ -223,6 +234,11 @@ export async function POST(request: Request) {
           decision.decision === "DISPUTED"
             ? Number(decision.correctedSalesAmount)
             : record.actualSalesAmount;
+        const correctedFee =
+          decision.decision === "DISPUTED" &&
+          record.reconcileType === "FEE_ONLY"
+            ? Number(decision.correctedFeeAmount)
+            : (record.finalFeeAmount ?? record.feeAmount);
         const calc = calcMap.get(record.id);
         const finalCommission =
           calc?.commissionAmount ?? record.commissionAmount;
@@ -243,6 +259,7 @@ export async function POST(request: Request) {
             finalOrders: record.actualOrders,
             finalSalesAmount: correctedSales,
             finalCommissionAmount: finalCommission,
+            finalFeeAmount: correctedFee,
             settlementReminderSent: false,
             updatedAt: now,
           },
@@ -255,7 +272,15 @@ export async function POST(request: Request) {
             reviewerId: session.userId,
             action: decision.decision === "DISPUTED" ? "DISPUTED" : "APPROVED",
             disputedSalesAmount:
-              decision.decision === "DISPUTED" ? correctedSales : null,
+              decision.decision === "DISPUTED" &&
+              record.reconcileType !== "FEE_ONLY"
+                ? correctedSales
+                : null,
+            disputedFeeAmount:
+              decision.decision === "DISPUTED" &&
+              record.reconcileType === "FEE_ONLY"
+                ? correctedFee
+                : null,
             note: note || "跳过客户确认",
             createdAt: now,
           },
@@ -273,7 +298,7 @@ export async function POST(request: Request) {
         }
         const specs =
           record.reconcileType === "FEE_ONLY"
-            ? [{ type: "FIXED_FEE", amount: record.feeAmount }]
+            ? [{ type: "FIXED_FEE", amount: correctedFee }]
             : [{ type: "COMMISSION", amount: finalCommission }];
         for (const spec of specs.filter((item) => item.amount > 0)) {
           const exists = await tx.settlement.findFirst({

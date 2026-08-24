@@ -1,6 +1,54 @@
 # Thrive Hub Handover
 
-Last updated: 2026-08-06 (Asia/Shanghai)
+## 2026-08-24 finance workbench information architecture follow-up (local only)
+
+- `/finance/workbench` now has two top-level areas: `财务工作台` for billing queues, receivables and channel payments; `财务流程` for initiating ordinary billing, supplier payments, expenses and maintaining billing profiles.
+- The ordinary billing form no longer asks for a free-form invoice-content field. Its stored description is derived from the selected fee type.
+- Selecting a customer limits the contract selector to that customer. Selecting a contract loads promotion-platform, target-site and affiliate-platform options from the contract and preselects the first available value.
+- No Prisma schema or migration change. TypeScript and diff checks passed; browser QA confirmed the two-area switch and the contract-driven dropdowns. Local `/finance/workbench` returned HTTP 200.
+- The top-level order is now `财务流程` on the left and `财务工作台` on the right. Invoice billing queue actions navigate to the existing Invoice editor with `focus=invoice`; AppShell hides the sidebar/topbar only in this focus mode while preserving the editor's form/real-time-preview split layout. Domestic billing keeps its dedicated flow.
+- `财务流程` now opens as a four-module launcher: `财务收款` (billing request), `出纳付款` (payment request), `费用报销`, and `财务资料汇总`. Each module opens its own focused form with a return-to-modules action. The data-summary module lists saved customer billing profiles and contract-configured receiving accounts, then provides the add-profile form. No schema change; browser QA covered launcher, form entry/return, customer selection and empty account states.
+- Billing, payment and expense flow pages now include `我的申请与审批进度`. Billing shows submitted → finance accepted → issued; payment/expense show submitted → finance approved → paid, with rejected status and rejection reason. Non-admin payment/expense queries are constrained to applicant/employee ID, billing flow rows are filtered to the applicant, and admins retain the all-record approval view. No schema change; TypeScript/diff checks and browser QA passed.
+
+## 2026-08-21 domestic invoice OCR and fixed-fee review follow-up (local only)
+
+- Domestic invoice file selection now extracts PDF text or runs local Tesseract OCR for images/scanned PDFs, pre-fills invoice number/code/type/date/tax-inclusive/net/tax/rate fields, and keeps manual correction available.
+- Finance workbench administrators can audit-soft-delete billing requests at every stage; accepted/completed records require a reason, linked invoices are voided/soft-hidden, and finance audit history is retained.
+- New customer reconciliation records canonicalize currencies to USD/CNY and default to USD when no contract currency exists. Customer and channel entry controls accept other ISO currency codes.
+- Draft/disputed fixed-fee reconciliations support multi-select batch amount/currency edits. Fixed-fee review defaults to no dispute but supports a distinct disputed amount; `finalFeeAmount` drives confirmed settlements without overwriting the original contract snapshot amount.
+- Additive migration `20260821170000_fixed_fee_dispute_amount` adds nullable `CustomerReconciliation.finalFeeAmount` and `ReconciliationReview.disputedFeeAmount`; no DROP/DELETE/TRUNCATE. Backup: `backups/local-before-fixed-fee-dispute-20260821/dev-before-fixed-fee-dispute.db`.
+- Validation: 64 migrations current, SQLite integrity `ok`, TypeScript and diff check passed, invoice parser sample passed, and browser QA passed for domestic form, administrator delete-reason modal, and fixed-fee batch edit modal. No commit, push, or deployment.
+
+## 2026-08-21 local finance workflow implementation (not committed or deployed)
+
+- Implemented idempotent customer reconciliation plans when a customer contract reaches `COMPLETED`: fixed-fee periods are consecutive inclusive 30-day periods; commission periods run from contract start to the first month-end, then by calendar month, with the last period truncated at contract end. Manual creation and audited period adjustment remain supported.
+- Preserved the existing customer reconciliation two-column fixed-fee / sales-commission UI and commission BI, dispute, skip-confirmation, and final-lock workflow. Multi-select now submits an Invoice/domestic-invoice billing request instead of opening Invoice directly.
+- Added the finance billing queue, Invoice request prefill, domestic-invoice registration/original upload and archive, customer receipt allocation, receivable status aggregation, channel payable release, channel business-document review, stream-specific channel payments, and a finance workbench.
+- Preserved the existing channel fixed-fee and commission waterfall columns. New document, finance-review, payable, and paid-amount information is shown inside each stream.
+- Additive migrations: `20260821100000_finance_workflow` and `20260821103000_channel_finance_streams`. They contain no `DROP TABLE`, `DROP COLUMN`, `DELETE FROM`, or `TRUNCATE`. Local pre-change backup: `backups/local-before-finance-workflow-20260821/dev-before-finance-workflow.db`.
+- Local DB verification: 63 migrations current, `PRAGMA integrity_check = ok`, foreign-key check returned zero rows. Build backups also include `dev_pre_deploy_20260821_115048.db`.
+- Validation passed: full TypeScript, customer-period boundary tests, 26/26 isolated security tests, `git diff --check`, and final Next.js production build. The final clean build completed successfully after stopping the local port-3001 Next process that held Prisma's Windows DLL.
+- Browser QA confirmed `/finance`, the customer fixed-fee/commission columns, multi-select `提交开票申请`, the channel fixed-fee/commission waterfalls, `/finance/billing`, and `/finance/workbench` render without console errors. Final local dev server is running on `http://127.0.0.1:3001`.
+- No commit, push, or production deployment has been performed. Production deployment requires the AGENTS.md checklist, verified backup, PM2 stop before build, and explicit user confirmation.
+
+## 2026-08-13 invoice PDF Chinese garble fix deployed
+
+- Commit `11b2ce8` (`fix(invoice): 修复发票 PDF 中文乱码`) was pushed to `origin/master` and deployed to production `/root/www`.
+- Change: `src/lib/invoicePdf.ts` now embeds `SourceHanSansCN-Regular.otf` as a base64 data URI inside the SVG `@font-face` instead of referencing it via a `file://` URL. This lets `sharp`/`librsvg` reliably load the CJK font during SVG→PNG rasterization, eliminating the Chinese tofu/garbled text in invoice PDFs. The font data is consumed only during rasterization and does not bloat the final PDF.
+- No Prisma schema or migration change. The build ran `pre-migrate-backup` + `prisma migrate deploy` with no pending migration.
+- Deployment sequence followed the runbook: latest scheduled backup `dev_daily_20260813_030001.db` (integrity ok); `git pull` fast-forwarded to `11b2ce8`; `pm2 stop thrive-hub` (SQLite released); `npm run build` succeeded; `pm2 restart thrive-hub --update-env` online (pid 3718198); `/login` returns HTTP 200.
+- Local verification before push: generated a Chinese-content invoice PDF with `generateInvoicePdf`, rasterized to PNG, and visually confirmed Chinese client name/address/line items/terms render correctly (no tofu/garbled). `tsc` showed no new errors in the changed file.
+
+## 2026-08-10 customer reconciliation and Invoice release
+
+- Commit `90c293b` (`Add customer reconciliation invoice workflow`) was pushed to `origin/master` and deployed to production `/root/www`.
+- Production build backup: `backups/dev_pre_deploy_20260810_133329.db`; the prior scheduled backup `dev_daily_20260810_030001.db` also had integrity `ok`.
+- Additive migrations `20260807151000_invoice_reconciliation_links` and `20260807175000_invoice_item_currency_period` were applied successfully. They create the reconciliation/Invoice link table and add/backfill line-level Invoice currency and period fields; no DROP, DELETE, or TRUNCATE is present.
+- Post-migration verification: 60 migrations current, SQLite `PRAGMA integrity_check` = `ok`, `PRAGMA foreign_key_check` returned no rows, and production had zero existing `InvoiceItem` rows to backfill.
+- PM2 `thrive-hub` is online at commit `90c293b`; `/login` returns HTTP 200 and protected `/invoices/new` and `/finance` return the expected unauthenticated HTTP 307 redirect.
+- The production error log was last modified at 04:31, before the 13:38 deployment restart, so no fresh startup error was observed.
+
+Last updated: 2026-08-10 (Asia/Shanghai)
 
 ## 2026-08-06 current production and repository state
 
@@ -214,7 +262,7 @@ Last updated: 2026-08-06 (Asia/Shanghai)
   outputs, seal images, project-local skills, and SQLite sidecar files while
   retaining tracked `.gitkeep` placeholders. Do not use `git add .`.
 - `prisma/schema.prisma` and migrations have no local diff. `prisma migrate
-  status` reports all 45 migrations applied and no pending migration.
+status` reports all 45 migrations applied and no pending migration.
 - The earlier build timeout was diagnosed from `.next/trace`: Next completed
   in about 605 seconds, roughly one second after the tool's old 10-minute
   timeout. After confirming no project Next process was running, `.next` was
@@ -457,21 +505,21 @@ business records. Existing sessions should re-login after role conversion.
 
 Use this only as orientation. Read source before extending a feature.
 
-| Commit | Scope |
-| --- | --- |
-| `b235691` | BI performance caching/pagination work and administrator observability panels |
-| `a5ca7c3` | Transactional contract upload flow |
-| `ac9d335` | Affiliate media kit upload and import merge behaviour |
+| Commit    | Scope                                                                                  |
+| --------- | -------------------------------------------------------------------------------------- |
+| `b235691` | BI performance caching/pagination work and administrator observability panels          |
+| `a5ca7c3` | Transactional contract upload flow                                                     |
+| `ac9d335` | Affiliate media kit upload and import merge behaviour                                  |
 | `8401538` | Operations revenue view using original currencies and reconciliation conversion fields |
-| `347fb6c` | BI bulk-operation logs and reversal support |
-| `2b42f9d` | Customer deletion impact handling |
-| `9880405` | Project KPI and customer management updates |
-| `84acee9` | BI loading optimization and customer bulk actions |
-| `0f6f81c` | BI export filters aligned with detail filtering |
-| `0ef8b94` | BI date range and SQLite affiliate import fix |
-| `f493d3f` | BI upload client-bundle fix |
-| `a7ba5e9` | Contract OCR 60-second fallback |
-| `4d144aa` | Contract OCR upload feedback |
+| `347fb6c` | BI bulk-operation logs and reversal support                                            |
+| `2b42f9d` | Customer deletion impact handling                                                      |
+| `9880405` | Project KPI and customer management updates                                            |
+| `84acee9` | BI loading optimization and customer bulk actions                                      |
+| `0f6f81c` | BI export filters aligned with detail filtering                                        |
+| `0ef8b94` | BI date range and SQLite affiliate import fix                                          |
+| `f493d3f` | BI upload client-bundle fix                                                            |
+| `a7ba5e9` | Contract OCR 60-second fallback                                                        |
+| `4d144aa` | Contract OCR upload feedback                                                           |
 
 ## 4. Current blockers / known symptoms
 
@@ -727,3 +775,58 @@ has happened merely because GitHub push succeeded.
 - `npm.cmd run typecheck`, `npx.cmd prisma validate`, and
   `git diff --check` passed before the final browser regression.
 - No commit, push, or production deployment has been performed for this work.
+
+## 2026-08-07 customer reconciliation / Invoice automation (local, not released)
+
+- Customer reconciliation submit now supports `CUSTOMER_REVIEW` and `SKIP_CUSTOMER`; skip mode records a per-reconciliation decision and only accepts corrected sales amount disputes. Order-count dispute input and new writes were removed.
+- Confirming a reconciliation no longer creates an Invoice draft automatically. The confirmed reconciliation card shows the next action to create an Invoice; an existing saved draft is reopened first, and Invoice/AR payment status remains read-only on the reconciliation page.
+- An `InvoiceReconciliation` link is created only when the user actually saves the prefilled Invoice. Saved drafts remain visible in the Invoice list.
+- The authenticated app layout creates one idempotent `INVOICE_ISSUE_OVERDUE` reminder for the reconciliation creator after three full calendar days without a linked `ISSUED` Invoice. DRAFT and VOID do not count as formally issued.
+- Migration `20260807151000_invoice_reconciliation_links` only creates the link table and indexes. Local backup was created under `backups/local-before-invoice-reconciliation-links/`; migration applied successfully and `PRAGMA integrity_check` returned `ok`.
+- Reconciliation PDF is now an operations report, not an Invoice-like statement. It shows period, locked sales, actual commission rate, amount payable, and per-commission BI summaries/details. Commission exports require `bi.view = READ` and compare current BI totals with locked reconciliation sales.
+- Verification passed: TypeScript, Prisma validate/status, diff check, PDF 3-page A4 render QA, and local `/login` HTTP 200. Local dev server restarted on port 3001.
+- No commit, push, or production deployment has occurred. Production deployment must stop PM2 before build/migration and verify the latest backup first.
+# 2026-08-21 财务工作台与按核销逐期渠道分账（本地，未部署）
+
+- 左侧“开票与收款”已合并为“财务工作台”；开票申请、Invoice/国内票、自动应收、到账核销及渠道付款集中处理。
+- Invoice/国内票首次开具时在同一事务幂等创建 `AccountsReceivable`；历史缺失应收已在本地备份后回填。
+- 客户到账核销现在触发 `CustomerReceiptAllocation -> ChannelPayableSource`；无渠道、无规则、币种或周期异常写入财务工作台“渠道应付异常”。
+- 最新产品口径：渠道分账不再预生成合同全部期数。每次客户对账实际核销时，只为相同费用流和对账起止日期创建一期；后续核销再逐期追加。
+- 手工创建/编辑 RULE_DRIVEN 渠道分账主记录也不再生成或重建未来周期。
+- 本地错误预生成且无来源/凭证/付款的渠道主记录 `cmt2mi1hw0001ytf8t86t9kh5` 已软删除，可恢复；操作前备份位于 `backups/local-before-empty-channel-master-cleanup-20260821/`。
+- 当前“测试测试”历史核销仍因 A 类规则阈值币种 USD 与到账 RMB 不一致而处于异常队列，未擅自换算或生成渠道应付。
+- 验证：TypeScript、`git diff --check`、安全测试 26/26 通过。尚未 commit/push/部署。
+# 2026-08-24 统一财务工作台（本地已完成）
+
+- `/finance/workbench` 已统一承载开票申请、Invoice、国内发票、应收与收款核销、渠道付款、供应商付款、员工费用报销、客户开票资料。
+- 客户对账支持带备注提交开票申请；普通开票申请支持国内/境外票据及结构化 Invoice 明细，费用类型新增 `AFFILIATE_FEE`。
+- Invoice/国内发票开具后自动创建应收；工作台显示实际发票号与系统单号，国内发票原件通过鉴权接口下载。
+- 新增 `CustomerBillingProfile`、`ManualBillingRequestItem`、`Supplier`、`SupplierBankAccount`、`PaymentRequest*`、`ExpenseClaim*`、`FinanceApprovalStep`、`FinanceAttachment` 等加法模型；迁移为 `20260824130000_unified_finance_requests`。
+- 数据库变更执行前备份：`backups/local-before-unified-finance-20260824-125559/dev.db`；构建前另生成 `backups/dev_pre_deploy_20260824_135633.db`。迁移已应用，`integrity_check=ok`、外键错误 0。
+- 验证：`npm run typecheck`、`npm run build`、`git diff --check`（仅换行提示）均通过；本地开发服务运行于 `http://127.0.0.1:3001`。
+- 未提交、未推送、未部署生产。工作区包含此前多轮财务/合同改造及用户文件，后续提交时务必只选择本次确认范围。
+
+## 2026-08-24 财务工作台收支整合（本地，未发布）
+
+- 财务工作台业务区统一为“开票与收款”和“付款与报销”。开票区包含开票申请记录及应收账款汇总；应收按币种展示应收、已收、余额，并支持单选、全选及带附件导出。
+- 付款与报销统一展示渠道商、联盟商、公司供应商、其他付款和费用报销，支持分类筛选、按币种汇总、单选/全选及带附件导出；原“渠道应付异常”更名为“付款异常记录”。
+- 新增受权限和数据范围约束的财务 ZIP 导出接口。仅收集系统本地受控附件，限制记录数、单文件及压缩包体积；外部或不安全路径不会打包，并在跳过清单中说明。
+- 渠道确认无异议并上传 Invoice 后，系统按渠道期次幂等创建付款申请；要求已确认、已收到对应客户款项、存在匹配付款账户。上传成功但自动建单失败时保留凭证并写入异常审计。
+- 渠道确认后三个自然日仍未提交 Invoice 时生成一次幂等站内提醒。目前提醒由已登录员工进入应用时触发扫描，并非独立定时任务；如需严格准点发送，生产环境仍需接入 cron/scheduler。
+- Shallow 可在第一阶段驳回；进入财务处理后财务处理人也可填写原因退回，状态和审批步骤在同一事务中更新并保留记录。
+- 本轮没有新增 Schema 或迁移，也没有修改业务数据。`npm.cmd run typecheck` 通过；本地浏览器已验证两个主区域、应收汇总、分类筛选和付款异常记录正常渲染。
+
+## 2026-08-24 发票申请表与付款分类修正（本地，未发布）
+
+- 财务流程中的 Invoice 仍是申请入口，申请人不能直接开票。申请表复用正式 Invoice 的客户/合同联动及费用类型、币种、费用期间、推广平台、目标站点、联盟平台、数量、单价和备注字段；提交后经过 Shallow 审核，财务受理时进入 `/invoices/new?billingRequestId=...&focus=invoice`，自动预填申请内容并由财务开具。
+- 国内发票申请改为独立紧凑布局：顶部显示开票金额汇总，服务月份使用下拉多选，不含税金额直接录入，默认增值税普通发票和 1% 税率，并自动计算税额及开票金额。
+- 付款分类文案统一为渠道商、联盟商固费、公司采购、费用报销和其他；费用报销拥有独立筛选项，不再混入“其他”。
+- 未修改 Schema、迁移或业务数据。TypeScript 检查通过；浏览器已验证国内票布局、原 Invoice 字段与客户联动，以及中文付款筛选。
+
+## 2026-08-24 Invoice 申请预填与应收汇总修正（本地，未发布）
+
+- Invoice 申请表与正式开具页统一客户/合同关联逻辑，并补齐 Invoice 日期、付款截止日、BILL TO、客户地址、币种、收款账户、附加条款及明细字段。合同未配置专属账户时，与正式 Invoice 一致回退显示系统全部收款账户。
+- 申请人选择的收款账户及头部字段随开票申请保存；财务受理后进入正式 Invoice 编辑器时自动回填，申请人仍不能直接开票。
+- 财务工作台顶部删除重复的“登记客户到账”按钮；应收区新增按到期月份筛选以及美元、人民币应收/已收/余额汇总模块。
+- 应收表补齐选择列表头，修复客户、发票号码、系统单号、到期日、状态和余额整体错位。
+- 未修改 Schema、迁移或现有业务数据。TypeScript 检查和本地浏览器回归通过。

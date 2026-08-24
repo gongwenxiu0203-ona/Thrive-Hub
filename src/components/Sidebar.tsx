@@ -76,8 +76,8 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
         ],
       },
       {
-        href: "/invoices",
-        label: "\u5f00\u7968\u4e0e\u6536\u6b3e",
+        href: "/finance/workbench",
+        label: "\u8d22\u52a1\u5de5\u4f5c\u53f0",
         icon: FileText,
         features: [
           "operations.accounts_receivable",
@@ -180,16 +180,9 @@ export function Sidebar({
             <p className="mb-2 px-3 text-[11px] font-semibold text-slate-400">{group.label}</p>
             <div className="space-y-1">
               {group.items.map((item) => {
-                const href =
-                  item.href === "/invoices" &&
-                  !hasAtLeast("operations.invoices", "READ") &&
-                  hasAtLeast("operations.accounts_receivable", "READ")
-                    ? "/operations?tab=ar"
-                    : item.href;
-                const active = item.href === "/invoices"
-                  ? pathname === "/invoices" ||
-                    pathname.startsWith("/invoices/") ||
-                    (pathname === "/operations" && searchParams.get("tab") === "ar")
+                const href = item.href;
+                const active = item.href === "/finance/workbench"
+                  ? pathname === "/finance/workbench" || pathname.startsWith("/finance/workbench/") || pathname.startsWith("/finance/billing/") || pathname.startsWith("/finance/receipts/") || pathname.startsWith("/invoices/")
                   : item.href === "/operations"
                     ? pathname === "/operations" && searchParams.get("tab") !== "ar"
                     : pathname === item.href || pathname.startsWith(item.href + "/");

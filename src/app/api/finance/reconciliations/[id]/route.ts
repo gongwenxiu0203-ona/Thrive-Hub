@@ -116,6 +116,44 @@ export async function PATCH(
         );
       }
 
+      const periodChanged = parsedPeriodStart.getTime() !== existing.periodStart.getTime()
+        || parsedPeriodEnd.getTime() !== existing.periodEnd.getTime();
+      if (periodChanged) {
+        const reason = typeof body.adjustmentReason === "string" ? body.adjustmentReason.trim() : "";
+        if (!reason) {
+          return NextResponse.json({ error: "调整对账周期时必须填写调整原因" }, { status: 400 });
+        }
+        const contract = await prisma.contract.findUnique({
+          where: { id: existing.contractId },
+          select: { startDate: true, endDate: true },
+        });
+        if ((contract?.startDate && parsedPeriodStart < contract.startDate)
+          || (contract?.endDate && parsedPeriodEnd > contract.endDate)) {
+          return NextResponse.json({ error: "调整后的对账周期不能超出合同有效期" }, { status: 400 });
+        }
+        const conflictingTypes = [existing.reconcileType, "BOTH"];
+        const overlap = await prisma.customerReconciliation.findFirst({
+          where: {
+            id: { not: id },
+            contractId: existing.contractId,
+            deletedAt: null,
+            reconcileType: { in: conflictingTypes },
+            periodStart: { lte: parsedPeriodEnd },
+            periodEnd: { gte: parsedPeriodStart },
+          },
+          select: { id: true },
+        });
+        if (overlap) {
+          return NextResponse.json({ error: "调整后的周期与同一合同、同一费用类型的现有对账记录重叠" }, { status: 409 });
+        }
+        data.periodAdjusted = true;
+        data.adjustmentReason = reason;
+        data.periodStart = parsedPeriodStart;
+        data.periodEnd = parsedPeriodEnd;
+        if (!existing.originalPeriodStart) data.originalPeriodStart = existing.periodStart;
+        if (!existing.originalPeriodEnd) data.originalPeriodEnd = existing.periodEnd;
+      }
+
       for (const key of draftOnlyFields) {
         if (key in body) {
           if (key === "periodStart") {
@@ -133,7 +171,23 @@ export async function PATCH(
       Object.assign(data, calc);
     }
 
-    const result = await prisma.customerReconciliation.update({ where: { id }, data });
+    const periodChanged = data.periodAdjusted === true;
+    const result = await prisma.$transaction(async (tx) => {
+      if (periodChanged) {
+        await tx.reconciliationPeriodAudit.create({
+          data: {
+            reconciliationId: id,
+            actorId: session.userId,
+            beforeStart: existing.periodStart,
+            beforeEnd: existing.periodEnd,
+            afterStart: data.periodStart as Date,
+            afterEnd: data.periodEnd as Date,
+            reason: data.adjustmentReason as string,
+          },
+        });
+      }
+      return tx.customerReconciliation.update({ where: { id }, data });
+    });
     return NextResponse.json(result);
   } catch (e) {
     if (e instanceof FeaturePermissionError) return NextResponse.json({ error: "无权限" }, { status: 403 });

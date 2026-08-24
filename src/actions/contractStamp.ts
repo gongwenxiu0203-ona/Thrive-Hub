@@ -27,6 +27,7 @@ import {
   requireFeaturePermission,
 } from "@/lib/permissionGuard";
 import { actionError, AppError } from "@/lib/appError";
+import { ensureCustomerReconciliationPlan } from "@/lib/customerReconciliationPlan";
 
 type Result<T = void> = { ok: true; data?: T } | { ok: false; error: string };
 
@@ -158,6 +159,9 @@ export async function stampContract(contractId: string, sealCompany?: SealCompan
         ...(c.status === "SIGNING" ? { status: "COMPLETED" } : {}),
       },
     });
+    if (c.status === "SIGNING") {
+      await ensureCustomerReconciliationPlan(contractId, session.userId);
+    }
 
     revalidatePath(`/contracts/${contractId}`);
     return { ok: true, data: { fileUrl } };

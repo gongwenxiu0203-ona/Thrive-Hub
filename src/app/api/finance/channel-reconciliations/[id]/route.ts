@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { channelReconciliationScope, financeDataView, isStaff } from "@/lib/dataScope";
 import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
-import { appendAuditEntry, splitCommissionServicePeriods, splitFixedFeeServicePeriods } from "@/lib/channelSplit";
+import { appendAuditEntry } from "@/lib/channelSplit";
 import { errorResponse } from "@/lib/appError";
 
 const PAYEE_FIELD_LIMITS = {
@@ -113,11 +113,7 @@ export async function PATCH(
       if (existing.periods.some((p) => p.fixedFeeReceived != null || p.commissionReceived != null || p.fixedFeeShareAmount != null || p.commissionShareAmount != null || p.confirmedGmv != null)) return NextResponse.json({ error: "已有分账录入，不能重建服务周期" }, { status: 409 });
       const start = contract.startDate; const end = splitRule.splitEndDate;
       if (end.getTime() < start.getTime()) return NextResponse.json({ error: "分账规则截止时间早于合同开始时间" }, { status: 400 });
-      const fixed = splitFixedFeeServicePeriods(start, end); const commission = splitCommissionServicePeriods(start, end);
-      const updated = await prisma.$transaction(async (tx) => {
-        await tx.channelReconciliationPeriod.deleteMany({ where: { reconciliationId: id } });
-        return tx.channelReconciliation.update({ where: { id }, data: { customerId, contractId, channelUserId: customer.channelUserId!, splitRuleId: splitRule.id, periodStart: start, periodEnd: end, totalPeriods: fixed.length + commission.length, note: typeof body.note === "string" ? body.note.trim() || null : existing.note, auditLog: appendAuditEntry(existing.auditLog, { type: "MASTER_EDIT", actorId: session.userId, at: new Date().toISOString(), reason, before: { customerId: existing.customerId, contractId: existing.contractId, periodStart: existing.periodStart, periodEnd: existing.periodEnd }, after: { customerId, contractId, periodStart: start, periodEnd: end } }), periods: { create: [ ...fixed.map((period) => ({ streamType: "FIXED_FEE", periodIndex: period.periodIndex, periodLabel: period.label, periodStart: period.start, periodEnd: period.end, fixedFeeShareRate: splitRule.fixedFeeRate })), ...commission.map((period) => ({ streamType: "COMMISSION", periodIndex: fixed.length + period.periodIndex, periodLabel: period.label, periodStart: period.start, periodEnd: period.end, commissionShareRate: splitRule.ruleType === "A" ? splitRule.commissionBelowRate : null })) ] } } });
-      });
+      const updated = await prisma.channelReconciliation.update({ where: { id }, data: { customerId, contractId, channelUserId: customer.channelUserId!, splitRuleId: splitRule.id, periodStart: start, periodEnd: end, totalPeriods: existing.periods.length, note: typeof body.note === "string" ? body.note.trim() || null : existing.note, auditLog: appendAuditEntry(existing.auditLog, { type: "MASTER_EDIT", actorId: session.userId, at: new Date().toISOString(), reason, before: { customerId: existing.customerId, contractId: existing.contractId, periodStart: existing.periodStart, periodEnd: existing.periodEnd }, after: { customerId, contractId, periodStart: start, periodEnd: end } }) } });
       return NextResponse.json(updated);
     }
 

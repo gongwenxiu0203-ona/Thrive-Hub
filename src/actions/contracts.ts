@@ -17,6 +17,7 @@ import { contractScope, customerScope } from "@/lib/dataScope";
 import type { PermLevel } from "@/lib/featurePermissions";
 import { requireFeaturePermission } from "@/lib/permissionGuard";
 import { writeAdminAudit } from "@/lib/adminObservability";
+import { ensureCustomerReconciliationPlan } from "@/lib/customerReconciliationPlan";
 
 const CONTRACT_EDIT_AUDIT_SELECT = {
   id: true,
@@ -514,6 +515,7 @@ export async function markCompleted(id: string) {
     where: { id },
     data: { status: "COMPLETED" },
   });
+  await ensureCustomerReconciliationPlan(id, session.userId);
   await syncContractProgressToProjects(id, "签署完成");
   if (contract.customerId) {
     await bumpCustomerStatus(contract.customerId, "COOPERATING");

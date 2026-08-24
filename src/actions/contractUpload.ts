@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
+import { ensureCustomerReconciliationPlan } from "@/lib/customerReconciliationPlan";
 import { requireSession } from "@/lib/session";
 import { extractDocxContent } from "@/lib/contractDocxExtract";
 import { extractPdfEmbeddedText } from "@/lib/contractPdfExtract";
@@ -521,6 +522,8 @@ export async function uploadExistingContract(
     console.warn("[uploadExistingContract] contractNo conflict after 3 retries:", lastError);
     return { ok: false, error: "合同编号冲突，请稍后重试" };
   }
+
+  await ensureCustomerReconciliationPlan(contract.id, session.userId);
 
   const base = contractFileBaseName({
     contractNo: contract.contractNo,

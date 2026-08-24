@@ -27,7 +27,7 @@ import { actionError } from "@/lib/appError";
 const INVOICE_FEATURE = "operations.invoices";
 const INVOICE_STATUSES = ["DRAFT", "ISSUED", "VOID"] as const;
 const PERIOD_TYPES = ["MONTH", "DATE_RANGE"] as const;
-const FEE_TYPES = ["MONTHLY_FEE", "SALES_COMMISSION"] as const;
+const FEE_TYPES = ["MONTHLY_FEE", "SALES_COMMISSION", "AFFILIATE_FEE"] as const;
 const MAX_INVOICE_AMOUNT = 1_000_000_000;
 const MAX_LINE_ITEMS = 100;
 
@@ -51,6 +51,7 @@ export type InvoiceItemInput = {
 };
 
 export type InvoiceDraftInput = {
+  billingRequestId?: string | null;
   customerId: string;
   contractId: string;
   contractIds: string[];
@@ -90,6 +91,7 @@ export type InvoiceListItem = {
 };
 
 export type InvoiceDetail = {
+  billingRequestId?: string | null;
   id: string;
   invoiceNo: string;
   customerId: string | null;
@@ -192,6 +194,74 @@ function isoDate(value: Date): string {
 
 function roundMoney(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+async function ensureAccountsReceivableForIssuedInvoice(
+  tx: Prisma.TransactionClient,
+  invoice: {
+    id: string;
+    invoiceNo: string;
+    customerId: string | null;
+    invoiceDate: Date;
+    dueDate: Date;
+    totalAmount: number;
+    currency: string;
+    accountsReceivableId: string | null;
+  },
+) {
+  if (invoice.accountsReceivableId) return invoice.accountsReceivableId;
+  if (invoice.currency === "MIXED") {
+    throw new Error("混合币种票据不能自动创建单一应收账款，请拆分开票。");
+  }
+  const normalizedCurrency = invoice.currency === "CNY" ? "RMB" : invoice.currency;
+  const exchangeRate = normalizedCurrency === "USD" ? 7.2 : 1;
+  const amountRmb = roundMoney(invoice.totalAmount * exchangeRate);
+  const existing = await tx.accountsReceivable.findUnique({ where: { invoiceNo: invoice.invoiceNo } });
+  if (existing) {
+    if (
+      existing.customerId !== invoice.customerId ||
+      existing.currency !== normalizedCurrency ||
+      Math.abs(existing.invoiceAmount - invoice.totalAmount) > 0.01
+    ) {
+      throw new Error("同号应收账款与当前票据金额、币种或客户不一致，请财务核查。");
+    }
+    await tx.invoice.update({ where: { id: invoice.id }, data: { accountsReceivableId: existing.id } });
+    return existing.id;
+  }
+  const now = new Date();
+  const overdue = invoice.dueDate < now;
+  const ar = await tx.accountsReceivable.create({
+    data: {
+      customerId: invoice.customerId,
+      invoiceNo: invoice.invoiceNo,
+      invoiceDate: invoice.invoiceDate,
+      invoiceAmount: invoice.totalAmount,
+      currency: normalizedCurrency,
+      exchangeRate,
+      amountRmb,
+      dueDate: invoice.dueDate,
+      status: overdue ? "OVERDUE" : "NOT_DUE",
+      riskLevel: overdue ? "YELLOW" : "GREEN",
+    },
+  });
+  await tx.invoice.update({ where: { id: invoice.id }, data: { accountsReceivableId: ar.id } });
+  return ar.id;
+}
+
+async function refreshBillingRequestStatus(tx: Prisma.TransactionClient, billingRequestId: string | null) {
+  if (!billingRequestId) return;
+  const request = await tx.billingRequest.findUnique({
+    where: { id: billingRequestId },
+    select: { requestedAmount: true, invoices: { where: { deletedAt: null, status: "ISSUED" }, select: { totalAmount: true } } },
+  });
+  if (!request) return;
+  const issuedAmount = roundMoney(request.invoices.reduce((sum, invoice) => sum + invoice.totalAmount, 0));
+  await tx.billingRequest.update({
+    where: { id: billingRequestId },
+    data: issuedAmount + 0.01 >= request.requestedAmount
+      ? { status: "COMPLETED", completedAt: new Date() }
+      : { status: "PROCESSING", completedAt: null },
+  });
 }
 
 function parseStringList(value: string | null | undefined): string[] {
@@ -1049,6 +1119,7 @@ export async function listInvoices(input?: {
   });
   return rows.map((row) => ({
     id: row.id,
+    billingRequestId: row.billingRequestId,
     invoiceNo: row.invoiceNo,
     customerId: row.customerId,
     customerName: row.customer?.brandName ?? row.clientName,
@@ -1148,11 +1219,31 @@ export async function createInvoice(
             draft.customerId,
             draft.contractLinks.map((link) => link.contractId),
           );
+          const billingRequestId = input.billingRequestId?.trim() || null;
+          let billingRequestLines: Array<{ id: string; reconciliationId: string; requestedAmount: number; feeType: string; currency: string }> | null = null;
+          if (billingRequestId) {
+            const request = await tx.billingRequest.findFirst({
+              where: { id: billingRequestId, status: "PROCESSING", documentType: "INVOICE", customerId: draft.customerId },
+              select: { id: true, lines: { select: { id: true, reconciliationId: true, requestedAmount: true, feeType: true, currency: true } } },
+            });
+            if (!request || request.lines.some((line) => !reconciliationIds.includes(line.reconciliationId))) {
+              throw new Error("开票申请不存在、尚未受理，或与所选对账记录不一致。");
+            }
+            billingRequestLines = request.lines;
+          }
           const { items, contractLinks, ...invoiceData } = draft;
-          return tx.invoice.create({
+          const billingRequestedTotal = billingRequestLines?.reduce((sum, line) => sum + line.requestedAmount, 0) ?? 0;
+          if (billingRequestLines && (invoiceData.totalAmount <= 0 || invoiceData.totalAmount > billingRequestedTotal + 0.01)) {
+            throw new Error("Invoice 金额必须大于 0，且不能超过开票申请金额。");
+          }
+          const billingAllocationRatio = billingRequestedTotal > 0 ? invoiceData.totalAmount / billingRequestedTotal : 0;
+          const invoice = await tx.invoice.create({
             data: {
               ...invoiceData,
               invoiceNo,
+              billingRequestId,
+              documentType: "INVOICE",
+              issuedAt: invoiceData.status === "ISSUED" ? new Date() : null,
               createdById: session.userId,
               items: { create: items },
               contractLinks: { create: contractLinks },
@@ -1166,11 +1257,20 @@ export async function createInvoice(
                     ),
                   }
                 : undefined,
+              billingAllocations: billingRequestLines
+                ? { create: billingRequestLines.map((line) => ({ reconciliationId: line.reconciliationId, requestLineId: line.id, amount: roundMoney(line.requestedAmount * billingAllocationRatio), feeType: line.feeType, currency: line.currency })) }
+                : undefined,
             },
-            select: { id: true, invoiceNo: true },
+            select: { id: true, invoiceNo: true, customerId: true, invoiceDate: true, dueDate: true, totalAmount: true, currency: true, accountsReceivableId: true, billingRequestId: true, status: true },
           });
+          if (invoice.status === "ISSUED") {
+            await ensureAccountsReceivableForIssuedInvoice(tx, invoice);
+            await refreshBillingRequestStatus(tx, invoice.billingRequestId);
+          }
+          return invoice;
         });
         revalidatePath("/invoices");
+        revalidatePath("/finance/billing");
         return {
           ok: true,
           id: created.id,
@@ -1301,14 +1401,28 @@ export async function setInvoiceStatus(
     } else if (existing.status !== "ISSUED") {
       return { ok: false, error: "仅已开具的 Invoice 可以作废" };
     }
-    const updated = await prisma.invoice.updateMany({
-      where: {
-        id,
-        deletedAt: null,
-        status: status === "ISSUED" ? "DRAFT" : "ISSUED",
-        ...invoiceScope(session),
-      },
-      data: { status },
+    const updated = await prisma.$transaction(async (tx) => {
+      const result = await tx.invoice.updateMany({
+        where: {
+          id,
+          deletedAt: null,
+          status: status === "ISSUED" ? "DRAFT" : "ISSUED",
+          ...invoiceScope(session),
+        },
+        data: { status, issuedAt: status === "ISSUED" ? new Date() : existing.issuedAt },
+      });
+      if (result.count !== 1) return result;
+      if (status === "ISSUED") {
+        const issuedInvoice = await tx.invoice.findUniqueOrThrow({
+          where: { id },
+          select: { id: true, invoiceNo: true, customerId: true, invoiceDate: true, dueDate: true, totalAmount: true, currency: true, accountsReceivableId: true, billingRequestId: true },
+        });
+        await ensureAccountsReceivableForIssuedInvoice(tx, issuedInvoice);
+        await refreshBillingRequestStatus(tx, issuedInvoice.billingRequestId);
+      } else {
+        await refreshBillingRequestStatus(tx, existing.billingRequestId);
+      }
+      return result;
     });
     if (updated.count !== 1) {
       return { ok: false, error: "Invoice 状态已变更，请刷新后重试" };

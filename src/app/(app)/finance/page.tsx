@@ -69,7 +69,12 @@ export default async function FinancePage() {
     // 未删除的对账记录（带行级权限）
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     canViewCustomer ? prisma.customerReconciliation.findMany({
-      where: { AND: [{ deletedAt: null }, recScope as any] },
+      where: {
+        AND: [
+          { deletedAt: null, planStatus: { not: "PLANNED" } },
+          recScope as any,
+        ],
+      },
       include: {
         customer: {
           select: {

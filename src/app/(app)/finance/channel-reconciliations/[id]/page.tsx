@@ -68,7 +68,13 @@ export default async function ChannelReconciliationDetailPage({
       contract: { select: { id: true, contractNo: true } },
       channelUser: { select: { id: true, name: true } },
       splitRule: true,
-      periods: { orderBy: { periodIndex: "asc" } },
+      periods: {
+        orderBy: { periodIndex: "asc" },
+        include: {
+          businessDocuments: { orderBy: { version: "desc" }, take: 1 },
+          payments: { where: { status: "PAID" }, orderBy: { paidAt: "desc" } },
+        },
+      },
     },
   });
   if (!rec) notFound();
@@ -257,6 +263,17 @@ export default async function ChannelReconciliationDetailPage({
           channelDisputeReason: p.channelDisputeReason,
           channelReviewVersion: p.channelReviewVersion,
           paymentProofUrl: p.paymentProofUrl,
+          payableStatus: p.payableStatus,
+          businessDocumentStatus: p.businessDocumentStatus,
+          financeReviewStatus: p.financeReviewStatus,
+          businessDocument: p.businessDocuments[0] ? {
+            id: p.businessDocuments[0].id,
+            fileUrl: p.businessDocuments[0].fileUrl,
+            status: p.businessDocuments[0].status,
+            rejectionReason: p.businessDocuments[0].rejectionReason,
+          } : null,
+          fixedFeePaidAmount: p.payments.filter((payment) => payment.streamType === "FIXED_FEE").reduce((sum, payment) => sum + payment.amount, 0),
+          commissionPaidAmount: p.payments.filter((payment) => payment.streamType === "COMMISSION").reduce((sum, payment) => sum + payment.amount, 0),
         })),
       }}
       derivedPeriods={derivedPeriods}

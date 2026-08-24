@@ -4,6 +4,7 @@ import { AppShell } from "@/components/AppShell";
 import { resolveUserPermissionsMap } from "@/lib/permissionResolver";
 import { hasPermissionLevel } from "@/lib/permissionGuard";
 import { ensureOverdueInvoiceIssueReminders } from "@/lib/reconciliationInvoiceReminder";
+import { ensureChannelInvoiceReminders } from "@/lib/channelPaymentWorkflow";
 
 export default async function AppLayout({
   children,
@@ -19,6 +20,7 @@ export default async function AppLayout({
   if (canViewReminders) {
     try {
       await ensureOverdueInvoiceIssueReminders(session.userId);
+      await ensureChannelInvoiceReminders();
     } catch (error) {
       console.error("[invoice-issue-reminder] scan failed", error);
     }

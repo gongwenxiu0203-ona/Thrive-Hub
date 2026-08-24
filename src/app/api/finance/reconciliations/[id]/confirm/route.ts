@@ -41,6 +41,7 @@ export async function POST(
       const finalOrders = rec.actualOrders;
       const finalSalesAmount = rec.actualSalesAmount;
       const finalCommissionAmount = rec.commissionAmount;
+      const finalFeeAmount = rec.finalFeeAmount ?? rec.feeAmount;
 
       const transition = await tx.customerReconciliation.updateMany({
         where: { id, status: "DISPUTED" },
@@ -49,6 +50,7 @@ export async function POST(
           finalOrders,
           finalSalesAmount,
           finalCommissionAmount,
+          finalFeeAmount,
           settlementReminderSent: false,
           updatedAt: new Date(),
         },
@@ -69,8 +71,8 @@ export async function POST(
       // 按对账流生成结算记录，并避免重复生成。
       const now = new Date();
       const settlementSpecs = [
-        ...(rec.reconcileType !== "COMMISSION_ONLY" && rec.feeAmount > 0
-          ? [{ type: "FIXED_FEE", amount: rec.feeAmount }]
+        ...(rec.reconcileType !== "COMMISSION_ONLY" && finalFeeAmount > 0
+          ? [{ type: "FIXED_FEE", amount: finalFeeAmount }]
           : []),
         ...(rec.reconcileType !== "FEE_ONLY" && finalCommissionAmount > 0
           ? [{ type: "COMMISSION", amount: finalCommissionAmount }]

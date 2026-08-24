@@ -8,9 +8,15 @@ import { promisify } from "util";
 const execFileAsync = promisify(execFile);
 const OCR_DPI = Number(process.env.CONTRACT_OCR_DPI || 150);
 const OCR_MAX_PAGES = Number(process.env.CONTRACT_OCR_MAX_PAGES || 25);
-const OCR_TOTAL_TIMEOUT_MS = Number(process.env.CONTRACT_OCR_TOTAL_TIMEOUT_MS || 60_000);
-const OCR_RENDER_TIMEOUT_MS = Number(process.env.CONTRACT_OCR_RENDER_TIMEOUT_MS || 60_000);
-const OCR_PAGE_TIMEOUT_MS = Number(process.env.CONTRACT_OCR_PAGE_TIMEOUT_MS || 45_000);
+const OCR_TOTAL_TIMEOUT_MS = Number(
+  process.env.CONTRACT_OCR_TOTAL_TIMEOUT_MS || 60_000,
+);
+const OCR_RENDER_TIMEOUT_MS = Number(
+  process.env.CONTRACT_OCR_RENDER_TIMEOUT_MS || 60_000,
+);
+const OCR_PAGE_TIMEOUT_MS = Number(
+  process.env.CONTRACT_OCR_PAGE_TIMEOUT_MS || 45_000,
+);
 
 export class ContractOcrTimeoutError extends Error {
   constructor(message = "扫描版 PDF OCR 超过 60 秒未完成") {
@@ -19,29 +25,39 @@ export class ContractOcrTimeoutError extends Error {
   }
 }
 
-export function isContractOcrTimeoutError(error: unknown): error is ContractOcrTimeoutError {
-  return error instanceof ContractOcrTimeoutError
-    || (error instanceof Error && error.name === "ContractOcrTimeoutError");
+export function isContractOcrTimeoutError(
+  error: unknown,
+): error is ContractOcrTimeoutError {
+  return (
+    error instanceof ContractOcrTimeoutError ||
+    (error instanceof Error && error.name === "ContractOcrTimeoutError")
+  );
 }
 
-export async function extractScannedPdfTextWithOcr(buffer: Buffer): Promise<string> {
+export async function extractScannedPdfTextWithOcr(
+  buffer: Buffer,
+): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "contract-ocr-"));
   const pdfPath = path.join(dir, "input.pdf");
   const deadline = Date.now() + OCR_TOTAL_TIMEOUT_MS;
   try {
     await fs.writeFile(pdfPath, buffer);
     const prefix = path.join(dir, "page");
-    await runCommand(command("PDFTOPPM_CMD", "pdftoppm"), [
-      "-r",
-      String(OCR_DPI),
-      "-png",
-      "-f",
-      "1",
-      "-l",
-      String(OCR_MAX_PAGES),
-      pdfPath,
-      prefix,
-    ], remainingTimeout(deadline, OCR_RENDER_TIMEOUT_MS));
+    await runCommand(
+      command("PDFTOPPM_CMD", "pdftoppm"),
+      [
+        "-r",
+        String(OCR_DPI),
+        "-png",
+        "-f",
+        "1",
+        "-l",
+        String(OCR_MAX_PAGES),
+        pdfPath,
+        prefix,
+      ],
+      remainingTimeout(deadline, OCR_RENDER_TIMEOUT_MS),
+    );
 
     const files = (await fs.readdir(dir))
       .filter((name) => name.startsWith("page-") && name.endsWith(".png"))
@@ -56,15 +72,19 @@ export async function extractScannedPdfTextWithOcr(buffer: Buffer): Promise<stri
       const outBase = imagePath.replace(/\.png$/i, "");
       const tessdataDir = resolveTessdataDir();
       console.info(`[contract-ocr] OCR ${index + 1}/${files.length}: ${file}`);
-      await runCommand(command("TESSERACT_CMD", "tesseract"), [
-        imagePath,
-        outBase,
-        ...(tessdataDir ? ["--tessdata-dir", tessdataDir] : []),
-        "-l",
-        resolveTesseractLang(tessdataDir),
-        "--psm",
-        "6",
-      ], timeout);
+      await runCommand(
+        command("TESSERACT_CMD", "tesseract"),
+        [
+          imagePath,
+          outBase,
+          ...(tessdataDir ? ["--tessdata-dir", tessdataDir] : []),
+          "-l",
+          resolveTesseractLang(tessdataDir),
+          "--psm",
+          "6",
+        ],
+        timeout,
+      );
       const textPath = `${outBase}.txt`;
       chunks.push(await fs.readFile(textPath, "utf8"));
     }
@@ -75,6 +95,38 @@ export async function extractScannedPdfTextWithOcr(buffer: Buffer): Promise<stri
     throw new Error(
       `扫描版 PDF 需要安装 OCR 组件后才能识别：poppler-utils(pdftoppm) + tesseract-ocr(含中文语言包)。当前 OCR 调用失败：${message}`,
     );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+export async function extractImageTextWithOcr(
+  buffer: Buffer,
+  extension = ".png",
+): Promise<string> {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "document-ocr-"));
+  const safeExtension = /^\.(png|jpe?g|webp)$/i.test(extension)
+    ? extension.toLowerCase()
+    : ".png";
+  const imagePath = path.join(dir, `input${safeExtension}`);
+  const outBase = path.join(dir, "result");
+  try {
+    await fs.writeFile(imagePath, buffer);
+    const tessdataDir = resolveTessdataDir();
+    await runCommand(
+      command("TESSERACT_CMD", "tesseract"),
+      [
+        imagePath,
+        outBase,
+        ...(tessdataDir ? ["--tessdata-dir", tessdataDir] : []),
+        "-l",
+        resolveTesseractLang(tessdataDir),
+        "--psm",
+        "6",
+      ],
+      OCR_PAGE_TIMEOUT_MS,
+    );
+    return (await fs.readFile(`${outBase}.txt`, "utf8")).trim();
   } finally {
     await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
   }
@@ -151,15 +203,19 @@ function command(envKey: string, fallback: string): string {
 }
 
 function runCommand(commandPath: string, args: string[], timeout: number) {
-  const commandPromise = process.platform === "win32" && /\.(cmd|bat)$/i.test(commandPath)
-    ? execFileAsync("cmd.exe", ["/d", "/s", "/c", commandPath, ...args], { timeout })
-    : execFileAsync(commandPath, args, { timeout });
+  const commandPromise =
+    process.platform === "win32" && /\.(cmd|bat)$/i.test(commandPath)
+      ? execFileAsync("cmd.exe", ["/d", "/s", "/c", commandPath, ...args], {
+          timeout,
+        })
+      : execFileAsync(commandPath, args, { timeout });
   return commandPromise.catch((error: unknown) => {
     if (
       error &&
       typeof error === "object" &&
       ("killed" in error || "signal" in error) &&
-      ((error as { killed?: boolean }).killed || (error as { signal?: string }).signal === "SIGTERM")
+      ((error as { killed?: boolean }).killed ||
+        (error as { signal?: string }).signal === "SIGTERM")
     ) {
       throw new ContractOcrTimeoutError();
     }

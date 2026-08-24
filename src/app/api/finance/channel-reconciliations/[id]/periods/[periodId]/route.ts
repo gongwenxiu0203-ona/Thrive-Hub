@@ -68,15 +68,13 @@ function canonicalCurrency(value: string): string {
   return normalized === "CNY" ? "RMB" : normalized;
 }
 
-const RECEIVED_CURRENCIES = new Set(["USD", "RMB", "EUR", "GBP", "HKD"]);
-
 function parsePeriodCurrency(value: unknown, fallback: string): string {
   if (value === undefined || value === null || value === "") {
     return canonicalCurrency(fallback);
   }
   if (typeof value !== "string") throw new Error("CURRENCY_INVALID");
   const normalized = canonicalCurrency(value);
-  if (!RECEIVED_CURRENCIES.has(normalized)) {
+  if (!/^[A-Z]{3,8}$/.test(normalized)) {
     throw new Error("CURRENCY_INVALID");
   }
   return normalized;
@@ -147,7 +145,8 @@ export async function PATCH(
             typeof body.correctionReason === "string"
               ? body.correctionReason.trim()
               : "";
-          if (!confirmationReason) throw new Error("CORRECTION_REASON_REQUIRED");
+          if (!confirmationReason)
+            throw new Error("CORRECTION_REASON_REQUIRED");
           if (confirmsFixedPayment && period.fixedFeeAmount === null) {
             throw new Error("FIXED_PAYMENT_DATA_REQUIRED");
           }
@@ -168,7 +167,8 @@ export async function PATCH(
         const commissionChanged =
           Object.keys(body).some((key) => commissionKeys.has(key)) ||
           commonChanged;
-        if (period.fixedFeePaidAt && fixedChanged) throw new Error("PAID_LOCKED");
+        if (period.fixedFeePaidAt && fixedChanged)
+          throw new Error("PAID_LOCKED");
         if (period.commissionPaidAt && commissionChanged) {
           throw new Error("PAID_LOCKED");
         }
@@ -230,9 +230,10 @@ export async function PATCH(
 
       const bodyKeys = Object.keys(body);
       const changesFixed = bodyKeys.some((key) => FIXED_FIELDS.has(key));
-      const changesCommission = bodyKeys.some((key) => COMMISSION_FIELDS.has(key));
-      const changesServicePeriod =
-        "periodStart" in body || "periodEnd" in body;
+      const changesCommission = bodyKeys.some((key) =>
+        COMMISSION_FIELDS.has(key),
+      );
+      const changesServicePeriod = "periodStart" in body || "periodEnd" in body;
 
       if (period.streamType === "FIXED_FEE" && changesCommission) {
         throw new Error("STREAM_FIELD_MISMATCH");
@@ -251,8 +252,12 @@ export async function PATCH(
         body.commissionPaidAt !== "";
       const requestsPayment = requestsFixedPayment || requestsCommissionPayment;
       if (requestsPayment) {
-        if (!["CONFIRMED", "SKIPPED"].includes(period.channelReviewStatus)) throw new Error("CHANNEL_REVIEW_REQUIRED");
-        const paymentProofUrl = typeof body.paymentProofUrl === "string" ? body.paymentProofUrl.trim() : "";
+        if (!["CONFIRMED", "SKIPPED"].includes(period.channelReviewStatus))
+          throw new Error("CHANNEL_REVIEW_REQUIRED");
+        const paymentProofUrl =
+          typeof body.paymentProofUrl === "string"
+            ? body.paymentProofUrl.trim()
+            : "";
         if (!paymentProofUrl) throw new Error("PAYMENT_PROOF_REQUIRED");
         let paymentProofUrls: unknown;
         try {
@@ -264,7 +269,9 @@ export async function PATCH(
           !Array.isArray(paymentProofUrls) ||
           paymentProofUrls.length === 0 ||
           paymentProofUrls.length > 10 ||
-          paymentProofUrls.some((url) => typeof url !== "string" || !url.startsWith("/uploads/"))
+          paymentProofUrls.some(
+            (url) => typeof url !== "string" || !url.startsWith("/uploads/"),
+          )
         ) {
           throw new Error("PAYMENT_PROOF_INVALID");
         }
@@ -274,7 +281,10 @@ export async function PATCH(
       if (
         requestsFixedPayment &&
         bodyKeys.some(
-          (key) => key !== "fixedFeePaidAt" && key !== "paymentProofUrl" && key !== "correctionReason",
+          (key) =>
+            key !== "fixedFeePaidAt" &&
+            key !== "paymentProofUrl" &&
+            key !== "correctionReason",
         )
       ) {
         throw new Error("PAYMENT_ONLY_REQUEST");
@@ -282,7 +292,10 @@ export async function PATCH(
       if (
         requestsCommissionPayment &&
         bodyKeys.some(
-          (key) => key !== "commissionPaidAt" && key !== "paymentProofUrl" && key !== "correctionReason",
+          (key) =>
+            key !== "commissionPaidAt" &&
+            key !== "paymentProofUrl" &&
+            key !== "correctionReason",
         )
       ) {
         throw new Error("PAYMENT_ONLY_REQUEST");
@@ -304,13 +317,17 @@ export async function PATCH(
 
       if (
         period.fixedFeePaidAt &&
-        (changesFixed || changesServicePeriod || period.streamType === "FIXED_FEE")
+        (changesFixed ||
+          changesServicePeriod ||
+          period.streamType === "FIXED_FEE")
       ) {
         throw new Error("PAID_LOCKED");
       }
       if (
         period.commissionPaidAt &&
-        (changesCommission || changesServicePeriod || period.streamType === "COMMISSION")
+        (changesCommission ||
+          changesServicePeriod ||
+          period.streamType === "COMMISSION")
       ) {
         throw new Error("PAID_LOCKED");
       }
@@ -333,15 +350,21 @@ export async function PATCH(
               period.commissionReceived !== null ||
               period.commissionShareAmount !== null ||
               period.commissionPaidAt !== null ||
-              period.confirmedGmv !== null;      const submittedReason =
+              period.confirmedGmv !== null;
+      const submittedReason =
         typeof body.correctionReason === "string"
           ? body.correctionReason.trim()
           : "";
       if (relevantAlreadyRecorded && !requestsPayment && !submittedReason) {
         throw new Error("CORRECTION_REASON_REQUIRED");
       }
-      if (period.channelReviewStatus === "DISPUTED" && !submittedReason) throw new Error("CORRECTION_REASON_REQUIRED");
-      const reason = requestsPayment ? submittedReason || "确认付款" : relevantAlreadyRecorded ? submittedReason : "首次录入";
+      if (period.channelReviewStatus === "DISPUTED" && !submittedReason)
+        throw new Error("CORRECTION_REASON_REQUIRED");
+      const reason = requestsPayment
+        ? submittedReason || "确认付款"
+        : relevantAlreadyRecorded
+          ? submittedReason
+          : "首次录入";
 
       const nextPeriodStart =
         "periodStart" in body
@@ -548,9 +571,18 @@ export async function PATCH(
           proofUrl: next.proofUrl,
           paymentProofUrl: next.paymentProofUrl,
           notes: next.notes,
-          channelReviewStatus: !requestsPayment && period.channelReviewStatus === "DISPUTED" ? "DRAFT" : period.channelReviewStatus,
-          channelReviewedAt: !requestsPayment && period.channelReviewStatus === "DISPUTED" ? null : period.channelReviewedAt,
-          channelDisputeReason: !requestsPayment && period.channelReviewStatus === "DISPUTED" ? null : period.channelDisputeReason,
+          channelReviewStatus:
+            !requestsPayment && period.channelReviewStatus === "DISPUTED"
+              ? "DRAFT"
+              : period.channelReviewStatus,
+          channelReviewedAt:
+            !requestsPayment && period.channelReviewStatus === "DISPUTED"
+              ? null
+              : period.channelReviewedAt,
+          channelDisputeReason:
+            !requestsPayment && period.channelReviewStatus === "DISPUTED"
+              ? null
+              : period.channelDisputeReason,
           auditLog,
         },
       });
@@ -563,7 +595,10 @@ export async function PATCH(
     }
     if (error instanceof Error) {
       if (error.message === "NOT_FOUND") {
-        return NextResponse.json({ error: "渠道商对账周期不存在、已删除或无权访问" }, { status: 404 });
+        return NextResponse.json(
+          { error: "渠道商对账周期不存在、已删除或无权访问" },
+          { status: 404 },
+        );
       }
       if (error.message === "RULE_MISSING") {
         return NextResponse.json(
@@ -583,10 +618,26 @@ export async function PATCH(
           { status: 409 },
         );
       }
-      if (error.message === "CHANNEL_REVIEW_REQUIRED") return NextResponse.json({ error: "渠道商确认完成或跳过确认后才能填写付款信息" }, { status: 409 });
-      if (error.message === "CHANNEL_REVIEW_LOCKED") return NextResponse.json({ error: "当前确认状态已锁定分账数据" }, { status: 409 });
-      if (error.message === "PAYMENT_PROOF_REQUIRED") return NextResponse.json({ error: "请先上传付款回单" }, { status: 400 });
-      if (error.message === "PAYMENT_PROOF_INVALID") return NextResponse.json({ error: "付款回单格式无效，最多支持 10 张已上传回单" }, { status: 400 });
+      if (error.message === "CHANNEL_REVIEW_REQUIRED")
+        return NextResponse.json(
+          { error: "渠道商确认完成或跳过确认后才能填写付款信息" },
+          { status: 409 },
+        );
+      if (error.message === "CHANNEL_REVIEW_LOCKED")
+        return NextResponse.json(
+          { error: "当前确认状态已锁定分账数据" },
+          { status: 409 },
+        );
+      if (error.message === "PAYMENT_PROOF_REQUIRED")
+        return NextResponse.json(
+          { error: "请先上传付款回单" },
+          { status: 400 },
+        );
+      if (error.message === "PAYMENT_PROOF_INVALID")
+        return NextResponse.json(
+          { error: "付款回单格式无效，最多支持 10 张已上传回单" },
+          { status: 400 },
+        );
       if (error.message === "CORRECTION_REASON_REQUIRED") {
         return NextResponse.json(
           { error: "修改已有录入时必须填写修改原因" },
@@ -640,7 +691,10 @@ export async function PATCH(
       }
       if (error.message === "FIXED_PAYMENT_DATA_REQUIRED") {
         return NextResponse.json(
-          { error: "填写固费实际付款时间前，必须先录入到账固费并完成分账金额计算" },
+          {
+            error:
+              "填写固费实际付款时间前，必须先录入到账固费并完成分账金额计算",
+          },
           { status: 400 },
         );
       }

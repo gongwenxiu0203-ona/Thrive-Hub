@@ -43,6 +43,7 @@ model User {
   salesBatches                        SalesBatch[]
   affiliateBatches                    AffiliateBatch[]
   attachments                         Attachment[]
+  financeAccountProfiles              FinanceAccountProfile[]
   // Finance module relations
   reconciliationsCreated              CustomerReconciliation[]    @relation("ReconciliationCreator")
   reconciliationsSubmitted            CustomerReconciliation[]    @relation("ReconciliationSubmitter")
@@ -78,13 +79,24 @@ model User {
   bulkOperationLogs                   BulkOperationLog[]          @relation("BulkOperationOperator")
   adminAuditLogs                      AdminAuditLog[]             @relation("AdminAuditActor")
   apiAccessLogs                       ApiAccessLog[]              @relation("ApiAccessActor")
-  emailReplySettingsAsTarget         EmailReplySetting[]         @relation("EmailReplyTarget")
-  emailReplySettingsUpdated          EmailReplySetting[]         @relation("EmailReplyUpdater")
-  emailDeliveryLogsCreated           EmailDeliveryLog[]          @relation("EmailDeliveryCreator")
-  intakeSubmissionsShared            CustomerIntakeSubmission[]  @relation("IntakeSharedBy")
-  intakeSubmissionsAsChannel         CustomerIntakeSubmission[]  @relation("IntakeChannel")
-  intakeSubmissionsReviewed          CustomerIntakeSubmission[]  @relation("IntakeReviewer")
-  invoicesCreated                    Invoice[]                   @relation("InvoiceCreator")
+  emailReplySettingsAsTarget          EmailReplySetting[]         @relation("EmailReplyTarget")
+  emailReplySettingsUpdated           EmailReplySetting[]         @relation("EmailReplyUpdater")
+  emailDeliveryLogsCreated            EmailDeliveryLog[]          @relation("EmailDeliveryCreator")
+  intakeSubmissionsShared             CustomerIntakeSubmission[]  @relation("IntakeSharedBy")
+  intakeSubmissionsAsChannel          CustomerIntakeSubmission[]  @relation("IntakeChannel")
+  intakeSubmissionsReviewed           CustomerIntakeSubmission[]  @relation("IntakeReviewer")
+  invoicesCreated                     Invoice[]                   @relation("InvoiceCreator")
+  reconciliationPeriodAudits          ReconciliationPeriodAudit[] @relation("ReconciliationPeriodAuditActor")
+  billingRequestsApplied              BillingRequest[]            @relation("BillingRequestApplicant")
+  billingRequestsAccepted             BillingRequest[]            @relation("BillingRequestAcceptor")
+  domesticInvoicesUploaded            DomesticInvoiceDocument[]   @relation("DomesticInvoiceUploader")
+  customerReceiptsCreated             CustomerReceipt[]           @relation("CustomerReceiptCreator")
+  receiptAllocationsCreated           CustomerReceiptAllocation[] @relation("ReceiptAllocationCreator")
+  receiptAllocationsReversed          CustomerReceiptAllocation[] @relation("ReceiptAllocationReverser")
+  channelDocumentsUploaded            ChannelBusinessDocument[]   @relation("ChannelDocumentUploader")
+  channelDocumentsReviewed            ChannelBusinessDocument[]   @relation("ChannelDocumentReviewer")
+  channelPaymentsCreated              ChannelPayment[]            @relation("ChannelPaymentCreator")
+  financeAuditLogs                    FinanceAuditLog[]           @relation("FinanceAuditActor")
 }
 
 // 角色级权限配置（每个角色 + 功能 = 一个等级）
@@ -140,19 +152,19 @@ model Customer {
   affiliateTeam  String? // 是否有联盟团队及负责工作
 
   // 内部管理
-  category        String? // 品类
-  status          String    @default("UNASSIGNED") // 见 CUSTOMER_STATUS_LABELS
-  statusChangedAt DateTime  @default(now()) // 用于状态超时自动流转
+  category               String? // 品类
+  status                 String    @default("UNASSIGNED") // 见 CUSTOMER_STATUS_LABELS
+  statusChangedAt        DateTime  @default(now()) // 用于状态超时自动流转
   staleReviewRequestedAt DateTime? // 创建满 30 天后的进度确认提醒发送时间
   staleReviewDeadlineAt  DateTime? // 提醒后无人处理时自动转为未推进合作的截止时间
-  rating          String    @default("PENDING") // S | A | B | C | PENDING(待评估)
-  evaluationData  String? // JSON: { revenueScore, bsrScore, mediaBuyScore, commissionScore, categoryScore, ... }
-  businessOwnerId String?
-  backendOwnerId  String?
-  demoDueDate     DateTime? // Demo 方案截止日期（独立存储，不依赖是否分配后端负责人）
-  channelUserId   String? // 渠道商 userId（关联渠道商用户）
-  referrerName    String? // 推荐人（客户表单手动填写）
-  createdById     String? // 创建者 userId
+  rating                 String    @default("PENDING") // S | A | B | C | PENDING(待评估)
+  evaluationData         String? // JSON: { revenueScore, bsrScore, mediaBuyScore, commissionScore, categoryScore, ... }
+  businessOwnerId        String?
+  backendOwnerId         String?
+  demoDueDate            DateTime? // Demo 方案截止日期（独立存储，不依赖是否分配后端负责人）
+  channelUserId          String? // 渠道商 userId（关联渠道商用户）
+  referrerName           String? // 推荐人（客户表单手动填写）
+  createdById            String? // 创建者 userId
 
   // 联系人（非必填）
   contactName  String?
@@ -178,17 +190,20 @@ model Customer {
   revenueSnapshots         ClientRevenueSnapshot[]
   accountsReceivable       AccountsReceivable[]
   invoices                 Invoice[]
+  billingRequests          BillingRequest[]
+  billingProfiles          CustomerBillingProfile[]
+  customerReceipts         CustomerReceipt[]
   splitRules               ChannelSplitRule[]
   authorizationInfos       CustomerAuthorizationInfo[]
-  intakeSubmissions        CustomerIntakeSubmission[] @relation("IntakeTargetCustomer")
-  createdFromSubmissions   CustomerIntakeSubmission[] @relation("IntakeCreatedCustomer")
+  intakeSubmissions        CustomerIntakeSubmission[]  @relation("IntakeTargetCustomer")
+  createdFromSubmissions   CustomerIntakeSubmission[]  @relation("IntakeCreatedCustomer")
 }
 
 // External customer information is quarantined here until an administrator reviews it.
 model CustomerIntakeSubmission {
-  id                String   @id @default(cuid())
-  type              String   // GENERAL_NEW | CUSTOMER_UPDATE
-  status            String   @default("PENDING") // PENDING | APPROVED | REJECTED
+  id                String    @id @default(cuid())
+  type              String // GENERAL_NEW | CUSTOMER_UPDATE
+  status            String    @default("PENDING") // PENDING | APPROVED | REJECTED
   brandName         String
   payload           String
   baselinePayload   String?
@@ -200,9 +215,9 @@ model CustomerIntakeSubmission {
   reviewNote        String?
   appliedFields     String?
   createdCustomerId String?
-  submittedAt       DateTime @default(now())
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  submittedAt       DateTime  @default(now())
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   customer        Customer? @relation("IntakeTargetCustomer", fields: [customerId], references: [id], onDelete: SetNull)
   createdCustomer Customer? @relation("IntakeCreatedCustomer", fields: [createdCustomerId], references: [id], onDelete: SetNull)
@@ -352,6 +367,7 @@ model Contract {
   invoices               Invoice[]
   invoiceLinks           InvoiceContract[]
   splitRule              ChannelSplitRule?
+  billingRequests        BillingRequest[]
 }
 
 model ContractFieldReview {
@@ -371,18 +387,18 @@ model ContractFieldReview {
 }
 
 model Task {
-  id           String  @id @default(cuid())
+  id            String  @id @default(cuid())
   automationKey String? @unique // 自动任务幂等键；空值兼容既有人工任务
-  title        String
-  description  String?
-  customerId   String?
-  contractId   String? // 关联合同（合同提交类任务）
-  ownerId      String?
-  publisherId  String?
-  priority     String  @default("MID") // LOW | MID | HIGH | URGENT
-  category     String  @default("GENERAL") // GENERAL | DEMO_PLAN | MEETING_BOOKING
-  status       String  @default("TODO") // TODO | IN_PROGRESS | REVIEW | DONE | RETURNED | CANCELLED
-  returnReason String? // 退回理由
+  title         String
+  description   String?
+  customerId    String?
+  contractId    String? // 关联合同（合同提交类任务）
+  ownerId       String?
+  publisherId   String?
+  priority      String  @default("MID") // LOW | MID | HIGH | URGENT
+  category      String  @default("GENERAL") // GENERAL | DEMO_PLAN | MEETING_BOOKING
+  status        String  @default("TODO") // TODO | IN_PROGRESS | REVIEW | DONE | RETURNED | CANCELLED
+  returnReason  String? // 退回理由
 
   externalLinks String @default("[]") // JSON array of {label, url}
 
@@ -769,11 +785,11 @@ model Project {
   name   String
   status String @default("ACTIVE") // ACTIVE 进行中 | PAUSED 暂停 | DONE 已完成 | CANCELLED 已终止
 
-  customerId String? // 关联客户（自动带出商务/后端负责人）
-  contractId String? // 关联合同（整合合作 = 签署完成的合同）
-  ownerId    String? // 项目负责人（默认创建人，可手动修改）
-  promoPlatforms String @default("[]") // JSON string[]：推广平台（可多选/手动新增）
-  targetSites    String @default("[]") // JSON string[]：目标站点（可多选/手动新增）
+  customerId     String? // 关联客户（自动带出商务/后端负责人）
+  contractId     String? // 关联合同（整合合作 = 签署完成的合同）
+  ownerId        String? // 项目负责人（默认创建人，可手动修改）
+  promoPlatforms String  @default("[]") // JSON string[]：推广平台（可多选/手动新增）
+  targetSites    String  @default("[]") // JSON string[]：目标站点（可多选/手动新增）
 
   // 单次合作流程字段
   stage          String? // 流程阶段：REQUIREMENT|SUBMITTED|PRICE_CONFIRMED|INFO_SUBMITTED|DECIDED|SETTLED
@@ -923,6 +939,16 @@ model CustomerReconciliation {
   customerId String
   contractId String
 
+  source              String    @default("MANUAL") // AUTO | MANUAL | ADJUSTMENT
+  planStatus          String    @default("OPEN") // PLANNED | OPEN | CANCELLED
+  periodIndex         Int?
+  automationKey       String?   @unique
+  periodAdjusted      Boolean   @default(false)
+  adjustmentReason    String?
+  originalPeriodStart DateTime?
+  originalPeriodEnd   DateTime?
+  openedAt            DateTime?
+
   // 对账周期
   periodStart DateTime
   periodEnd   DateTime
@@ -973,6 +999,7 @@ model CustomerReconciliation {
   finalOrders           Int?
   finalSalesAmount      Float?
   finalCommissionAmount Float?
+  finalFeeAmount        Float?
 
   // 软删除：deletedAt 非空表示已删除，7 天后访问列表时永久清理
   deletedAt DateTime?
@@ -981,20 +1008,45 @@ model CustomerReconciliation {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  customer               Customer                @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  contract               Contract                @relation(fields: [contractId], references: [id])
-  createdBy              User                    @relation("ReconciliationCreator", fields: [createdById], references: [id])
-  submittedBy            User?                   @relation("ReconciliationSubmitter", fields: [submittedById], references: [id])
-  submittedToUser        User?                   @relation("ReconciliationTarget", fields: [submittedToUserId], references: [id])
+  customer               Customer                    @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  contract               Contract                    @relation(fields: [contractId], references: [id])
+  createdBy              User                        @relation("ReconciliationCreator", fields: [createdById], references: [id])
+  submittedBy            User?                       @relation("ReconciliationSubmitter", fields: [submittedById], references: [id])
+  submittedToUser        User?                       @relation("ReconciliationTarget", fields: [submittedToUserId], references: [id])
   reviews                ReconciliationReview[]
   settlements            Settlement[]
-  channelReconciliations ChannelReconciliation[] @relation("CustomerReconciliationToChannels")
+  channelReconciliations ChannelReconciliation[]     @relation("CustomerReconciliationToChannels")
   invoiceLinks           InvoiceReconciliation[]
+  periodAudits           ReconciliationPeriodAudit[]
+  billingRequestLines    BillingRequestLine[]
+  billingAllocations     BillingDocumentAllocation[]
+  receiptAllocations     CustomerReceiptAllocation[]
+  channelPayableSources  ChannelPayableSource[]
 
   @@index([customerId])
   @@index([contractId])
   @@index([status])
   @@index([deletedAt])
+  @@index([contractId, reconcileType, periodStart])
+  @@index([planStatus, periodStart])
+}
+
+model ReconciliationPeriodAudit {
+  id               String   @id @default(cuid())
+  reconciliationId String
+  actorId          String
+  beforeStart      DateTime
+  beforeEnd        DateTime
+  afterStart       DateTime
+  afterEnd         DateTime
+  reason           String
+  createdAt        DateTime @default(now())
+
+  reconciliation CustomerReconciliation @relation(fields: [reconciliationId], references: [id], onDelete: Cascade)
+  actor          User                   @relation("ReconciliationPeriodAuditActor", fields: [actorId], references: [id])
+
+  @@index([reconciliationId, createdAt])
+  @@index([actorId])
 }
 
 // 对账审核/争议记录（每次提交、确认、争议各一条，保留完整历史）
@@ -1006,6 +1058,7 @@ model ReconciliationReview {
   action              String
   disputedOrders      Int? // 争议时填写的己方单量
   disputedSalesAmount Float? // 争议时填写的己方销售额
+  disputedFeeAmount   Float? // 固费异议时填写的最终固费金额
   note                String? // 备注/意见
   createdAt           DateTime @default(now())
 
@@ -1102,7 +1155,7 @@ model ChannelReconciliation {
   // 关联到客户配置的分账规则（autoCreated=true 时由规则触发器写入；手动创建为 null）
   splitRuleId String?
 
-createdById    String
+  createdById    String
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   deletedAt      DateTime?
@@ -1155,41 +1208,48 @@ model ChannelSplitRule {
 }
 
 model ChannelReconciliationPeriod {
-  id                    String    @id @default(cuid())
-  reconciliationId      String
-  streamType            String    @default("BOTH") // BOTH | FIXED_FEE | COMMISSION
-  periodIndex           Int
-  periodLabel           String?
-  fixedFeeAmount        Float?
-  commissionAmount      Float?
-  fixedFeePaidAt        DateTime?
-  commissionPaidAt      DateTime?
-  periodStart           DateTime?
-  periodEnd             DateTime?
-  fixedFeeReceived      Float?
-  commissionReceived    Float?
-  fixedFeeReceivedCurrency String?
+  id                         String    @id @default(cuid())
+  reconciliationId           String
+  streamType                 String    @default("BOTH") // BOTH | FIXED_FEE | COMMISSION
+  periodIndex                Int
+  periodLabel                String?
+  fixedFeeAmount             Float?
+  commissionAmount           Float?
+  fixedFeePaidAt             DateTime?
+  commissionPaidAt           DateTime?
+  periodStart                DateTime?
+  periodEnd                  DateTime?
+  fixedFeeReceived           Float?
+  commissionReceived         Float?
+  fixedFeeReceivedCurrency   String?
   commissionReceivedCurrency String?
-  fixedFeeShareRate     Float?
-  commissionShareRate   Float?
-  fixedFeeShareAmount   Float?
-  commissionShareAmount Float?
-  fixedFeeSplitDate     DateTime?
-  commissionSplitDate   DateTime?
-  confirmedGmv          Float?
-auditLog              String    @default("[]")
-  channelReviewStatus   String    @default("DRAFT")
-  channelPushedAt       DateTime?
-  channelReviewedAt     DateTime?
-  channelDisputeReason  String?
-  channelReviewVersion  Int       @default(0)
-  paymentProofUrl       String? // JSON append-only correction snapshots
-  proofUrl              String?
-  notes                 String?
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
+  fixedFeeShareRate          Float?
+  commissionShareRate        Float?
+  fixedFeeShareAmount        Float?
+  commissionShareAmount      Float?
+  fixedFeeSplitDate          DateTime?
+  commissionSplitDate        DateTime?
+  confirmedGmv               Float?
+  auditLog                   String    @default("[]")
+  channelReviewStatus        String    @default("DRAFT")
+  channelPushedAt            DateTime?
+  channelReviewedAt          DateTime?
+  channelDisputeReason       String?
+  channelReviewVersion       Int       @default(0)
+  paymentProofUrl            String? // JSON append-only correction snapshots
+  proofUrl                   String?
+  payableStatus              String    @default("WAITING_CUSTOMER_RECEIPT")
+  businessDocumentStatus     String    @default("NOT_REQUIRED")
+  financeReviewStatus        String    @default("NOT_STARTED")
+  paymentVersion             Int       @default(0)
+  notes                      String?
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
 
-  reconciliation ChannelReconciliation @relation(fields: [reconciliationId], references: [id], onDelete: Cascade)
+  reconciliation    ChannelReconciliation     @relation(fields: [reconciliationId], references: [id], onDelete: Cascade)
+  payableSources    ChannelPayableSource[]
+  businessDocuments ChannelBusinessDocument[]
+  payments          ChannelPayment[]
 
   @@unique([reconciliationId, periodIndex])
   @@index([reconciliationId])
@@ -1298,9 +1358,10 @@ model AccountsReceivable {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
-  customer    Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  followOwner User?     @relation("ARFollowOwner", fields: [followOwnerId], references: [id], onDelete: SetNull)
-  invoices    Invoice[]
+  customer           Customer?                   @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  followOwner        User?                       @relation("ARFollowOwner", fields: [followOwnerId], references: [id], onDelete: SetNull)
+  invoices           Invoice[]
+  receiptAllocations CustomerReceiptAllocation[]
 
   @@index([customerId])
   @@index([status])
@@ -1317,6 +1378,9 @@ model Invoice {
   contractId           String?
   accountsReceivableId String?
   createdById          String?
+  billingRequestId     String?
+  documentType         String    @default("INVOICE") // INVOICE | DOMESTIC
+  issuedAt             DateTime?
   invoiceDate          DateTime
   dueDate              DateTime
   periodType           String // MONTH | DATE_RANGE
@@ -1328,36 +1392,41 @@ model Invoice {
   totalAmount          Float     @default(0)
   bankAccountKey       String?
   bankSnapshot         String    @default("{}") // JSON snapshot of beneficiary/bank/SWIFT/account
-  terms                 String?
-  status                String    @default("DRAFT") // DRAFT | ISSUED | VOID
-  pdfUrl                String?
-  deletedAt             DateTime?
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
+  terms                String?
+  status               String    @default("DRAFT") // DRAFT | ISSUED | VOID
+  pdfUrl               String?
+  deletedAt            DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
-  customer           Customer?           @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  contract           Contract?           @relation(fields: [contractId], references: [id], onDelete: SetNull)
-  accountsReceivable AccountsReceivable? @relation(fields: [accountsReceivableId], references: [id], onDelete: SetNull)
-  createdBy          User?               @relation("InvoiceCreator", fields: [createdById], references: [id], onDelete: SetNull)
-  items              InvoiceItem[]
-  contractLinks      InvoiceContract[]
+  customer            Customer?                   @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  contract            Contract?                   @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  accountsReceivable  AccountsReceivable?         @relation(fields: [accountsReceivableId], references: [id], onDelete: SetNull)
+  createdBy           User?                       @relation("InvoiceCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  items               InvoiceItem[]
+  contractLinks       InvoiceContract[]
   reconciliationLinks InvoiceReconciliation[]
+  billingRequest      BillingRequest?             @relation(fields: [billingRequestId], references: [id], onDelete: SetNull)
+  domesticDocument    DomesticInvoiceDocument?
+  billingAllocations  BillingDocumentAllocation[]
+  receiptAllocations  CustomerReceiptAllocation[]
 
   @@index([customerId])
   @@index([contractId])
   @@index([accountsReceivableId])
   @@index([createdById])
+  @@index([billingRequestId])
   @@index([invoiceDate])
   @@index([status])
   @@index([deletedAt])
 }
 
 model InvoiceContract {
-  id        String   @id @default(cuid())
-  invoiceId String
+  id         String   @id @default(cuid())
+  invoiceId  String
   contractId String
-  sortOrder Int      @default(0)
-  createdAt DateTime @default(now())
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
 
   invoice  Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   contract Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
@@ -1381,6 +1450,7 @@ model InvoiceReconciliation {
   @@unique([invoiceId, reconciliationId])
   @@index([invoiceId, sortOrder])
 }
+
 model InvoiceItem {
   id                String   @id @default(cuid())
   invoiceId         String
@@ -1407,6 +1477,314 @@ model InvoiceItem {
 }
 
 // 销售漏斗（独立建模，不复用 Project.stage —— Project.stage 是项目流程）
+model BillingRequest {
+  id              String    @id @default(cuid())
+  requestNo       String    @unique
+  applicantId     String
+  acceptedById    String?
+  customerId      String
+  contractId      String?
+  legalEntityKey  String
+  documentType    String // INVOICE | DOMESTIC
+  mergeMode       String // MERGED | SEPARATE
+  status          String    @default("SUBMITTED") // SUBMITTED | PROCESSING | COMPLETED | REJECTED | CANCELLED
+  currency        String
+  requestedAmount Float
+  sourceType      String    @default("RECONCILIATION") // RECONCILIATION | MANUAL
+  applicantNote   String?
+  rejectionReason String?
+  submittedAt     DateTime  @default(now())
+  acceptedAt      DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  applicant   User                       @relation("BillingRequestApplicant", fields: [applicantId], references: [id])
+  acceptedBy  User?                      @relation("BillingRequestAcceptor", fields: [acceptedById], references: [id], onDelete: SetNull)
+  customer    Customer                   @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  contract    Contract?                  @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  lines       BillingRequestLine[]
+  manualItems ManualBillingRequestItem[]
+  invoices    Invoice[]
+
+  @@index([customerId, status])
+  @@index([applicantId, status])
+  @@index([submittedAt])
+}
+
+model CustomerBillingProfile {
+  id                String   @id @default(cuid())
+  customerId        String
+  name              String
+  invoiceTitle      String
+  taxNumber         String?
+  registeredAddress String?
+  registeredPhone   String?
+  bankName          String?
+  bankAccount       String?
+  deliveryEmail     String?
+  isDefault         Boolean  @default(false)
+  status            String   @default("ACTIVE") // ACTIVE | INACTIVE
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId, status])
+}
+
+model ManualBillingRequestItem {
+  id                String   @id @default(cuid())
+  requestId         String
+  description       String
+  feeType           String // MONTHLY_FEE | SALES_COMMISSION | AFFILIATE_FEE
+  currency          String   @default("USD")
+  periodType        String   @default("DATE_RANGE")
+  periodLabel       String
+  promoPlatform     String?
+  targetSite        String?
+  affiliatePlatform String?
+  quantity          Float    @default(1)
+  unitPrice         Float
+  amount            Float
+  serviceMonths     String? // JSON string[] of YYYY-MM
+  netAmount         Float?
+  taxRate           Float?
+  taxAmount         Float?
+  grossAmount       Float?
+  remark            String?
+  sortOrder         Int      @default(0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  request BillingRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([requestId, sortOrder])
+  @@index([feeType])
+}
+
+model BillingRequestLine {
+  id               String   @id @default(cuid())
+  requestId        String
+  reconciliationId String
+  requestedAmount  Float
+  feeType          String // FIXED_FEE | COMMISSION
+  currency         String
+  sortOrder        Int      @default(0)
+  createdAt        DateTime @default(now())
+
+  request        BillingRequest         @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  reconciliation CustomerReconciliation @relation(fields: [reconciliationId], references: [id], onDelete: Restrict)
+
+  @@unique([requestId, reconciliationId, feeType])
+  @@index([reconciliationId])
+}
+
+model BillingDocumentAllocation {
+  id               String   @id @default(cuid())
+  invoiceId        String
+  reconciliationId String
+  requestLineId    String?
+  amount           Float
+  feeType          String
+  currency         String
+  createdAt        DateTime @default(now())
+
+  invoice        Invoice                @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  reconciliation CustomerReconciliation @relation(fields: [reconciliationId], references: [id], onDelete: Restrict)
+
+  @@unique([invoiceId, reconciliationId, feeType])
+  @@index([reconciliationId])
+  @@index([requestLineId])
+}
+
+model DomesticInvoiceDocument {
+  id                 String    @id @default(cuid())
+  invoiceId          String    @unique
+  invoiceCode        String?
+  invoiceNumber      String
+  invoiceType        String
+  taxInclusiveAmount Float
+  netAmount          Float
+  taxAmount          Float
+  taxRate            Float?
+  originalFileUrl    String?
+  uploadedById       String?
+  uploadedAt         DateTime?
+  voidedAt           DateTime?
+  redInvoiceId       String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  invoice    Invoice               @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  uploadedBy User?                 @relation("DomesticInvoiceUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+  lines      DomesticInvoiceLine[]
+
+  @@index([invoiceNumber])
+  @@index([redInvoiceId])
+}
+
+model DomesticInvoiceLine {
+  id                 String   @id @default(cuid())
+  documentId         String
+  description        String
+  specification      String?
+  unit               String?
+  quantity           Float    @default(1)
+  unitPrice          Float
+  netAmount          Float
+  taxRate            Float
+  taxAmount          Float
+  taxInclusiveAmount Float
+  serviceMonths      String? // JSON string[] of YYYY-MM
+  sortOrder          Int      @default(0)
+  createdAt          DateTime @default(now())
+
+  document DomesticInvoiceDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId, sortOrder])
+  @@index([serviceMonths])
+}
+
+model CustomerReceipt {
+  id            String   @id @default(cuid())
+  receiptNo     String   @unique
+  customerId    String
+  currency      String
+  amount        Float
+  receivedAt    DateTime
+  bankReference String?
+  proofUrls     String   @default("[]")
+  remark        String?
+  status        String   @default("UNALLOCATED") // UNALLOCATED | PARTIAL | ALLOCATED | REVERSED
+  createdById   String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  customer    Customer                    @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  createdBy   User                        @relation("CustomerReceiptCreator", fields: [createdById], references: [id])
+  allocations CustomerReceiptAllocation[]
+
+  @@index([customerId, receivedAt])
+  @@index([status])
+}
+
+model CustomerReceiptAllocation {
+  id                   String    @id @default(cuid())
+  idempotencyKey       String    @unique
+  receiptId            String
+  accountsReceivableId String?
+  invoiceId            String?
+  reconciliationId     String?
+  feeType              String
+  allocatedAmount      Float
+  status               String    @default("ACTIVE") // ACTIVE | REVERSED
+  createdById          String
+  reversedAt           DateTime?
+  reversedById         String?
+  reversalReason       String?
+  createdAt            DateTime  @default(now())
+
+  receipt            CustomerReceipt         @relation(fields: [receiptId], references: [id], onDelete: Restrict)
+  accountsReceivable AccountsReceivable?     @relation(fields: [accountsReceivableId], references: [id], onDelete: SetNull)
+  invoice            Invoice?                @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  reconciliation     CustomerReconciliation? @relation(fields: [reconciliationId], references: [id], onDelete: SetNull)
+  createdBy          User                    @relation("ReceiptAllocationCreator", fields: [createdById], references: [id])
+  reversedBy         User?                   @relation("ReceiptAllocationReverser", fields: [reversedById], references: [id], onDelete: SetNull)
+  payableSources     ChannelPayableSource[]
+
+  @@index([receiptId, status])
+  @@index([accountsReceivableId])
+  @@index([invoiceId])
+  @@index([reconciliationId])
+}
+
+model ChannelPayableSource {
+  id                String   @id @default(cuid())
+  allocationId      String
+  channelPeriodId   String
+  reconciliationId  String
+  feeType           String
+  sourceAmount      Float
+  shareRateSnapshot Float
+  payableAmount     Float
+  currency          String
+  status            String   @default("ACTIVE") // ACTIVE | REVERSED | EXCEPTION
+  exceptionReason   String?
+  createdAt         DateTime @default(now())
+
+  allocation     CustomerReceiptAllocation   @relation(fields: [allocationId], references: [id], onDelete: Restrict)
+  channelPeriod  ChannelReconciliationPeriod @relation(fields: [channelPeriodId], references: [id], onDelete: Restrict)
+  reconciliation CustomerReconciliation      @relation(fields: [reconciliationId], references: [id], onDelete: Restrict)
+
+  @@unique([allocationId, channelPeriodId, feeType])
+  @@index([channelPeriodId, status])
+  @@index([reconciliationId])
+}
+
+model ChannelBusinessDocument {
+  id              String    @id @default(cuid())
+  channelPeriodId String
+  uploadedById    String
+  documentType    String
+  streamType      String    @default("BOTH") // BOTH | FIXED_FEE | COMMISSION
+  fileUrl         String
+  documentNo      String?
+  documentDate    DateTime?
+  status          String    @default("PENDING") // PENDING | APPROVED | REJECTED
+  reviewedById    String?
+  reviewedAt      DateTime?
+  rejectionReason String?
+  version         Int       @default(1)
+  createdAt       DateTime  @default(now())
+
+  channelPeriod ChannelReconciliationPeriod @relation(fields: [channelPeriodId], references: [id], onDelete: Cascade)
+  uploadedBy    User                        @relation("ChannelDocumentUploader", fields: [uploadedById], references: [id])
+  reviewedBy    User?                       @relation("ChannelDocumentReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([channelPeriodId, status])
+  @@index([channelPeriodId, streamType, status])
+}
+
+model ChannelPayment {
+  id              String   @id @default(cuid())
+  channelPeriodId String
+  streamType      String   @default("BOTH") // BOTH | FIXED_FEE | COMMISSION
+  amount          Float
+  currency        String
+  paidAt          DateTime
+  transactionNo   String?
+  proofUrls       String   @default("[]")
+  status          String   @default("PAID") // PAID | REVERSED
+  createdById     String
+  createdAt       DateTime @default(now())
+
+  channelPeriod ChannelReconciliationPeriod @relation(fields: [channelPeriodId], references: [id], onDelete: Restrict)
+  createdBy     User                        @relation("ChannelPaymentCreator", fields: [createdById], references: [id])
+
+  @@index([channelPeriodId, status])
+  @@index([channelPeriodId, streamType, status])
+  @@index([paidAt])
+}
+
+model FinanceAuditLog {
+  id         String   @id @default(cuid())
+  entityType String
+  entityId   String
+  action     String
+  fromStatus String?
+  toStatus   String?
+  actorId    String
+  note       String?
+  metadata   String   @default("{}")
+  createdAt  DateTime @default(now())
+
+  actor User @relation("FinanceAuditActor", fields: [actorId], references: [id])
+
+  @@index([entityType, entityId, createdAt])
+  @@index([actorId])
+}
+
 model SalesPipeline {
   id                      String    @id @default(cuid())
   prospectName            String // 潜在客户名称
@@ -1524,4 +1902,205 @@ model ContractAnnotation {
 
   @@index([contractId])
   @@index([versionId])
+}
+
+model Supplier {
+  id           String   @id @default(cuid())
+  supplierNo   String   @unique
+  name         String
+  type         String   @default("SUPPLIER") // SUPPLIER | CHANNEL | AFFILIATE | OTHER
+  country      String?
+  taxNumber    String?
+  contactName  String?
+  contactEmail String?
+  status       String   @default("ACTIVE") // ACTIVE | INACTIVE
+  note         String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  bankAccounts    SupplierBankAccount[]
+  paymentRequests PaymentRequest[]
+
+  @@index([name])
+  @@index([type, status])
+}
+
+model SupplierBankAccount {
+  id            String   @id @default(cuid())
+  supplierId    String
+  accountName   String
+  bankName      String?
+  accountNumber String
+  country       String?
+  currency      String   @default("USD")
+  swiftCode     String?
+  bankAddress   String?
+  isDefault     Boolean  @default(false)
+  status        String   @default("ACTIVE")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  @@index([supplierId, status])
+}
+
+model PaymentRequest {
+  id               String    @id @default(cuid())
+  requestNo        String    @unique
+  requestType      String    @default("SUPPLIER") // SUPPLIER | CHANNEL | AFFILIATE | REIMBURSEMENT | OTHER
+  applicantId      String
+  supplierId       String?
+  payerEntity      String
+  payerAccountKey  String?
+  payeeSnapshot    String    @default("{}")
+  reason           String
+  currency         String
+  amount           Float
+  scheduledAt      DateTime?
+  relatedReceiptId String?
+  relatedInvoiceId String?
+  status           String    @default("SUBMITTED") // DRAFT | SUBMITTED | APPROVED | REJECTED | PAYING | PAID | CANCELLED
+  approvedById     String?
+  approvedAt       DateTime?
+  rejectionReason  String?
+  paidById         String?
+  paidAt           DateTime?
+  transactionNo    String?
+  paymentProofUrls String    @default("[]")
+  note             String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  supplier Supplier?            @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  items    PaymentRequestItem[]
+
+  @@index([status, createdAt])
+  @@index([supplierId])
+  @@index([applicantId])
+  @@index([relatedInvoiceId])
+  @@index([relatedReceiptId])
+}
+
+model PaymentRequestItem {
+  id               String   @id @default(cuid())
+  paymentRequestId String
+  description      String
+  amount           Float
+  currency         String
+  invoiceUrls      String   @default("[]")
+  sortOrder        Int      @default(0)
+  createdAt        DateTime @default(now())
+
+  paymentRequest PaymentRequest @relation(fields: [paymentRequestId], references: [id], onDelete: Cascade)
+
+  @@index([paymentRequestId, sortOrder])
+}
+
+model ExpenseClaim {
+  id                  String    @id @default(cuid())
+  claimNo             String    @unique
+  employeeId          String
+  reimbursementEntity String
+  currency            String
+  totalAmount         Float
+  payeeSnapshot       String    @default("{}")
+  status              String    @default("SUBMITTED") // DRAFT | SUBMITTED | APPROVED | REJECTED | PAYING | PAID | CANCELLED
+  approvedById        String?
+  approvedAt          DateTime?
+  rejectionReason     String?
+  paidAt              DateTime?
+  paymentProofUrls    String    @default("[]")
+  note                String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  items ExpenseClaimItem[]
+
+  @@index([status, createdAt])
+  @@index([employeeId])
+}
+
+model ExpenseClaimItem {
+  id             String   @id @default(cuid())
+  expenseClaimId String
+  description    String
+  expenseType    String
+  expenseDate    DateTime
+  currency       String
+  amount         Float
+  invoiceTitle   String?
+  invoiceNumber  String?
+  invoiceUrls    String   @default("[]")
+  remark         String?
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now())
+
+  expenseClaim ExpenseClaim @relation(fields: [expenseClaimId], references: [id], onDelete: Cascade)
+
+  @@index([expenseClaimId, sortOrder])
+  @@index([invoiceNumber])
+}
+
+model FinanceApprovalStep {
+  id         String    @id @default(cuid())
+  entityType String
+  entityId   String
+  stepNo     Int
+  stepType   String
+  assigneeId String?
+  operatorId String?
+  status     String    @default("PENDING") // PENDING | APPROVED | REJECTED | SKIPPED
+  comment    String?
+  actedAt    DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@unique([entityType, entityId, stepNo])
+  @@index([assigneeId, status])
+  @@index([entityType, entityId])
+}
+
+model FinanceAttachment {
+  id             String   @id @default(cuid())
+  entityType     String
+  entityId       String
+  attachmentType String
+  fileUrl        String
+  fileName       String?
+  uploadedById   String
+  version        Int      @default(1)
+  createdAt      DateTime @default(now())
+
+  @@index([entityType, entityId, attachmentType])
+}
+
+model FinanceAccountProfile {
+  id              String   @id @default(cuid())
+  profileNo       String   @unique
+  name            String
+  accountType     String // COMPANY_BANK | SUPPLIER_BANK | EMPLOYEE | OTHER
+  legalEntity     String
+  accountName     String
+  bankName        String?
+  accountNumber   String
+  currency        String
+  country         String?
+  swiftCode       String?
+  bankAddress     String?
+  payeeAddress    String?
+  routingNumber   String?
+  note            String?
+  payerAccountKey String?
+  attachmentUrls  String   @default("[]")
+  isDefault       Boolean  @default(false)
+  status          String   @default("ACTIVE") // ACTIVE | INACTIVE
+  createdById     String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  createdBy User @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([legalEntity, status])
+  @@index([accountType, status])
+  @@index([currency, status])
 }

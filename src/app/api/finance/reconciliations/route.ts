@@ -7,6 +7,13 @@ import { parseDateOnlyUtc } from "@/lib/dateRange";
 import { errorResponse } from "@/lib/appError";
 import { financeReferenceCustomerScope } from "@/lib/dataScope";
 
+function reconciliationCurrency(value: string | null | undefined) {
+  const normalized = String(value ?? "").trim().toUpperCase();
+  if (["美金", "美元", "US$", "$"].includes(normalized)) return "USD";
+  if (["人民币", "人民币元", "RMB", "¥", "￥"].includes(normalized)) return "CNY";
+  return normalized || "USD";
+}
+
 // GET /api/finance/reconciliations — 获取对账列表
 export async function GET(req: Request) {
   try {
@@ -57,6 +64,8 @@ export async function POST(req: Request) {
       periodStart,
       periodEnd,
       reconcileType,
+      source,
+      adjustmentReason,
     } = body;
 
     if (!customerId || !contractId || !periodStart || !periodEnd) {
@@ -75,6 +84,10 @@ export async function POST(req: Request) {
     if (start > end) {
       return NextResponse.json({ error: "对账周期结束时间不能早于开始时间" }, { status: 400 });
     }
+    const normalizedSource = source === "ADJUSTMENT" ? "ADJUSTMENT" : "MANUAL";
+    if (normalizedSource === "ADJUSTMENT" && (!adjustmentReason || !String(adjustmentReason).trim())) {
+      return NextResponse.json({ error: "新增调整单时必须填写调整原因" }, { status: 400 });
+    }
 
     // 获取合同信息，快照到对账记录
     const contract = await prisma.contract.findFirst({
@@ -91,10 +104,13 @@ export async function POST(req: Request) {
     if (contract.status !== "COMPLETED") {
       return NextResponse.json({ error: "只能对已签署完成的合同创建对账" }, { status: 400 });
     }
+    if (contract.startDate && start < contract.startDate || contract.endDate && end > contract.endDate) {
+      return NextResponse.json({ error: "手动对账周期不能超出合同有效期" }, { status: 400 });
+    }
 
     const conflictingTypes = [normalizedType, "BOTH"];
     const overlap = await prisma.customerReconciliation.findFirst({
-      where: { customerId, deletedAt: null, reconcileType: { in: conflictingTypes }, periodStart: { lte: end }, periodEnd: { gte: start } },
+      where: { contractId, deletedAt: null, reconcileType: { in: conflictingTypes }, periodStart: { lte: end }, periodEnd: { gte: start } },
       select: { periodStart: true, periodEnd: true },
     });
     if (overlap) {
@@ -121,17 +137,19 @@ export async function POST(req: Request) {
     });
 
     // 货币：固费用 contract.feeCurrency；抽佣/销售额用 thresholdCurrency > betTargetCurrency > feeCurrency
-    const fixedFeeCurrency = contract.feeCurrency || "人民币";
-    const commissionCurrency =
-      cAny.thresholdCurrency ||
-      cAny.betTargetCurrency ||
-      contract.feeCurrency ||
-      "人民币";
+    const fixedFeeCurrency = reconciliationCurrency(contract.feeCurrency);
+    const commissionCurrency = reconciliationCurrency(cAny.thresholdCurrency || cAny.betTargetCurrency || contract.feeCurrency);
 
     const reconciliation = await prisma.customerReconciliation.create({
       data: {
         customerId,
         contractId,
+        source: normalizedSource,
+        planStatus: "OPEN",
+        adjustmentReason: normalizedSource === "ADJUSTMENT" ? String(adjustmentReason).trim() : null,
+        originalPeriodStart: start,
+        originalPeriodEnd: end,
+        openedAt: new Date(),
         periodStart: start,
         periodEnd: end,
         // 快照合同条款
