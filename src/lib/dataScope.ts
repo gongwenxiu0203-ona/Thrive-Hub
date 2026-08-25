@@ -3,7 +3,7 @@
 // 角色规则：
 //   BRAND   ：硬性限制，仅 Customer.brandName == user.brandName 的数据。即使有 READ 权限也无法跨品牌查看。
 //   CHANNEL ：硬性限制，仅 channelUserId/createdById == user.id 的客户。
-//   ADMIN/USER（内部员工）：默认显示自己相关的（"我的"），但可通过 ?scope=all 切换到全部
+//   ADMIN/USER（内部员工）：只受功能权限控制，所有业务数据均为全量范围
 //   其他角色：完全无访问
 
 type Session = {
@@ -12,7 +12,7 @@ type Session = {
   brandName?: string | null;
 };
 
-/** 视图模式：staff 默认 "mine"（仅自己相关），"all" 查看全部 */
+/** 视图模式：仅保留为外部角色及旧页面查询参数兼容；内部角色始终全量。 */
 export type ViewScope = "mine" | "all";
 
 export function isStaff(role: string): boolean {
@@ -57,31 +57,30 @@ export function customerScope(
   }
   // 内部员工
   if (isStaff(session.role)) {
-    if (view === "all") return {};
-    // 默认仅显示自己相关的
-    return {
-      OR: [
-        { businessOwnerId: session.userId },
-        { backendOwnerId: session.userId },
-        { createdById: session.userId },
-      ],
-    };
+    return {};
   }
   // 未识别角色：拒绝
   return { id: "__NO_ACCESS__" };
 }
 
 /**
- * Customer scope for finance form references only.
+ * Customer scope for creation and association form references.
  *
- * Internal staff may select any active customer/contract while creating a
- * finance record. External roles retain their hard customer isolation. This
- * helper must not be used for finance record lists or detail-page access.
+ * Internal ADMIN/USER may select any active customer while creating or
+ * associating business records. External roles retain their hard customer
+ * isolation. Do not use this helper for customer list/detail visibility.
  */
-export function financeReferenceCustomerScope(
+export function creationReferenceCustomerScope(
   session: Session,
 ): Record<string, unknown> {
   return customerScope(session, isStaff(session.role) ? "all" : "mine");
+}
+
+/** Finance-specific compatibility alias for existing callers. */
+export function financeReferenceCustomerScope(
+  session: Session,
+): Record<string, unknown> {
+  return creationReferenceCustomerScope(session);
 }
 
 /** Contract 行级权限 */
@@ -109,15 +108,7 @@ export function reconciliationScope(
     return { customer: customerScope(session, view) };
   }
   if (isStaff(session.role)) {
-    if (view === "all") return {};
-    return {
-      OR: [
-        { createdById: session.userId },
-        { submittedById: session.userId },
-        { submittedToUserId: session.userId },
-        { customer: { businessOwnerId: session.userId } },
-      ],
-    };
+    return {};
   }
   return { id: "__NO_ACCESS__" };
 }
@@ -134,14 +125,7 @@ export function channelReconciliationScope(
     return { customer: { brandName: session.brandName } };
   }
   if (isStaff(session.role)) {
-    if (view === "all") return {};
-    return {
-      OR: [
-        { createdById: session.userId },
-        { customer: { businessOwnerId: session.userId } },
-        { customer: { backendOwnerId: session.userId } },
-      ],
-    };
+    return {};
   }
   return { id: "__NO_ACCESS__" };
 }
@@ -161,14 +145,7 @@ export function taskScope(
     };
   }
   if (isStaff(session.role)) {
-    if (view === "all") return {};
-    return {
-      OR: [
-        { ownerId: session.userId },
-        { publisherId: session.userId },
-        { customer: { businessOwnerId: session.userId } },
-      ],
-    };
+    return {};
   }
   return { id: "__NO_ACCESS__" };
 }
@@ -185,19 +162,17 @@ export function salesScope(
     return { customer: customerScope(session, view) };
   }
   if (isStaff(session.role)) {
-    if (view === "all") return {};
-    // 内部员工"我的"：仅自己负责的客户的销售数据
-    return { customer: customerScope(session, "mine") };
+    return {};
   }
   return { id: "__NO_ACCESS__" };
 }
 
-/** Reminder：本身按 targetId 过滤 */
+/** Reminder：内部人员可按功能权限查看全量；外部角色仅查看自己的收件记录。 */
 export function reminderScope(session: Session): Record<string, unknown> {
-  return { targetId: session.userId };
+  return isStaff(session.role) ? {} : { targetId: session.userId };
 }
 
-/** Project 行级权限：BRAND/CHANNEL 完全禁入；内部员工 "mine" 匹配 owner/创建人/客户负责人。 */
+/** Project 行级权限：BRAND/CHANNEL 完全禁入；内部员工按功能权限访问全量。 */
 export function projectScope(
   session: Session,
   view: ViewScope = "mine",
@@ -206,22 +181,13 @@ export function projectScope(
     return { id: "__NO_ACCESS__" };
   }
   if (isStaff(session.role)) {
-    if (view === "all") return {};
-    return {
-      OR: [
-        { ownerId: session.userId },
-        { createdById: session.userId },
-        { customer: { backendOwnerId: session.userId } },
-        { customer: { businessOwnerId: session.userId } },
-      ],
-    };
+    return {};
   }
   return { id: "__NO_ACCESS__" };
 }
 
 /** 员工 KPI 行级权限（作用于 ProjectGmvTarget）。
- *  ADMIN（all）：无过滤；
- *  非 ADMIN 或 mine：仅自己作为 Strategy AM / 项目 owner / 客户售前方案负责人的项目目标。
+ *  ADMIN/USER：按功能权限访问全量；
  *  BRAND/CHANNEL：完全禁入（上层路由再加一道隐藏拦截）。 */
 export function kpiScope(
   session: Session,
@@ -231,14 +197,7 @@ export function kpiScope(
     return { id: "__NO_ACCESS__" };
   }
   if (isStaff(session.role)) {
-    if (view === "all") return {};
-    return {
-      OR: [
-        { amOwnerId: session.userId },
-        { project: { ownerId: session.userId } },
-        { project: { customer: { backendOwnerId: session.userId } } },
-      ],
-    };
+    return {};
   }
   return { id: "__NO_ACCESS__" };
 }

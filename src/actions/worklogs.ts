@@ -81,16 +81,13 @@ export async function createWorkLog(payload: WorkLogPayload): Promise<WorkLogSav
   return { ok: true, workLogId: log.id };
 }
 
-/** 更新工作日志（仅作者或管理员）*/
+/** 更新工作日志：内部员工按功能编辑权限操作全量记录。 */
 export async function updateWorkLog(id: string, payload: WorkLogPayload): Promise<WorkLogSaveResult> {
   const session = await requireSession();
   await requireFeaturePermission(session, "worklogs.records", "EDIT");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const log = await (prisma.workLog.findUnique as any)({ where: { id } });
   if (!log) return { ok: false, error: "日志不存在" };
-  if (log.authorId !== session.userId && session.role !== "ADMIN") {
-    return { ok: false, error: "仅作者或管理员可编辑" };
-  }
   const err = validateWorkContent(payload);
   if (err) return { ok: false, error: err };
   const referenceError = await validateActiveReferences(payload);
@@ -165,16 +162,13 @@ async function syncWorkLogToProjects(
   for (const projectId of projectIds) revalidatePath(`/projects/${projectId}`);
 }
 
-/** 软删除（回收站 7 天可恢复；仅作者或管理员）*/
+/** 软删除（回收站 7 天可恢复；按功能管理权限操作全量记录）。 */
 export async function softDeleteWorkLog(id: string) {
   const session = await requireSession();
   await requireFeaturePermission(session, "worklogs.records", "MANAGE");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const log = await (prisma.workLog.findUnique as any)({ where: { id } });
   if (!log) throw new Error("日志不存在");
-  if (log.authorId !== session.userId && session.role !== "ADMIN") {
-    throw new Error("仅作者或管理员可删除");
-  }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (prisma.workLog.update as any)({ where: { id }, data: { deletedAt: new Date() } });
   revalidatePath("/worklogs");

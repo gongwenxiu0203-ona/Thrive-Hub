@@ -34,7 +34,7 @@ export function isAttachmentEntityType(value: string): value is AttachmentEntity
 }
 
 function entityViewScope(session: Pick<SessionPayload, "role">): ViewScope {
-  return session.role === "ADMIN" ? "all" : "mine";
+  return session.role === "ADMIN" || session.role === "USER" ? "all" : "mine";
 }
 
 export async function requireAttachmentEntityAccess(

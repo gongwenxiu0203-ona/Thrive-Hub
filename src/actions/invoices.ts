@@ -635,15 +635,8 @@ export async function getInvoiceFormOptions(
   const session = await requireInvoicePermission(
     includeAllFinanceReferences ? "EDIT" : "READ",
   );
-  const referenceCustomerScope = includeAllFinanceReferences
-    ? financeReferenceCustomerScope(session)
-    : customerScope(
-        session,
-        session.role === "ADMIN" ? "all" : "mine",
-      );
-  const receivableCustomerScope = includeAllFinanceReferences
-    ? financeReferenceCustomerScope(session)
-    : customerScope(session, session.role === "ADMIN" ? "all" : "mine");
+  const referenceCustomerScope = financeReferenceCustomerScope(session);
+  const receivableCustomerScope = financeReferenceCustomerScope(session);
   const [customers, contracts, accountsReceivables] = await Promise.all([
     prisma.customer.findMany({
       where: { deletedAt: null, ...referenceCustomerScope },

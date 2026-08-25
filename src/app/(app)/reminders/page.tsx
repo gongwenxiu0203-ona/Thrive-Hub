@@ -10,6 +10,7 @@ import { ReminderItem } from "./ReminderItem";
 import { MarkAllReadButton } from "./MarkAllReadButton";
 import { hasPermissionLevel } from "@/lib/permissionGuard";
 import { resolveUserPermission } from "@/lib/permissionResolver";
+import { isStaff } from "@/lib/dataScope";
 
 export const metadata = { title: "提醒管理 · Thraive联盟营销系统" };
 
@@ -36,9 +37,12 @@ export default async function RemindersPage({
 
   // Build base where clause
   const isCreatedScope = scopeFilter.includes("created") && !scopeFilter.includes("received");
+  const receivedOnly = scopeFilter.includes("received") && !scopeFilter.includes("created");
   const baseWhere = isCreatedScope
     ? { createdById: session.userId, deletedAt: null }
-    : { targetId: session.userId, deletedAt: null };
+    : receivedOnly || !isStaff(session.role)
+      ? { targetId: session.userId, deletedAt: null }
+      : { deletedAt: null };
 
   const [allReminders, users, unreadCount] = await Promise.all([
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -134,8 +138,8 @@ export default async function RemindersPage({
               targetName={r.target.name}
               creatorName={r.createdBy.name}
               canEdit={canEdit}
-              canModify={canEdit && (r.createdById === session.userId || session.role === "ADMIN")}
-              canManage={canManage && (r.createdById === session.userId || session.role === "ADMIN")}
+              canModify={canEdit}
+              canManage={canManage}
               users={userOptions}
             />
           ))}

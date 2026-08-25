@@ -13,7 +13,7 @@ import {
 } from "@/lib/contractCommissionConfig";
 import { CONTRACT_REVIEW_FIELDS } from "@/lib/constants";
 import { syncContractProgressToProjects } from "@/actions/projects";
-import { contractScope, customerScope } from "@/lib/dataScope";
+import { contractScope, creationReferenceCustomerScope } from "@/lib/dataScope";
 import type { PermLevel } from "@/lib/featurePermissions";
 import { requireFeaturePermission } from "@/lib/permissionGuard";
 import { writeAdminAudit } from "@/lib/adminObservability";
@@ -99,7 +99,7 @@ async function requireContractRow(id: string, required: PermLevel) {
 
 async function requireCustomerRow(customerId: string, session: Awaited<ReturnType<typeof requireSession>>) {
   const row = await prisma.customer.findFirst({
-    where: { id: customerId, ...customerScope(session, session.role === "ADMIN" ? "all" : "mine"), deletedAt: null },
+    where: { id: customerId, ...creationReferenceCustomerScope(session), deletedAt: null },
     select: { id: true },
   });
   if (!row) throw new Error("客户不存在或无权访问");

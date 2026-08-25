@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { hasBiPermission } from "@/lib/biAuthorization";
-import { customerScope, salesScope } from "@/lib/dataScope";
+import { creationReferenceCustomerScope, salesScope } from "@/lib/dataScope";
 import {
   buildSalesRecordWhereFromParams,
   csvFilterValues,
@@ -104,10 +104,6 @@ export async function deleteBatch(batchId: string) {
   const batch = await prisma.salesBatch.findFirst({
     where: {
       id: batchId,
-      OR: [
-        { uploaderId: session.userId },
-        { customer: customerScope(session, session.role === "ADMIN" ? "all" : "mine") },
-      ],
     },
   });
   if (!batch) throw new Error("批次不存在或无权操作");
@@ -124,7 +120,7 @@ export async function bulkUpdateSalesRecordsCustomer(recordIds: string[], custom
   if (!ids.length) throw new Error("请选择要修改的数据记录");
   if (!customerId) throw new Error("请选择要关联的客户");
   const customer = await prisma.customer.findFirst({
-    where: { AND: [{ id: customerId, deletedAt: null }, customerScope(session, session.role === "ADMIN" ? "all" : "mine")] },
+    where: { AND: [{ id: customerId, deletedAt: null }, creationReferenceCustomerScope(session)] },
     select: { brandName: true },
   });
   if (!customer) throw new Error("客户不存在或已删除");
@@ -159,7 +155,7 @@ export async function bulkUpdateSalesRecordsCustomerByFilter(
   await requireBi(session.userId, "EDIT");
   if (!customerId) throw new Error("请选择要关联的客户");
   const customer = await prisma.customer.findFirst({
-    where: { AND: [{ id: customerId, deletedAt: null }, customerScope(session, session.role === "ADMIN" ? "all" : "mine")] },
+    where: { AND: [{ id: customerId, deletedAt: null }, creationReferenceCustomerScope(session)] },
     select: { brandName: true },
   });
   if (!customer) throw new Error("客户不存在或已删除");
@@ -252,7 +248,7 @@ export async function undoBulkUpdateSalesRecordsCustomer(snapshots: SalesRecordU
   for (const group of groups.values()) {
     if (group[0].customerId) {
       const target = await prisma.customer.findFirst({
-        where: { AND: [{ id: group[0].customerId, deletedAt: null }, customerScope(session, session.role === "ADMIN" ? "all" : "mine")] },
+        where: { AND: [{ id: group[0].customerId, deletedAt: null }, creationReferenceCustomerScope(session)] },
         select: { id: true, brandName: true },
       });
       if (!target || target.brandName !== group[0].brand) throw new Error("撤回目标客户无权访问或快照无效");
@@ -284,7 +280,7 @@ export async function getSalesBulkOperationLogs(): Promise<SalesBulkOperationLog
   const session = await requireSession();
   await requireBi(session.userId, "MANAGE");
   const logs = await prisma.bulkOperationLog.findMany({
-    where: { module: BI_SALES_DETAIL_LOG_MODULE, ...(session.role === "ADMIN" ? {} : { operatorId: session.userId }) },
+    where: { module: BI_SALES_DETAIL_LOG_MODULE },
     orderBy: { createdAt: "desc" },
     take: 80,
     include: { operator: { select: { name: true } } },
@@ -311,7 +307,6 @@ export async function undoSalesBulkOperationLogs(logIds: string[]): Promise<Sale
       id: { in: ids },
       module: BI_SALES_DETAIL_LOG_MODULE,
       revertedAt: null,
-      ...(session.role === "ADMIN" ? {} : { operatorId: session.userId }),
     },
     orderBy: { createdAt: "desc" },
   });
@@ -340,7 +335,7 @@ export async function undoSalesBulkOperationLogs(logIds: string[]): Promise<Sale
                 id: targetCustomerId,
                 brandName: group[0].brand,
                 deletedAt: null,
-                ...customerScope(session, session.role === "ADMIN" ? "all" : "mine"),
+                ...creationReferenceCustomerScope(session),
               },
               select: { id: true },
             });

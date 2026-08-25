@@ -37,7 +37,7 @@ export default async function TasksPage({
 }) {
   const session = await requireSession();
   const sp = await searchParams;
-  const isAdmin = session.role === "ADMIN";
+  const isInternal = session.role === "ADMIN" || session.role === "USER";
 
   const customerFilter = csv(sp, "customer");
   const priorityFilter = csv(sp, "priority");
@@ -45,11 +45,8 @@ export default async function TasksPage({
   const statusFilter = csv(sp, "status");
   const q = sp.q?.trim() ?? "";
 
-  // Default: show current user's tasks.
-  // Admin: can switch to a specific user via ?owner=userId (single value).
-  // Non-admin: always filter to own tasks regardless of params.
-  const viewAsId = isAdmin && sp.owner ? sp.owner : session.userId;
-  const defaultToCurrentUser = viewAsId === session.userId;
+  // Internal roles default to all records and may narrow to one employee.
+  const viewAsId = isInternal && sp.owner ? sp.owner : null;
   const taskMode = sp.mode === "published" ? "published" : "owned";
 
   // 行级权限
@@ -68,7 +65,7 @@ export default async function TasksPage({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prisma.task.findMany({
       where: {
-        ...taskScope(sess, isAdmin && !defaultToCurrentUser ? "all" : view),
+        ...taskScope(sess, "all"),
         deletedAt: null,
       } as any,
       orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
@@ -110,11 +107,12 @@ export default async function TasksPage({
   // Client filtering
   const tasks = allTasks
     .filter((t) => {
-      // “我负责的 / 我发起的”均以当前查看成员为准；管理员可切换成员。
-      if (taskMode === "published") {
-        if (t.publisherId !== viewAsId) return false;
-      } else if (t.ownerId !== viewAsId) {
-        return false;
+      if (viewAsId) {
+        if (taskMode === "published") {
+          if (t.publisherId !== viewAsId) return false;
+        } else if (t.ownerId !== viewAsId) {
+          return false;
+        }
       }
       if (customerFilter.length && !customerFilter.includes(t.customerId ?? "")) return false;
       if (priorityFilter.length && !priorityFilter.includes(t.priority)) return false;
@@ -182,8 +180,7 @@ export default async function TasksPage({
       t.description?.match(/第\s*\d+\s*期/)?.[0].replace(/\s+/g, "") ??
       null,
     canReassign:
-      (session.role === "ADMIN" || session.role === "USER") &&
-      (isAdmin || t.ownerId === session.userId || t.publisherId === session.userId),
+      isInternal,
     dueDate: t.dueDate ? t.dueDate.toISOString() : null,
     meetingTime: t.meetingTime ? t.meetingTime.toISOString() : null,
     meetingMode: t.meetingMode,
@@ -205,13 +202,13 @@ export default async function TasksPage({
       <PageHeader
         title="任务管理"
         description={
-          defaultToCurrentUser
-            ? `${taskMode === "published" ? "显示我发起的任务" : "显示我负责的任务"} · 共 ${tasks.length} 项 — 拖拽卡片切换状态`
-            : `查看 ${users.find((u) => u.id === viewAsId)?.name ?? ""}${taskMode === "published" ? "发起" : "负责"}的任务 · 共 ${tasks.length} 项`
+          viewAsId
+            ? `查看 ${users.find((u) => u.id === viewAsId)?.name ?? ""}${taskMode === "published" ? "发起" : "负责"}的任务 · 共 ${tasks.length} 项`
+            : `显示全部任务 · 共 ${tasks.length} 项 — 可按成员筛选`
         }
         actions={
           <div className="flex items-center gap-2">
-            {isAdmin && (
+            {isInternal && (
               <ViewAsSelector users={userOptions} currentUserId={session.userId} />
             )}
             <TaskFormModal customers={customerOptions} users={userOptions} />

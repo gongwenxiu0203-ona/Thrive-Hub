@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { type RecycleType } from "@/lib/recycleBin";
 import { requireFeaturePermission } from "@/lib/permissionGuard";
-import { contractScope, customerScope, projectScope, salesScope, taskScope } from "@/lib/dataScope";
+import { contractScope, customerScope, isStaff, projectScope, salesScope, taskScope } from "@/lib/dataScope";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function model(type: RecycleType): any {
@@ -25,7 +25,7 @@ function model(type: RecycleType): any {
 /** 恢复：清除 deletedAt，移出回收站 */
 export async function restoreItem(type: RecycleType, id: string) {
   const session = await requireSession();
-  const view = session.role === "ADMIN" ? "all" : "mine";
+  const view = isStaff(session.role) ? "all" : "mine";
   let where: Record<string, unknown> = { id };
   switch (type) {
     case "customer":
@@ -45,7 +45,7 @@ export async function restoreItem(type: RecycleType, id: string) {
       break;
     case "reminder":
       await requireFeaturePermission(session, "reminders.records", "MANAGE");
-      where = { id, targetId: session.userId };
+      where = { id };
       break;
     case "salesRecord":
       await requireFeaturePermission(session, "bi.manage", "MANAGE");
@@ -53,14 +53,14 @@ export async function restoreItem(type: RecycleType, id: string) {
       break;
     case "salesBatch":
       await requireFeaturePermission(session, "bi.manage", "MANAGE");
-      where = { id, OR: [{ uploaderId: session.userId }, { customer: customerScope(session, view) }] };
+      where = { id };
       break;
     case "project":
       await requireFeaturePermission(session, "projects.records", "MANAGE");
       where = { AND: [{ id }, projectScope(session, view)] };
       break;
     case "workLog":
-      if (session.role !== "ADMIN") throw new Error("仅管理员可恢复工作记录");
+      await requireFeaturePermission(session, "worklogs.records", "MANAGE");
       break;
   }
   const existing = await model(type).findFirst({ where, select: { id: true } });

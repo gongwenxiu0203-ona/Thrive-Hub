@@ -312,8 +312,7 @@ export async function getBillingRequestInvoiceIds(id: string) {
 export async function deleteBillingRequest(id: string, reason?: string) {
   try {
     const session = await requireSession();
-    if (session.role !== "ADMIN")
-      return { ok: false, error: "仅管理员可以删除开票申请记录。" };
+    await requireFeaturePermission(session, "operations.invoices", "MANAGE");
     const billing = await prisma.billingRequest.findUnique({
       where: { id },
       include: {

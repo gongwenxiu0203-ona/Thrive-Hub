@@ -20,7 +20,7 @@ export async function POST(request: Request) {
     const feature = type === "AR" ? "operations.accounts_receivable" : "finance.channel_reconciliation";
     const permission = await resolveUserPermission(session.userId, feature);
     if (!hasPermissionLevel(permission, "READ")) return NextResponse.json({ error: "无导出权限。" }, { status: 403 });
-    const canViewAll = session.role === "ADMIN" || hasPermissionLevel(permission, "MANAGE");
+    const canViewAll = isStaff(session.role);
     const attachments: string[] = [];
     let rows: Array<Record<string, unknown>> = [];
     if (type === "AR") {

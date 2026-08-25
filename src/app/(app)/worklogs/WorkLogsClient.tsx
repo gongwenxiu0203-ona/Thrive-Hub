@@ -53,7 +53,7 @@ export default function WorkLogsClient({
   canManage: boolean;
 }) {
   const router = useRouter();
-  const [scope, setScope] = useState<"mine" | "all">("mine");
+  const [scope, setScope] = useState<"mine" | "all">("all");
   const [editing, setEditing] = useState<LogRow | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [, startTransition] = useTransition();
@@ -84,7 +84,7 @@ export default function WorkLogsClient({
       <div className="flex gap-1.5">
         {([
           { key: "mine", label: `我的日志（${logs.filter((l) => l.authorId === currentUserId).length}）` },
-          ...(canManage ? [{ key: "all" as const, label: `全部日志（${logs.length}）` }] : []),
+          { key: "all" as const, label: `全部日志（${logs.length}）` },
         ] as const).map((s) => (
           <button
             key={s.key}

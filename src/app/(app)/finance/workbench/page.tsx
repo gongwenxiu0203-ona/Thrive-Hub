@@ -67,6 +67,7 @@ export default async function FinanceWorkbenchPage() {
     hasPermissionLevel(invoicePermission, "READ") ||
     hasPermissionLevel(receivablePermission, "READ");
   const canViewChannel = hasPermissionLevel(channelPermission, "READ");
+  const canManageBilling = hasPermissionLevel(invoicePermission, "MANAGE");
   if (!canViewBilling && !canViewChannel) redirect("/finance");
   const [
     billingRequests,
@@ -256,13 +257,13 @@ export default async function FinanceWorkbenchPage() {
         orderBy: { brandName: "asc" },
       }),
       prisma.paymentRequest.findMany({
-        where: session.role === "ADMIN" ? {} : { applicantId: session.userId },
+        where: {},
         include: { supplier: { select: { name: true } } },
         orderBy: { createdAt: "desc" },
         take: 100,
       }),
       prisma.expenseClaim.findMany({
-        where: session.role === "ADMIN" ? {} : { employeeId: session.userId },
+        where: {},
         orderBy: { createdAt: "desc" },
         take: 100,
       }),
@@ -275,11 +276,7 @@ export default async function FinanceWorkbenchPage() {
       }),
     ]);
   const financeUserMap = new Map(financeUsers.map((row) => [row.id, row.name]));
-  const visibleBillingIds = billingRequests
-    .filter(
-      (row) => session.role === "ADMIN" || row.applicant.id === session.userId,
-    )
-    .map((row) => row.id);
+  const visibleBillingIds = billingRequests.map((row) => row.id);
   const visiblePaymentIds = paymentRequests.map((row) => row.id);
   const visibleExpenseIds = expenseClaims.map((row) => row.id);
   const [financeAccounts, approvalSteps] = await Promise.all([
@@ -340,7 +337,7 @@ export default async function FinanceWorkbenchPage() {
             canEditBilling={hasPermissionLevel(invoicePermission, "EDIT")}
             canEditReceipt={hasPermissionLevel(receivablePermission, "EDIT")}
             canEditPayment={hasPermissionLevel(channelPermission, "EDIT")}
-            isAdmin={session.role === "ADMIN"}
+            isAdmin={canManageBilling}
             billingRequests={billingRequests.map((row) => {
               const issuedAmount = row.invoices
                 .filter((invoice) => invoice.status === "ISSUED")
@@ -704,14 +701,8 @@ export default async function FinanceWorkbenchPage() {
                   hasPermissionLevel(receivablePermission, "EDIT") ||
                   hasPermissionLevel(channelPermission, "EDIT")
                 }
-                isAdmin={session.role === "ADMIN"}
-                billingFlows={billingRequests
-                  .filter(
-                    (row) =>
-                      session.role === "ADMIN" ||
-                      row.applicant.id === session.userId,
-                  )
-                  .map((row) => ({
+                isAdmin={canManageBilling}
+                billingFlows={billingRequests.map((row) => ({
                     id: row.id,
                     requestNo: row.requestNo,
                     customerName: row.customer.brandName,

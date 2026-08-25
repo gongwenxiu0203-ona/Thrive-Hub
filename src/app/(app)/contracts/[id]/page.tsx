@@ -37,7 +37,7 @@ import {
   labelOf,
 } from "@/lib/constants";
 import { formatDate, formatDateTime } from "@/lib/utils";
-import { contractScope, customerScope } from "@/lib/dataScope";
+import { contractScope, creationReferenceCustomerScope } from "@/lib/dataScope";
 import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
 
 export default async function ContractDetailPage({
@@ -108,7 +108,7 @@ export default async function ContractDetailPage({
     }),
     prisma.customer.findMany({
       where: {
-        ...customerScope(session, session.role === "ADMIN" ? "all" : "mine"),
+        ...creationReferenceCustomerScope(session),
         deletedAt: null,
       },
       select: { id: true, brandName: true },

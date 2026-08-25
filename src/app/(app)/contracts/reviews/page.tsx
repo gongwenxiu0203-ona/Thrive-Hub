@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { REVIEWER_EMAIL } from "@/lib/contractReviewer";
 import { formatDateTime } from "@/lib/utils";
+import { isStaff } from "@/lib/dataScope";
 
 export default async function ContractReviewQueuePage() {
   const session = await requireSession();
@@ -15,12 +16,12 @@ export default async function ContractReviewQueuePage() {
   });
 
   const isReviewer = !!reviewer && reviewer.id === session.userId;
-  const isAdmin = session.role === "ADMIN";
+  const hasFullInternalScope = isStaff(session.role);
 
   const pending = await prisma.contractReview.findMany({
     where: {
       status: "PENDING",
-      ...(isReviewer || isAdmin
+      ...(isReviewer || hasFullInternalScope
         ? {}
         : {
             contract: {

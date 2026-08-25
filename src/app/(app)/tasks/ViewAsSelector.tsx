@@ -17,11 +17,11 @@ export function ViewAsSelector({
   const router = useRouter();
   const sp = useSearchParams();
 
-  const selectedId = sp.get("owner") ?? currentUserId;
+  const selectedId = sp.get("owner") ?? "all";
 
   function handleChange(e: React.ChangeEvent<HTMLSelectElement>) {
     const params = new URLSearchParams(sp.toString());
-    if (e.target.value === currentUserId) {
+    if (e.target.value === "all") {
       params.delete("owner");
     } else {
       params.set("owner", e.target.value);
@@ -37,6 +37,7 @@ export function ViewAsSelector({
         onChange={handleChange}
         className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
       >
+        <option value="all">全部内部员工</option>
         {users.map((u) => (
           <option key={u.id} value={u.id}>
             {u.id === currentUserId ? `${u.name}（我）` : u.name}

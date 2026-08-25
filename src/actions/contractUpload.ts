@@ -20,7 +20,7 @@ import {
   stringifyCommissionConfig,
 } from "@/lib/contractCommissionConfig";
 import { writePrivateContractFile } from "@/lib/contractFileStorage";
-import { customerScope } from "@/lib/dataScope";
+import { creationReferenceCustomerScope } from "@/lib/dataScope";
 import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
 import { CONTRACT_UPLOAD_MAX_BYTES, CONTRACT_UPLOAD_MAX_MB } from "@/lib/contractUploadLimits";
 import {
@@ -329,7 +329,7 @@ export async function uploadExistingContract(
   const customer = await prisma.customer.findFirst({
     where: {
       id: customerId,
-      ...customerScope(session, session.role === "ADMIN" ? "all" : "mine"),
+      ...creationReferenceCustomerScope(session),
       deletedAt: null,
     },
     select: { id: true, brandName: true },

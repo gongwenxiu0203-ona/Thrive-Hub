@@ -7,7 +7,7 @@ import { ContractV4Form } from "./ContractV4Form";
 import { UploadExistingForm } from "./UploadExistingForm";
 import { TransactionalUploadForm } from "./TransactionalUploadForm";
 import { requireFeaturePermission } from "@/lib/permissionGuard";
-import { contractScope, customerScope } from "@/lib/dataScope";
+import { contractScope, creationReferenceCustomerScope } from "@/lib/dataScope";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "新建合同 · Thraive联盟营销系统" };
@@ -33,7 +33,7 @@ export default async function NewContractPage({
     customer = await prisma.customer.findFirst({
       where: {
         id: customerId,
-        ...customerScope(session, session.role === "ADMIN" ? "all" : "mine"),
+        ...creationReferenceCustomerScope(session),
         deletedAt: null,
       },
       select: { id: true, brandName: true },
@@ -59,7 +59,7 @@ export default async function NewContractPage({
       customer = await prisma.customer.findFirst({
         where: {
           id: existingContract.customerId,
-          ...customerScope(session, session.role === "ADMIN" ? "all" : "mine"),
+          ...creationReferenceCustomerScope(session),
           deletedAt: null,
         },
         select: { id: true, brandName: true },
@@ -70,7 +70,7 @@ export default async function NewContractPage({
   const [customers, users, templates] = await Promise.all([
     prisma.customer.findMany({
       where: {
-        ...customerScope(session, session.role === "ADMIN" ? "all" : "mine"),
+        ...creationReferenceCustomerScope(session),
         deletedAt: null,
       },
       select: { id: true, brandName: true },

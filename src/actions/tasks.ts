@@ -46,9 +46,6 @@ async function requireTaskWriteAccess(taskId: string, session: SessionPayload) {
     where: {
       id: taskId,
       deletedAt: null,
-      ...(session.role === "ADMIN"
-        ? {}
-        : { OR: [{ ownerId: session.userId }, { publisherId: session.userId }] }),
     },
     select: {
       id: true,
@@ -233,18 +230,6 @@ export async function moveTask(
     throw new Error("无效的任务状态");
   }
   const uniqueOrderedIds = [...new Set(orderedIds)];
-  if (uniqueOrderedIds.length > 0 && session.role !== "ADMIN") {
-    const allowedCount = await prisma.task.count({
-      where: {
-        id: { in: uniqueOrderedIds },
-        deletedAt: null,
-        OR: [{ ownerId: session.userId }, { publisherId: session.userId }],
-      },
-    });
-    if (allowedCount !== uniqueOrderedIds.length) {
-      throw new Error("排序列表包含无权操作的任务");
-    }
-  }
   await prisma.$transaction([
     prisma.task.update({ where: { id: taskId }, data: { status: toStatus } }),
     ...uniqueOrderedIds.map((id, index) =>

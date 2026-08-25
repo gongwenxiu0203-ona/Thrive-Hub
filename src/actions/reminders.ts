@@ -32,14 +32,14 @@ export async function createReminder(fd: FormData) {
 
 export async function updateReminder(id: string, fd: FormData) {
   const session = await requireSession();
-  const permission = await requireFeaturePermission(session, "reminders.records", "EDIT");
+  await requireFeaturePermission(session, "reminders.records", "EDIT");
   const title = str(fd, "title");
   const remindDate = str(fd, "remindDate");
   if (!title) throw new Error("提醒标题为必填项");
   if (!remindDate) throw new Error("提醒日期为必填项");
 
   const existing = await prisma.reminder.findFirst({
-    where: { id, deletedAt: null, ...(permission === "MANAGE" ? {} : { createdById: session.userId }) },
+    where: { id, deletedAt: null },
     select: { id: true },
   });
   if (!existing) throw new Error("提醒不存在或无权修改");

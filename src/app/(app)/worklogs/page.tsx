@@ -19,7 +19,6 @@ export default async function WorkLogsPage() {
     (prisma.workLog.findMany as any)({
       where: {
         deletedAt: null,
-        ...(canManage ? {} : { authorId: session.userId }),
       },
       include: { author: { select: { id: true, name: true } } },
       orderBy: { logDate: "desc" },
@@ -69,7 +68,7 @@ export default async function WorkLogsPage() {
       projects={(projects as any[]).map((p) => ({ id: p.id, name: p.name }))}
       affiliates={affiliates.map((a) => ({ id: a.id, name: a.platformAffiliateName }))}
       currentUserId={session.userId}
-      isAdmin={session.role === "ADMIN"}
+      isAdmin={session.role === "ADMIN" || session.role === "USER"}
       canEdit={hasPermissionLevel(permission, "EDIT")}
       canManage={canManage}
     />
