@@ -30,6 +30,9 @@ next-env.d.ts
 
 # ===== 备份文件 =====
 /backups/
+/src/generated/project-prisma/
+/project-storage/
+/prisma-projects/data/
 
 # ===== 上传文件（用户上传内容不进版本库）=====
 /uploads/*

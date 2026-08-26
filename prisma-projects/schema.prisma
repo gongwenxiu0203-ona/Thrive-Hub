@@ -1,0 +1,308 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/project-prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("PROJECT_DATA_DATABASE_URL")
+}
+
+model ProjectKpi {
+  id          String   @id @default(cuid())
+  projectId   String
+  metricKey   String
+  metricName  String
+  periodStart DateTime
+  periodEnd   DateTime
+  targetValue Float?
+  actualValue Float?
+  unit        String?
+  currency    String?
+  source      String   @default("MANUAL")
+  amOwnerId   String?
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([projectId, metricKey, periodStart, periodEnd])
+  @@index([projectId, periodStart])
+}
+
+model ProjectSourceFile {
+  id               String   @id @default(cuid())
+  projectId        String
+  sourceType       String
+  dataMonth        String   @default("")
+  projectCurrency  String?
+  originalAmount   Float    @default(0)
+  detectedCurrency String?
+  originalName     String
+  storageKey       String   @unique
+  mimeType         String?
+  sizeBytes        Int
+  sha256           String
+  status           String   @default("UPLOADED")
+  importSummary    String   @default("{}")
+  uploadedById     String
+  uploadedAt       DateTime @default(now())
+
+  @@index([projectId, sourceType, uploadedAt])
+  @@index([sha256])
+}
+
+model ProjectDataSource {
+  id          String   @id @default(cuid())
+  name        String
+  code        String   @unique
+  description String?
+  status      String   @default("ACTIVE")
+  sourceUrl   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model ProjectMonthlySalesSummary {
+  id                String   @id @default(cuid())
+  projectId         String
+  dataMonth         String
+  currency          String
+  totalAmount       Float    @default(0)
+  platformBreakdown String   @default("{}")
+  exchangeRates     String   @default("{}")
+  calculationDate   DateTime @default(now())
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([projectId, dataMonth])
+  @@index([dataMonth])
+}
+
+model ProjectSalesSummary {
+  id             String   @id @default(cuid())
+  projectId      String
+  sourceFileId   String?
+  periodStart    DateTime
+  periodEnd      DateTime
+  marketplace    String   @default("")
+  currency       String
+  orderCount     Int      @default(0)
+  units          Int      @default(0)
+  grossSales     Float    @default(0)
+  netSales       Float    @default(0)
+  refundAmount   Float    @default(0)
+  discountAmount Float    @default(0)
+  rawSummary     String   @default("{}")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([projectId, periodStart, periodEnd, marketplace, currency])
+  @@index([projectId, periodStart])
+  @@index([sourceFileId])
+}
+
+model ProjectDiscountSource {
+  id               String    @id @default(cuid())
+  projectId        String
+  name             String
+  sourceType       String
+  platform         String?
+  sourceUrl        String?
+  appToken         String?
+  tableId          String?
+  viewId           String?
+  headerRowIndex   Int       @default(1)
+  syncStatus       String    @default("IDLE")
+  lastSyncAt       DateTime?
+  lastSyncCount    Int       @default(0)
+  syncError        String?
+  lastOperatedById String?
+  lastOperatedAt   DateTime?
+  configuration    String    @default("{}")
+  status           String    @default("ACTIVE")
+  createdById      String
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  // Legacy external-record identity mappings. Standard source-field mappings
+  // live in ProjectDiscountFieldMapping and are queried by sourceId.
+  recordMappings ProjectDiscountMapping[]
+  records  ProjectDiscountRecord[]
+  reminderSettings ProjectDiscountReminderSetting[]
+  reminderRuns     ProjectDiscountReminderRun[]
+
+  @@unique([projectId, name])
+  @@index([projectId, status])
+}
+
+model ProjectDiscountReminderSetting {
+  id                  String   @id @default(cuid())
+  projectId           String
+  sourceId            String
+  enabled             Boolean  @default(true)
+  targetUserIds       String   @default("[]")
+  remindBeforeEndDays Int      @default(3)
+  notifySyncFailure   Boolean  @default(true)
+  scheduleTime        String   @default("09:00")
+  timezone            String   @default("Asia/Shanghai")
+  planVersion         Int      @default(1)
+  createdById         String
+  updatedById         String
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  source ProjectDiscountSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  runs   ProjectDiscountReminderRun[]
+
+  @@unique([projectId, sourceId])
+  @@index([enabled, scheduleTime])
+}
+
+model ProjectDiscountReminderRun {
+  id             String   @id @default(cuid())
+  projectId      String
+  sourceId       String
+  settingId      String
+  scheduleDate   String
+  planVersion    Int
+  eventType      String
+  targetUserIds  String   @default("[]")
+  reminderIds    String   @default("[]")
+  status         String   @default("PENDING")
+  errorMessage   String?
+  startedAt      DateTime @default(now())
+  completedAt    DateTime?
+  createdAt      DateTime @default(now())
+
+  source  ProjectDiscountSource          @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  setting ProjectDiscountReminderSetting @relation(fields: [settingId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, sourceId, scheduleDate, planVersion, eventType])
+  @@index([status, scheduleDate])
+  @@index([settingId])
+}
+
+model ProjectDiscountFieldMapping {
+  id          String   @id @default(cuid())
+  sourceId    String
+  targetField String
+  sourceField String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([sourceId, targetField])
+  @@index([sourceId])
+}
+
+model ProjectDiscountMapping {
+  id           String   @id @default(cuid())
+  sourceId     String
+  externalKey  String
+  productId    String?
+  sku          String?
+  discountCode String?
+  mappingData  String   @default("{}")
+  status       String   @default("ACTIVE")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  source ProjectDiscountSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceId, externalKey])
+  @@index([productId])
+  @@index([sku])
+}
+
+model ProjectDiscountRecord {
+  id               String    @id @default(cuid())
+  projectId        String
+  sourceId         String
+  sourceFileId     String?
+  externalRecordId String?
+  occurredAt       DateTime
+  orderId          String?
+  sku              String?
+  discountCode     String?
+  currency         String
+  grossAmount      Float     @default(0)
+  discountAmount   Float
+  netAmount        Float
+  quantity         Int       @default(1)
+  rawData          String    @default("{}")
+  salesType        String?
+  productCategory  String?
+  asin             String?
+  productLink      String?
+  originalPrice    Float?
+  discountPrice    Float?
+  discountRate     Float?
+  startDate        DateTime?
+  endDate          DateTime?
+  promoCode        String?
+  accCampaignId    String?
+  accGoldRatio     Float?
+  lastUpdated      DateTime?
+  activityStatus   String    @default("ACTIVE")
+  dealType         String?
+  brand            String?
+  platform         String?
+  store            String?
+  createdAt        DateTime  @default(now())
+
+  source ProjectDiscountSource @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+
+  @@unique([sourceId, externalRecordId])
+  @@index([projectId, occurredAt])
+  @@index([sourceFileId])
+  @@index([sku])
+}
+
+model ProjectProduct {
+  id           String   @id @default(cuid())
+  projectId    String
+  sku          String
+  asin         String?
+  name         String
+  brand        String?
+  marketplace  String   @default("")
+  currency     String?
+  listPrice    Float?
+  cost         Float?
+  status       String   @default("ACTIVE")
+  attributes   String   @default("{}")
+  sequence     String?
+  store        String?
+  category     String?
+  platform     String?
+  bsrRank      String?
+  rating       Float?
+  linkPosition String?
+  productLink  String?
+  reviewCount  Int?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([projectId, sku, marketplace])
+  @@index([projectId, status])
+  @@index([asin])
+}
+
+model ProjectSyncConfig {
+  id              String    @id @default(cuid())
+  projectId       String
+  syncType        String
+  provider        String
+  enabled         Boolean   @default(false)
+  schedule        String?
+  configuration   String    @default("{}")
+  secretReference String?
+  lastSyncedAt    DateTime?
+  lastStatus      String?
+  lastError       String?
+  createdById     String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([projectId, syncType, provider])
+  @@index([enabled, syncType])
+}

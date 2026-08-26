@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && node scripts/pre-migrate-backup.js && prisma migrate deploy && next build",
+    "build": "prisma generate && node scripts/pre-migrate-backup.js && prisma migrate deploy && node scripts/prepare-project-db.js && next build",
     "build:prod": "cp prisma/schema.mysql.prisma prisma/schema.prisma && prisma generate && prisma migrate deploy && next build",
     "start": "next start",
     "typecheck": "tsc --noEmit --pretty false",
@@ -14,7 +14,10 @@
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
     "db:reset": "prisma migrate reset --force",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate && prisma generate --schema prisma-projects/schema.prisma",
+    "project:prisma:generate": "prisma generate --schema prisma-projects/schema.prisma",
+    "project:db:deploy": "node scripts/prepare-project-db.js",
+    "project:db:status": "prisma migrate status --schema prisma-projects/schema.prisma"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

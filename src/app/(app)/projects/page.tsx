@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { redirect } from "next/navigation";
-import { customerScope, projectScope } from "@/lib/dataScope";
+import { creationReferenceCustomerScope, projectScope } from "@/lib/dataScope";
 import { resolveUserPermission } from "@/lib/permissionResolver";
 import { hasPermissionLevel } from "@/lib/permissionGuard";
 import ProjectsClient from "./ProjectsClient";
@@ -43,7 +43,7 @@ export default async function ProjectsPage() {
         status: "COMPLETED",
         deletedAt: null,
         customerId: { not: null },
-        customer: { deletedAt: null, ...customerScope(scopeSession, view) },
+        customer: { deletedAt: null, ...creationReferenceCustomerScope(scopeSession) },
       },
       select: {
         id: true,
@@ -58,7 +58,7 @@ export default async function ProjectsPage() {
   // 关联客户（含商务负责人，自动带出）+ Strategy AM 候选用户
   const [customers, users] = await Promise.all([
     prisma.customer.findMany({
-      where: { deletedAt: null, ...customerScope(scopeSession, view) },
+      where: { deletedAt: null, ...creationReferenceCustomerScope(scopeSession) },
       select: { id: true, brandName: true, businessOwner: { select: { name: true } } },
       orderBy: { brandName: "asc" },
     }),
