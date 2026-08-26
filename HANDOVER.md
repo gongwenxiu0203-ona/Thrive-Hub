@@ -1,5 +1,13 @@
 # Thrive Hub Handover
 
+## 2026-08-25 manual reconciliation plan and completed-record deletion (local only)
+
+- Manual customer reconciliation creation now defaults to both fixed-fee and sales-commission streams. Selecting a completed contract pre-fills its start/end dates, and one submission creates the same complete period plan used by automatic contract completion: inclusive 30-day fixed-fee periods and first-partial-month/subsequent-calendar-month commission periods.
+- Creation is atomic after preflight overlap checks: any overlap in either selected stream rejects the whole request, so the UI cannot leave a half-created plan.
+- Completed customer reconciliations can be soft-deleted only by an ADMIN with a required reason. The action writes `FinanceAuditLog`; confirmed or settled deleted records are excluded from the seven-day physical trash cleanup and remain recoverable/auditable.
+- Completed or paid channel reconciliations can likewise be soft-deleted only by an ADMIN with the existing required reason; payment and period history is retained.
+- No Prisma schema or migration change. Customer-plan boundary tests, full TypeScript, scoped diff check and local browser QA passed. No customer/channel record was created or deleted during QA. Not committed, pushed, or deployed.
+
 ## 2026-08-24 finance workbench information architecture follow-up (local only)
 
 - `/finance/workbench` now has two top-level areas: `财务工作台` for billing queues, receivables and channel payments; `财务流程` for initiating ordinary billing, supplier payments, expenses and maintaining billing profiles.
@@ -830,3 +838,76 @@ has happened merely because GitHub push succeeded.
 - 财务工作台顶部删除重复的“登记客户到账”按钮；应收区新增按到期月份筛选以及美元、人民币应收/已收/余额汇总模块。
 - 应收表补齐选择列表头，修复客户、发票号码、系统单号、到期日、状态和余额整体错位。
 - 未修改 Schema、迁移或现有业务数据。TypeScript 检查和本地浏览器回归通过。
+
+## 2026-08-25 项目进度与折扣数据中心（本地，未发布）
+
+- `/projects` 整合为四个板块：项目进度跟踪、项目折扣汇总、联盟营销、单次合作；原联盟营销与单次合作创建/列表/详情逻辑保留。
+- 项目进度首页提供概览和紧凑项目表；`/projects/kpi-config` 支持按项目读取、新增和编辑 KPI；`/projects/source-data` 支持项目源文件上传与状态列表。
+- 折扣模块严格分为折扣汇总表、产品信息表、折扣数据源表和字段映射表，支持项目选择、读取、刷新及新增。
+- 新增 `prisma-projects/schema.prisma` 和纯 CREATE 迁移，使用 `PROJECT_DATA_DATABASE_URL` 及独立生成的 Project Prisma Client。该库与现有主库/BI 数据物理分离，仅用 scalar projectId/userId 做应用层关联。
+- 项目源文件使用 `PROJECT_DATA_UPLOAD_DIR` 独立存储，带 30MB、扩展名、SHA-256 去重、路径边界与项目数据权限校验，不进入 BI 上传目录。
+- 项目进度跟踪首页已改为销售数据 Dashboard：支持月份、周一至周日周次、项目筛选，展示已录入项目、按币种月度 KPI、本周销售、整体完成率及三列项目进度卡；多币种禁止直接相加。
+- KPI 配置页已按月展示项目、AM、GMV 目标、80% 达标线，支持编辑、删除和多行批量新增；项目下拉找不到时可在弹窗内手动创建项目，再将 KPI 写入独立项目数据库。
+- 构建流程新增 `scripts/prepare-project-db.js`：检查项目库迁移不含破坏性 SQL、单独备份、生成 Client 并执行独立迁移。
+- 本地项目库初始迁移已应用。`npx.cmd tsc --noEmit --pretty false`、`npm.cmd run build`、`git diff --check` 通过；浏览器验证项目首页、折扣四表、KPI 和源数据页无运行错误。
+- 本地开发服务运行于 `http://127.0.0.1:3001`。未 commit、未 push、未部署生产。
+
+## 2026-08-25 内部角色创建与关联范围修正（本地，未发布）
+
+- 新增通用 `creationReferenceCustomerScope`：内部 `ADMIN` 与 `USER` 在创建或关联业务记录时均可选择全部未删除客户，不再按客户创建人、业务负责人或后台负责人过滤。
+- 已应用到合同新建、已有合同上传、合同编辑、合同服务端保存校验、项目创建，以及销售记录和 Invoice 的客户关联校验。
+- 客户列表、客户详情及外部角色的数据可见范围未放开；`BRAND` 与 `CHANNEL` 仍保持原有硬隔离。
+- 本轮未修改 Schema、迁移或业务数据；TypeScript 与 `git diff --check` 通过，未 commit、未 push、未部署。
+
+## 2026-08-25 内部角色全站全量数据权限（本地，未发布）
+
+- 权限口径统一为：`ADMIN` 与内部员工 `USER` 只由功能叶权限决定是否可查看、编辑或管理；一旦拥有对应功能权限，不再按创建人、负责人、申请人、上传人或操作人限制业务记录范围。
+- 公共行级范围已覆盖客户、合同、客户对账、渠道分账、任务、BI 销售、项目、KPI、提醒和附件；外部 `BRAND`、`CHANNEL` 的租户/归属隔离保持不变。
+- 清理了任务写入与转派、BI 操作日志、工作日志、财务付款/报销/开票申请、合同审核队列、回收站恢复等页面或动作中的内部员工二次归属过滤。
+- 任务页和工作日志页默认展示全量并支持按成员/我的记录缩小；站内信的未读计数与批量已读仍只作用于当前收件人，避免替其他员工改变阅读状态。
+- 未修改 Schema、迁移或业务数据；TypeScript、`git diff --check` 以及内部 `USER` 9 类公共 scope 全量/外部 `CHANNEL` 隔离断言均通过。未 commit、未 push、未部署。
+
+## 2026-08-25 项目折扣源提醒与响应式验收（本地，未发布）
+
+- 折扣源数据管理已对齐原应用：飞书链接识别、数据源身份字段、项目与表头行关联、映射/同步状态，以及编辑、映射、提醒、同步、删除操作；同项目内按来源和飞书表身份查重。
+- 独立项目数据库新增 `ProjectDiscountReminderSetting`、`ProjectDiscountReminderRun`；纯 CREATE 迁移 `20260825170000_discount_reminder_settings` 已在本地应用，未修改主业务库或 BI 库。
+- 提醒接收人从已审核内部用户中按姓名选择；定时入口 `/api/cron/project-discount-reminders` 使用 `PROJECT_DISCOUNT_CRON_SECRET`，按时区与计划时间幂等生成同步失败、折扣临期站内信。
+- 项目源数据汇总缺少汇率时不再按 1:1 计入；未配置换算的异币种保持阻断，避免错误汇总。
+- 项目进度、KPI、源数据、折扣导航、源数据弹窗、筛选区及宽表已在 360px 与 768px 验收，无页面级横向溢出。
+- 验证通过：项目 Prisma validate/generate/migrate status、TypeScript、`git diff --check`、本地页面与新增数据源交互。服务运行于 `http://127.0.0.1:3001`。
+- 未 commit、未 push、未部署生产。生产定时执行仍需配置 cron secret 与调度器调用。
+
+## 2026-08-25 飞书折扣源真实同步接入（本地，未发布）
+
+- 新增 `src/lib/feishuDiscountSync.ts`，仅从 `FEISHU_APP_ID` / `FEISHU_APP_SECRET` 读取企业自建应用凭证并缓存短期 `tenant_access_token`，密钥未写入仓库。
+- 支持 Wiki 节点解析、飞书多维表格 500 条分页（最多 20 页）、电子表格 A:ZZ 每 100 行分批（最多 5000 行）、富文本/链接/多选/时间值规范化。
+- 字段映射页面的源字段和样例改为实时读取；同步入口不再固定失败，现会执行映射、日期/金额/百分比转换、缺失折扣率计算、内容键查重、增改删统计及同源并发锁。
+- 同步写入仍只进入独立 `PROJECT_DATA_DATABASE_URL` 项目库，不修改主业务库或 BI 库；失败会保留明确错误并更新数据源状态，不写伪造记录。
+- 服务器凭证连通性已只读验证：Token 获取成功；测试 Wiki 节点识别为 sheet；测试范围读取成功（10 行、702 列），未输出 Token、Secret 或表格业务内容。
+- 当前本地 `.env.development` / `.env` 尚未检测到飞书变量，因此本地 UI 端到端同步仍需补齐本地环境变量并重启开发服务。
+- 服务器 `PROJECT_DISCOUNT_CRON_SECRET` 格式检查显示长度 20 且含空格，不是 `openssl rand -hex 32` 的 64 位结果；部署前必须修正，并同步调度器请求头。
+- TypeScript 与 `git diff --check` 通过；本轮无 Schema 或迁移变更，未 commit、未 push、未部署。
+
+## 2026-08-25 项目 KPI 与折扣应用严格对齐（本地，未发布）
+
+- 项目数据继续使用 `PROJECT_DATA_DATABASE_URL` 对应的独立 Prisma/SQLite 数据库；现有业务库与 BI 库未拆分、未迁移、未写入本次源数据或折扣数据。
+- 项目 Dashboard 已按原应用改为月内自然周、月度 KPI、月累计销售、时间进度比风险判断，并保留多币种分组，禁止跨币种直接相加。
+- KPI 配置支持月份、项目、AM、目标币种、GMV 目标、80% 达标线、批量新增、编辑、删除及找不到项目时手动创建。
+- 源数据管理已实现原始/已处理双页签、当月 KPI 项目、多平台多文件上传、日期和金额解析、币种检测与冲突确认、固定汇率换算、单删/批删/重处理、删除后重算，以及项目级文件明细、原币小计、汇率和项目币种汇总。
+- 平台映射严格为 ACC/Sales、Levanta/sales、Wayward-CC/ccSales、Wayward-attribution/GMV、领星（ACC）/销售额。
+- 折扣管理已拆为折扣汇总、产品信息、折扣数据源、字段映射四个独立页面；包含原应用 21 列汇总、11 字段产品资料、Excel/CSV 自动映射导入、飞书链接解析与 16 个标准字段映射。
+- 当前仓库没有可用的飞书表格读取凭证/连接实现，折扣数据源同步会明确返回 FAILED 和原因，不会伪造成功数据。
+- 独立项目库新增迁移 `20260825123000_original_app_alignment`，仅包含 ADD COLUMN / CREATE TABLE / CREATE INDEX，无 DROP、DELETE 或 TRUNCATE；本地已应用，迁移状态最新。
+- 生产保护要求项目数据库、项目上传目录和项目备份目录位于发布目录外；分别使用 `PROJECT_DATA_DATABASE_URL`、`PROJECT_DATA_UPLOAD_DIR`、`PROJECT_DATA_BACKUP_DIR`。
+- 验证通过：双 Prisma validate/migrate status、TypeScript、git diff-check、Next.js production build（77/77 静态页）、本地浏览器主要页面与 API 200 回归。
+- 本地开发服务运行于 `http://127.0.0.1:3001`。未 commit、未 push、未部署生产。
+## 2026-08-25 客户合作结束与对账计划闭环（本地，未发布）
+
+- 客户新增 `cooperationEndDate`；迁移 `20260825193000_customer_cooperation_end_date` 仅执行 `ADD COLUMN`，无 DROP/DELETE/TRUNCATE。本地迁移前备份为 `backups/dev_pre_deploy_20260825_175901.db`。
+- 客户对账自动生成条件统一为：合同状态 `COMPLETED` 且客户状态 `COOPERATING`。合同完成入口会先推进客户状态，再幂等生成固定费连续 30 天、佣金首月/自然月/末期截断的完整计划。
+- 客户切换为“结束合作”必须填写结束日期：结束日后的对账计划标记 `CANCELLED`；跨结束日且尚未产生财务事实的记录截短到结束日并写周期审计；已确认、已开票或已收款历史不改金额、不删除，只保留审计说明。
+- 管理员可在结算中心“作废记录”页签单条或批量恢复记录，恢复原因必填；若客户仍为结束合作且记录在结束日之后，则禁止恢复，需先调整客户状态/结束日。
+- 客户对账手工创建仅允许合作中客户，选择合同后默认合同起止日期和固费+销售佣金，并复用自动计划的周期划分算法。
+- 合同软删除策略：取消未确认客户对账和未完成合同任务；仅软删没有付款来源的空渠道主记录；已确认对账、开票申请、Invoice/国内发票、应收、收款核销、渠道应付/付款和项目历史全部保留，避免破坏财务审计链。
+- 验证通过：Prisma validate/generate/migrate deploy、TypeScript、周期测试、`git diff --check`；数据库 `integrity_check=ok`、外键错误 0。
+- 未 commit、未 push、未部署生产；工作区仍含未发布的项目管理及其他本地改动，提交时必须按范围精确暂存。

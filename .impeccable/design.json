@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-16T16:00:00+08:00",
+  "title": "Design System: Thrive Hub",
+  "extensions": {
+    "colorMeta": {
+      "operational-purple": { "role": "primary", "displayName": "Operational Purple", "canonical": "#6d55e8", "tonalRamp": ["#21184f", "#382a80", "#4b35ad", "#5d43d4", "#6d55e8", "#a982fb", "#d6beff", "#f3e9ff"] },
+      "canvas": { "role": "neutral", "displayName": "Quiet Canvas", "canonical": "#fbfaff", "tonalRamp": ["#24222b", "#46424f", "#696371", "#8e8798", "#b6afbf", "#d8d2df", "#eeeaf2", "#fbfaff"] }
+    },
+    "typographyMeta": {
+      "title": { "displayName": "Operational Title", "purpose": "Modal, panel, and section titles." },
+      "body": { "displayName": "Working Body", "purpose": "Forms, tables, and operational copy." }
+    },
+    "shadows": [
+      { "name": "modal", "value": "0 8px 24px rgba(51, 65, 85, 0.16)", "purpose": "Modal and floating interactive surfaces only." }
+    ],
+    "motion": [
+      { "name": "state", "value": "180ms cubic-bezier(0.22, 1, 0.36, 1)", "purpose": "Hover, focus, drawer, and modal state changes." }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "640px" },
+      { "name": "lg", "value": "1024px" }
+    ]
+  },
+  "components": [
+    { "name": "Primary Button", "kind": "button", "refersTo": "button-primary", "description": "Primary operational action.", "html": "<button class=\"ds-btn-primary\">保存</button>", "css": ".ds-btn-primary{min-height:36px;padding:8px 14px;border:0;border-radius:6px;background:#6d55e8;color:#fff;font:600 14px system-ui;transition:background 180ms cubic-bezier(.22,1,.36,1)}.ds-btn-primary:hover{background:#5d43d4}.ds-btn-primary:focus-visible{outline:2px solid #d6beff;outline-offset:2px}" },
+    { "name": "Text Input", "kind": "input", "refersTo": "input", "description": "Standard operational field.", "html": "<input class=\"ds-input\" value=\"客户名称\" />", "css": ".ds-input{height:40px;padding:8px 12px;border:1px solid #dcd4e7;border-radius:6px;background:#fff;color:#334155;font:400 14px system-ui}.ds-input:focus{border-color:#6d55e8;outline:2px solid #f3e9ff;outline-offset:0}" }
+  ],
+  "narrative": {
+    "northStar": "The Clear Operations Console",
+    "overview": "A restrained operational workspace that is calm enough for sustained use, dense enough for real work, and predictable across modules.",
+    "keyCharacteristics": ["Professional, clear, and efficient.", "Flat by default.", "One component vocabulary.", "Accessible and responsive."],
+    "rules": [
+      { "name": "The One Accent Rule", "body": "Purple communicates action, selection, or focus.", "section": "colors" },
+      { "name": "The Flat-by-Default Rule", "body": "Static panels rely on structure, not decorative shadow.", "section": "elevation" }
+    ],
+    "dos": ["Do use the shared Modal and button vocabulary."],
+    "donts": ["Don't shrink complex desktop forms directly onto mobile."]
+  }
+}
