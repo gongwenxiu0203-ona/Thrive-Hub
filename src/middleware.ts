@@ -17,6 +17,8 @@ const PUBLIC_PREFIXES = [
   "/api/auth",
   // Machine-to-machine endpoint: the route itself requires RECEIVABLE_CRON_SECRET.
   "/api/cron/receivable-tasks",
+  // Machine-to-machine endpoint: the route itself requires PROJECT_DISCOUNT_CRON_SECRET.
+  "/api/cron/project-discount-reminders",
   "/contract-fill",        // 外部合同填写链接（无需登录）
   "/api/contract-fill",    // 外部填写提交 API
 ];
