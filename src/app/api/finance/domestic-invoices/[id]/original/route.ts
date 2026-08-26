@@ -10,5 +10,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const invoice = await prisma.invoice.findFirst({ where: { id, deletedAt: null, documentType: "DOMESTIC" }, select: { domesticDocument: { select: { originalFileUrl: true } } } });
   const fileUrl = invoice?.domesticDocument?.originalFileUrl;
   if (!fileUrl) return NextResponse.json({ error: "发票原件不存在。" }, { status: 404 });
-  return NextResponse.redirect(new URL(fileUrl, request.url));
+  const downloadUrl = new URL(fileUrl, request.url);
+  downloadUrl.searchParams.set("download", "1");
+  return NextResponse.redirect(downloadUrl);
 }

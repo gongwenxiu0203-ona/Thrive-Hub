@@ -661,6 +661,7 @@ function CustomerReconciliationTab({
   const [customerFilter, setCustomerFilter] = useState<string[]>([]);
   const [settlementFilter, setSettlementFilter] = useState<string[]>([]);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [bulkDeletionReason, setBulkDeletionReason] = useState("");
   const [confirmTarget, setConfirmTarget] = useState<{
     customerId: string;
     customerName: string;
@@ -679,17 +680,26 @@ function CustomerReconciliationTab({
   }
 
   async function deleteAllForCustomer(customerId: string) {
+    if (!bulkDeletionReason.trim()) {
+      alert("请填写删除原因");
+      return;
+    }
     setDeletingId(customerId);
     try {
       const res = await fetch(
         `/api/finance/customers/${customerId}/reconciliations`,
-        { method: "DELETE" },
+        {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reason: bulkDeletionReason.trim() }),
+        },
       );
       if (!res.ok) {
         alert((await res.json()).error ?? "删除失败");
         return;
       }
       setConfirmTarget(null);
+      setBulkDeletionReason("");
       router.refresh();
     } finally {
       setDeletingId(null);
@@ -862,7 +872,10 @@ function CustomerReconciliationTab({
         <Modal
           open
           onClose={() => {
-            if (deletingId === null) setConfirmTarget(null);
+            if (deletingId === null) {
+              setConfirmTarget(null);
+              setBulkDeletionReason("");
+            }
           }}
           title="确认删除客户对账？"
         >
@@ -875,11 +888,27 @@ function CustomerReconciliationTab({
               <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700">
                 💡 删除后会进入「已删除」Tab，<strong>7 天内可恢复</strong>，超期将自动永久清理。
               </p>
+              <label className="block space-y-1">
+                <span className="font-medium text-slate-700">删除原因 *</span>
+                <textarea
+                  className="input min-h-20 w-full resize-y"
+                  value={bulkDeletionReason}
+                  onChange={(event) => setBulkDeletionReason(event.target.value)}
+                  placeholder="请说明删除该客户全部对账记录的原因"
+                  disabled={deletingId !== null}
+                />
+                <span className="text-xs text-slate-500">
+                  已确认或已结算记录只做软删除并永久保留审计及财务关联历史。
+                </span>
+              </label>
             <div className="flex justify-end gap-3 border-t border-slate-100 pt-4">
               <button
                 type="button"
                 className="btn-secondary"
-                onClick={() => setConfirmTarget(null)}
+                onClick={() => {
+                  setConfirmTarget(null);
+                  setBulkDeletionReason("");
+                }}
                 disabled={deletingId !== null}
               >
                 取消
@@ -887,7 +916,7 @@ function CustomerReconciliationTab({
               <button
                 type="button"
                 className="rounded-lg bg-rose-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-rose-500 disabled:opacity-50"
-                disabled={deletingId !== null}
+                disabled={deletingId !== null || !bulkDeletionReason.trim()}
                 onClick={() => deleteAllForCustomer(confirmTarget.customerId)}
               >
                 {deletingId === confirmTarget.customerId

@@ -384,6 +384,21 @@ export default async function FinanceWorkbenchPage() {
                         null,
                     }
                   : null,
+                documents: row.invoices
+                  .filter(
+                    (invoice) => invoice.status === "ISSUED"
+                      && (row.documentType !== "DOMESTIC"
+                        || Boolean(invoice.domesticDocument?.originalFileUrl)),
+                  )
+                  .map((invoice) => ({
+                    id: invoice.id,
+                    invoiceNo: invoice.invoiceNo,
+                    status: invoice.status,
+                    actualInvoiceNo:
+                      invoice.domesticDocument?.invoiceNumber ?? null,
+                    originalFileUrl:
+                      invoice.domesticDocument?.originalFileUrl ?? null,
+                  })),
               };
             })}
             receivables={receivables.map((row) => ({

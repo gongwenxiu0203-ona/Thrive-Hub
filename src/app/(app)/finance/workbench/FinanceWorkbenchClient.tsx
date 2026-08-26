@@ -32,6 +32,13 @@ type BillingRow = {
     actualInvoiceNo: string | null;
     originalFileUrl: string | null;
   } | null;
+  documents: Array<{
+    id: string;
+    invoiceNo: string;
+    status: string;
+    actualInvoiceNo: string | null;
+    originalFileUrl: string | null;
+  }>;
 };
 type ReceivableRow = {
   id: string;
@@ -456,6 +463,24 @@ export function FinanceWorkbenchClient({
                         ) : (
                           <span className="text-slate-400">—</span>
                         )}
+                        {row.documents.map((document, index) => (
+                          <a
+                            key={document.id}
+                            href={
+                              row.documentType === "DOMESTIC"
+                                ? `/api/finance/domestic-invoices/${document.id}/original`
+                                : `/api/invoices/${document.id}/pdf`
+                            }
+                            className="ml-3 inline-flex text-xs font-medium text-brand-700 hover:underline"
+                            target="_blank"
+                            rel="noreferrer"
+                            download
+                          >
+                            {row.documentType === "DOMESTIC"
+                              ? `下载国内发票${row.documents.length > 1 ? ` ${index + 1}` : ""}`
+                              : `下载 Invoice${row.documents.length > 1 ? ` ${index + 1}` : ""}`}
+                          </a>
+                        ))}
                         {isAdmin && (
                           <button
                             type="button"

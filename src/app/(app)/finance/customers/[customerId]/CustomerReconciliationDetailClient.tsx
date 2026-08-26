@@ -1892,6 +1892,24 @@ function InvoiceSettlementState({
           >
             {state.invoiceNo}
           </Link>
+          {state.invoiceStatus === "ISSUED"
+            && (state.documentType !== "DOMESTIC" || state.originalFileUrl) && (
+            <div className="mt-2">
+              <a
+                href={
+                  state.documentType === "DOMESTIC"
+                    ? `/api/finance/domestic-invoices/${state.invoiceId}/original`
+                    : `/api/invoices/${state.invoiceId}/pdf`
+                }
+                className="inline-flex items-center rounded-md border border-brand-200 bg-white px-2.5 py-1 text-xs font-semibold text-brand-700 hover:bg-brand-50"
+                target="_blank"
+                rel="noreferrer"
+                download
+              >
+                {state.documentType === "DOMESTIC" ? "下载国内发票原件" : "下载 Invoice"}
+              </a>
+            </div>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Badge className="bg-violet-100 text-violet-700">

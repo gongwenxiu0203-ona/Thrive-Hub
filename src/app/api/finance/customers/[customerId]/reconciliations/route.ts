@@ -7,15 +7,18 @@ import { RECONCILIATION_FEATURE } from "@/lib/reconciliationAccess";
 import { errorResponse } from "@/lib/appError";
 
 // DELETE /api/finance/customers/[customerId]/reconciliations
-// 删除该客户的全部月度对账记录（含级联的 settlements/reviews）
+// Soft-delete all customer reconciliation records. Confirmed/settled history is
+// retained indefinitely for audit and can only be removed by an administrator.
 export async function DELETE(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ customerId: string }> },
 ) {
   try {
     const session = await requireSession();
     await requireFeaturePermission(session, RECONCILIATION_FEATURE, "MANAGE");
     const { customerId } = await params;
+    const body = await req.json().catch(() => ({}));
+    const deletionReason = typeof body.reason === "string" ? body.reason.trim() : "";
 
     const view = financeDataView(session);
     const customer = await prisma.customer.findFirst({
@@ -25,33 +28,67 @@ export async function DELETE(
       return NextResponse.json({ error: "客户不存在" }, { status: 404 });
     }
 
-    // 软删除：标记 deletedAt，7 天内可恢复
-    const protectedRecord = await prisma.customerReconciliation.findFirst({
+    const records = await prisma.customerReconciliation.findMany({
       where: {
-        AND: [
-          { customerId, deletedAt: null },
-          reconciliationScope(session, view),
-          {
-            OR: [
-              { status: "CONFIRMED" },
-              { settlements: { some: { status: "SETTLED" } } },
-            ],
-          },
-        ],
+        AND: [{ customerId, deletedAt: null }, reconciliationScope(session, view)],
       },
-      select: { id: true },
+      select: {
+        id: true,
+        status: true,
+        settlements: { select: { status: true } },
+      },
     });
-    if (protectedRecord) {
-      return NextResponse.json({ error: "该客户存在已确认或已结算的财务历史，不能批量删除" }, { status: 409 });
+    const hasCompleted = records.some(
+      (record) => record.status === "CONFIRMED"
+        || record.settlements.some((settlement) => settlement.status === "SETTLED"),
+    );
+    if (hasCompleted && session.role !== "ADMIN") {
+      return NextResponse.json(
+        { error: "只有管理员可以删除含已确认或已结算历史的客户对账" },
+        { status: 403 },
+      );
     }
-    const { count } = await prisma.customerReconciliation.updateMany({
-      where: { AND: [{ customerId, deletedAt: null }, reconciliationScope(session, view)] },
-      data: { deletedAt: new Date() },
+    if (hasCompleted && !deletionReason) {
+      return NextResponse.json(
+        { error: "删除含已确认或已结算历史的客户对账必须填写删除原因" },
+        { status: 400 },
+      );
+    }
+
+    const deletedAt = new Date();
+    const count = await prisma.$transaction(async (tx) => {
+      const result = await tx.customerReconciliation.updateMany({
+        where: { id: { in: records.map((record) => record.id) }, deletedAt: null },
+        data: { deletedAt },
+      });
+      if (records.length > 0) {
+        await tx.financeAuditLog.createMany({
+          data: records.map((record) => ({
+            entityType: "CUSTOMER_RECONCILIATION",
+            entityId: record.id,
+            action: "BATCH_SOFT_DELETE",
+            actorId: session.userId,
+            fromStatus: record.status,
+            toStatus: "DELETED",
+            note: deletionReason || null,
+            metadata: JSON.stringify({
+              customerId,
+              completed: record.status === "CONFIRMED"
+                || record.settlements.some((settlement) => settlement.status === "SETTLED"),
+              settlementStatuses: record.settlements.map((settlement) => settlement.status),
+              deletedAt: deletedAt.toISOString(),
+            }),
+          })),
+        });
+      }
+      return result.count;
     });
 
     return NextResponse.json({ success: true, deleted: count });
   } catch (e) {
-    if (e instanceof FeaturePermissionError) return NextResponse.json({ error: "无权限" }, { status: 403 });
+    if (e instanceof FeaturePermissionError) {
+      return NextResponse.json({ error: "无权限" }, { status: 403 });
+    }
     return errorResponse(e, "finance.customer-reconciliations.delete-all");
   }
 }

@@ -6,6 +6,8 @@ export type ReconciliationInvoiceState = {
   invoiceId: string;
   invoiceNo: string;
   invoiceStatus: string;
+  documentType: string;
+  originalFileUrl: string | null;
   receivableStatus: string | null;
   receivedAmount: number | null;
   totalAmount: number;
@@ -59,7 +61,9 @@ export async function getReconciliationInvoiceStateMap(
           id: true,
           invoiceNo: true,
           status: true,
+          documentType: true,
           totalAmount: true,
+          domesticDocument: { select: { originalFileUrl: true } },
           items: { select: { currency: true, amount: true } },
           accountsReceivable: {
             select: { status: true, receivedAmount: true },
@@ -87,6 +91,8 @@ export async function getReconciliationInvoiceStateMap(
           invoiceId: link.invoice.id,
           invoiceNo: link.invoice.invoiceNo,
           invoiceStatus: link.invoice.status,
+          documentType: link.invoice.documentType,
+          originalFileUrl: link.invoice.domesticDocument?.originalFileUrl ?? null,
           receivableStatus: link.invoice.accountsReceivable?.status ?? null,
           receivedAmount:
             link.invoice.accountsReceivable?.receivedAmount ?? null,

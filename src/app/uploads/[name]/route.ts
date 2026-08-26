@@ -32,7 +32,7 @@ const MIME: Record<string, string> = {
 };
 
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ name: string }> },
 ) {
   const session = await getSession();
@@ -78,9 +78,13 @@ export async function GET(
   try {
     const data = await readFile(filePath);
     const ext = path.extname(safeName).toLowerCase();
+    const forceDownload = new URL(req.url).searchParams.get("download") === "1";
     return new NextResponse(new Uint8Array(data), {
       headers: {
         "Content-Type": MIME[ext] ?? "application/octet-stream",
+        ...(forceDownload
+          ? { "Content-Disposition": `attachment; filename="${safeName.replace(/[\r\n"]/g, "_")}"` }
+          : {}),
         "Cache-Control": "private, no-store",
         "X-Content-Type-Options": "nosniff",
       },
