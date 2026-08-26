@@ -34,7 +34,6 @@ export function resolveEffectivePermission({
 }): PermLevel {
   const canonicalFeature = feature;
   if (!FEATURE_BY_KEY.has(canonicalFeature)) return "NONE";
-  if (!FEATURE_BY_KEY.has(canonicalFeature)) return "NONE";
   const userMap = new Map(userPermissions.map((row) => [row.feature, row.level]));
   const roleMap = new Map(rolePermissions.map((row) => [row.feature, row.level]));
   return (

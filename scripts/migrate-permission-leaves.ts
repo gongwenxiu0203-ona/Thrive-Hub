@@ -1,4 +1,5 @@
 import { prisma } from "../src/lib/prisma";
+import { DEFAULT_ROLE_PERMISSIONS } from "../src/lib/featurePermissions";
 
 const mappings: Record<string, string[]> = {
   "projects.progress_dashboard": ["projects.records", "tasks"],
@@ -22,10 +23,12 @@ const mappings: Record<string, string[]> = {
 
 async function main() {
   const apply = process.argv.includes("--apply");
-  const [roles, users] = await Promise.all([
+  const [roles, users, userAccounts] = await Promise.all([
     prisma.rolePermission.findMany(),
     prisma.userPermissionOverride.findMany(),
+    prisma.user.findMany({ select: { id: true, role: true } }),
   ]);
+  const userRole = new Map(userAccounts.map((user) => [user.id, user.role]));
   const roleExisting = new Set(roles.map((row) => `${row.role}\u0000${row.feature}`));
   const userExisting = new Set(users.map((row) => `${row.userId}\u0000${row.feature}`));
   const roleCreates: Array<{ role: string; feature: string; level: string }> = [];
@@ -35,12 +38,17 @@ async function main() {
     for (const role of [...new Set(roles.map((row) => row.role))]) {
       if (roleExisting.has(`${role}\u0000${target}`)) continue;
       const source = sources.map((feature) => roles.find((row) => row.role === role && row.feature === feature)).find(Boolean);
-      if (source) roleCreates.push({ role, feature: target, level: source.level });
+      const level = role === "ADMIN" || role === "USER"
+        ? source?.level ?? DEFAULT_ROLE_PERMISSIONS[role]?.[target]
+        : DEFAULT_ROLE_PERMISSIONS[role]?.[target];
+      if (level) roleCreates.push({ role, feature: target, level });
     }
     for (const userId of [...new Set(users.map((row) => row.userId))]) {
       if (userExisting.has(`${userId}\u0000${target}`)) continue;
       const source = sources.map((feature) => users.find((row) => row.userId === userId && row.feature === feature)).find(Boolean);
-      if (source) userCreates.push({ userId, feature: target, level: source.level });
+      const role = userRole.get(userId);
+      const level = role === "ADMIN" || role === "USER" ? source?.level : DEFAULT_ROLE_PERMISSIONS[role ?? ""]?.[target];
+      if (level) userCreates.push({ userId, feature: target, level });
     }
   }
 
