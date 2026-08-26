@@ -6,12 +6,28 @@ import { FeaturePermissionError } from "@/lib/permissionGuard";
 import { parseDateOnlyUtc } from "@/lib/dateRange";
 import { errorResponse } from "@/lib/appError";
 import { financeReferenceCustomerScope } from "@/lib/dataScope";
+import { buildCustomerReconciliationPlan } from "@/lib/customerReconciliationPlan";
 
 function reconciliationCurrency(value: string | null | undefined) {
   const normalized = String(value ?? "").trim().toUpperCase();
   if (["美金", "美元", "US$", "$"].includes(normalized)) return "USD";
   if (["人民币", "人民币元", "RMB", "¥", "￥"].includes(normalized)) return "CNY";
   return normalized || "USD";
+}
+
+function contractCommissionCurrency(contract: {
+  thresholdCurrency?: string | null;
+  betTargetCurrency?: string | null;
+  feeCurrency?: string | null;
+  tieredRules?: string | null;
+}) {
+  try {
+    const tiered = contract.tieredRules ? JSON.parse(contract.tieredRules) as { currency?: string } : null;
+    if (tiered?.currency) return tiered.currency;
+  } catch {
+    // Invalid historical JSON falls back to the explicit contract currency fields.
+  }
+  return contract.thresholdCurrency || contract.betTargetCurrency || contract.feeCurrency;
 }
 
 // GET /api/finance/reconciliations — 获取对账列表
@@ -64,16 +80,24 @@ export async function POST(req: Request) {
       periodStart,
       periodEnd,
       reconcileType,
+      reconcileTypes,
       source,
       adjustmentReason,
+      fixedFeeCurrency: requestedFixedFeeCurrency,
+      commissionCurrency: requestedCommissionCurrency,
     } = body;
 
     if (!customerId || !contractId || !periodStart || !periodEnd) {
       return NextResponse.json({ error: "客户、合同、周期开始时间和结束时间均为必填项" }, { status: 400 });
     }
 
-    const normalizedType = reconcileType ?? "BOTH";
-    if (!NEW_RECONCILIATION_TYPES.includes(normalizedType)) {
+    const normalizedTypes = Array.isArray(reconcileTypes)
+      ? [...new Set(reconcileTypes)]
+      : [reconcileType].filter(Boolean);
+    if (
+      normalizedTypes.length === 0 ||
+      normalizedTypes.some((type) => !NEW_RECONCILIATION_TYPES.includes(type))
+    ) {
       return NextResponse.json({ error: "新建对账必须分开选择固费或销售佣金，不再支持合并对账" }, { status: 400 });
     }
     const start = typeof periodStart === "string" ? parseDateOnlyUtc(periodStart) : null;
@@ -95,11 +119,11 @@ export async function POST(req: Request) {
         id: contractId,
         customerId,
         deletedAt: null,
-        customer: { ...referenceCustomerScope, deletedAt: null },
+        customer: { ...referenceCustomerScope, deletedAt: null, status: "COOPERATING" },
       },
     });
     if (!contract) {
-      return NextResponse.json({ error: "合同不存在" }, { status: 404 });
+      return NextResponse.json({ error: "合同不存在，或客户当前不是合作中状态" }, { status: 404 });
     }
     if (contract.status !== "COMPLETED") {
       return NextResponse.json({ error: "只能对已签署完成的合同创建对账" }, { status: 400 });
@@ -108,14 +132,24 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "手动对账周期不能超出合同有效期" }, { status: 400 });
     }
 
-    const conflictingTypes = [normalizedType, "BOTH"];
-    const overlap = await prisma.customerReconciliation.findFirst({
-      where: { contractId, deletedAt: null, reconcileType: { in: conflictingTypes }, periodStart: { lte: end }, periodEnd: { gte: start } },
-      select: { periodStart: true, periodEnd: true },
-    });
-    if (overlap) {
-      const streamName = normalizedType === "FEE_ONLY" ? "固费" : "销售佣金";
-      return NextResponse.json({ error: `该客户的${streamName}周期与已有对账记录（${formatDate(overlap.periodStart)} 至 ${formatDate(overlap.periodEnd)}）重叠，请调整周期后重试` }, { status: 409 });
+    const periods = buildCustomerReconciliationPlan(start, end).filter((period) =>
+      normalizedTypes.includes(period.type),
+    );
+    for (const period of periods) {
+      const overlap = await prisma.customerReconciliation.findFirst({
+        where: {
+          contractId,
+          deletedAt: null,
+          reconcileType: { in: [period.type, "BOTH"] },
+          periodStart: { lte: period.end },
+          periodEnd: { gte: period.start },
+        },
+        select: { periodStart: true, periodEnd: true },
+      });
+      if (overlap) {
+        const streamName = period.type === "FEE_ONLY" ? "固费" : "销售佣金";
+        return NextResponse.json({ error: `该合同的${streamName}周期与已有对账记录（${formatDate(overlap.periodStart)} 至 ${formatDate(overlap.periodEnd)}）重叠，未创建任何记录` }, { status: 409 });
+      }
     }
 
     // 解析合同金额字段
@@ -137,21 +171,29 @@ export async function POST(req: Request) {
     });
 
     // 货币：固费用 contract.feeCurrency；抽佣/销售额用 thresholdCurrency > betTargetCurrency > feeCurrency
-    const fixedFeeCurrency = reconciliationCurrency(contract.feeCurrency);
-    const commissionCurrency = reconciliationCurrency(cAny.thresholdCurrency || cAny.betTargetCurrency || contract.feeCurrency);
+    const fixedFeeCurrency = reconciliationCurrency(
+      requestedFixedFeeCurrency || contract.feeCurrency,
+    );
+    const commissionCurrency = reconciliationCurrency(
+      requestedCommissionCurrency || contractCommissionCurrency(cAny),
+    );
 
-    const reconciliation = await prisma.customerReconciliation.create({
-      data: {
+    const now = new Date();
+    const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const reconciliations = await prisma.$transaction(
+      periods.map((period) => prisma.customerReconciliation.create({
+        data: {
         customerId,
         contractId,
         source: normalizedSource,
-        planStatus: "OPEN",
+        planStatus: period.start <= today ? "OPEN" : "PLANNED",
+        periodIndex: period.index,
         adjustmentReason: normalizedSource === "ADJUSTMENT" ? String(adjustmentReason).trim() : null,
         originalPeriodStart: start,
         originalPeriodEnd: end,
-        openedAt: new Date(),
-        periodStart: start,
-        periodEnd: end,
+        openedAt: period.start <= today ? now : null,
+        periodStart: period.start,
+        periodEnd: period.end,
         // 快照合同条款
         partyA: contract.partyA,
         accountingPeriod: contract.accountingPeriod,
@@ -167,18 +209,22 @@ export async function POST(req: Request) {
         betType,
         betOrderCount,
         betSalesAmount,
-        reconcileType: normalizedType,
+        reconcileType: period.type,
         createdById: session.userId,
         updatedAt: new Date(),
-      },
-      include: {
+        },
+        include: {
         customer: { select: { id: true, brandName: true } },
         contract: { select: { id: true, contractNo: true } },
         createdBy: { select: { id: true, name: true } },
-      },
-    });
+        },
+      })),
+    );
 
-    return NextResponse.json(reconciliation, { status: 201 });
+    return NextResponse.json(
+      { ...reconciliations[0], id: reconciliations[0].id, createdCount: reconciliations.length },
+      { status: 201 },
+    );
   } catch (e) {
     if (e instanceof FeaturePermissionError) {
       return NextResponse.json({ error: "无权限" }, { status: 403 });

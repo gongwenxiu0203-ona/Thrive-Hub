@@ -63,7 +63,7 @@ export default async function CustomerReconciliationPage({
 
     // 所有未删除的月度对账记录（新→旧）
     prisma.customerReconciliation.findMany({
-      where: { AND: [{ customerId, deletedAt: null }, access.scope] },
+      where: { AND: [{ customerId, deletedAt: null, planStatus: { not: "CANCELLED" } }, access.scope] },
       include: {
         contract: {
           select: {

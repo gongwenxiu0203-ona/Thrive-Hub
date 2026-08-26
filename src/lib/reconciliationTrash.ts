@@ -13,6 +13,8 @@ export async function purgeExpiredTrashedReconciliations(): Promise<number> {
   const result = await prisma.customerReconciliation.deleteMany({
     where: {
       deletedAt: { lt: threshold },
+      status: { not: "CONFIRMED" },
+      settlements: { none: { status: "SETTLED" } },
     },
   });
   return result.count;

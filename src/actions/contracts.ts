@@ -311,10 +311,62 @@ export async function updateContract(
 export async function deleteContract(id: string) {
   const session = await requireContractRow(id, "MANAGE");
   if (session.role !== "ADMIN") throw new Error("仅管理员可删除合同");
-  // 软删除：进回收站，7 天内可恢复
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (prisma.contract.update as any)({ where: { id }, data: { deletedAt: new Date() } });
+  const contract = await prisma.contract.findUnique({
+    where: { id },
+    select: { id: true, contractNo: true, customerId: true },
+  });
+  if (!contract) throw new Error("合同不存在");
+  const now = new Date();
+  const reason = `合同 ${contract.contractNo} 已删除，未完成的后续业务停止`;
+  const result = await prisma.$transaction(async (tx) => {
+    await tx.contract.update({ where: { id }, data: { deletedAt: now } });
+    const cancelledReconciliations = await tx.customerReconciliation.updateMany({
+      where: { contractId: id, deletedAt: null, status: { not: "CONFIRMED" }, planStatus: { not: "CANCELLED" } },
+      data: { planStatus: "CANCELLED", adjustmentReason: reason, updatedAt: now },
+    });
+    const cancelledTasks = await tx.task.updateMany({
+      where: { contractId: id, deletedAt: null, status: { notIn: ["DONE", "CANCELLED"] } },
+      data: { status: "CANCELLED", returnReason: reason, updatedAt: now },
+    });
+    const emptyChannelRecords = await tx.channelReconciliation.findMany({
+      where: { contractId: id, deletedAt: null, status: "PENDING", periods: { none: {} } },
+      select: { id: true, auditLog: true, status: true },
+    });
+    for (const channelRecord of emptyChannelRecords) {
+      await tx.channelReconciliation.update({
+        where: { id: channelRecord.id },
+        data: {
+          deletedAt: now,
+          deletedById: session.userId,
+          deletionReason: reason,
+          auditLog: JSON.stringify([
+            ...(() => { try { return JSON.parse(channelRecord.auditLog); } catch { return []; } })(),
+            { type: "CONTRACT_DELETE_SOFT_DELETE", actorId: session.userId, at: now.toISOString(), reason },
+          ]),
+        },
+      });
+    }
+    return {
+      cancelledReconciliations: cancelledReconciliations.count,
+      cancelledTasks: cancelledTasks.count,
+      emptyChannelRecords: emptyChannelRecords.length,
+    };
+  });
+  await writeAdminAudit({
+    actorId: session.userId,
+    action: "DELETE_CONTRACT_WITH_SAFE_LINKAGE",
+    module: "contracts",
+    targetType: "Contract",
+    targetId: id,
+    targetLabel: contract.contractNo,
+    summary: `软删除合同 ${contract.contractNo}；取消未完成对账和任务，保留已确认财务历史`,
+    before: { deletedAt: null },
+    after: { deletedAt: now },
+    metadata: result,
+  });
   revalidatePath("/contracts");
+  revalidatePath("/finance");
+  if (contract.customerId) revalidatePath(`/customers/${contract.customerId}`);
   redirect("/contracts");
 }
 
@@ -515,11 +567,11 @@ export async function markCompleted(id: string) {
     where: { id },
     data: { status: "COMPLETED" },
   });
-  await ensureCustomerReconciliationPlan(id, session.userId);
   await syncContractProgressToProjects(id, "签署完成");
   if (contract.customerId) {
     await bumpCustomerStatus(contract.customerId, "COOPERATING");
   }
+  await ensureCustomerReconciliationPlan(id, session.userId);
 
   revalidatePath("/contracts");
   revalidatePath(`/contracts/${id}`);

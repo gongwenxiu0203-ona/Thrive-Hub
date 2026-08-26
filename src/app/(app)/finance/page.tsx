@@ -65,13 +65,13 @@ export default async function FinancePage() {
   const customerRecCustomerScope = financeReferenceCustomerScope(sess);
   const channelCustomerScope = financeReferenceCustomerScope(sess);
 
-  const [reconciliations, trashedReconciliations, channelReconciliations, customers, channelUsers, affiliateReconciliations] = await Promise.all([
+  const [reconciliations, cancelledReconciliations, trashedReconciliations, channelReconciliations, customers, channelUsers, affiliateReconciliations] = await Promise.all([
     // 未删除的对账记录（带行级权限）
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     canViewCustomer ? prisma.customerReconciliation.findMany({
       where: {
         AND: [
-          { deletedAt: null, planStatus: { not: "PLANNED" } },
+          { deletedAt: null, planStatus: { notIn: ["PLANNED", "CANCELLED"] } },
           recScope as any,
         ],
       },
@@ -90,6 +90,16 @@ export default async function FinancePage() {
         },
       },
       orderBy: { periodStart: "desc" },
+    }) : Promise.resolve([]),
+
+    session.role === "ADMIN" && canManageCustomer ? prisma.customerReconciliation.findMany({
+      where: { AND: [{ deletedAt: null, planStatus: "CANCELLED" }, recScope as any] },
+      include: {
+        customer: { select: { id: true, brandName: true, cooperationEndDate: true } },
+        contract: { select: { id: true, contractNo: true } },
+        createdBy: { select: { id: true, name: true } },
+      },
+      orderBy: [{ customer: { brandName: "asc" } }, { periodStart: "asc" }],
     }) : Promise.resolve([]),
 
     // 已软删除的对账记录（用于"已删除"Tab，带行级权限）
@@ -143,6 +153,7 @@ export default async function FinancePage() {
         AND: [
           {
             deletedAt: null,
+            status: "COOPERATING",
             contracts: { some: { status: "COMPLETED", deletedAt: null } },
           },
            customerRecCustomerScope as any,
@@ -157,6 +168,12 @@ export default async function FinancePage() {
             id: true,
             contractNo: true,
             type: true,
+            startDate: true,
+            endDate: true,
+            feeCurrency: true,
+            thresholdCurrency: true,
+            betTargetCurrency: true,
+            tieredRules: true,
           },
           orderBy: { createdAt: "desc" },
         },
@@ -265,6 +282,7 @@ export default async function FinancePage() {
   return (
     <FinanceClient
       reconciliations={reconciliations}
+      cancelledReconciliations={cancelledReconciliations}
       trashedReconciliations={trashedReconciliations}
       channelReconciliations={channelReconciliations}
       customers={customers}

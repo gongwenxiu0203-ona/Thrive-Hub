@@ -10,6 +10,12 @@ type Contract = {
   id: string;
   contractNo: string;
   type: string;
+  startDate: Date | string | null;
+  endDate: Date | string | null;
+  feeCurrency: string | null;
+  thresholdCurrency: string | null;
+  betTargetCurrency: string | null;
+  tieredRules: string | null;
 };
 
 type Customer = {
@@ -25,15 +31,47 @@ type Props = {
 
 type ReconcileType = "FEE_ONLY" | "COMMISSION_ONLY";
 
+const CURRENCY_OPTIONS = ["USD", "CNY", "EUR", "GBP", "HKD", "JPY", "CAD", "AUD", "SGD"];
+
+function normalizeCurrency(value: string | null | undefined) {
+  const normalized = String(value ?? "").trim().toUpperCase();
+  if (["美金", "美元", "US$", "$"].includes(normalized)) return "USD";
+  if (["人民币", "人民币元", "RMB", "¥", "￥"].includes(normalized)) return "CNY";
+  return normalized || "USD";
+}
+
+function defaultCommissionCurrency(contract: Contract | null | undefined) {
+  try {
+    const tiered = contract?.tieredRules
+      ? JSON.parse(contract.tieredRules) as { currency?: string }
+      : null;
+    if (tiered?.currency) return normalizeCurrency(tiered.currency);
+  } catch {
+    // Invalid historical JSON falls back to the explicit contract fields.
+  }
+  return normalizeCurrency(
+    contract?.thresholdCurrency || contract?.betTargetCurrency || contract?.feeCurrency,
+  );
+}
+
+function dateInputValue(value: Date | string | null) {
+  if (!value) return "";
+  return new Date(value).toISOString().slice(0, 10);
+}
+
 export function NewReconciliationModal({ customers, onCreated }: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
   const [selectedContractId, setSelectedContractId] = useState("");
-  const [reconcileType, setReconcileType] =
-    useState<ReconcileType>("FEE_ONLY");
+  const [reconcileTypes, setReconcileTypes] = useState<ReconcileType[]>([
+    "FEE_ONLY",
+    "COMMISSION_ONLY",
+  ]);
   const [periodStart, setPeriodStart] = useState("");
   const [periodEnd, setPeriodEnd] = useState("");
+  const [fixedFeeCurrency, setFixedFeeCurrency] = useState("USD");
+  const [commissionCurrency, setCommissionCurrency] = useState("USD");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,18 +83,41 @@ export function NewReconciliationModal({ customers, onCreated }: Props) {
   function handleCustomerChange(customerId: string) {
     setSelectedCustomerId(customerId);
     const customer = customers.find((item) => item.id === customerId);
-    setSelectedContractId(
-      customer?.contracts.length === 1 ? customer.contracts[0].id : "",
-    );
+    const onlyContract = customer?.contracts.length === 1 ? customer.contracts[0] : null;
+    setSelectedContractId(onlyContract?.id ?? "");
+    setPeriodStart(dateInputValue(onlyContract?.startDate ?? null));
+    setPeriodEnd(dateInputValue(onlyContract?.endDate ?? null));
+    setFixedFeeCurrency(normalizeCurrency(onlyContract?.feeCurrency));
+    setCommissionCurrency(defaultCommissionCurrency(onlyContract));
     setError(null);
+  }
+
+  function handleContractChange(contractId: string) {
+    setSelectedContractId(contractId);
+    const contract = selectedCustomer?.contracts.find((item) => item.id === contractId);
+    setPeriodStart(dateInputValue(contract?.startDate ?? null));
+    setPeriodEnd(dateInputValue(contract?.endDate ?? null));
+    setFixedFeeCurrency(normalizeCurrency(contract?.feeCurrency));
+    setCommissionCurrency(defaultCommissionCurrency(contract));
+    setError(null);
+  }
+
+  function toggleType(type: ReconcileType) {
+    setReconcileTypes((current) =>
+      current.includes(type)
+        ? current.filter((item) => item !== type)
+        : [...current, type],
+    );
   }
 
   function resetForm() {
     setSelectedCustomerId("");
     setSelectedContractId("");
-    setReconcileType("FEE_ONLY");
+    setReconcileTypes(["FEE_ONLY", "COMMISSION_ONLY"]);
     setPeriodStart("");
     setPeriodEnd("");
+    setFixedFeeCurrency("USD");
+    setCommissionCurrency("USD");
     setError(null);
   }
 
@@ -66,7 +127,8 @@ export function NewReconciliationModal({ customers, onCreated }: Props) {
       !selectedCustomerId ||
       !selectedContractId ||
       !periodStart ||
-      !periodEnd
+      !periodEnd ||
+      reconcileTypes.length === 0
     ) {
       setError("请选择客户、合同并填写完整的对账周期");
       return;
@@ -85,9 +147,11 @@ export function NewReconciliationModal({ customers, onCreated }: Props) {
         body: JSON.stringify({
           customerId: selectedCustomerId,
           contractId: selectedContractId,
-          reconcileType,
+          reconcileTypes,
           periodStart,
           periodEnd,
+          fixedFeeCurrency,
+          commissionCurrency,
         }),
       });
       if (!response.ok) {
@@ -148,7 +212,7 @@ export function NewReconciliationModal({ customers, onCreated }: Props) {
             <select
               className="input"
               value={selectedContractId}
-              onChange={(event) => setSelectedContractId(event.target.value)}
+              onChange={(event) => handleContractChange(event.target.value)}
               disabled={!selectedCustomer}
               required
             >
@@ -170,25 +234,61 @@ export function NewReconciliationModal({ customers, onCreated }: Props) {
               <button
                 type="button"
                 className={
-                  reconcileType === "FEE_ONLY" ? "btn-primary" : "btn-secondary"
+                  reconcileTypes.includes("FEE_ONLY") ? "btn-primary" : "btn-secondary"
                 }
-                onClick={() => setReconcileType("FEE_ONLY")}
+                onClick={() => toggleType("FEE_ONLY")}
               >
                 固费
               </button>
               <button
                 type="button"
                 className={
-                  reconcileType === "COMMISSION_ONLY"
+                  reconcileTypes.includes("COMMISSION_ONLY")
                     ? "btn-primary"
                     : "btn-secondary"
                 }
-                onClick={() => setReconcileType("COMMISSION_ONLY")}
+                onClick={() => toggleType("COMMISSION_ONLY")}
               >
                 销售佣金
               </button>
             </div>
           </div>
+
+          <p className="text-xs text-slate-500">
+            默认同时创建固费与销售佣金计划；固费每 30 个自然日一期，销售佣金首期至当月月底、之后按自然月划分。
+          </p>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label">固费币种</label>
+              <select
+                className="input"
+                value={fixedFeeCurrency}
+                onChange={(event) => setFixedFeeCurrency(event.target.value)}
+                disabled={!reconcileTypes.includes("FEE_ONLY")}
+              >
+                {CURRENCY_OPTIONS.map((currency) => (
+                  <option key={currency} value={currency}>{currency}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="label">销售佣金币种</label>
+              <select
+                className="input"
+                value={commissionCurrency}
+                onChange={(event) => setCommissionCurrency(event.target.value)}
+                disabled={!reconcileTypes.includes("COMMISSION_ONLY")}
+              >
+                {CURRENCY_OPTIONS.map((currency) => (
+                  <option key={currency} value={currency}>{currency}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <p className="text-xs text-slate-500">
+            默认读取合同中对应费用类型的币种，创建前可分别调整。
+          </p>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -239,7 +339,8 @@ export function NewReconciliationModal({ customers, onCreated }: Props) {
                 !selectedCustomerId ||
                 !selectedContractId ||
                 !periodStart ||
-                !periodEnd
+                !periodEnd ||
+                reconcileTypes.length === 0
               }
               className="btn-primary"
             >

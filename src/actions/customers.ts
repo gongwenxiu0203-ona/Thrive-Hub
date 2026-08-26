@@ -10,6 +10,11 @@ import { canDeleteCustomer, isStaff } from "@/lib/permissions";
 import { bumpCustomerStatus, capitalizeBrandName } from "@/lib/customer";
 import { customerScope } from "@/lib/dataScope";
 import { requireFeaturePermission } from "@/lib/permissionGuard";
+import { parseDateOnlyUtc } from "@/lib/dateRange";
+import {
+  closeCustomerReconciliationPlans,
+  ensureCustomerPlansForCooperatingCustomer,
+} from "@/lib/customerReconciliationPlan";
 
 const LEO_EMAIL = "leo.g@thraiveagency.com";
 const LEDO_EMAIL = "ledo.h@thraiveagency.com";
@@ -442,7 +447,11 @@ export async function bulkUpdateCustomers(
   const data: Record<string, unknown> = {};
   if (patch.status !== undefined) {
     if (!isCustomerStatus(patch.status)) return { ok: false, error: "无效的客户进度" };
+    if (patch.status === "COOPERATION_DONE") {
+      return { ok: false, error: "批量结束合作需要逐个客户填写合作结束日期" };
+    }
     data.status = patch.status;
+    if (patch.status === "COOPERATING") data.cooperationEndDate = null;
     data.statusChangedAt = new Date();
     data.staleReviewDeadlineAt = null;
   }
@@ -468,20 +477,53 @@ export async function bulkUpdateCustomers(
   return { ok: true };
 }
 
-export async function updateCustomerStatus(id: string, status: string) {
+export async function updateCustomerStatus(id: string, status: string, cooperationEndDate?: string) {
   const session = await requireCustomerFollowupSession();
   if (!isCustomerStatus(status)) throw new Error("无效的客户进度");
   const customer = await prisma.customer.findFirst({
     where: { AND: [{ id, deletedAt: null }, accessibleCustomerWhere(session)] },
-    select: { id: true },
+    select: { id: true, status: true, cooperationEndDate: true },
   });
   if (!customer) throw new Error("客户不存在或无权修改");
-  await prisma.customer.update({
-    where: { id: customer.id },
-    data: { status, statusChangedAt: new Date(), staleReviewDeadlineAt: null },
+  const parsedEndDate = status === "COOPERATION_DONE"
+    ? parseDateOnlyUtc(String(cooperationEndDate ?? ""))
+    : null;
+  if (status === "COOPERATION_DONE" && !parsedEndDate) {
+    throw new Error("结束合作时必须填写有效的合作结束日期");
+  }
+  await prisma.$transaction(async (tx) => {
+    await tx.customer.update({
+      where: { id: customer.id },
+      data: {
+        status,
+        cooperationEndDate: status === "COOPERATION_DONE" ? parsedEndDate : null,
+        statusChangedAt: new Date(),
+        staleReviewDeadlineAt: null,
+      },
+    });
+    await tx.adminAuditLog.create({
+      data: {
+        actorId: session.userId,
+        action: "UPDATE_CUSTOMER_COOPERATION_STATUS",
+        module: "customers",
+        targetType: "Customer",
+        targetId: customer.id,
+        summary: status === "COOPERATION_DONE"
+          ? `客户结束合作，结束日期 ${parsedEndDate!.toISOString().slice(0, 10)}`
+          : `客户合作状态变更为 ${status}`,
+        beforeJson: JSON.stringify({ status: customer.status, cooperationEndDate: customer.cooperationEndDate }),
+        afterJson: JSON.stringify({ status, cooperationEndDate: parsedEndDate }),
+      },
+    });
   });
+  if (status === "COOPERATION_DONE" && parsedEndDate) {
+    await closeCustomerReconciliationPlans(customer.id, parsedEndDate, session.userId);
+  } else if (status === "COOPERATING") {
+    await ensureCustomerPlansForCooperatingCustomer(customer.id, session.userId);
+  }
   revalidatePath("/customers");
   revalidatePath(`/customers/${id}`);
+  revalidatePath("/finance");
 }
 
 /**

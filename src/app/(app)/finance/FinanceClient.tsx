@@ -60,6 +60,17 @@ type TrashedReconciliation = {
   createdBy: { id: string; name: string };
 };
 
+type CancelledReconciliation = {
+  id: string;
+  reconcileType: string;
+  periodStart: Date | string;
+  periodEnd: Date | string;
+  adjustmentReason: string | null;
+  customer: { id: string; brandName: string; cooperationEndDate: Date | string | null };
+  contract: { id: string; contractNo: string };
+  createdBy: { id: string; name: string };
+};
+
 type ChannelReconciliation = Omit<ChannelReconciliationRecord, "periods"> & {
   recordMode: string;
   fixedFeeReceivedCurrency: string;
@@ -93,11 +104,18 @@ type Customer = {
     id: string;
     contractNo: string;
     type: string;
+    startDate: Date | string | null;
+    endDate: Date | string | null;
+    feeCurrency: string | null;
+    thresholdCurrency: string | null;
+    betTargetCurrency: string | null;
+    tieredRules: string | null;
   }[];
 };
 
 type Props = {
   reconciliations: Reconciliation[];
+  cancelledReconciliations: CancelledReconciliation[];
   trashedReconciliations: TrashedReconciliation[];
   channelReconciliations: ChannelReconciliation[];
   customers: Customer[];
@@ -119,7 +137,7 @@ type Props = {
   canManageAffiliateReconciliations?: boolean;
 };
 
-type Tab = "customers" | "trash" | "channels" | "affiliates";
+type Tab = "customers" | "cancelled" | "trash" | "channels" | "affiliates";
 
 // ── aggregate settlement status ───────────────────────────────────────────────
 function settlementAgg(settlements: Settlement[]): {
@@ -340,6 +358,7 @@ function MultiSelectFilter({
 // ── Main Component ─────────────────────────────────────────────────────────────
 export function FinanceClient({
   reconciliations,
+  cancelledReconciliations,
   trashedReconciliations,
   channelReconciliations,
   customers,
@@ -370,6 +389,11 @@ export function FinanceClient({
       : []),
     ...(canManageCustomerReconciliations
       ? [
+          {
+            key: "cancelled" as Tab,
+            label: "作废记录",
+            count: cancelledReconciliations.length,
+          },
           {
             key: "trash" as Tab,
             label: "已删除",
@@ -404,6 +428,9 @@ export function FinanceClient({
                 ? "全部数据视图 · 统一管理客户对账、渠道分账与联盟商结算"
                 : "仅显示与你相关的结算记录 · 可切换到「全部」"
               : "统一管理客户对账、渠道分账与联盟商结算"}
+          </p>
+          <p className="mt-1 text-xs text-brand-700">
+            创建要求：合同已签署完成，且客户状态为“合作中”。
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -458,6 +485,9 @@ export function FinanceClient({
           reconciliations={reconciliations}
           canManage={canManageCustomerReconciliations}
         />
+      )}
+      {tab === "cancelled" && canManageCustomerReconciliations && (
+        <CancelledReconciliationTab records={cancelledReconciliations} onDone={() => router.refresh()} />
       )}
       {tab === "trash" && canManageCustomerReconciliations && (
         <TrashTab trashed={trashedReconciliations} />
@@ -868,6 +898,89 @@ function CustomerReconciliationTab({
           </div>
         </Modal>
       )}
+    </div>
+  );
+}
+
+function CancelledReconciliationTab({
+  records,
+  onDone,
+}: {
+  records: CancelledReconciliation[];
+  onDone: () => void;
+}) {
+  const [selected, setSelected] = useState<string[]>([]);
+  const [restoring, setRestoring] = useState(false);
+  const allSelected = records.length > 0 && selected.length === records.length;
+
+  async function restore(ids: string[]) {
+    const reason = window.prompt("请填写恢复作废对账的原因");
+    if (!reason?.trim()) return;
+    setRestoring(true);
+    try {
+      const response = await fetch("/api/finance/reconciliations/plan-status", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids, reason: reason.trim() }),
+      });
+      if (!response.ok) {
+        alert((await response.json()).error ?? "恢复失败");
+        return;
+      }
+      setSelected([]);
+      onDone();
+    } finally {
+      setRestoring(false);
+    }
+  }
+
+  return (
+    <div className="card overflow-hidden">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
+        <div>
+          <h2 className="font-semibold text-slate-900">作废的客户对账记录</h2>
+          <p className="mt-1 text-xs text-slate-500">管理员可单条或批量恢复；恢复操作必须填写原因并保留审计记录。</p>
+        </div>
+        <button
+          type="button"
+          className="btn-primary"
+          disabled={!selected.length || restoring}
+          onClick={() => void restore(selected)}
+        >
+          批量恢复（{selected.length}）
+        </button>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[900px] text-sm">
+          <thead className="bg-slate-50 text-left text-xs text-slate-500">
+            <tr>
+              <th className="px-4 py-3"><input type="checkbox" checked={allSelected} onChange={() => setSelected(allSelected ? [] : records.map((item) => item.id))} /></th>
+              <th className="px-4 py-3">客户</th>
+              <th className="px-4 py-3">合同</th>
+              <th className="px-4 py-3">类型</th>
+              <th className="px-4 py-3">周期</th>
+              <th className="px-4 py-3">合作结束日期</th>
+              <th className="px-4 py-3">作废原因</th>
+              <th className="px-4 py-3">操作</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {records.map((record) => (
+              <tr key={record.id}>
+                <td className="px-4 py-3"><input type="checkbox" checked={selected.includes(record.id)} onChange={() => setSelected((current) => current.includes(record.id) ? current.filter((id) => id !== record.id) : [...current, record.id])} /></td>
+                <td className="px-4 py-3 font-medium text-slate-900">{record.customer.brandName}</td>
+                <td className="px-4 py-3">{record.contract.contractNo}</td>
+                <td className="px-4 py-3">{record.reconcileType === "FEE_ONLY" ? "固费" : "销售佣金"}</td>
+                <td className="px-4 py-3">{formatDate(record.periodStart)} ~ {formatDate(record.periodEnd)}</td>
+                <td className="px-4 py-3">{record.customer.cooperationEndDate ? formatDate(record.customer.cooperationEndDate) : "—"}</td>
+                <td className="max-w-72 px-4 py-3 text-xs text-slate-500">{record.adjustmentReason ?? "—"}</td>
+                <td className="px-4 py-3"><button type="button" className="text-brand-700 hover:underline" disabled={restoring} onClick={() => void restore([record.id])}>恢复正常对账</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!records.length && <p className="py-12 text-center text-sm text-slate-500">暂无作废记录</p>}
+      </div>
     </div>
   );
 }

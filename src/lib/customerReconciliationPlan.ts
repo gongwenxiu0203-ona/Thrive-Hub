@@ -7,6 +7,21 @@ function reconciliationCurrency(value: string | null | undefined) {
   return normalized || "USD";
 }
 
+function contractCommissionCurrency(contract: {
+  thresholdCurrency?: string | null;
+  betTargetCurrency?: string | null;
+  feeCurrency?: string | null;
+  tieredRules?: string | null;
+}) {
+  try {
+    const tiered = contract.tieredRules ? JSON.parse(contract.tieredRules) as { currency?: string } : null;
+    if (tiered?.currency) return tiered.currency;
+  } catch {
+    // Invalid historical JSON falls back to the explicit contract currency fields.
+  }
+  return contract.thresholdCurrency || contract.betTargetCurrency || contract.feeCurrency;
+}
+
 export type ReconciliationPlanPeriod = {
   type: "FEE_ONLY" | "COMMISSION_ONLY";
   index: number;
@@ -91,9 +106,15 @@ function automationKey(contractId: string, period: ReconciliationPlanPeriod): st
  * 缺少客户或有效合同日期时安全跳过，由业务人员补齐后可再次触发。
  */
 export async function ensureCustomerReconciliationPlan(contractId: string, actorId: string) {
-  const contract = await prisma.contract.findUnique({ where: { id: contractId } });
+  const contract = await prisma.contract.findUnique({
+    where: { id: contractId },
+    include: { customer: { select: { status: true, cooperationEndDate: true } } },
+  });
   if (!contract || contract.status !== "COMPLETED" || !contract.customerId || !contract.startDate || !contract.endDate) {
     return { created: 0, skipped: true };
+  }
+  if (contract.customer?.status !== "COOPERATING") {
+    return { created: 0, skipped: true, reason: "CUSTOMER_NOT_COOPERATING" };
   }
   if (contract.startDate > contract.endDate) {
     return { created: 0, skipped: true };
@@ -130,7 +151,7 @@ export async function ensureCustomerReconciliationPlan(contractId: string, actor
           affiliateRule: contract.affiliateRule,
           paymentCycle: contract.paymentCycle,
           fixedFeeCurrency: reconciliationCurrency(contract.feeCurrency),
-          commissionCurrency: reconciliationCurrency(contract.thresholdCurrency || contract.feeCurrency),
+          commissionCurrency: reconciliationCurrency(contractCommissionCurrency(contract)),
           reconcileType: period.type,
           createdById: actorId,
           updatedAt: now,
@@ -144,4 +165,101 @@ export async function ensureCustomerReconciliationPlan(contractId: string, actor
   }
 
   return { created, skipped: false };
+}
+
+export async function ensureCustomerPlansForCooperatingCustomer(customerId: string, actorId: string) {
+  const contracts = await prisma.contract.findMany({
+    where: { customerId, status: "COMPLETED", deletedAt: null },
+    select: { id: true },
+  });
+  let created = 0;
+  for (const contract of contracts) {
+    const result = await ensureCustomerReconciliationPlan(contract.id, actorId);
+    created += result.created;
+  }
+  return { created, contracts: contracts.length };
+}
+
+export async function closeCustomerReconciliationPlans(
+  customerId: string,
+  cooperationEndDate: Date,
+  actorId: string,
+) {
+  const endDate = utcDate(cooperationEndDate);
+  const records = await prisma.customerReconciliation.findMany({
+    where: { customerId, deletedAt: null, planStatus: { not: "CANCELLED" } },
+    include: {
+      settlements: { select: { status: true } },
+      billingRequestLines: { select: { id: true }, take: 1 },
+      receiptAllocations: { where: { status: "ACTIVE" }, select: { id: true }, take: 1 },
+    },
+  });
+  const reason = `客户结束合作，合作结束日期调整为 ${endDate.toISOString().slice(0, 10)}`;
+  let cancelled = 0;
+  let shortened = 0;
+  let preserved = 0;
+
+  await prisma.$transaction(async (tx) => {
+    for (const record of records) {
+      const hasFinancialHistory = record.status === "CONFIRMED"
+        || record.settlements.some((item) => item.status === "SETTLED")
+        || record.billingRequestLines.length > 0
+        || record.receiptAllocations.length > 0;
+      if (record.periodStart > endDate) {
+        await tx.customerReconciliation.update({
+          where: { id: record.id },
+          data: { planStatus: "CANCELLED", adjustmentReason: reason, updatedAt: new Date() },
+        });
+        await tx.financeAuditLog.create({
+          data: {
+            entityType: "CUSTOMER_RECONCILIATION",
+            entityId: record.id,
+            action: "CANCEL_AFTER_COOPERATION_END",
+            actorId,
+            fromStatus: record.planStatus,
+            toStatus: "CANCELLED",
+            note: reason,
+            metadata: JSON.stringify({ hasFinancialHistory, periodStart: record.periodStart, periodEnd: record.periodEnd }),
+          },
+        });
+        cancelled += 1;
+      } else if (record.periodEnd > endDate && !hasFinancialHistory) {
+        await tx.customerReconciliation.update({
+          where: { id: record.id },
+          data: {
+            periodEnd: endDate,
+            periodAdjusted: true,
+            adjustmentReason: reason,
+            updatedAt: new Date(),
+          },
+        });
+        await tx.reconciliationPeriodAudit.create({
+          data: {
+            reconciliationId: record.id,
+            actorId,
+            beforeStart: record.periodStart,
+            beforeEnd: record.periodEnd,
+            afterStart: record.periodStart,
+            afterEnd: endDate,
+            reason,
+          },
+        });
+        shortened += 1;
+      } else if (record.periodEnd > endDate) {
+        await tx.financeAuditLog.create({
+          data: {
+            entityType: "CUSTOMER_RECONCILIATION",
+            entityId: record.id,
+            action: "COOPERATION_END_PRESERVE_FINANCIAL_HISTORY",
+            actorId,
+            fromStatus: record.status,
+            toStatus: record.status,
+            note: `${reason}；该记录已有财务历史，保留原周期`,
+          },
+        });
+        preserved += 1;
+      }
+    }
+  });
+  return { cancelled, shortened, preserved };
 }

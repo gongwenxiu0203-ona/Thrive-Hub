@@ -298,6 +298,7 @@ export default async function CustomerDetailPage({
             customerId={customer.id}
             customerName={customer.brandName}
             status={customer.status}
+            cooperationEndDate={customer.cooperationEndDate?.toISOString().slice(0, 10) ?? null}
             businessOwnerId={customer.businessOwnerId}
             backendOwnerId={customer.backendOwnerId}
             demoDueDate={customerAny.demoDueDate ? new Date(customerAny.demoDueDate).toISOString().slice(0, 10) : null}

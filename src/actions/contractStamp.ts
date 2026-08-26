@@ -28,6 +28,7 @@ import {
 } from "@/lib/permissionGuard";
 import { actionError, AppError } from "@/lib/appError";
 import { ensureCustomerReconciliationPlan } from "@/lib/customerReconciliationPlan";
+import { bumpCustomerStatus } from "@/lib/customer";
 
 type Result<T = void> = { ok: true; data?: T } | { ok: false; error: string };
 
@@ -72,7 +73,7 @@ export async function stampContract(contractId: string, sealCompany?: SealCompan
 
   const c = await prisma.contract.findUnique({
     where: { id: contractId },
-    select: { id: true, status: true, stampStatus: true },
+    select: { id: true, status: true, stampStatus: true, customerId: true },
   });
   if (!c) return { ok: false, error: "合同不存在" };
   if (c.status !== "SIGNING" && c.status !== "COMPLETED") {
@@ -160,6 +161,7 @@ export async function stampContract(contractId: string, sealCompany?: SealCompan
       },
     });
     if (c.status === "SIGNING") {
+      if (c.customerId) await bumpCustomerStatus(c.customerId, "COOPERATING");
       await ensureCustomerReconciliationPlan(contractId, session.userId);
     }
 

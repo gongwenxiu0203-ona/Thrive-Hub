@@ -258,23 +258,10 @@ export function FinanceWorkbenchClient({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {canEditBilling && (
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={() => setEmbeddedUrl("/invoices/new")}
-            >
-              新建 Invoice
-            </button>
-          )}
           {canViewBilling && (
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={() => setEmbeddedUrl("/invoices")}
-            >
-              Invoice 列表
-            </button>
+            <Link href="/invoices" className="btn-secondary">
+              Invoice
+            </Link>
           )}
           <Link href="/finance" className="btn-secondary">
             返回结算中心

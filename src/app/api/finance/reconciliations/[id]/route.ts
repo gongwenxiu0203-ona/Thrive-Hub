@@ -205,6 +205,8 @@ export async function DELETE(
     const session = await requireSession();
     const access = await getReconciliationAccess(session, "MANAGE", req);
     const { id } = await params;
+    const body = await req.json().catch(() => ({}));
+    const deletionReason = typeof body.reason === "string" ? body.reason.trim() : "";
     const existing = await prisma.customerReconciliation.findFirst({
       where: scopedReconciliationWhere(id, access.scope),
       include: { settlements: { select: { status: true } } },
@@ -212,16 +214,37 @@ export async function DELETE(
     if (!existing) {
       return NextResponse.json({ error: "对账记录不存在或您无权访问" }, { status: 404 });
     }
-    if (existing.status === "CONFIRMED") {
-      return NextResponse.json({ error: "已确认的对账记录属于财务历史，不能删除" }, { status: 409 });
+    const completed = existing.status === "CONFIRMED"
+      || existing.settlements.some((settlement) => settlement.status === "SETTLED");
+    if (completed && session.role !== "ADMIN") {
+      return NextResponse.json({ error: "只有管理员可以删除已确认或已结算的客户对账" }, { status: 403 });
     }
-    if (existing.settlements.some((settlement) => settlement.status === "SETTLED")) {
-      return NextResponse.json({ error: "该对账记录已存在已结算款项，不能删除" }, { status: 409 });
+    if (completed && !deletionReason) {
+      return NextResponse.json({ error: "删除已完成的客户对账必须填写删除原因" }, { status: 400 });
     }
 
-    await prisma.customerReconciliation.update({
-      where: { id },
-      data: { deletedAt: new Date() },
+    const deletedAt = new Date();
+    await prisma.$transaction(async (tx) => {
+      await tx.customerReconciliation.update({
+        where: { id },
+        data: { deletedAt },
+      });
+      await tx.financeAuditLog.create({
+        data: {
+          entityType: "CUSTOMER_RECONCILIATION",
+          entityId: id,
+          action: "SOFT_DELETE",
+          actorId: session.userId,
+          fromStatus: existing.status,
+          toStatus: "DELETED",
+          note: deletionReason || null,
+          metadata: JSON.stringify({
+            completed,
+            settlementStatuses: existing.settlements.map((item) => item.status),
+            deletedAt: deletedAt.toISOString(),
+          }),
+        },
+      });
     });
 
     return NextResponse.json({ success: true });

@@ -54,6 +54,7 @@ export function InternalManagement({
   customerId,
   customerName,
   status,
+  cooperationEndDate,
   businessOwnerId,
   backendOwnerId,
   demoDueDate,
@@ -68,6 +69,7 @@ export function InternalManagement({
   customerId: string;
   customerName: string;
   status: string;
+  cooperationEndDate?: string | null;
   businessOwnerId: string | null;
   backendOwnerId: string | null;
   demoDueDate?: string | null;
@@ -82,6 +84,8 @@ export function InternalManagement({
   const [pending, startTransition] = useTransition();
   // 默认显示创建时已保存的 Demo 截止日期（即使售前方案负责人空着）
   const [demoDue, setDemoDue] = useState(demoDueDate ?? "");
+  const [endingCooperation, setEndingCooperation] = useState(false);
+  const [cooperationEnd, setCooperationEnd] = useState(cooperationEndDate ?? "");
 
   function run(fn: () => Promise<unknown>) {
     startTransition(async () => {
@@ -105,7 +109,16 @@ export function InternalManagement({
             className="input flex-1"
             value={status}
             disabled={pending || !_canEdit}
-            onChange={(e) => run(() => updateCustomerStatus(customerId, e.target.value))}
+            onChange={(e) => {
+              const nextStatus = e.target.value;
+              if (nextStatus === "COOPERATION_DONE") {
+                setEndingCooperation(true);
+                if (!cooperationEnd) setCooperationEnd(new Date().toISOString().slice(0, 10));
+                return;
+              }
+              setEndingCooperation(false);
+              run(() => updateCustomerStatus(customerId, nextStatus));
+            }}
           >
             {Object.entries(CUSTOMER_STATUS_LABELS).map(([k, v]) => (
               <option key={k} value={k}>{v}</option>
@@ -115,6 +128,42 @@ export function InternalManagement({
             {labelOf(CUSTOMER_STATUS_LABELS, status)}
           </Badge>
         </div>
+        {endingCooperation && (
+          <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
+            <label className="label text-xs">合作结束日期 *</label>
+            <div className="flex flex-wrap gap-2">
+              <input
+                type="date"
+                className="input min-w-44 flex-1"
+                value={cooperationEnd}
+                onChange={(event) => setCooperationEnd(event.target.value)}
+              />
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={pending || !cooperationEnd}
+                onClick={() => run(async () => {
+                  await updateCustomerStatus(customerId, "COOPERATION_DONE", cooperationEnd);
+                  setEndingCooperation(false);
+                })}
+              >
+                确认结束合作
+              </button>
+              <button type="button" className="btn-secondary" onClick={() => setEndingCooperation(false)}>
+                取消
+              </button>
+            </div>
+            <p className="mt-2 text-[11px] text-amber-700">
+              系统将截断未确认的跨期对账，并把结束日期之后的客户对账计划标记为作废。
+            </p>
+          </div>
+        )}
+        {status === "COOPERATION_DONE" && cooperationEndDate && !endingCooperation && (
+          <div className="mt-1.5 flex items-center gap-2 text-[11px] text-slate-500">
+            <span>合作结束日期：{cooperationEndDate}</span>
+            {_canEdit && <button type="button" className="text-brand-700 hover:underline" onClick={() => setEndingCooperation(true)}>修改结束日期</button>}
+          </div>
+        )}
         <p className="mt-1.5 text-[11px] text-slate-400">进度也可随任务与合同状态自动推进</p>
       </div>
 

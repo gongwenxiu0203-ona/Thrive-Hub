@@ -1071,6 +1071,7 @@ function MonthlyRecordRow({
   const [updatingCurrency, setUpdatingCurrency] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [deletionReason, setDeletionReason] = useState("");
 
   const isDraft = rec.status === "DRAFT";
   const isPendingReview = rec.status === "PENDING_REVIEW";
@@ -1143,16 +1144,23 @@ function MonthlyRecordRow({
 
   async function deleteRecord() {
     if (!canManage) return;
+    if (isConfirmed && !deletionReason.trim()) {
+      alert("删除已完成的客户对账必须填写删除原因");
+      return;
+    }
     setDeleting(true);
     try {
       const res = await fetch(`/api/finance/reconciliations/${rec.id}`, {
         method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: deletionReason.trim() }),
       });
       if (!res.ok) {
         alert((await res.json()).error ?? "删除失败");
         return;
       }
       setShowDeleteModal(false);
+      setDeletionReason("");
       onRefresh();
     } finally {
       setDeleting(false);
@@ -1725,7 +1733,10 @@ function MonthlyRecordRow({
       {showDeleteModal && canManage && (
         <Modal
           open
-          onClose={() => setShowDeleteModal(false)}
+          onClose={() => {
+            setShowDeleteModal(false);
+            setDeletionReason("");
+          }}
           title="确认删除该月度对账？"
           size="sm"
           closeOnBackdrop={!deleting}
@@ -1735,7 +1746,10 @@ function MonthlyRecordRow({
               <button
                 type="button"
                 className="btn-secondary"
-                onClick={() => setShowDeleteModal(false)}
+                onClick={() => {
+                  setShowDeleteModal(false);
+                  setDeletionReason("");
+                }}
                 disabled={deleting}
               >
                 取消
@@ -1743,7 +1757,7 @@ function MonthlyRecordRow({
               <button
                 type="button"
                 className="rounded-lg bg-rose-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-rose-500 disabled:opacity-50"
-                disabled={deleting}
+                disabled={deleting || (isConfirmed && !deletionReason.trim())}
                 onClick={deleteRecord}
               >
                 {deleting ? "删除中…" : "确认删除"}
@@ -1766,9 +1780,25 @@ function MonthlyRecordRow({
               ）。
             </p>
             <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700">
-              💡 删除后可在财务对账列表的「已删除」Tab 中找回，
-              <strong>7 天内可恢复</strong>，超期将自动永久清理。
+              💡 删除后可在财务对账列表的「已删除」Tab 中找回。
+              {isConfirmed ? (
+                <strong> 已完成记录将作为审计历史永久保留，不会自动物理删除。</strong>
+              ) : (
+                <><strong> 7 天内可恢复</strong>，超期将自动清理。</>
+              )}
             </p>
+            <div>
+              <label className="label">
+                删除原因{isConfirmed ? " *" : "（选填）"}
+              </label>
+              <textarea
+                className="input min-h-20 resize-y"
+                value={deletionReason}
+                onChange={(event) => setDeletionReason(event.target.value)}
+                placeholder={isConfirmed ? "请说明删除已完成对账的原因" : "可填写删除原因，便于审计追溯"}
+                maxLength={500}
+              />
+            </div>
           </div>
         </Modal>
       )}

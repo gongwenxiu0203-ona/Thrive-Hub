@@ -523,8 +523,6 @@ export async function uploadExistingContract(
     return { ok: false, error: "合同编号冲突，请稍后重试" };
   }
 
-  await ensureCustomerReconciliationPlan(contract.id, session.userId);
-
   const base = contractFileBaseName({
     contractNo: contract.contractNo,
     createdAt: new Date(),
@@ -553,6 +551,7 @@ export async function uploadExistingContract(
   const archived = true;
   await syncContractProgressToProjects(contract.id, "签署完成");
   await bumpCustomerStatus(customerId, "COOPERATING");
+  await ensureCustomerReconciliationPlan(contract.id, session.userId);
   const autoSubmitted = false;
 
   revalidatePath("/contracts");

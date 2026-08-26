@@ -331,6 +331,7 @@ export async function DELETE(
       },
       select: {
         id: true,
+        status: true,
         periods: {
           where: {
             OR: [
@@ -344,10 +345,13 @@ export async function DELETE(
       },
     });
     if (!existing) return NextResponse.json({ error: "渠道商对账记录不存在、已删除或无权访问" }, { status: 404 });
-    if (existing.periods.length > 0) {
+    if (existing.status === "SETTLED" && session.role !== "ADMIN") {
+      return NextResponse.json({ error: "只有管理员可以删除已完成的渠道商对账" }, { status: 403 });
+    }
+    if (existing.periods.length > 0 && session.role !== "ADMIN") {
       return NextResponse.json(
-        { error: "该分账已有向渠道商付款的锁定期，不能删除" },
-        { status: 409 },
+        { error: "只有管理员可以删除已有付款记录的渠道商对账" },
+        { status: 403 },
       );
     }
     const current = await prisma.channelReconciliation.findUniqueOrThrow({ where: { id }, select: { auditLog: true, status: true } });
