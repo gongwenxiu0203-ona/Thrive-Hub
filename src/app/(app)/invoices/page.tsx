@@ -15,7 +15,7 @@ export default async function InvoicesPage({
 }) {
   const session = await requireSession();
   const params = await searchParams;
-  const permission = await resolveUserPermission(session.userId, "operations.invoices");
+  const permission = await resolveUserPermission(session.userId, "finance.invoices");
   if (!hasPermissionLevel(permission, "READ")) redirect("/operations");
   const search = params.search?.trim() ?? "";
   const status = params.status ?? "";

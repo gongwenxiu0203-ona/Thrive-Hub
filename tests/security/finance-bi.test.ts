@@ -74,6 +74,7 @@ before(async () => {
   const otherCustomer = await prisma.customer.create({
     data: {
       brandName: "Security Finance Other Customer",
+      status: "COOPERATING",
       businessOwnerId: ids.otherUser,
       createdById: ids.otherUser,
     },
@@ -196,9 +197,7 @@ after(async () => {
   await prisma.salesBatch.deleteMany({ where: { id: { in: [ids.ownedBatch, ids.otherBatch] } } });
   await prisma.customerReconciliation.deleteMany({
     where: {
-      id: {
-        in: [ids.ownedReconciliation, ids.otherReconciliation, ids.deletedReconciliation, ids.crossOwnedReconciliation],
-      },
+      contractId: { in: [ids.ownedContract, ids.otherContract, ids.draftContract, ids.deletedContract] },
     },
   });
   await prisma.contract.deleteMany({
@@ -363,9 +362,9 @@ test("BI clear requires internal MANAGE permission", async () => {
   assert.equal(editOnly.status, 403);
 
   await prisma.userPermissionOverride.upsert({
-    where: { userId_feature: { userId: actors.brand.id, feature: "bi" } },
+    where: { userId_feature: { userId: actors.brand.id, feature: "bi.manage" } },
     update: { level: "MANAGE" },
-    create: { userId: actors.brand.id, feature: "bi", level: "MANAGE" },
+    create: { userId: actors.brand.id, feature: "bi.manage", level: "MANAGE" },
   });
   const brandCookie = await sessionCookie(actors.brand);
   const externalManage = await jsonRequest(
@@ -377,11 +376,11 @@ test("BI clear requires internal MANAGE permission", async () => {
   assert.equal(externalManage.status, 403);
 });
 
-test("BI MANAGE clear preview is row-scoped and execution soft-deletes with audit logs", async () => {
+test("BI MANAGE gives an internal USER full data scope and execution keeps audit logs", async () => {
   await prisma.userPermissionOverride.upsert({
-    where: { userId_feature: { userId: actors.user.id, feature: "bi" } },
+    where: { userId_feature: { userId: actors.user.id, feature: "bi.manage" } },
     update: { level: "MANAGE" },
-    create: { userId: actors.user.id, feature: "bi", level: "MANAGE" },
+    create: { userId: actors.user.id, feature: "bi.manage", level: "MANAGE" },
   });
   const userCookie = await sessionCookie(actors.user);
 
@@ -393,7 +392,7 @@ test("BI MANAGE clear preview is row-scoped and execution soft-deletes with audi
   );
   assert.equal(crossScopePreview.status, 200);
   const crossScopeBody = await crossScopePreview.json() as { count: number };
-  assert.equal(crossScopeBody.count, 0);
+  assert.equal(crossScopeBody.count, 1);
 
   const preview = await jsonRequest(
     "/api/sales/clear",

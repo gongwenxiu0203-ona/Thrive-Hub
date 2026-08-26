@@ -10,20 +10,20 @@ test("role defaults keep representative leaves available for all four roles", ()
   assert.equal(resolveEffectivePermission({ role: "CHANNEL", feature: "finance.channel_reconciliation" }), "EDIT");
 });
 
-test("legacy rows remain a fallback for every leaf sharing the old module", () => {
+test("legacy rows are inert after canonical leaf migration", () => {
   assert.equal(resolveEffectivePermission({
     role: "BRAND",
     feature: "customers.followup",
     rolePermissions: [{ feature: "customers", level: "READ" }],
-  }), "READ");
+  }), "NONE");
   assert.equal(resolveEffectivePermission({
     role: "CHANNEL",
     feature: "finance.affiliate_reconciliation",
     rolePermissions: [{ feature: "finance_channel", level: "MANAGE" }],
-  }), "MANAGE");
+  }), "NONE");
 });
 
-test("canonical values beat legacy values and explicit NONE remains valid", () => {
+test("canonical explicit NONE remains authoritative", () => {
   assert.equal(resolveEffectivePermission({
     role: "ADMIN",
     feature: "bi.export",
@@ -49,7 +49,7 @@ test("permission landing always points at an allowed route", () => {
     { "contracts.records": "READ" },
     { "projects.records": "READ" },
     { "bi.view": "READ" },
-    { "operations.accounts_receivable": "READ" },
+    { "finance.receivables": "READ" },
     { "intake.review": "READ" },
   ];
   for (const permissions of cases) {

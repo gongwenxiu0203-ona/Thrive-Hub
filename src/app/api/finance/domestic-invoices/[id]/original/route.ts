@@ -5,7 +5,7 @@ import { requireSession } from "@/lib/session";
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
-  await requireFeaturePermission(session, "operations.invoices", "READ");
+  await requireFeaturePermission(session, "finance.domestic_invoices", "READ");
   const { id } = await params;
   const invoice = await prisma.invoice.findFirst({ where: { id, deletedAt: null, documentType: "DOMESTIC" }, select: { domesticDocument: { select: { originalFileUrl: true } } } });
   const fileUrl = invoice?.domesticDocument?.originalFileUrl;

@@ -11,7 +11,7 @@ export const metadata = { title: "登记客户到账 · Thraive" };
 export default async function NewReceiptPage({ searchParams }: { searchParams: Promise<{ customerId?: string; arId?: string }> }) {
   const session = await requireSession();
   if (!isStaff(session.role)) redirect("/finance");
-  await requireFeaturePermission(session, "operations.accounts_receivable", "EDIT");
+  await requireFeaturePermission(session, "finance.receipt_allocation", "EDIT");
   const query = await searchParams;
   const customers = await prisma.customer.findMany({
     where: { deletedAt: null }, orderBy: { brandName: "asc" },

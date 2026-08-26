@@ -56,9 +56,8 @@ export function requestedViewScope(value: string | null | undefined): ViewScope 
 /**
  * Resolve a safe row-level view scope.
  *
- * `scope=all` is honored only for ADMIN or a user whose effective permission
- * for the relevant feature is MANAGE. All other roles/levels are pinned to
- * `mine`, even if the client explicitly asks for all.
+ * Internal ADMIN/USER accounts are feature-gated but always use the complete
+ * business data scope. External roles remain pinned to their ownership scope.
  */
 export async function resolveSafeViewScope(
   session: Pick<SessionPayload, "userId" | "role">,
@@ -67,7 +66,7 @@ export async function resolveSafeViewScope(
   resolvedPermission?: PermLevel,
 ): Promise<ViewScope> {
   if (requestedViewScope(requested) !== "all") return "mine";
-  if (session.role === "ADMIN") return "all";
+  if (session.role === "ADMIN" || session.role === "USER") return "all";
 
   const permission =
     resolvedPermission ??

@@ -27,7 +27,7 @@ export async function POST(
 ) {
   try {
     const session = await requireSession();
-    await requireFeaturePermission(session, "operations.invoices", "EDIT");
+    await requireFeaturePermission(session, "finance.domestic_invoices", "EDIT");
     const { id } = await params;
     const form = await request.formData();
     const file = form.get("file");

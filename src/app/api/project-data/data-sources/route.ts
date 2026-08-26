@@ -11,13 +11,13 @@ async function ensureDefaults() {
 }
 
 export async function GET() {
-  try { const session = await requireSession(); await requireFeaturePermission(session, "projects.records", "READ"); await ensureDefaults(); return NextResponse.json({ data: await db.projectDataSource.findMany({ where: { status: "ACTIVE" }, orderBy: { createdAt: "asc" } }) }); }
+  try { const session = await requireSession(); await requireFeaturePermission(session, "projects.source_data", "READ"); await ensureDefaults(); return NextResponse.json({ data: await db.projectDataSource.findMany({ where: { status: "ACTIVE" }, orderBy: { createdAt: "asc" } }) }); }
   catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "读取数据来源失败。" }, { status: 403 }); }
 }
 
 export async function POST(request: Request) {
   try {
-    const session = await requireSession(); await requireFeaturePermission(session, "projects.records", "EDIT"); const body = await request.json();
+    const session = await requireSession(); await requireFeaturePermission(session, "projects.source_data", "EDIT"); const body = await request.json();
     const name = String(body.name ?? "").trim(); const code = String(body.code ?? "").trim().toLowerCase();
     if (!name || !/^[a-z0-9-]{2,50}$/.test(code)) throw new Error("平台名称必填，平台代码只能使用小写字母、数字和连字符。");
     const data = await db.projectDataSource.create({ data: { name, code, description: String(body.description ?? "").trim() || null, sourceUrl: String(body.sourceUrl ?? "").trim() || null } });

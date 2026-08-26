@@ -17,7 +17,7 @@ export type SaveResult = { ok: boolean; error?: string; id?: string };
 
 async function canOperate(
   userId: string,
-  feature: "operations.revenue" | "operations.accounts_receivable" | "operations.sales_pipeline",
+  feature: "operations.revenue" | "finance.receivables" | "operations.sales_pipeline",
   required: Exclude<PermLevel, "NONE">,
 ) {
   return hasPermissionLevel(await resolveUserPermission(userId, feature), required);
@@ -252,7 +252,7 @@ export async function createAR(payload: {
   remark?: string | null;
 }): Promise<SaveResult> {
   const session = await requireSession();
-  if (!(await canOperate(session.userId, "operations.accounts_receivable", "EDIT"))) return { ok: false, error: "无权操作" };
+  if (!(await canOperate(session.userId, "finance.receivables", "EDIT"))) return { ok: false, error: "无权操作" };
   if (!payload.invoiceNo?.trim()) return { ok: false, error: "请填写发票号" };
   if (!payload.invoiceDate) return { ok: false, error: "请选择开票日期" };
   if (!payload.dueDate) return { ok: false, error: "请选择应收到期日" };
@@ -324,7 +324,7 @@ export async function updateAR(
   },
 ): Promise<SaveResult> {
   const session = await requireSession();
-  if (!(await canOperate(session.userId, "operations.accounts_receivable", "EDIT"))) return { ok: false, error: "无权操作" };
+  if (!(await canOperate(session.userId, "finance.receivables", "EDIT"))) return { ok: false, error: "无权操作" };
   const existing = await prisma.accountsReceivable.findUnique({ where: { id } });
   if (!existing) return { ok: false, error: "记录不存在" };
 
@@ -358,7 +358,7 @@ export async function updateAR(
 
 export async function deleteAR(id: string): Promise<SaveResult> {
   const session = await requireSession();
-  if (!(await canOperate(session.userId, "operations.accounts_receivable", "MANAGE"))) return { ok: false, error: "无权删除应收账款" };
+  if (!(await canOperate(session.userId, "finance.receivables", "MANAGE"))) return { ok: false, error: "无权删除应收账款" };
   const deleted = await prisma.accountsReceivable.deleteMany({ where: { id } });
   if (deleted.count === 0) return { ok: false, error: "应收账款记录不存在或已被删除" };
   revalidatePath("/operations");
@@ -368,7 +368,7 @@ export async function deleteAR(id: string): Promise<SaveResult> {
 /** Bulk recalculate status + riskLevel for every AR row using today as the reference date. */
 export async function refreshArRisks(): Promise<{ ok: boolean; updated: number; error?: string }> {
   const session = await requireSession();
-  if (!(await canOperate(session.userId, "operations.accounts_receivable", "EDIT"))) {
+  if (!(await canOperate(session.userId, "finance.receivables", "EDIT"))) {
     return { ok: false, updated: 0, error: "无权刷新应收账款风险，请联系管理员授予应收账款编辑权限" };
   }
   const all = await prisma.accountsReceivable.findMany();

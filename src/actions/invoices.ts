@@ -24,7 +24,7 @@ import {
 import { requireSession } from "@/lib/session";
 import { actionError } from "@/lib/appError";
 
-const INVOICE_FEATURE = "operations.invoices";
+const INVOICE_FEATURE = "finance.invoices";
 const INVOICE_STATUSES = ["DRAFT", "ISSUED", "VOID"] as const;
 const PERIOD_TYPES = ["MONTH", "DATE_RANGE"] as const;
 const FEE_TYPES = ["MONTHLY_FEE", "SALES_COMMISSION", "AFFILIATE_FEE"] as const;

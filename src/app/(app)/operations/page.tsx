@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 const TAB_FEATURES = {
   revenue: "operations.revenue",
   count: "operations.customer_count",
-  ar: "operations.accounts_receivable",
+  ar: "finance.receivables",
   pipeline: "operations.sales_pipeline",
   kpi: "operations.employee_kpi",
 } as const;
@@ -31,7 +31,7 @@ export default async function FinanceOperationsPage({
   const permissionEntries = await Promise.all(
     Object.entries({
       ...TAB_FEATURES,
-      invoices: "operations.invoices",
+      invoices: "finance.invoices",
     }).map(async ([key, feature]) => [
       key,
       await resolveUserPermission(session.userId, feature),

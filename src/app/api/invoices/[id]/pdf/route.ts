@@ -51,7 +51,7 @@ export async function GET(
   }
 
   try {
-    await requireFeaturePermission(session, "operations.invoices", "READ");
+    await requireFeaturePermission(session, "finance.invoices", "READ");
   } catch (error) {
     if (error instanceof FeaturePermissionError) {
       return NextResponse.json(

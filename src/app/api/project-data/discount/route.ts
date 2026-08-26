@@ -79,9 +79,17 @@ function parseSourceUrl(raw: unknown) {
 async function assertProjects(
   projectIds: string[],
   level: "READ" | "EDIT" | "MANAGE" = "READ",
+  feature = "projects.discount_summary",
 ) {
   if (!projectIds.length) throw new Error("请选择项目。");
-  for (const id of projectIds) await requireProjectDataAccess(id, level);
+  for (const id of projectIds) await requireProjectDataAccess(id, level, feature);
+}
+
+function discountFeature(action: string) {
+  if (action === "products" || action === "product-summary" || action.includes("product")) return "projects.discount_products";
+  if (action === "mappings" || action === "source-fields" || action.includes("mapping")) return "projects.discount_mappings";
+  if (action === "sources" || action.startsWith("reminder") || action.includes("source")) return "projects.discount_sources";
+  return "projects.discount_summary";
 }
 
 export async function GET(request: Request) {
@@ -91,7 +99,7 @@ export async function GET(request: Request) {
     const projectIds = ids(
       url.searchParams.get("projectIds") || url.searchParams.get("projectId"),
     );
-    await assertProjects(projectIds);
+    await assertProjects(projectIds, "READ", discountFeature(action));
     if (action === "records" || action === "summary") {
       const rows = await db.projectDiscountRecord.findMany({
         where: { projectId: { in: projectIds } },
@@ -271,7 +279,7 @@ export async function POST(request: Request) {
     const body = await request.json();
     const action = String(body.action || "");
     const projectId = text(body.projectId, "项目", 80);
-    const { session } = await requireProjectDataAccess(projectId, "EDIT");
+    const { session } = await requireProjectDataAccess(projectId, "EDIT", discountFeature(action));
     if (action === "save-source") {
       const parsed = parseSourceUrl(body.sourceUrl);
       const id = body.id ? String(body.id) : null;

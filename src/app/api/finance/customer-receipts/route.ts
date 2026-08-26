@@ -8,7 +8,7 @@ import { errorResponse } from "@/lib/appError";
 export async function GET() {
   try {
     const session = await requireSession();
-    await requireFeaturePermission(session, "operations.accounts_receivable", "READ");
+    await requireFeaturePermission(session, "finance.receipt_allocation", "READ");
     if (!['ADMIN', 'USER'].includes(session.role)) return NextResponse.json({ error: "仅内部员工可查看收款流水" }, { status: 403 });
     const receipts = await prisma.customerReceipt.findMany({ include: { customer: { select: { id: true, brandName: true } }, allocations: true, createdBy: { select: { id: true, name: true } } }, orderBy: { receivedAt: "desc" }, take: 200 });
     return NextResponse.json({ receipts });
@@ -21,7 +21,7 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const session = await requireSession();
-    await requireFeaturePermission(session, "operations.accounts_receivable", "EDIT");
+    await requireFeaturePermission(session, "finance.receipt_allocation", "EDIT");
     if (!['ADMIN', 'USER'].includes(session.role)) return NextResponse.json({ error: "仅内部员工可登记客户到账" }, { status: 403 });
     const body = await req.json();
     const allocations: ReceiptAllocationInput[] = Array.isArray(body.allocations) ? body.allocations.map((row: Record<string, unknown>) => ({

@@ -22,6 +22,7 @@ type UserRecord = {
 };
 
 type Tab = "role" | "user";
+const VISIBLE_FEATURES = FEATURES;
 
 export function PermissionsPanel({ users, canEdit }: { users: UserRecord[]; canEdit: boolean }) {
   const [tab, setTab] = useState<Tab>("role");
@@ -139,9 +140,9 @@ function RolePermissionsTab({ canEdit }: { canEdit: boolean }) {
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
-          {FEATURES.map((f, index) => (
+          {VISIBLE_FEATURES.map((f, index) => (
             <Fragment key={f.key}>
-              {(index === 0 || FEATURES[index - 1].group !== f.group) && (
+              {(index === 0 || VISIBLE_FEATURES[index - 1].group !== f.group) && (
                 <tr className="bg-brand-50/70">
                   <td colSpan={ALL_ROLES.length + 1} className="px-4 py-2 text-xs font-semibold text-brand-700">
                     {FEATURE_GROUPS.includes(f.group as (typeof FEATURE_GROUPS)[number])
@@ -151,8 +152,8 @@ function RolePermissionsTab({ canEdit }: { canEdit: boolean }) {
                 </tr>
               )}
               {(index === 0
-                || FEATURES[index - 1].group !== f.group
-                || FEATURES[index - 1].module !== f.module) && (
+                || VISIBLE_FEATURES[index - 1].group !== f.group
+                || VISIBLE_FEATURES[index - 1].module !== f.module) && (
                 <tr className="bg-slate-50/70">
                   <td colSpan={ALL_ROLES.length + 1} className="px-4 py-2 text-xs font-medium text-slate-600">
                     {f.module}
@@ -381,12 +382,12 @@ function UserPermissionEditor({ user, canEdit }: { user: UserRecord; canEdit: bo
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
-          {FEATURES.map((f, index) => {
+          {VISIBLE_FEATURES.map((f, index) => {
             const lv = effective[f.key] ?? "NONE";
             const isOverride = overrideKeys.has(f.key);
             return (
               <Fragment key={f.key}>
-                {(index === 0 || FEATURES[index - 1].group !== f.group) && (
+                {(index === 0 || VISIBLE_FEATURES[index - 1].group !== f.group) && (
                   <tr className="bg-brand-50/70">
                     <td colSpan={4} className="px-4 py-2 text-xs font-semibold text-brand-700">
                       {f.group}
@@ -394,8 +395,8 @@ function UserPermissionEditor({ user, canEdit }: { user: UserRecord; canEdit: bo
                   </tr>
                 )}
                 {(index === 0
-                  || FEATURES[index - 1].group !== f.group
-                  || FEATURES[index - 1].module !== f.module) && (
+                  || VISIBLE_FEATURES[index - 1].group !== f.group
+                  || VISIBLE_FEATURES[index - 1].module !== f.module) && (
                     <tr className="bg-slate-50/70">
                       <td colSpan={4} className="px-4 py-2 text-xs font-medium text-slate-600">
                         {f.module}

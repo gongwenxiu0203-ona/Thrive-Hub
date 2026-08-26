@@ -44,7 +44,7 @@ export async function submitManualBillingRequest(input: {
 }) {
   try {
     const session = await requireSession();
-    await requireFeaturePermission(session, "operations.invoices", "EDIT");
+    await requireFeaturePermission(session, "finance.billing_requests", "EDIT");
     if (!isStaff(session.role)) return { ok: false, error: "仅内部员工可以提交开票申请。" };
     if (!input.customerId || !["INVOICE", "DOMESTIC"].includes(input.documentType)) return { ok: false, error: "请选择客户和票据类型。" };
     if (!input.items.length || input.items.length > 50) return { ok: false, error: "请填写 1 至 50 条开票明细。" };
@@ -89,7 +89,7 @@ export async function submitManualBillingRequest(input: {
 
 export async function saveCustomerBillingProfile(input: { customerId: string; name: string; invoiceTitle: string; taxNumber?: string; registeredAddress?: string; registeredPhone?: string; bankName?: string; bankAccount?: string; deliveryEmail?: string; isDefault?: boolean }) {
   try {
-    const session = await requireSession(); await requireFeaturePermission(session, "operations.invoices", "EDIT");
+    const session = await requireSession(); await requireFeaturePermission(session, "finance.profiles", "EDIT");
     if (!input.name.trim() || !input.invoiceTitle.trim()) return { ok: false, error: "资料名称和发票抬头必填。" };
     const result = await prisma.$transaction(async (tx) => {
       if (input.isDefault) await tx.customerBillingProfile.updateMany({ where: { customerId: input.customerId }, data: { isDefault: false } });
@@ -104,7 +104,7 @@ export async function saveCustomerBillingProfile(input: { customerId: string; na
 export async function saveFinanceAccountProfile(input: { id?: string; name: string; accountType: string; legalEntity: string; accountName: string; bankName?: string; accountNumber: string; currency?: string; country?: string; swiftCode?: string; bankAddress?: string; payeeAddress?: string; routingNumber?: string; note?: string; payerAccountKey?: string; attachmentUrls?: string[]; isDefault?: boolean }) {
   try {
     const session = await requireSession();
-    await requireFeaturePermission(session, "operations.accounts_receivable", "MANAGE");
+    await requireFeaturePermission(session, "finance.profiles", "MANAGE");
     const accountNumber = input.accountNumber.replace(/\s+/g, "");
     const legalEntity = cleanText(input.legalEntity);
     const currency = cleanCurrency(input.currency || (["CUSTOMER_BILLING", "COMPANY_PAYER", "SUPPLIER_PAYEE", "EMPLOYEE_REIMBURSEMENT"].includes(input.accountType) ? "CNY" : "USD"));
@@ -122,7 +122,7 @@ export async function saveFinanceAccountProfile(input: { id?: string; name: stri
 
 export async function createSupplierAndPaymentRequest(input: { supplierName: string; supplierType: string; country?: string; accountName: string; bankName?: string; accountNumber: string; swiftCode?: string; payerEntity?: string; payerAccountKey?: string; payerAccountProfileId?: string; reason: string; currency: string; amount: number; scheduledAt?: string; relatedInvoiceId?: string; relatedReceiptId?: string; invoiceUrls?: string | string[]; attachmentUrls?: string[]; note?: string }) {
   try {
-    const session = await requireSession(); await requireFeaturePermission(session, "finance.channel_reconciliation", "EDIT");
+    const session = await requireSession(); await requireFeaturePermission(session, "finance.payment_requests", "EDIT");
     const amount = round(Number(input.amount)); if (!input.supplierName.trim() || !input.accountName.trim() || !input.accountNumber.trim() || !input.reason.trim() || amount <= 0) return { ok: false, error: "请完整填写供应商、收款账户、付款事由和金额。" };
     if (!input.payerAccountProfileId) return { ok: false, error: "付款主体和付款账户必须从统一财务账户目录选择。" };
     const result = await prisma.$transaction(async (tx) => {
@@ -151,7 +151,7 @@ export async function createSupplierAndPaymentRequest(input: { supplierName: str
 
 export async function createExpenseClaim(input: { reimbursementEntity: string; currency: string; accountName: string; accountNumber: string; note?: string; attachmentUrls?: string[]; items: Array<{ description: string; expenseType: string; expenseDate: string; amount: number; invoiceTitle?: string; invoiceNumber?: string; invoiceUrls?: string | string[]; remark?: string }> }) {
   try {
-    const session = await requireSession(); await requireFeaturePermission(session, "operations.accounts_receivable", "EDIT");
+    const session = await requireSession(); await requireFeaturePermission(session, "finance.expenses", "EDIT");
     if (!input.reimbursementEntity.trim() || !input.accountName.trim() || !input.accountNumber.trim() || !input.items.length) return { ok: false, error: "请完整填写报销主体、收款账户和费用明细。" };
     const items = input.items.map((item, sortOrder) => { const amount = round(Number(item.amount)); if (!item.description.trim() || !item.expenseType || !item.expenseDate || amount <= 0) throw new Error("请完整填写每条费用明细。"); return { ...item, amount, sortOrder }; });
     const totalAmount = round(items.reduce((sum, item) => sum + item.amount, 0));
@@ -168,7 +168,18 @@ export async function createExpenseClaim(input: { reimbursementEntity: string; c
 
 export async function decideFinanceRequest(entityType: "BILLING_REQUEST" | "PAYMENT_REQUEST" | "EXPENSE_CLAIM", id: string, action: "APPROVE" | "REJECT" | "PAID", details?: string | { comment?: string; proofUrls?: string[]; transactionNo?: string; paidAt?: string }) {
   try {
-    const session = await requireSession(); await requireFeaturePermission(session, "finance.channel_reconciliation", "EDIT");
+    const session = await requireSession();
+    await requireFeaturePermission(
+      session,
+      entityType === "BILLING_REQUEST"
+        ? "finance.billing_requests"
+        : entityType === "EXPENSE_CLAIM"
+          ? "finance.expenses"
+          : action === "PAID"
+            ? "finance.payments"
+            : "finance.payment_requests",
+      action === "PAID" ? "MANAGE" : "EDIT",
+    );
     const comment = typeof details === "string" ? details.trim() : details?.comment?.trim() || "";
     if (action === "REJECT" && !comment) return { ok: false, error: "驳回必须填写原因。" };
     const now = new Date();

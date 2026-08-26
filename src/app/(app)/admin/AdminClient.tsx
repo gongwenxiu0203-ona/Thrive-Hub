@@ -166,7 +166,7 @@ export function AdminClient({
   const canEditUsers = hasAtLeast("admin.users", "EDIT");
   const canManageUsers = hasAtLeast("admin.users", "MANAGE");
   const canReviewRegistrations = hasAtLeast("admin.registration_review", "EDIT");
-  const canEditPermissions = hasAtLeast("admin.permissions", "EDIT");
+  const canEditPermissions = hasAtLeast("admin.permissions", "MANAGE");
   const canReviewIntake = hasAtLeast("intake.review", "EDIT");
 
   async function refreshUsers() {

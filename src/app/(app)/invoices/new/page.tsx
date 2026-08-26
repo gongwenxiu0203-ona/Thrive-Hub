@@ -21,7 +21,7 @@ export default async function NewInvoicePage({
   const session = await requireSession();
   const permission = await resolveUserPermission(
     session.userId,
-    "operations.invoices",
+    "finance.invoices",
   );
   if (!hasPermissionLevel(permission, "EDIT")) redirect("/invoices");
   const params = await searchParams;

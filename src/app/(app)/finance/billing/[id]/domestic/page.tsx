@@ -11,7 +11,7 @@ export const metadata = { title: "登记国内发票 · Thrive Hub" };
 
 export default async function DomesticInvoicePage({ params }: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
-  const permission = await resolveUserPermission(session.userId, "operations.invoices");
+  const permission = await resolveUserPermission(session.userId, "finance.domestic_invoices");
   if (!hasPermissionLevel(permission, "EDIT")) redirect("/finance/workbench");
   const { id } = await params;
   const request = await prisma.billingRequest.findFirst({ where: { id, documentType: "DOMESTIC" }, include: {

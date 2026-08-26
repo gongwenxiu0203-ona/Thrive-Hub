@@ -37,7 +37,7 @@ export async function POST(
 ) {
   try {
     const session = await requireSession();
-    await requireFeaturePermission(session, "operations.invoices", "EDIT");
+    await requireFeaturePermission(session, "finance.invoices", "EDIT");
     if (!isStaff(session.role)) {
       throw new AppError("仅内部员工可以发送 Invoice", 403, "PERMISSION_DENIED");
     }

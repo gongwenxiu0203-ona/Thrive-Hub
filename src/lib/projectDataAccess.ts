@@ -3,10 +3,14 @@ import { projectScope, type ViewScope } from "@/lib/dataScope";
 import { requireFeaturePermission, resolveSafeViewScope } from "@/lib/permissionGuard";
 import { requireSession } from "@/lib/session";
 
-export async function requireProjectDataAccess(projectId: string, level: "READ" | "EDIT" | "MANAGE") {
+export async function requireProjectDataAccess(
+  projectId: string,
+  level: "READ" | "EDIT" | "MANAGE",
+  feature = "projects.records",
+) {
   const session = await requireSession();
-  const permission = await requireFeaturePermission(session, "projects.records", level);
-  const view = await resolveSafeViewScope(session, "projects.records", "all", permission) as ViewScope;
+  const permission = await requireFeaturePermission(session, feature, level);
+  const view = await resolveSafeViewScope(session, feature, "all", permission) as ViewScope;
   const project = await prisma.project.findFirst({ where: { id: projectId, deletedAt: null, ...projectScope(session, view) }, select: { id: true, name: true } });
   if (!project) throw new Error("项目不存在或无权访问。");
   return { session, project };

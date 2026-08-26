@@ -16,7 +16,7 @@ export default async function InvoiceDetailPage({
   const { id } = await params;
   const [invoice, permission] = await Promise.all([
     getInvoiceById(id),
-    resolveUserPermission(session.userId, "operations.invoices"),
+    resolveUserPermission(session.userId, "finance.invoices"),
   ]);
   if (!hasPermissionLevel(permission, "READ")) redirect("/operations");
   if (!invoice) notFound();

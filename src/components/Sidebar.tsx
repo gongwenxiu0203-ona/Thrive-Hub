@@ -80,8 +80,8 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
         label: "\u8d22\u52a1\u5de5\u4f5c\u53f0",
         icon: FileText,
         features: [
-          "operations.accounts_receivable",
-          "operations.invoices",
+          "finance.receivables",
+          "finance.invoices",
         ],
       },
       {

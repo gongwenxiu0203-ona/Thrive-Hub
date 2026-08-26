@@ -20,7 +20,7 @@ export async function POST(
 ) {
   try {
     const session = await requireSession();
-    await requireFeaturePermission(session, "operations.invoices", "EDIT");
+    await requireFeaturePermission(session, "finance.domestic_invoices", "EDIT");
     const { id } = await params;
     const billing = await prisma.billingRequest.findFirst({
       where: { id, documentType: "DOMESTIC", status: "PROCESSING" },

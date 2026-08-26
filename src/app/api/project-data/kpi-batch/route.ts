@@ -12,8 +12,8 @@ const ownerFromTarget = (item: { amOwnerId: string | null; source: string }) => 
 
 async function access(level: "READ" | "EDIT", requested = "all") {
   const session = await requireSession();
-  const permission = await requireFeaturePermission(session, "projects.records", level);
-  const view = await resolveSafeViewScope(session, "projects.records", requested, permission);
+  const permission = await requireFeaturePermission(session, "projects.kpi", level);
+  const view = await resolveSafeViewScope(session, "projects.kpi", requested, permission);
   return { session, scope: projectScope(session, view) };
 }
 

@@ -44,7 +44,13 @@ export const FEATURES: FeatureDefinition[] = [
   { key: "contracts.templates", label: "合同模板", group: "工作流", module: "合同管理", legacyKey: "contracts" },
   { key: "contracts.signing", label: "签署与归档", group: "工作流", module: "合同管理", legacyKey: "contracts" },
   { key: "projects.records", label: "项目档案", group: "工作流", module: "项目管理", legacyKey: "tasks" },
+  { key: "projects.progress_dashboard", label: "项目进度 Dashboard", group: "工作流", module: "项目进度跟踪", legacyKey: "tasks" },
   { key: "projects.kpi", label: "项目 KPI", group: "工作流", module: "项目管理", legacyKey: "tasks" },
+  { key: "projects.source_data", label: "项目源数据管理", group: "工作流", module: "项目进度跟踪", legacyKey: "tasks" },
+  { key: "projects.discount_summary", label: "折扣汇总", group: "工作流", module: "项目折扣管理", legacyKey: "tasks" },
+  { key: "projects.discount_products", label: "折扣产品信息", group: "工作流", module: "项目折扣管理", legacyKey: "tasks" },
+  { key: "projects.discount_sources", label: "折扣数据源与提醒", group: "工作流", module: "项目折扣管理", legacyKey: "tasks" },
+  { key: "projects.discount_mappings", label: "折扣字段映射", group: "工作流", module: "项目折扣管理", legacyKey: "tasks" },
   { key: "tasks.board", label: "任务看板", group: "工作流", module: "任务与工作记录", legacyKey: "tasks" },
   { key: "worklogs.records", label: "工作记录", group: "工作流", module: "任务与工作记录", legacyKey: "tasks" },
 
@@ -60,8 +66,17 @@ export const FEATURES: FeatureDefinition[] = [
   { key: "finance.customer_reconciliation", label: "客户对账", group: "财务与经营", module: "结算中心", legacyKey: "finance_customer" },
   { key: "finance.channel_reconciliation", label: "渠道分账", group: "财务与经营", module: "结算中心", legacyKey: "finance_channel" },
   { key: "finance.affiliate_reconciliation", label: "联盟商结算", group: "财务与经营", module: "结算中心", legacyKey: "finance_channel" },
-  { key: "operations.accounts_receivable", label: "应收账款", group: "财务与经营", module: "开票与收款", legacyKey: "finance_customer" },
-  { key: "operations.invoices", label: "Invoice", group: "财务与经营", module: "开票与收款", legacyKey: "finance_customer" },
+  { key: "finance.billing_requests", label: "开票申请", group: "财务与经营", module: "财务工作台", legacyKey: "finance_customer" },
+  { key: "finance.invoices", label: "Invoice 开具", group: "财务与经营", module: "财务工作台", legacyKey: "finance_customer" },
+  { key: "finance.domestic_invoices", label: "国内发票", group: "财务与经营", module: "财务工作台", legacyKey: "finance_customer" },
+  { key: "finance.receivables", label: "应收账款", group: "财务与经营", module: "财务工作台", legacyKey: "finance_customer" },
+  { key: "finance.receipt_allocation", label: "收款登记与核销", group: "财务与经营", module: "财务工作台", legacyKey: "finance_customer" },
+  { key: "finance.payment_requests", label: "付款申请", group: "财务与经营", module: "财务流程", legacyKey: "finance_channel" },
+  { key: "finance.payments", label: "付款处理与应付核销", group: "财务与经营", module: "财务工作台", legacyKey: "finance_channel" },
+  { key: "finance.expenses", label: "费用报销", group: "财务与经营", module: "财务流程", legacyKey: "finance_channel" },
+  { key: "finance.profiles", label: "财务资料", group: "财务与经营", module: "财务流程", legacyKey: "finance_customer" },
+  { key: "finance.exports", label: "财务数据导出", group: "财务与经营", module: "财务工作台", legacyKey: "finance_customer" },
+  { key: "finance.exceptions", label: "财务异常处理", group: "财务与经营", module: "财务工作台", legacyKey: "finance_channel" },
   { key: "operations.revenue", label: "收入与现金流", group: "财务与经营", module: "经营驾驶舱", legacyKey: "finance_customer" },
   { key: "operations.customer_count", label: "客户经营", group: "财务与经营", module: "经营驾驶舱", legacyKey: "finance_customer" },
   { key: "operations.sales_pipeline", label: "销售漏斗", group: "财务与经营", module: "经营驾驶舱", legacyKey: "finance_customer" },
@@ -121,21 +136,3 @@ export const ROLE_LABELS_FOR_PERM: Record<string, string> = {
 export const FEATURE_BY_KEY = new Map(
   FEATURES.map((feature) => [feature.key, feature]),
 );
-
-/**
- * Temporary compatibility for guards that still pass a pre-granular module
- * key. New authorization code should use the leaf key on the right directly.
- */
-export const LEGACY_FEATURE_ALIASES: Record<string, string> = {
-  dashboard: "dashboard.view",
-  customers: "customers.records",
-  contracts: "contracts.records",
-  tasks: "tasks.board",
-  bi: "bi.view",
-  affiliates: "affiliates.records",
-  finance_customer: "finance.customer_reconciliation",
-  finance_channel: "finance.channel_reconciliation",
-  reminders: "reminders.records",
-  intake: "intake.links",
-  admin: "admin.users",
-};

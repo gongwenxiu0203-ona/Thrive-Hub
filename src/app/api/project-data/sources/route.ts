@@ -83,7 +83,7 @@ async function recalculate(projectId: string, dataMonth: string) {
 }
 
 async function authorize(projectId: string | null, mode: "READ" | "EDIT") {
-  if (projectId) return requireProjectDataAccess(projectId, mode);
+  if (projectId) return requireProjectDataAccess(projectId, mode, "projects.source_data");
   const session = await requireSession();
   await requireFeaturePermission(session, "projects.records", mode);
   return { session };
@@ -161,7 +161,7 @@ export async function POST(request: Request) {
     if (file.size <= 0 || file.size > MAX_BYTES) return NextResponse.json({ error: "源文件必须小于 30MB。" }, { status: 400 });
     const extension = path.extname(file.name).toLowerCase();
     if (!EXTENSIONS.has(extension)) return NextResponse.json({ error: "仅支持 .xlsx、.xls 和 .csv 文件。" }, { status: 400 });
-    const { session } = await requireProjectDataAccess(projectId, "EDIT");
+    const { session } = await requireProjectDataAccess(projectId, "EDIT", "projects.source_data");
     const bytes = Buffer.from(await file.arrayBuffer());
     const sha256 = createHash("sha256").update(bytes).digest("hex");
     const duplicate = await db.projectSourceFile.findFirst({ where: { projectId, sourceType, dataMonth, sha256, status: { not: "DELETED" } } });

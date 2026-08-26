@@ -5,6 +5,7 @@ import { dateValue, requireProjectDataAccess, safeJson } from "@/lib/projectData
 const resources = ["KPI", "SALES_SUMMARY", "DISCOUNT_SOURCE", "DISCOUNT_MAPPING", "DISCOUNT_RECORD", "PRODUCT", "SYNC_CONFIG"] as const;
 type Resource = typeof resources[number];
 const validResource = (value: string): value is Resource => (resources as readonly string[]).includes(value);
+const resourceFeature = (resource: Resource) => resource === "KPI" ? "projects.kpi" : resource === "SALES_SUMMARY" ? "projects.source_data" : resource === "PRODUCT" ? "projects.discount_products" : resource === "DISCOUNT_MAPPING" ? "projects.discount_mappings" : resource === "DISCOUNT_SOURCE" || resource === "SYNC_CONFIG" ? "projects.discount_sources" : "projects.discount_summary";
 const text = (value: unknown, label: string, max = 200) => { const result = String(value ?? "").trim(); if (!result || result.length > max) throw new Error(`${label}不能为空或超过 ${max} 字。`); return result; };
 const optional = (value: unknown, max = 200) => { const result = String(value ?? "").trim(); return result ? result.slice(0, max) : null; };
 const number = (value: unknown, label: string, fallback?: number) => { if ((value === "" || value == null) && fallback !== undefined) return fallback; const result = Number(value); if (!Number.isFinite(result)) throw new Error(`${label}必须是有效数字。`); return result; };
@@ -13,7 +14,7 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url); const projectId = text(url.searchParams.get("projectId"), "项目ID", 80); const resource = String(url.searchParams.get("resource") ?? "");
     if (!validResource(resource)) return NextResponse.json({ error: "资源类型无效。" }, { status: 400 });
-    await requireProjectDataAccess(projectId, "READ");
+    await requireProjectDataAccess(projectId, "READ", resourceFeature(resource));
     const take = Math.min(500, Math.max(1, Number(url.searchParams.get("limit")) || 100));
     const data = resource === "KPI" ? await db.projectKpi.findMany({ where: { projectId }, orderBy: { periodStart: "desc" }, take })
       : resource === "SALES_SUMMARY" ? await db.projectSalesSummary.findMany({ where: { projectId }, orderBy: { periodStart: "desc" }, take })
@@ -30,7 +31,7 @@ export async function POST(request: Request) {
   try {
     const body = await request.json(); const projectId = text(body.projectId, "项目ID", 80); const resource = String(body.resource ?? "");
     if (!validResource(resource)) return NextResponse.json({ error: "资源类型无效。" }, { status: 400 });
-    const { session } = await requireProjectDataAccess(projectId, "EDIT");
+    const { session } = await requireProjectDataAccess(projectId, "EDIT", resourceFeature(resource));
     let data: unknown;
     if (resource === "KPI") {
       const periodStart = dateValue(body.periodStart, "开始日期"), periodEnd = dateValue(body.periodEnd, "结束日期"); if (periodEnd < periodStart) throw new Error("结束日期不能早于开始日期。");

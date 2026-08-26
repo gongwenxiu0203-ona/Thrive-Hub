@@ -60,7 +60,13 @@ export function routeRequirement(
   if (startsWithRoute(pathname, "/contracts/reviews")) return { features: ["contracts.reviews"] };
   if (startsWithRoute(pathname, "/contracts/templates")) return { features: ["contracts.templates"] };
   if (startsWithRoute(pathname, "/contracts")) return { features: ["contracts.records"] };
-  if (startsWithRoute(pathname, "/projects")) return { features: ["projects.records"] };
+  if (startsWithRoute(pathname, "/projects/kpi-config")) return { features: ["projects.kpi"] };
+  if (startsWithRoute(pathname, "/projects/source-data")) return { features: ["projects.source_data"] };
+  if (startsWithRoute(pathname, "/projects/discount/product-info")) return { features: ["projects.discount_products"] };
+  if (startsWithRoute(pathname, "/projects/discount/source")) return { features: ["projects.discount_sources"] };
+  if (startsWithRoute(pathname, "/projects/discount/field-mapping")) return { features: ["projects.discount_mappings"] };
+  if (startsWithRoute(pathname, "/projects/discount")) return { features: ["projects.discount_summary"] };
+  if (startsWithRoute(pathname, "/projects")) return { features: ["projects.records", "projects.progress_dashboard"] };
   if (startsWithRoute(pathname, "/tasks")) return { features: ["tasks.board"] };
   if (startsWithRoute(pathname, "/worklogs")) return { features: ["worklogs.records"] };
   if (startsWithRoute(pathname, "/bi")) return { features: ["bi.view"] };
@@ -68,15 +74,18 @@ export function routeRequirement(
   if (startsWithRoute(pathname, "/finance/channel-reconciliations")) return { features: ["finance.channel_reconciliation"] };
   if (startsWithRoute(pathname, "/finance/affiliate-reconciliations")) return { features: ["finance.affiliate_reconciliation"] };
   if (startsWithRoute(pathname, "/finance/customers") || startsWithRoute(pathname, "/finance/reconciliations")) return { features: ["finance.customer_reconciliation"] };
-  if (startsWithRoute(pathname, "/finance")) return { features: ["finance.customer_reconciliation", "finance.channel_reconciliation", "finance.affiliate_reconciliation"] };
-  if (pathname === "/invoices/new") return { features: ["operations.invoices"], required: "EDIT" };
-  if (startsWithRoute(pathname, "/invoices")) return { features: ["operations.invoices"] };
+  if (startsWithRoute(pathname, "/finance/receipts")) return { features: ["finance.receipt_allocation"] };
+  if (startsWithRoute(pathname, "/finance/billing")) return { features: ["finance.billing_requests", "finance.invoices", "finance.domestic_invoices"] };
+  if (startsWithRoute(pathname, "/finance/workbench")) return { features: ["finance.billing_requests", "finance.invoices", "finance.domestic_invoices", "finance.receivables", "finance.receipt_allocation", "finance.payment_requests", "finance.payments", "finance.expenses", "finance.profiles", "finance.exports", "finance.exceptions"] };
+  if (startsWithRoute(pathname, "/finance")) return { features: ["finance.customer_reconciliation", "finance.channel_reconciliation", "finance.affiliate_reconciliation", "finance.billing_requests", "finance.receivables", "finance.payment_requests"] };
+  if (pathname === "/invoices/new") return { features: ["finance.invoices"], required: "EDIT" };
+  if (startsWithRoute(pathname, "/invoices")) return { features: ["finance.invoices"] };
   if (startsWithRoute(pathname, "/operations")) {
     const tab = searchParams?.get("tab");
     const byTab: Record<string, string> = {
       revenue: "operations.revenue",
       count: "operations.customer_count",
-      ar: "operations.accounts_receivable",
+      ar: "finance.receivables",
       pipeline: "operations.sales_pipeline",
       kpi: "operations.employee_kpi",
     };
@@ -114,12 +123,12 @@ const LANDING_CANDIDATES = [
   ["/dashboard", ["dashboard.view"]],
   ["/customers", ["customers.records"]],
   ["/contracts", ["contracts.records"]],
-  ["/projects", ["projects.records"]],
+  ["/projects", ["projects.records", "projects.progress_dashboard"]],
   ["/bi", ["bi.view"]],
   ["/affiliates", ["affiliates.records"]],
   ["/finance", ["finance.customer_reconciliation", "finance.channel_reconciliation", "finance.affiliate_reconciliation"]],
-  ["/invoices", ["operations.invoices"]],
-  ["/operations", ["operations.revenue", "operations.customer_count", "operations.accounts_receivable", "operations.sales_pipeline", "operations.employee_kpi"]],
+  ["/invoices", ["finance.invoices"]],
+  ["/operations", ["operations.revenue", "operations.customer_count", "finance.receivables", "operations.sales_pipeline", "operations.employee_kpi"]],
   ["/reminders", ["reminders.records"]],
   ["/admin", [...ADMIN_FEATURES, "intake.review"]],
 ] as const;

@@ -57,16 +57,19 @@ function contractInvoiceAccounts(value: string | null | undefined) {
 export default async function FinanceWorkbenchPage() {
   const session = await requireSession();
   if (!isStaff(session.role)) redirect("/finance");
-  const [invoicePermission, receivablePermission, channelPermission] =
+  const [invoicePermission, receivablePermission, channelPermission, paymentPermission, expensePermission, profilePermission] =
     await Promise.all([
-      resolveUserPermission(session.userId, "operations.invoices"),
-      resolveUserPermission(session.userId, "operations.accounts_receivable"),
+      resolveUserPermission(session.userId, "finance.billing_requests"),
+      resolveUserPermission(session.userId, "finance.receivables"),
       resolveUserPermission(session.userId, "finance.channel_reconciliation"),
+      resolveUserPermission(session.userId, "finance.payment_requests"),
+      resolveUserPermission(session.userId, "finance.expenses"),
+      resolveUserPermission(session.userId, "finance.profiles"),
     ]);
   const canViewBilling =
     hasPermissionLevel(invoicePermission, "READ") ||
     hasPermissionLevel(receivablePermission, "READ");
-  const canViewChannel = hasPermissionLevel(channelPermission, "READ");
+  const canViewChannel = hasPermissionLevel(channelPermission, "READ") || hasPermissionLevel(paymentPermission, "READ") || hasPermissionLevel(expensePermission, "READ");
   const canManageBilling = hasPermissionLevel(invoicePermission, "MANAGE");
   if (!canViewBilling && !canViewChannel) redirect("/finance");
   const [
@@ -336,7 +339,7 @@ export default async function FinanceWorkbenchPage() {
             canViewPayment={canViewChannel}
             canEditBilling={hasPermissionLevel(invoicePermission, "EDIT")}
             canEditReceipt={hasPermissionLevel(receivablePermission, "EDIT")}
-            canEditPayment={hasPermissionLevel(channelPermission, "EDIT")}
+            canEditPayment={hasPermissionLevel(paymentPermission, "EDIT") || hasPermissionLevel(channelPermission, "EDIT")}
             isAdmin={canManageBilling}
             billingRequests={billingRequests.map((row) => {
               const issuedAmount = row.invoices
@@ -528,7 +531,10 @@ export default async function FinanceWorkbenchPage() {
               canEdit={
                 hasPermissionLevel(invoicePermission, "EDIT") ||
                 hasPermissionLevel(receivablePermission, "EDIT") ||
-                hasPermissionLevel(channelPermission, "EDIT")
+                hasPermissionLevel(channelPermission, "EDIT") ||
+                hasPermissionLevel(paymentPermission, "EDIT") ||
+                hasPermissionLevel(expensePermission, "EDIT") ||
+                hasPermissionLevel(profilePermission, "EDIT")
               }
               data={{
                 customers: financeCustomers.map((customer) => ({
@@ -714,7 +720,10 @@ export default async function FinanceWorkbenchPage() {
                 canEdit={
                   hasPermissionLevel(invoicePermission, "EDIT") ||
                   hasPermissionLevel(receivablePermission, "EDIT") ||
-                  hasPermissionLevel(channelPermission, "EDIT")
+                  hasPermissionLevel(channelPermission, "EDIT") ||
+                  hasPermissionLevel(paymentPermission, "EDIT") ||
+                  hasPermissionLevel(expensePermission, "EDIT") ||
+                  hasPermissionLevel(profilePermission, "EDIT")
                 }
                 isAdmin={canManageBilling}
                 billingFlows={billingRequests.map((row) => ({

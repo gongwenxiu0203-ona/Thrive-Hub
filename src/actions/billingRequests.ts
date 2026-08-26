@@ -40,7 +40,7 @@ export async function submitBillingRequest(input: SubmitBillingRequestInput) {
     const session = await requireSession();
     await requireFeaturePermission(
       session,
-      "finance.customer_reconciliation",
+      "finance.billing_requests",
       "EDIT",
     );
     if (!isStaff(session.role))
@@ -173,7 +173,7 @@ export async function submitBillingRequest(input: SubmitBillingRequestInput) {
 export async function acceptBillingRequest(id: string) {
   try {
     const session = await requireSession();
-    await requireFeaturePermission(session, "operations.invoices", "EDIT");
+    await requireFeaturePermission(session, "finance.billing_requests", "EDIT");
     if (!isStaff(session.role))
       return { ok: false, error: "仅内部财务人员可以受理开票申请。" };
     const result = await prisma.$transaction(async (tx) => {
@@ -230,7 +230,7 @@ export async function acceptBillingRequest(id: string) {
 
 export async function getBillingRequestInvoiceIds(id: string) {
   const session = await requireSession();
-  await requireFeaturePermission(session, "operations.invoices", "EDIT");
+  await requireFeaturePermission(session, "finance.billing_requests", "EDIT");
   const request = await prisma.billingRequest.findFirst({
     where: { id, status: { in: ["PROCESSING", "COMPLETED"] } },
     select: {
@@ -312,7 +312,7 @@ export async function getBillingRequestInvoiceIds(id: string) {
 export async function deleteBillingRequest(id: string, reason?: string) {
   try {
     const session = await requireSession();
-    await requireFeaturePermission(session, "operations.invoices", "MANAGE");
+    await requireFeaturePermission(session, "finance.billing_requests", "MANAGE");
     const billing = await prisma.billingRequest.findUnique({
       where: { id },
       include: {

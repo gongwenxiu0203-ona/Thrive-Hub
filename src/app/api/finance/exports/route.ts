@@ -17,7 +17,7 @@ export async function POST(request: Request) {
     const rawIds = Array.isArray(body.ids) ? body.ids : [];
     const ids: string[] = [...new Set(rawIds.filter((id): id is string => typeof id === "string" && /^[a-zA-Z0-9_-]{5,80}$/.test(id)))];
     if (!(["AR", "PAYMENT_REQUEST", "EXPENSE_CLAIM", "PAYMENTS_AND_EXPENSES"] as string[]).includes(type) || !ids.length || ids.length > 200) return NextResponse.json({ error: "请选择 1 至 200 条有效财务记录。" }, { status: 400 });
-    const feature = type === "AR" ? "operations.accounts_receivable" : "finance.channel_reconciliation";
+    const feature = "finance.exports";
     const permission = await resolveUserPermission(session.userId, feature);
     if (!hasPermissionLevel(permission, "READ")) return NextResponse.json({ error: "无导出权限。" }, { status: 403 });
     const canViewAll = isStaff(session.role);

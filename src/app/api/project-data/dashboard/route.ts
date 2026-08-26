@@ -10,9 +10,9 @@ const monthPattern = /^\d{4}-(0[1-9]|1[0-2])$/;
 export async function GET(request: Request) {
   try {
     const session = await requireSession();
-    const permission = await requireFeaturePermission(session, "projects.records", "READ");
+    const permission = await requireFeaturePermission(session, "projects.progress_dashboard", "READ");
     const url = new URL(request.url);
-    const view = await resolveSafeViewScope(session, "projects.records", url.searchParams.get("scope") || "all", permission);
+    const view = await resolveSafeViewScope(session, "projects.progress_dashboard", url.searchParams.get("scope") || "all", permission);
     const month = url.searchParams.get("month") || new Date().toISOString().slice(0, 7);
     if (!monthPattern.test(month)) throw new Error("月份格式无效");
     const [year, monthNumber] = month.split("-").map(Number);
