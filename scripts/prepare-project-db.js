@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 
 const root = path.resolve(__dirname, "..");
+require("@next/env").loadEnvConfig(root);
 const schemaDir = path.join(root, "prisma-projects");
 if (process.env.NODE_ENV === "production" && !process.env.PROJECT_DATA_DATABASE_URL) {
   throw new Error("Production requires PROJECT_DATA_DATABASE_URL outside the release directory.");
