@@ -144,6 +144,23 @@ type Props = {
   invoiceStates?: Record<string, ReconciliationInvoiceState>;
 };
 
+const RECONCILIATION_CURRENCY_OPTIONS = [
+  { value: "USD", label: "USD — 美元" },
+  { value: "CNY", label: "CNY — 人民币" },
+  { value: "EUR", label: "EUR — 欧元" },
+  { value: "GBP", label: "GBP — 英镑" },
+  { value: "HKD", label: "HKD — 港元" },
+  { value: "JPY", label: "JPY — 日元" },
+  { value: "CAD", label: "CAD — 加元" },
+  { value: "AUD", label: "AUD — 澳元" },
+  { value: "SGD", label: "SGD — 新加坡元" },
+  { value: "CHF", label: "CHF — 瑞士法郎" },
+  { value: "NZD", label: "NZD — 新西兰元" },
+  { value: "KRW", label: "KRW — 韩元" },
+  { value: "INR", label: "INR — 印度卢比" },
+  { value: "AED", label: "AED — 阿联酋迪拉姆" },
+] as const;
+
 // ── currency symbol ───────────────────────────────────────────────────────────
 function currencySymbol(c: string) {
   const code = c.trim().toUpperCase();
@@ -153,6 +170,14 @@ function currencySymbol(c: string) {
   if (code === "GBP") return "£";
   if (code === "HKD") return "HK$";
   if (code === "JPY") return "¥";
+  if (code === "CAD") return "CA$";
+  if (code === "AUD") return "A$";
+  if (code === "SGD") return "S$";
+  if (code === "CHF") return "CHF ";
+  if (code === "NZD") return "NZ$";
+  if (code === "KRW") return "₩";
+  if (code === "INR") return "₹";
+  if (code === "AED") return "AED ";
   return `${code} `;
 }
 
@@ -1286,11 +1311,10 @@ function MonthlyRecordRow({
                       ? `${fixedSym}${(rec.finalFeeAmount ?? rec.feeAmount).toLocaleString("zh-CN", { minimumFractionDigits: 2 })}`
                       : `${commSym}${liveAmount.toLocaleString("zh-CN", { minimumFractionDigits: 2 })}`}
                   </strong>
-                  {!isConfirmed && !readOnly && (
-                    <>
-                      <input
-                        className="h-7 w-20 rounded-md border border-[#dcd4e7] bg-white px-2 text-xs uppercase text-slate-700 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
-                        list="reconciliation-currency-options"
+                  {!readOnly && (
+                      <select
+                        aria-label={isFixedStream ? "固费币种" : "销售佣金币种"}
+                        className="h-8 min-w-32 rounded-md border border-[#dcd4e7] bg-white px-2 text-xs text-slate-700 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
                         value={
                           (isFixedStream
                             ? rec.fixedFeeCurrency
@@ -1305,16 +1329,13 @@ function MonthlyRecordRow({
                             event.target.value.toUpperCase(),
                           )
                         }
-                      />
-                      <datalist id="reconciliation-currency-options">
-                        <option value="USD" />
-                        <option value="CNY" />
-                        <option value="EUR" />
-                        <option value="GBP" />
-                        <option value="HKD" />
-                        <option value="JPY" />
-                      </datalist>
-                    </>
+                      >
+                        {RECONCILIATION_CURRENCY_OPTIONS.map((currency) => (
+                          <option key={currency.value} value={currency.value}>
+                            {currency.label}
+                          </option>
+                        ))}
+                      </select>
                   )}
                 </dd>
               </div>
@@ -1428,10 +1449,10 @@ function MonthlyRecordRow({
                             ? `${commSym}${rec.finalSalesAmount?.toLocaleString("zh-CN", { minimumFractionDigits: 2 }) ?? "—"}`
                             : `${commSym}${rec.actualSalesAmount.toLocaleString("zh-CN", { minimumFractionDigits: 2 })}`}
                         </span>
-                        {!isConfirmed && !readOnly && (
-                          <input
-                            className="h-6 w-20 rounded border border-slate-200 px-1 text-xs uppercase text-slate-600"
-                            list="reconciliation-currency-options"
+                        {!readOnly && (
+                          <select
+                            aria-label="实际销售额币种"
+                            className="h-7 min-w-32 rounded border border-slate-200 bg-white px-1 text-xs text-slate-600"
                             value={rec.commissionCurrency || "USD"}
                             disabled={updatingCurrency}
                             onChange={(e) =>
@@ -1440,7 +1461,13 @@ function MonthlyRecordRow({
                                 e.target.value.toUpperCase(),
                               )
                             }
-                          />
+                          >
+                            {RECONCILIATION_CURRENCY_OPTIONS.map((currency) => (
+                              <option key={currency.value} value={currency.value}>
+                                {currency.label}
+                              </option>
+                            ))}
+                          </select>
                         )}
                       </span>
                     }

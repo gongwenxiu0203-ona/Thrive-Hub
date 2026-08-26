@@ -7,21 +7,6 @@ function reconciliationCurrency(value: string | null | undefined) {
   return normalized || "USD";
 }
 
-function contractCommissionCurrency(contract: {
-  thresholdCurrency?: string | null;
-  betTargetCurrency?: string | null;
-  feeCurrency?: string | null;
-  tieredRules?: string | null;
-}) {
-  try {
-    const tiered = contract.tieredRules ? JSON.parse(contract.tieredRules) as { currency?: string } : null;
-    if (tiered?.currency) return tiered.currency;
-  } catch {
-    // Invalid historical JSON falls back to the explicit contract currency fields.
-  }
-  return contract.thresholdCurrency || contract.betTargetCurrency || contract.feeCurrency;
-}
-
 export type ReconciliationPlanPeriod = {
   type: "FEE_ONLY" | "COMMISSION_ONLY";
   index: number;
@@ -151,7 +136,7 @@ export async function ensureCustomerReconciliationPlan(contractId: string, actor
           affiliateRule: contract.affiliateRule,
           paymentCycle: contract.paymentCycle,
           fixedFeeCurrency: reconciliationCurrency(contract.feeCurrency),
-          commissionCurrency: reconciliationCurrency(contractCommissionCurrency(contract)),
+          commissionCurrency: "USD",
           reconcileType: period.type,
           createdById: actorId,
           updatedAt: now,

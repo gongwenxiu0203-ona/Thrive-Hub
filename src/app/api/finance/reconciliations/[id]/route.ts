@@ -69,13 +69,6 @@ export async function PATCH(
 
     // 货币字段任何状态可改
     const currencyFields = ["fixedFeeCurrency", "commissionCurrency"];
-    const hasCurrencyFields = currencyFields.some((key) => key in body);
-    if (hasCurrencyFields && existing.status === "CONFIRMED") {
-      return NextResponse.json(
-        { error: "已确认的对账记录已锁定，不能修改币种" },
-        { status: 409 },
-      );
-    }
     const draftOnlyFields = [
       "periodStart", "periodEnd",
       "betType", "betOrderCount", "betSalesAmount",
@@ -87,7 +80,16 @@ export async function PATCH(
 
     // 货币字段
     for (const key of currencyFields) {
-      if (key in body) data[key] = body[key];
+      if (key in body) {
+        const currency = String(body[key] ?? "").trim().toUpperCase();
+        if (!/^[A-Z]{3}$/.test(currency)) {
+          return NextResponse.json(
+            { error: "币种必须是有效的三位国际币种代码" },
+            { status: 400 },
+          );
+        }
+        data[key] = currency;
+      }
     }
 
     // 草稿专属字段

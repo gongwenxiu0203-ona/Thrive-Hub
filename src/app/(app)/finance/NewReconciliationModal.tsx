@@ -31,29 +31,6 @@ type Props = {
 
 type ReconcileType = "FEE_ONLY" | "COMMISSION_ONLY";
 
-const CURRENCY_OPTIONS = ["USD", "CNY", "EUR", "GBP", "HKD", "JPY", "CAD", "AUD", "SGD"];
-
-function normalizeCurrency(value: string | null | undefined) {
-  const normalized = String(value ?? "").trim().toUpperCase();
-  if (["美金", "美元", "US$", "$"].includes(normalized)) return "USD";
-  if (["人民币", "人民币元", "RMB", "¥", "￥"].includes(normalized)) return "CNY";
-  return normalized || "USD";
-}
-
-function defaultCommissionCurrency(contract: Contract | null | undefined) {
-  try {
-    const tiered = contract?.tieredRules
-      ? JSON.parse(contract.tieredRules) as { currency?: string }
-      : null;
-    if (tiered?.currency) return normalizeCurrency(tiered.currency);
-  } catch {
-    // Invalid historical JSON falls back to the explicit contract fields.
-  }
-  return normalizeCurrency(
-    contract?.thresholdCurrency || contract?.betTargetCurrency || contract?.feeCurrency,
-  );
-}
-
 function dateInputValue(value: Date | string | null) {
   if (!value) return "";
   return new Date(value).toISOString().slice(0, 10);
@@ -70,8 +47,6 @@ export function NewReconciliationModal({ customers, onCreated }: Props) {
   ]);
   const [periodStart, setPeriodStart] = useState("");
   const [periodEnd, setPeriodEnd] = useState("");
-  const [fixedFeeCurrency, setFixedFeeCurrency] = useState("USD");
-  const [commissionCurrency, setCommissionCurrency] = useState("USD");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -87,8 +62,6 @@ export function NewReconciliationModal({ customers, onCreated }: Props) {
     setSelectedContractId(onlyContract?.id ?? "");
     setPeriodStart(dateInputValue(onlyContract?.startDate ?? null));
     setPeriodEnd(dateInputValue(onlyContract?.endDate ?? null));
-    setFixedFeeCurrency(normalizeCurrency(onlyContract?.feeCurrency));
-    setCommissionCurrency(defaultCommissionCurrency(onlyContract));
     setError(null);
   }
 
@@ -97,8 +70,6 @@ export function NewReconciliationModal({ customers, onCreated }: Props) {
     const contract = selectedCustomer?.contracts.find((item) => item.id === contractId);
     setPeriodStart(dateInputValue(contract?.startDate ?? null));
     setPeriodEnd(dateInputValue(contract?.endDate ?? null));
-    setFixedFeeCurrency(normalizeCurrency(contract?.feeCurrency));
-    setCommissionCurrency(defaultCommissionCurrency(contract));
     setError(null);
   }
 
@@ -116,8 +87,6 @@ export function NewReconciliationModal({ customers, onCreated }: Props) {
     setReconcileTypes(["FEE_ONLY", "COMMISSION_ONLY"]);
     setPeriodStart("");
     setPeriodEnd("");
-    setFixedFeeCurrency("USD");
-    setCommissionCurrency("USD");
     setError(null);
   }
 
@@ -150,8 +119,6 @@ export function NewReconciliationModal({ customers, onCreated }: Props) {
           reconcileTypes,
           periodStart,
           periodEnd,
-          fixedFeeCurrency,
-          commissionCurrency,
         }),
       });
       if (!response.ok) {
@@ -258,36 +225,8 @@ export function NewReconciliationModal({ customers, onCreated }: Props) {
             默认同时创建固费与销售佣金计划；固费每 30 个自然日一期，销售佣金首期至当月月底、之后按自然月划分。
           </p>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="label">固费币种</label>
-              <select
-                className="input"
-                value={fixedFeeCurrency}
-                onChange={(event) => setFixedFeeCurrency(event.target.value)}
-                disabled={!reconcileTypes.includes("FEE_ONLY")}
-              >
-                {CURRENCY_OPTIONS.map((currency) => (
-                  <option key={currency} value={currency}>{currency}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="label">销售佣金币种</label>
-              <select
-                className="input"
-                value={commissionCurrency}
-                onChange={(event) => setCommissionCurrency(event.target.value)}
-                disabled={!reconcileTypes.includes("COMMISSION_ONLY")}
-              >
-                {CURRENCY_OPTIONS.map((currency) => (
-                  <option key={currency} value={currency}>{currency}</option>
-                ))}
-              </select>
-            </div>
-          </div>
           <p className="text-xs text-slate-500">
-            默认读取合同中对应费用类型的币种，创建前可分别调整。
+            创建后自动设置：固费采用合同月度服务费币种，销售佣金采用 USD；可在对账详情页随时修改。
           </p>
 
           <div className="grid grid-cols-2 gap-3">

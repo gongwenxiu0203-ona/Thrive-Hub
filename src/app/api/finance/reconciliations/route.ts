@@ -15,21 +15,6 @@ function reconciliationCurrency(value: string | null | undefined) {
   return normalized || "USD";
 }
 
-function contractCommissionCurrency(contract: {
-  thresholdCurrency?: string | null;
-  betTargetCurrency?: string | null;
-  feeCurrency?: string | null;
-  tieredRules?: string | null;
-}) {
-  try {
-    const tiered = contract.tieredRules ? JSON.parse(contract.tieredRules) as { currency?: string } : null;
-    if (tiered?.currency) return tiered.currency;
-  } catch {
-    // Invalid historical JSON falls back to the explicit contract currency fields.
-  }
-  return contract.thresholdCurrency || contract.betTargetCurrency || contract.feeCurrency;
-}
-
 // GET /api/finance/reconciliations — 获取对账列表
 export async function GET(req: Request) {
   try {
@@ -83,8 +68,6 @@ export async function POST(req: Request) {
       reconcileTypes,
       source,
       adjustmentReason,
-      fixedFeeCurrency: requestedFixedFeeCurrency,
-      commissionCurrency: requestedCommissionCurrency,
     } = body;
 
     if (!customerId || !contractId || !periodStart || !periodEnd) {
@@ -170,13 +153,10 @@ export async function POST(req: Request) {
       betTarget: cAny.betTarget ?? null,
     });
 
-    // 货币：固费用 contract.feeCurrency；抽佣/销售额用 thresholdCurrency > betTargetCurrency > feeCurrency
-    const fixedFeeCurrency = reconciliationCurrency(
-      requestedFixedFeeCurrency || contract.feeCurrency,
-    );
-    const commissionCurrency = reconciliationCurrency(
-      requestedCommissionCurrency || contractCommissionCurrency(cAny),
-    );
+    // 创建时使用统一默认值：固费跟随合同月度服务费币种，销售佣金默认 USD。
+    // 创建后可在对账详情页随时修改。
+    const fixedFeeCurrency = reconciliationCurrency(contract.feeCurrency);
+    const commissionCurrency = "USD";
 
     const now = new Date();
     const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
