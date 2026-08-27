@@ -520,10 +520,10 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
             <div className="grid gap-4 sm:grid-cols-3">
               <div>
                 <label className="label">合同类型</label>
-                <select className="input" value={contractType} onChange={e => setContractType(e.target.value)}>
+                <select className="input" value={contractType} onChange={e => setContractType(e.target.value)} disabled={!isEdit}>
                   <option value="BRAND">品牌方合同</option>
-                  <option value="CHANNEL">渠道商合同</option>
-                  <option value="REBATE">返佣合同</option>
+                  {isEdit ? <option value="CHANNEL">渠道商返佣合同</option> : null}
+                  {isEdit ? <option value="REBATE">返佣合同（历史）</option> : null}
                 </select>
               </div>
               <div>
@@ -555,10 +555,8 @@ export function ContractV4Form({ customers, users, templates, presetCustomerId, 
             <div className="grid gap-4 sm:grid-cols-3">
               <div>
                 <label className="label">合同类型</label>
-                <select className="input" value={contractType} onChange={e => setContractType(e.target.value)}>
+                <select className="input" value="BRAND" disabled>
                   <option value="BRAND">品牌方合同</option>
-                  <option value="CHANNEL">渠道商合同</option>
-                  <option value="REBATE">返佣合同</option>
                 </select>
               </div>
               <div>

@@ -283,7 +283,9 @@ export async function uploadExistingContract(
 
   const customerId = s(fd, "customerId");
   if (!customerId) return { ok: false, error: "请选择关联客户" };
-  const type = s(fd, "type") || "BRAND";
+  // “上传已有合同”属于品牌方合同入口。渠道商返佣与事务性合同
+  // 分别使用独立的归档上传动作，不能通过篡改表单字段绕过入口。
+  const type = "BRAND";
   const templateId = s(fd, "templateId") || null;
   const partyBCompany = s(fd, "partyBCompany") || null;
   const noPrefix = (s(fd, "contractNoPrefix") as "LYNQ" | "THRAIVE") || "THRAIVE";

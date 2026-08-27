@@ -130,7 +130,10 @@ export default async function ContractsPage({
   // Client-side filtering for multi-select support
   const contracts = allContracts.filter((ct) => {
     if (statusFilter.length && !statusFilter.includes(ct.status)) return false;
-    if (typeFilter.length && !typeFilter.includes(ct.type)) return false;
+    if (typeFilter.length) {
+      const logicalType = ct.type === "REBATE" ? "CHANNEL" : ct.type;
+      if (!typeFilter.includes(logicalType)) return false;
+    }
     if (customerFilter.length && (!ct.customerId || !customerFilter.includes(ct.customerId))) return false;
     if (q) {
       const ql = q.toLowerCase();
@@ -147,7 +150,11 @@ export default async function ContractsPage({
   const userOptions = users.map((u) => ({ id: u.id, name: u.name }));
 
   const statusOptions = Object.entries(CONTRACT_STATUS_LABELS).map(([value, label]) => ({ value, label }));
-  const typeOptions = Object.entries(CONTRACT_TYPE_LABELS).map(([value, label]) => ({ value, label }));
+  const typeOptions = [
+    { value: "BRAND", label: "品牌方合同" },
+    { value: "CHANNEL", label: "渠道商返佣合同" },
+    { value: "TRANSACTIONAL", label: "事务性合同" },
+  ];
   const customerFilterOptions = customers.map((c) => ({ value: c.id, label: c.brandName }));
 
   return (

@@ -110,9 +110,9 @@ export const RATING_COLORS: Record<string, string> = {
 // ---- Contract -------------------------------------------------------------
 
 export const CONTRACT_TYPE_LABELS: Record<string, string> = {
-  CHANNEL: "渠道商合同",
+  CHANNEL: "渠道商返佣合同",
   BRAND: "品牌方合同",
-  REBATE: "返佣合同",
+  REBATE: "渠道商返佣合同（历史）",
   TRANSACTIONAL: "事务性合同",
 };
 

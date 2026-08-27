@@ -224,6 +224,7 @@ export async function createContract(
     }
     return tx.contract.create({ data: {
       contractNo, customerId, ...contractFieldsFromForm(fd), ownerId, reviewerId,
+      type: "BRAND",
       status: "IN_PROGRESS", createdById: session.userId,
     } });
   }).catch((error) => {
@@ -927,7 +928,7 @@ export async function createContractV4(
         data: {
           contractNo,
           customerId,
-      type: payload.type || "BRAND",
+      type: "BRAND",
       status: payload.saveAsDraft ? "DRAFT" : "IN_PROGRESS",
       createdById: session.userId,
       ownerId: payload.ownerId || session.userId,

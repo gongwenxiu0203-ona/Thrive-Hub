@@ -248,10 +248,8 @@ export function UploadExistingForm({
               </select>
             </Field>
             <Field label="合同类型" required>
-              <select value={type} onChange={(e) => setType(e.target.value as typeof type)} className="input">
+              <select value="BRAND" className="input" disabled>
                 <option value="BRAND">品牌方合同</option>
-                <option value="CHANNEL">渠道商合同</option>
-                <option value="REBATE">返佣合同</option>
               </select>
             </Field>
             <Field label="合同编号前缀">
