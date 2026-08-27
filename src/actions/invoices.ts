@@ -1236,12 +1236,41 @@ export async function createInvoice(
           if (billingRequestId) {
             const request = await tx.billingRequest.findFirst({
               where: { id: billingRequestId, status: "PROCESSING", documentType: "INVOICE", customerId: draft.customerId },
-              select: { id: true, lines: { select: { id: true, reconciliationId: true, requestedAmount: true, feeType: true, currency: true } } },
+              select: {
+                id: true,
+                lines: {
+                  select: {
+                    id: true,
+                    reconciliationId: true,
+                    requestedAmount: true,
+                    feeType: true,
+                    currency: true,
+                    reconciliation: { select: { contractId: true } },
+                  },
+                },
+              },
             });
-            if (!request || request.lines.some((line) => !reconciliationIds.includes(line.reconciliationId))) {
-              throw new Error("开票申请不存在、尚未受理，或与所选对账记录不一致。");
+            const requestReconciliationIds = request?.lines.map((line) => line.reconciliationId) ?? [];
+            const requestContractIds = Array.from(
+              new Set(request?.lines.map((line) => line.reconciliation.contractId) ?? []),
+            );
+            const selectedContractIds = draft.contractLinks.map((line) => line.contractId);
+            const sameReconciliations =
+              requestReconciliationIds.length === reconciliationIds.length &&
+              requestReconciliationIds.every((id) => reconciliationIds.includes(id));
+            const sameContracts =
+              requestContractIds.length === selectedContractIds.length &&
+              requestContractIds.every((id) => selectedContractIds.includes(id));
+            if (!request || !sameReconciliations || !sameContracts) {
+              throw new Error("开票申请不存在、尚未受理，或与所选对账记录及合同不一致。");
             }
-            billingRequestLines = request.lines;
+            billingRequestLines = request.lines.map((line) => ({
+              id: line.id,
+              reconciliationId: line.reconciliationId,
+              requestedAmount: line.requestedAmount,
+              feeType: line.feeType,
+              currency: line.currency,
+            }));
           }
           const { items, contractLinks, ...invoiceData } = draft;
           const billingRequestedTotal = billingRequestLines?.reduce((sum, line) => sum + line.requestedAmount, 0) ?? 0;

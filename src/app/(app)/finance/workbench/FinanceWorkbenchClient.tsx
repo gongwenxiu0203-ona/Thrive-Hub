@@ -17,6 +17,7 @@ type BillingRow = {
   documentType: string;
   mergeMode: string;
   lineCount: number;
+  contractNos: string[];
   sourceType: string;
   applicantNote: string | null;
   status: string;
@@ -390,6 +391,11 @@ export function FinanceWorkbenchClient({
                         <p className="text-xs text-slate-500">
                           {row.applicantName}
                         </p>
+                        {row.contractNos.length > 0 && (
+                          <p className="mt-1 max-w-xs text-xs text-slate-500">
+                            合同：{row.contractNos.join("、")}
+                          </p>
+                        )}
                         {row.applicantNote && (
                           <p className="mt-1 max-w-xs text-xs text-amber-700">
                             备注：{row.applicantNote}

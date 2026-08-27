@@ -40,7 +40,7 @@ export function NewReconciliationModal({ customers, onCreated }: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
-  const [selectedContractId, setSelectedContractId] = useState("");
+  const [selectedContractIds, setSelectedContractIds] = useState<string[]>([]);
   const [reconcileTypes, setReconcileTypes] = useState<ReconcileType[]>([
     "FEE_ONLY",
     "COMMISSION_ONLY",
@@ -54,22 +54,34 @@ export function NewReconciliationModal({ customers, onCreated }: Props) {
     () => customers.find((customer) => customer.id === selectedCustomerId),
     [customers, selectedCustomerId],
   );
+  const selectedContracts = useMemo(
+    () => selectedCustomer?.contracts.filter((contract) => selectedContractIds.includes(contract.id)) ?? [],
+    [selectedCustomer, selectedContractIds],
+  );
+  const isSingleContract = selectedContracts.length === 1;
 
   function handleCustomerChange(customerId: string) {
     setSelectedCustomerId(customerId);
     const customer = customers.find((item) => item.id === customerId);
     const onlyContract = customer?.contracts.length === 1 ? customer.contracts[0] : null;
-    setSelectedContractId(onlyContract?.id ?? "");
+    setSelectedContractIds(onlyContract ? [onlyContract.id] : []);
     setPeriodStart(dateInputValue(onlyContract?.startDate ?? null));
     setPeriodEnd(dateInputValue(onlyContract?.endDate ?? null));
     setError(null);
   }
 
-  function handleContractChange(contractId: string) {
-    setSelectedContractId(contractId);
-    const contract = selectedCustomer?.contracts.find((item) => item.id === contractId);
-    setPeriodStart(dateInputValue(contract?.startDate ?? null));
-    setPeriodEnd(dateInputValue(contract?.endDate ?? null));
+  function toggleContract(contractId: string) {
+    setSelectedContractIds((current) => {
+      const next = current.includes(contractId)
+        ? current.filter((id) => id !== contractId)
+        : [...current, contractId];
+      const onlyContract = next.length === 1
+        ? selectedCustomer?.contracts.find((item) => item.id === next[0])
+        : null;
+      setPeriodStart(dateInputValue(onlyContract?.startDate ?? null));
+      setPeriodEnd(dateInputValue(onlyContract?.endDate ?? null));
+      return next;
+    });
     setError(null);
   }
 
@@ -83,7 +95,7 @@ export function NewReconciliationModal({ customers, onCreated }: Props) {
 
   function resetForm() {
     setSelectedCustomerId("");
-    setSelectedContractId("");
+    setSelectedContractIds([]);
     setReconcileTypes(["FEE_ONLY", "COMMISSION_ONLY"]);
     setPeriodStart("");
     setPeriodEnd("");
@@ -94,15 +106,22 @@ export function NewReconciliationModal({ customers, onCreated }: Props) {
     event.preventDefault();
     if (
       !selectedCustomerId ||
-      !selectedContractId ||
-      !periodStart ||
-      !periodEnd ||
+      selectedContractIds.length === 0 ||
+      (isSingleContract && (!periodStart || !periodEnd)) ||
       reconcileTypes.length === 0
     ) {
       setError("请选择客户、合同并填写完整的对账周期");
       return;
     }
-    if (periodEnd < periodStart) {
+    if (
+      selectedCustomer &&
+      selectedContractIds.length > 1 &&
+      selectedContractIds.length !== selectedCustomer.contracts.length
+    ) {
+      setError("同时创建多合同对账时，需要选择该客户的全部合同；也可以只选择其中一份合同。");
+      return;
+    }
+    if (isSingleContract && periodEnd < periodStart) {
       setError("对账周期结束日期不能早于开始日期");
       return;
     }
@@ -115,21 +134,26 @@ export function NewReconciliationModal({ customers, onCreated }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           customerId: selectedCustomerId,
-          contractId: selectedContractId,
+          contractIds: selectedContractIds,
+          ...(isSingleContract
+            ? {
+                contractId: selectedContractIds[0],
+                periodStart,
+                periodEnd,
+              }
+            : {}),
           reconcileTypes,
-          periodStart,
-          periodEnd,
         }),
       });
       if (!response.ok) {
         setError(await readApiError(response, "创建客户对账失败"));
         return;
       }
-      const created = (await response.json()) as { id: string };
+      await response.json();
       setOpen(false);
       resetForm();
       onCreated();
-      router.push(`/finance/reconciliations/${created.id}`);
+      router.push(`/finance/customers/${selectedCustomerId}`);
     } catch (cause) {
       console.error("[finance-reconciliation-create]", cause);
       setError(clientUnknownError());
@@ -176,23 +200,57 @@ export function NewReconciliationModal({ customers, onCreated }: Props) {
 
           <div>
             <label className="label">关联合同 *</label>
-            <select
-              className="input"
-              value={selectedContractId}
-              onChange={(event) => handleContractChange(event.target.value)}
-              disabled={!selectedCustomer}
-              required
-            >
-              <option value="">
-                {selectedCustomer ? "请选择合同" : "请先选择客户"}
-              </option>
-              {selectedCustomer?.contracts.map((contract) => (
-                <option key={contract.id} value={contract.id}>
-                  {contract.contractNo}（
-                  {CONTRACT_TYPE_LABELS[contract.type] ?? contract.type}）
-                </option>
-              ))}
-            </select>
+            {!selectedCustomer ? (
+              <div className="input flex items-center text-slate-400">请先选择客户</div>
+            ) : selectedCustomer.contracts.length === 1 ? (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5">
+                <div className="text-sm font-medium text-emerald-900">
+                  {selectedCustomer.contracts[0].contractNo}
+                </div>
+                <div className="mt-0.5 text-xs text-emerald-700">
+                  {CONTRACT_TYPE_LABELS[selectedCustomer.contracts[0].type] ?? selectedCustomer.contracts[0].type} · 唯一合同，已自动关联
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-lg border border-slate-200">
+                <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
+                  <span className="text-xs text-slate-500">可选择一份，或全选该客户的全部合同</span>
+                  <button
+                    type="button"
+                    className="text-xs font-medium text-brand-600 hover:text-brand-700"
+                    onClick={() => {
+                      const allIds = selectedCustomer.contracts.map((item) => item.id);
+                      setSelectedContractIds(selectedContractIds.length === allIds.length ? [] : allIds);
+                      setPeriodStart("");
+                      setPeriodEnd("");
+                    }}
+                  >
+                    {selectedContractIds.length === selectedCustomer.contracts.length ? "取消全选" : "全选合同"}
+                  </button>
+                </div>
+                <div className="max-h-52 space-y-1 overflow-y-auto p-2">
+                  {selectedCustomer.contracts.map((contract) => (
+                    <label key={contract.id} className="flex cursor-pointer items-start gap-3 rounded-md px-2 py-2 hover:bg-slate-50">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                        checked={selectedContractIds.includes(contract.id)}
+                        onChange={() => toggleContract(contract.id)}
+                      />
+                      <span className="min-w-0">
+                        <span className="block text-sm font-medium text-slate-800">{contract.contractNo}</span>
+                        <span className="block text-xs text-slate-500">
+                          {CONTRACT_TYPE_LABELS[contract.type] ?? contract.type} · {dateInputValue(contract.startDate)} 至 {dateInputValue(contract.endDate)}
+                        </span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                <div className="border-t border-slate-100 px-3 py-2 text-xs text-slate-500">
+                  已选择 {selectedContractIds.length} 份合同
+                </div>
+              </div>
+            )}
           </div>
 
           <div>
@@ -229,7 +287,7 @@ export function NewReconciliationModal({ customers, onCreated }: Props) {
             创建后自动设置：固费采用合同月度服务费币种，销售佣金采用 USD；可在对账详情页随时修改。
           </p>
 
-          <div className="grid grid-cols-2 gap-3">
+          {isSingleContract ? <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="label">对账开始日期 *</label>
               <input
@@ -251,7 +309,17 @@ export function NewReconciliationModal({ customers, onCreated }: Props) {
                 required
               />
             </div>
-          </div>
+          </div> : selectedContractIds.length > 1 ? (
+            <div className="rounded-lg bg-brand-50 px-3 py-2 text-xs text-brand-700">
+              多合同将分别采用各合同自身的开始、结束日期，并按现有固费和销售佣金周期规则生成。
+            </div>
+          ) : null}
+
+          {selectedCustomer && selectedContractIds.length > 1 && selectedContractIds.length !== selectedCustomer.contracts.length && (
+            <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+              多合同模式需要选中该客户的全部合同，当前还差 {selectedCustomer.contracts.length - selectedContractIds.length} 份。
+            </p>
+          )}
 
           {error && (
             <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
@@ -276,9 +344,9 @@ export function NewReconciliationModal({ customers, onCreated }: Props) {
               disabled={
                 loading ||
                 !selectedCustomerId ||
-                !selectedContractId ||
-                !periodStart ||
-                !periodEnd ||
+                selectedContractIds.length === 0 ||
+                Boolean(selectedCustomer && selectedContractIds.length > 1 && selectedContractIds.length !== selectedCustomer.contracts.length) ||
+                (isSingleContract && (!periodStart || !periodEnd)) ||
                 reconcileTypes.length === 0
               }
               className="btn-primary"

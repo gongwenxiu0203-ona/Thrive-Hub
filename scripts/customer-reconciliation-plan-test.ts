@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   buildCommissionPeriods,
   buildFixedFeePeriods,
+  buildManualReconciliationContractPlans,
 } from "../src/lib/customerReconciliationPlan";
 
 const date = (value: string) => new Date(`${value}T00:00:00.000Z`);
@@ -46,5 +47,44 @@ assert.deepEqual(
 
 assert.equal(buildFixedFeePeriods(date("2026-08-22"), date("2026-08-21")).length, 0);
 assert.equal(buildCommissionPeriods(date("2026-08-22"), date("2026-08-21")).length, 0);
+
+const singleContractPlan = buildManualReconciliationContractPlans({
+  contracts: [{
+    contractId: "contract-a",
+    contractStart: date("2026-01-01"),
+    contractEnd: date("2026-12-31"),
+  }],
+  reconcileTypes: ["FEE_ONLY", "COMMISSION_ONLY"],
+  requestedStart: date("2026-02-15"),
+  requestedEnd: date("2026-03-20"),
+});
+assert.equal(singleContractPlan.length, 1);
+assert.equal(singleContractPlan[0].periods.filter((period) => period.type === "FEE_ONLY").length, 2);
+assert.deepEqual(
+  compact(singleContractPlan[0].periods.filter((period) => period.type === "COMMISSION_ONLY")),
+  [["2026-02-15", "2026-02-28"], ["2026-03-01", "2026-03-20"]],
+  "single-contract manual creation must keep the requested date range",
+);
+
+const multiContractPlan = buildManualReconciliationContractPlans({
+  contracts: [
+    { contractId: "contract-a", contractStart: date("2026-01-15"), contractEnd: date("2026-02-20") },
+    { contractId: "contract-b", contractStart: date("2026-04-10"), contractEnd: date("2026-05-05") },
+  ],
+  reconcileTypes: ["COMMISSION_ONLY"],
+  requestedStart: date("2025-01-01"),
+  requestedEnd: date("2027-01-01"),
+});
+assert.deepEqual(
+  multiContractPlan.map((plan) => ({
+    contractId: plan.contractId,
+    periods: compact(plan.periods),
+  })),
+  [
+    { contractId: "contract-a", periods: [["2026-01-15", "2026-01-31"], ["2026-02-01", "2026-02-20"]] },
+    { contractId: "contract-b", periods: [["2026-04-10", "2026-04-30"], ["2026-05-01", "2026-05-05"]] },
+  ],
+  "multi-contract manual creation must use each contract's own effective dates",
+);
 
 console.log("customer reconciliation plan tests passed");

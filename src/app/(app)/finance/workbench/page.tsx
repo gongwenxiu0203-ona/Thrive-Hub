@@ -85,7 +85,16 @@ export default async function FinanceWorkbenchPage() {
           include: {
             customer: { select: { brandName: true } },
             applicant: { select: { id: true, name: true } },
-            lines: { select: { id: true } },
+            lines: {
+              select: {
+                id: true,
+                reconciliation: {
+                  select: {
+                    contract: { select: { contractNo: true } },
+                  },
+                },
+              },
+            },
             manualItems: { select: { id: true } },
             invoices: {
               where: { deletedAt: null },
@@ -364,6 +373,13 @@ export default async function FinanceWorkbenchPage() {
                 documentType: row.documentType,
                 mergeMode: row.mergeMode,
                 lineCount: row.lines.length + row.manualItems.length,
+                contractNos: Array.from(
+                  new Set(
+                    row.lines
+                      .map((line) => line.reconciliation.contract.contractNo)
+                      .filter(Boolean),
+                  ),
+                ),
                 sourceType: row.sourceType,
                 applicantNote: row.applicantNote,
                 status:

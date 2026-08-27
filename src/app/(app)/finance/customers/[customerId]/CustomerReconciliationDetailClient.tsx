@@ -269,10 +269,13 @@ export function CustomerReconciliationDetailClient({
   const searchParams = useSearchParams();
   const scopeAll = searchParams.get("scope") === "all";
   const [, startTransition] = useTransition();
-  const fixedReconciliations = reconciliations.filter(
+  const visibleReconciliations = contract
+    ? reconciliations.filter((rec) => rec.contract.id === contract.id)
+    : reconciliations;
+  const fixedReconciliations = visibleReconciliations.filter(
     (rec) => rec.reconcileType !== "COMMISSION_ONLY",
   );
-  const commissionReconciliations = reconciliations.filter(
+  const commissionReconciliations = visibleReconciliations.filter(
     (rec) => rec.reconcileType !== "FEE_ONLY",
   );
 
@@ -385,6 +388,34 @@ export function CustomerReconciliationDetailClient({
 
   return (
     <div className="space-y-6">
+      {customer.contracts.length > 1 && (
+        <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+          <div className="mb-2 flex items-center justify-between gap-3 px-1">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-900">按合同查看对账</h2>
+              <p className="text-xs text-slate-500">全部合同视图支持跨合同勾选并统一提交开票申请。</p>
+            </div>
+            <span className="shrink-0 text-xs text-slate-400">共 {customer.contracts.length} 份合同</span>
+          </div>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            <Link
+              href={`/finance/customers/${customer.id}`}
+              className={!contract ? "btn-primary shrink-0 text-sm" : "btn-secondary shrink-0 text-sm"}
+            >
+              全部合同
+            </Link>
+            {customer.contracts.map((item) => item && (
+              <Link
+                key={item.id}
+                href={`/finance/customers/${customer.id}?contractId=${item.id}`}
+                className={contract?.id === item.id ? "btn-primary shrink-0 text-sm" : "btn-secondary shrink-0 text-sm"}
+              >
+                {item.contractNo}
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
       <BasicInfoSection customer={customer} contract={contract} />
 
       <div className="grid items-start gap-6 xl:grid-cols-2">
@@ -1233,6 +1264,9 @@ function MonthlyRecordRow({
           </span>
           <span className="font-medium text-slate-900">
             对账周期 {formatDate(rec.periodStart)} ~ {formatDate(rec.periodEnd)}
+          </span>
+          <span className="rounded bg-violet-50 px-2 py-1 text-xs font-medium text-violet-700">
+            {rec.contract.contractNo}
           </span>
           <Badge className={RECONCILIATION_STATUS_COLORS[rec.status]}>
             {RECONCILIATION_STATUS_LABELS[rec.status] ?? rec.status}

@@ -71,6 +71,52 @@ export function buildCustomerReconciliationPlan(startDate: Date, endDate: Date):
   ];
 }
 
+export type ManualReconciliationContractInput = {
+  contractId: string;
+  contractStart: Date;
+  contractEnd: Date;
+};
+
+export type ManualReconciliationContractPlan = ManualReconciliationContractInput & {
+  periods: ReconciliationPlanPeriod[];
+};
+
+/**
+ * Builds the period drafts for manual reconciliation creation.
+ *
+ * A single selected contract keeps the existing editable date-range behaviour.
+ * When several contracts are selected, every contract is planned independently
+ * from its own effective dates so contracts with different terms never share a
+ * synthetic range.
+ */
+export function buildManualReconciliationContractPlans(input: {
+  contracts: ManualReconciliationContractInput[];
+  reconcileTypes: ReconciliationPlanPeriod["type"][];
+  requestedStart?: Date | null;
+  requestedEnd?: Date | null;
+}): ManualReconciliationContractPlan[] {
+  const selectedTypes = new Set(input.reconcileTypes);
+  const isSingleContract = input.contracts.length === 1;
+
+  return input.contracts.map((contract) => {
+    const start = isSingleContract && input.requestedStart
+      ? input.requestedStart
+      : contract.contractStart;
+    const end = isSingleContract && input.requestedEnd
+      ? input.requestedEnd
+      : contract.contractEnd;
+
+    return {
+      ...contract,
+      contractStart: start,
+      contractEnd: end,
+      periods: buildCustomerReconciliationPlan(start, end).filter((period) =>
+        selectedTypes.has(period.type),
+      ),
+    };
+  });
+}
+
 function money(value: string | null): number {
   if (!value) return 0;
   const parsed = Number(value.replace(/[^\d.-]/g, ""));

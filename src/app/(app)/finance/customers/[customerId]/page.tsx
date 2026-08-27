@@ -132,7 +132,9 @@ export default async function CustomerReconciliationPage({
     ? customer.contracts.find((c) => c.id === sp.contractId) ??
       customer.contracts[0] ??
       null
-    : customer.contracts[0] ?? null;
+    : customer.contracts.length === 1
+      ? customer.contracts[0]
+      : null;
 
   return (
     <div className="space-y-6">
@@ -141,9 +143,9 @@ export default async function CustomerReconciliationPage({
         <h1 className="mt-1 text-2xl font-semibold text-slate-900">
           {customer.brandName} — 对账管理
         </h1>
-        {contract && (
-          <p className="text-sm text-slate-500">合同：{contract.contractNo}</p>
-        )}
+        <p className="text-sm text-slate-500">
+          {contract ? `合同：${contract.contractNo}` : `共 ${customer.contracts.length} 份有效合同，可在下方切换查看`}
+        </p>
       </div>
 
       <CustomerReconciliationDetailClient

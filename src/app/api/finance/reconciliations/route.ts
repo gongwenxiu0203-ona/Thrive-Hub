@@ -6,7 +6,7 @@ import { FeaturePermissionError } from "@/lib/permissionGuard";
 import { parseDateOnlyUtc } from "@/lib/dateRange";
 import { errorResponse } from "@/lib/appError";
 import { financeReferenceCustomerScope } from "@/lib/dataScope";
-import { buildCustomerReconciliationPlan } from "@/lib/customerReconciliationPlan";
+import { buildManualReconciliationContractPlans } from "@/lib/customerReconciliationPlan";
 
 function reconciliationCurrency(value: string | null | undefined) {
   const normalized = String(value ?? "").trim().toUpperCase();
@@ -62,6 +62,7 @@ export async function POST(req: Request) {
     const {
       customerId,
       contractId,
+      contractIds,
       periodStart,
       periodEnd,
       reconcileType,
@@ -70,8 +71,16 @@ export async function POST(req: Request) {
       adjustmentReason,
     } = body;
 
-    if (!customerId || !contractId || !periodStart || !periodEnd) {
-      return NextResponse.json({ error: "客户、合同、周期开始时间和结束时间均为必填项" }, { status: 400 });
+    const selectedContractIds = Array.from(new Set(
+      (Array.isArray(contractIds) ? contractIds : [contractId])
+        .filter((value): value is string => typeof value === "string" && Boolean(value.trim()))
+        .map((value) => value.trim()),
+    ));
+    if (!customerId || selectedContractIds.length === 0) {
+      return NextResponse.json({ error: "客户和关联合同均为必填项" }, { status: 400 });
+    }
+    if (selectedContractIds.length > 50) {
+      return NextResponse.json({ error: "一次最多选择 50 份合同创建客户对账" }, { status: 400 });
     }
 
     const normalizedTypes = Array.isArray(reconcileTypes)
@@ -83,12 +92,12 @@ export async function POST(req: Request) {
     ) {
       return NextResponse.json({ error: "新建对账必须分开选择固费或销售佣金，不再支持合并对账" }, { status: 400 });
     }
-    const start = typeof periodStart === "string" ? parseDateOnlyUtc(periodStart) : null;
-    const end = typeof periodEnd === "string" ? parseDateOnlyUtc(periodEnd) : null;
-    if (!start || !end) {
-      return NextResponse.json({ error: "对账周期日期格式无效" }, { status: 400 });
+    const requestedStart = typeof periodStart === "string" ? parseDateOnlyUtc(periodStart) : null;
+    const requestedEnd = typeof periodEnd === "string" ? parseDateOnlyUtc(periodEnd) : null;
+    if (selectedContractIds.length === 1 && (!requestedStart || !requestedEnd)) {
+      return NextResponse.json({ error: "单合同创建时，对账周期开始和结束日期均为必填项" }, { status: 400 });
     }
-    if (start > end) {
+    if (requestedStart && requestedEnd && requestedStart > requestedEnd) {
       return NextResponse.json({ error: "对账周期结束时间不能早于开始时间" }, { status: 400 });
     }
     const normalizedSource = source === "ADJUSTMENT" ? "ADJUSTMENT" : "MANUAL";
@@ -97,121 +106,162 @@ export async function POST(req: Request) {
     }
 
     // 获取合同信息，快照到对账记录
-    const contract = await prisma.contract.findFirst({
+    const contracts = await prisma.contract.findMany({
       where: {
-        id: contractId,
+        id: { in: selectedContractIds },
         customerId,
         deletedAt: null,
         customer: { ...referenceCustomerScope, deletedAt: null, status: "COOPERATING" },
       },
     });
-    if (!contract) {
-      return NextResponse.json({ error: "合同不存在，或客户当前不是合作中状态" }, { status: 404 });
+    if (contracts.length !== selectedContractIds.length) {
+      return NextResponse.json({ error: "部分合同不存在、不属于该客户，或客户当前不是合作中状态" }, { status: 404 });
     }
-    if (contract.status !== "COMPLETED") {
-      return NextResponse.json({ error: "只能对已签署完成的合同创建对账" }, { status: 400 });
+    const incompleteContract = contracts.find((contract) => contract.status !== "COMPLETED");
+    if (incompleteContract) {
+      return NextResponse.json({ error: `合同 ${incompleteContract.contractNo} 尚未签署完成，不能创建对账` }, { status: 400 });
     }
-    if (contract.startDate && start < contract.startDate || contract.endDate && end > contract.endDate) {
-      return NextResponse.json({ error: "手动对账周期不能超出合同有效期" }, { status: 400 });
+    const missingDatesContract = contracts.find((contract) => !contract.startDate || !contract.endDate);
+    if (missingDatesContract) {
+      return NextResponse.json({ error: `合同 ${missingDatesContract.contractNo} 缺少有效开始或结束日期` }, { status: 400 });
     }
-
-    const periods = buildCustomerReconciliationPlan(start, end).filter((period) =>
-      normalizedTypes.includes(period.type),
-    );
-    for (const period of periods) {
-      const overlap = await prisma.customerReconciliation.findFirst({
+    if (selectedContractIds.length > 1) {
+      const allEligibleContracts = await prisma.contract.findMany({
         where: {
-          contractId,
+          customerId,
+          status: "COMPLETED",
           deletedAt: null,
-          reconcileType: { in: [period.type, "BOTH"] },
-          periodStart: { lte: period.end },
-          periodEnd: { gte: period.start },
+          startDate: { not: null },
+          endDate: { not: null },
+          customer: { ...referenceCustomerScope, deletedAt: null, status: "COOPERATING" },
         },
-        select: { periodStart: true, periodEnd: true },
+        select: { id: true },
       });
-      if (overlap) {
-        const streamName = period.type === "FEE_ONLY" ? "固费" : "销售佣金";
-        return NextResponse.json({ error: `该合同的${streamName}周期与已有对账记录（${formatDate(overlap.periodStart)} 至 ${formatDate(overlap.periodEnd)}）重叠，未创建任何记录` }, { status: 409 });
+      const selectedIdSet = new Set(selectedContractIds);
+      if (
+        allEligibleContracts.length !== selectedContractIds.length
+        || allEligibleContracts.some((contract) => !selectedIdSet.has(contract.id))
+      ) {
+        return NextResponse.json({ error: "多合同创建时必须选择该客户的全部有效已完成合同" }, { status: 400 });
+      }
+    }
+    if (selectedContractIds.length === 1 && requestedStart && requestedEnd) {
+      const contract = contracts[0];
+      if (requestedStart < contract.startDate! || requestedEnd > contract.endDate!) {
+        return NextResponse.json({ error: "手动对账周期不能超出合同有效期" }, { status: 400 });
       }
     }
 
-    // 解析合同金额字段
-    const feeAmount = parseMoneyString(contract.feeAmount);
-    const commissionRate = parseRateString(contract.commissionRate);
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const cAny = contract as any;
-
-    // 从合同 v3 字段推断 betType / betOrderCount / betSalesAmount
-    // 新逻辑：commissionType=THRESHOLD → 销售额对赌（金额=thresholdAmount）
-    // 其他类型 + 兼容旧合同的 hasBet/betTarget
-    const { betType, betOrderCount, betSalesAmount } = deriveBetFromContract({
-      commissionType: cAny.commissionType ?? null,
-      thresholdAmount: cAny.thresholdAmount ?? null,
-      // 旧字段（向后兼容）
-      hasBet: cAny.hasBet ?? null,
-      betTarget: cAny.betTarget ?? null,
+    const plans = buildManualReconciliationContractPlans({
+      contracts: contracts.map((contract) => ({
+        contractId: contract.id,
+        contractStart: contract.startDate!,
+        contractEnd: contract.endDate!,
+      })),
+      reconcileTypes: normalizedTypes as ("FEE_ONLY" | "COMMISSION_ONLY")[],
+      requestedStart,
+      requestedEnd,
     });
-
-    // 创建时使用统一默认值：固费跟随合同月度服务费币种，销售佣金默认 USD。
-    // 创建后可在对账详情页随时修改。
-    const fixedFeeCurrency = reconciliationCurrency(contract.feeCurrency);
-    const commissionCurrency = "USD";
 
     const now = new Date();
     const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-    const reconciliations = await prisma.$transaction(
-      periods.map((period) => prisma.customerReconciliation.create({
-        data: {
-        customerId,
-        contractId,
-        source: normalizedSource,
-        planStatus: period.start <= today ? "OPEN" : "PLANNED",
-        periodIndex: period.index,
-        adjustmentReason: normalizedSource === "ADJUSTMENT" ? String(adjustmentReason).trim() : null,
-        originalPeriodStart: start,
-        originalPeriodEnd: end,
-        openedAt: period.start <= today ? now : null,
-        periodStart: period.start,
-        periodEnd: period.end,
-        // 快照合同条款
-        partyA: contract.partyA,
-        accountingPeriod: contract.accountingPeriod,
-        feeCycle: contract.feeCycle,
-        feeAmount,
-        commissionRate,
-        affiliateRule: contract.affiliateRule,
-        paymentCycle: contract.paymentCycle,
-        // 货币
-        fixedFeeCurrency,
-        commissionCurrency,
-        // 对赌条款（自动从合同推断）
-        betType,
-        betOrderCount,
-        betSalesAmount,
-        reconcileType: period.type,
-        createdById: session.userId,
-        updatedAt: new Date(),
-        },
-        include: {
-        customer: { select: { id: true, brandName: true } },
-        contract: { select: { id: true, contractNo: true } },
-        createdBy: { select: { id: true, name: true } },
-        },
-      })),
-    );
+    const contractById = new Map(contracts.map((contract) => [contract.id, contract]));
+    const reconciliations = await prisma.$transaction(async (tx) => {
+      // 整批先查重，全部通过后才开始写入，避免多合同只创建一部分。
+      for (const plan of plans) {
+        const contract = contractById.get(plan.contractId)!;
+        for (const period of plan.periods) {
+          const overlap = await tx.customerReconciliation.findFirst({
+            where: {
+              contractId: plan.contractId,
+              deletedAt: null,
+              reconcileType: { in: [period.type, "BOTH"] },
+              periodStart: { lte: period.end },
+              periodEnd: { gte: period.start },
+            },
+            select: { periodStart: true, periodEnd: true },
+          });
+          if (overlap) {
+            const streamName = period.type === "FEE_ONLY" ? "固费" : "销售佣金";
+            throw new ReconciliationOverlapError(
+              `合同 ${contract.contractNo} 的${streamName}周期与已有对账记录（${formatDate(overlap.periodStart)} 至 ${formatDate(overlap.periodEnd)}）重叠，整批未创建任何记录`,
+            );
+          }
+        }
+      }
+
+      const created = [];
+      for (const plan of plans) {
+        const contract = contractById.get(plan.contractId)!;
+        const cAny = contract as typeof contract & {
+          commissionType?: string | null;
+          thresholdAmount?: string | null;
+          hasBet?: string | null;
+          betTarget?: string | null;
+        };
+        const { betType, betOrderCount, betSalesAmount } = deriveBetFromContract({
+          commissionType: cAny.commissionType ?? null,
+          thresholdAmount: cAny.thresholdAmount ?? null,
+          hasBet: cAny.hasBet ?? null,
+          betTarget: cAny.betTarget ?? null,
+        });
+        for (const period of plan.periods) {
+          created.push(await tx.customerReconciliation.create({
+            data: {
+              customerId,
+              contractId: contract.id,
+              source: normalizedSource,
+              planStatus: period.start <= today ? "OPEN" : "PLANNED",
+              periodIndex: period.index,
+              adjustmentReason: normalizedSource === "ADJUSTMENT" ? String(adjustmentReason).trim() : null,
+              originalPeriodStart: plan.contractStart,
+              originalPeriodEnd: plan.contractEnd,
+              openedAt: period.start <= today ? now : null,
+              periodStart: period.start,
+              periodEnd: period.end,
+              partyA: contract.partyA,
+              accountingPeriod: contract.accountingPeriod,
+              feeCycle: contract.feeCycle,
+              feeAmount: parseMoneyString(contract.feeAmount),
+              commissionRate: parseRateString(contract.commissionRate),
+              affiliateRule: contract.affiliateRule,
+              paymentCycle: contract.paymentCycle,
+              fixedFeeCurrency: reconciliationCurrency(contract.feeCurrency),
+              commissionCurrency: "USD",
+              betType,
+              betOrderCount,
+              betSalesAmount,
+              reconcileType: period.type,
+              createdById: session.userId,
+              updatedAt: now,
+            },
+            include: {
+              customer: { select: { id: true, brandName: true } },
+              contract: { select: { id: true, contractNo: true } },
+              createdBy: { select: { id: true, name: true } },
+            },
+          }));
+        }
+      }
+      return created;
+    });
 
     return NextResponse.json(
-      { ...reconciliations[0], id: reconciliations[0].id, createdCount: reconciliations.length },
+      { ...reconciliations[0], id: reconciliations[0].id, firstId: reconciliations[0].id, createdCount: reconciliations.length, contractCount: plans.length },
       { status: 201 },
     );
   } catch (e) {
     if (e instanceof FeaturePermissionError) {
       return NextResponse.json({ error: "无权限" }, { status: 403 });
     }
+    if (e instanceof ReconciliationOverlapError) {
+      return NextResponse.json({ error: e.message }, { status: 409 });
+    }
     return errorResponse(e, "finance.reconciliation.create");
   }
 }
+
+class ReconciliationOverlapError extends Error {}
 
 const NEW_RECONCILIATION_TYPES = ["FEE_ONLY", "COMMISSION_ONLY"] as const;
 
