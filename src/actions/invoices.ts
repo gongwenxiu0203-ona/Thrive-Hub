@@ -1,6 +1,7 @@
 "use server";
 
 import { Prisma } from "@prisma/client";
+import { deletedInvoiceNumber, releaseDeletedInvoiceNumber } from "@/lib/businessNumberRelease";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import {
@@ -499,7 +500,7 @@ async function nextInvoiceNumber(
 ): Promise<string> {
   const prefix = invoicePrefix(invoiceDate);
   const existing = await tx.invoice.findMany({
-    where: { invoiceNo: { startsWith: prefix } },
+    where: { invoiceNo: { startsWith: prefix }, deletedAt: null },
     select: { invoiceNo: true },
   });
   let max = 0;
@@ -1369,10 +1370,11 @@ export async function updateInvoiceNumber(
     });
     if (!existing || existing.deletedAt) return { ok: false, error: "Invoice 不存在" };
     if (existing.invoiceNo === nextNumber) return { ok: false, error: "新编号与当前编号相同" };
-    const duplicate = await prisma.invoice.findUnique({ where: { invoiceNo: nextNumber }, select: { id: true } });
-    if (duplicate) return { ok: false, error: "该 Invoice 编号已存在，不能重复" };
     try {
       await prisma.$transaction(async (tx) => {
+        if (!(await releaseDeletedInvoiceNumber(tx, nextNumber, id))) {
+          throw new Error("ACTIVE_NUMBER_CONFLICT");
+        }
         await tx.invoice.update({ where: { id }, data: { invoiceNo: nextNumber, pdfUrl: null } });
         if (existing.accountsReceivableId) {
           await tx.accountsReceivable.update({
@@ -1382,6 +1384,9 @@ export async function updateInvoiceNumber(
         }
       });
     } catch (error) {
+      if (error instanceof Error && error.message === "ACTIVE_NUMBER_CONFLICT") {
+        return { ok: false, error: "该 Invoice 编号已存在，不能重复" };
+      }
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         return { ok: false, error: "该 Invoice 编号已存在，不能重复" };
       }
@@ -1511,13 +1516,8 @@ export async function softDeleteInvoice(
       return { ok: false, error: "已开具的 Invoice 请使用作废，不可删除" };
     }
     const deleted = await prisma.invoice.updateMany({
-      where: {
-        id,
-        deletedAt: null,
-        status: "DRAFT",
-        ...invoiceScope(session),
-      },
-      data: { deletedAt: new Date() },
+      where: { id, deletedAt: null, status: "DRAFT", ...invoiceScope(session) },
+      data: { deletedAt: new Date(), invoiceNo: deletedInvoiceNumber(existing.invoiceNo, existing.id), pdfUrl: null },
     });
     if (deleted.count !== 1) {
       return { ok: false, error: "Invoice 状态已变更，请刷新后重试" };

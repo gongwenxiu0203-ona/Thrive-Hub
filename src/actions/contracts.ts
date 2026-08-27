@@ -1,6 +1,7 @@
 "use server";
 
 import { Prisma } from "@prisma/client";
+import { deletedContractNumber, releaseDeletedContractNumber } from "@/lib/businessNumberRelease";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
@@ -175,7 +176,7 @@ export type ContractSaveResult = {
 async function nextContractNoByPrefix(prefix: string): Promise<string> {
   const year = new Date().getFullYear();
   const existing = await prisma.contract.findMany({
-    where: { contractNo: { startsWith: `${prefix}-${year}-` } },
+    where: { contractNo: { startsWith: `${prefix}-${year}-` }, deletedAt: null },
     select: { contractNo: true },
   });
   let max = 0;
@@ -193,7 +194,7 @@ export async function nextContractNo(prefix: "LYNQ" | "THRAIVE"): Promise<string
   const like = `${prefix}-${year}-%`;
   // Find the highest sequence number used this year for this prefix.
   const existing = await prisma.contract.findMany({
-    where: { contractNo: { startsWith: `${prefix}-${year}-` } },
+    where: { contractNo: { startsWith: `${prefix}-${year}-` }, deletedAt: null },
     select: { contractNo: true },
   });
   let max = 0;
@@ -215,23 +216,21 @@ export async function createContract(
   if (!contractNo) return { ok: false, error: "合同编号为必填项" };
   if (!customerId) return { ok: false, error: "请选择关联客户" };
 
-  const dup = await prisma.contract.findUnique({ where: { contractNo } });
-  if (dup) return { ok: false, error: "合同编号已存在" };
-
   const ownerId = str(fd, "ownerId") || session.userId;
   const reviewerId = str(fd, "reviewerId") || (await defaultReviewerId());
-
-  const contract = await prisma.contract.create({
-    data: {
-      contractNo,
-      customerId,
-      ...contractFieldsFromForm(fd),
-      ownerId,
-      reviewerId,
-      status: "IN_PROGRESS",
-      createdById: session.userId,
-    },
+  const contract = await prisma.$transaction(async (tx) => {
+    if (!(await releaseDeletedContractNumber(tx, contractNo))) {
+      throw new Error("合同编号已存在");
+    }
+    return tx.contract.create({ data: {
+      contractNo, customerId, ...contractFieldsFromForm(fd), ownerId, reviewerId,
+      status: "IN_PROGRESS", createdById: session.userId,
+    } });
+  }).catch((error) => {
+    if (error instanceof Error && error.message === "合同编号已存在") return null;
+    throw error;
   });
+  if (!contract) return { ok: false, error: "合同编号已存在" };
 
   revalidatePath("/contracts");
   revalidatePath(`/customers/${customerId}`);
@@ -335,7 +334,10 @@ export async function deleteContract(id: string) {
   const now = new Date();
   const reason = `合同 ${contract.contractNo} 已删除，未完成的后续业务停止`;
   const result = await prisma.$transaction(async (tx) => {
-    await tx.contract.update({ where: { id }, data: { deletedAt: now } });
+    await tx.contract.update({
+      where: { id },
+      data: { deletedAt: now, contractNo: deletedContractNumber(contract.contractNo, contract.id) },
+    });
     const cancelledReconciliations = await tx.customerReconciliation.updateMany({
       where: { contractId: id, deletedAt: null, status: { not: "CONFIRMED" }, planStatus: { not: "CANCELLED" } },
       data: { planStatus: "CANCELLED", adjustmentReason: reason, updatedAt: now },
@@ -769,11 +771,17 @@ export async function updateContractNumber(
     const existing = await prisma.contract.findUnique({ where: { id: contractId }, select: { contractNo: true } });
     if (!existing) return { ok: false, error: "合同不存在" };
     if (existing.contractNo === nextNumber) return { ok: false, error: "新编号与当前编号相同" };
-    const duplicate = await prisma.contract.findUnique({ where: { contractNo: nextNumber }, select: { id: true } });
-    if (duplicate) return { ok: false, error: "该合同编号已存在，不能重复" };
     try {
-      await prisma.contract.update({ where: { id: contractId }, data: { contractNo: nextNumber } });
+      await prisma.$transaction(async (tx) => {
+        if (!(await releaseDeletedContractNumber(tx, nextNumber, contractId))) {
+          throw new Error("ACTIVE_NUMBER_CONFLICT");
+        }
+        await tx.contract.update({ where: { id: contractId }, data: { contractNo: nextNumber } });
+      });
     } catch (error) {
+      if (error instanceof Error && error.message === "ACTIVE_NUMBER_CONFLICT") {
+        return { ok: false, error: "该合同编号已存在，不能重复" };
+      }
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         return { ok: false, error: "该合同编号已存在，不能重复" };
       }
@@ -897,7 +905,7 @@ export async function createContractV4(
   const year = new Date().getFullYear();
   const computeNextNo = async () => {
     const existing = await prisma.contract.findMany({
-      where: { contractNo: { startsWith: `THRAIVE-${year}-` } },
+      where: { contractNo: { startsWith: `THRAIVE-${year}-` }, deletedAt: null },
       select: { contractNo: true },
     });
     let max = 0;

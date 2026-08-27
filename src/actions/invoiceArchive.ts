@@ -7,6 +7,7 @@ import { requireSession } from "@/lib/session";
 import { requireFeaturePermission } from "@/lib/permissionGuard";
 import { isStaff, financeReferenceCustomerScope } from "@/lib/dataScope";
 import { saveUploadedFile } from "@/lib/upload";
+import { releaseDeletedInvoiceNumber } from "@/lib/businessNumberRelease";
 
 export type ArchiveActionResult = { ok: boolean; error?: string; invoiceId?: string };
 
@@ -42,13 +43,13 @@ export async function uploadInvoiceArchive(fd: FormData): Promise<ArchiveActionR
       select: { id: true },
     });
     if (!contract) return { ok: false, error: "所选合同不属于该客户" };
-    if (await prisma.invoice.findUnique({ where: { invoiceNo }, select: { id: true } })) {
-      return { ok: false, error: "该 Invoice 编号已存在" };
-    }
     const saved = await saveUploadedFile(file);
     const now = new Date();
     try {
       const invoice = await prisma.$transaction(async (tx) => {
+        if (!(await releaseDeletedInvoiceNumber(tx, invoiceNo))) {
+          throw new Error("ACTIVE_NUMBER_CONFLICT");
+        }
         const created = await tx.invoice.create({
           data: {
             invoiceNo, customerId, contractId, createdById: session.userId,
@@ -75,6 +76,9 @@ export async function uploadInvoiceArchive(fd: FormData): Promise<ArchiveActionR
       revalidatePath("/invoices");
       return { ok: true, invoiceId: invoice.id };
     } catch (error) {
+      if (error instanceof Error && error.message === "ACTIVE_NUMBER_CONFLICT") {
+        return { ok: false, error: "该 Invoice 编号已存在" };
+      }
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         return { ok: false, error: "该 Invoice 编号已存在" };
       }
