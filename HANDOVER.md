@@ -1,5 +1,13 @@
 # Thrive Hub Handover
 
+## 2026-08-27 手工 Invoice 归档、应收补建与客户对账关联（未提交）
+
+- Invoice 列表新增“上传 Invoice”：仅填写唯一编号、客户、合同并上传原件；记录标记为 `archiveOnly/MANUAL_UPLOAD`，状态为已开具，但不会自动创建应收账款。
+- 手工归档 Invoice 可在列表点击“创建应收”，补录金额、币种、到期日、汇率和备注后生成应收；缺少必要字段时由弹窗收集，不允许静默使用占位金额。
+- 已确认客户对账可从同客户、同合同的已开票 Invoice/国内发票中手动关联；关联后沿用开票/收款状态回传，并可下载生成 PDF、国内发票原件或手工上传的 Invoice 原件。
+- Schema 纯新增 `Invoice.originalFileUrl/archiveOnly/archiveSource`；迁移 `20260827173000_invoice_manual_archive` 已在本地成功应用，无破坏性 SQL。
+- 本轮关联文件：`src/actions/invoiceArchive.ts`、Invoice 列表/页面、客户对账详情、`reconciliationInvoice.ts`、`attachmentAccess.ts`。
+
 ## 2026-08-25 manual reconciliation plan and completed-record deletion (local only)
 
 - Manual customer reconciliation creation now defaults to both fixed-fee and sales-commission streams. Selecting a completed contract pre-fills its start/end dates, and one submission creates the same complete period plan used by automatic contract completion: inclusive 30-day fixed-fee periods and first-partial-month/subsequent-calendar-month commission periods.
@@ -911,3 +919,12 @@ has happened merely because GitHub push succeeded.
 - 合同软删除策略：取消未确认客户对账和未完成合同任务；仅软删没有付款来源的空渠道主记录；已确认对账、开票申请、Invoice/国内发票、应收、收款核销、渠道应付/付款和项目历史全部保留，避免破坏财务审计链。
 - 验证通过：Prisma validate/generate/migrate deploy、TypeScript、周期测试、`git diff --check`；数据库 `integrity_check=ok`、外键错误 0。
 - 未 commit、未 push、未部署生产；工作区仍含未发布的项目管理及其他本地改动，提交时必须按范围精确暂存。
+# 2026-08-27 合同/Invoice 编号与合同补充文件（本地未提交）
+
+- 合同详情新增管理员修改编号：必须填写原因，编号全局唯一，写管理员审计。
+- Invoice 详情新增管理员修改编号：必须填写原因；若已创建应收账款，同事务同步应收的 invoiceNo，并清空旧 PDF 地址以便重新生成。
+- 新建合同增加“渠道商合同上传”：关联客户、类型固定 CHANNEL、负责人默认上传人、不做字段识别，编号 `CHANNEL-年份-三位序号`。
+- 事务性合同编号由 `TX-年份-序号` 改为 `COMPANY-年份-三位序号`。
+- 合同详情新增附加条款/补充文件追加存档；新增 `ContractAddendum` 表及迁移 `20260827153000_contract_addenda`，迁移仅 CREATE TABLE/INDEX，无破坏性 SQL。
+- 本地已执行 `prisma migrate deploy`，69 个主库迁移全部成功；`tsc --noEmit`、`git diff --check`、完整 `npm run build` 均通过。完整构建测试使用临时的外置项目数据库环境变量，不修改生产配置。
+- 本批改动尚未 commit/push/deploy；工作区原有 `.claude/settings.local.json`、`output/` 和临时 scripts 文件均未触碰。

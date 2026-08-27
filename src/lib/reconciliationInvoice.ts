@@ -62,6 +62,7 @@ export async function getReconciliationInvoiceStateMap(
           invoiceNo: true,
           status: true,
           documentType: true,
+          originalFileUrl: true,
           totalAmount: true,
           domesticDocument: { select: { originalFileUrl: true } },
           items: { select: { currency: true, amount: true } },
@@ -92,7 +93,7 @@ export async function getReconciliationInvoiceStateMap(
           invoiceNo: link.invoice.invoiceNo,
           invoiceStatus: link.invoice.status,
           documentType: link.invoice.documentType,
-          originalFileUrl: link.invoice.domesticDocument?.originalFileUrl ?? null,
+          originalFileUrl: link.invoice.domesticDocument?.originalFileUrl ?? link.invoice.originalFileUrl ?? null,
           receivableStatus: link.invoice.accountsReceivable?.status ?? null,
           receivedAmount:
             link.invoice.accountsReceivable?.receivedAmount ?? null,

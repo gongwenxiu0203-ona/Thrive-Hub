@@ -21,7 +21,7 @@ export default async function CustomerReconciliationPage({
   const { customerId } = await params;
   const sp = await searchParams;
 
-  const [customer, reconciliations, users] = await Promise.all([
+  const [customer, reconciliations, users, linkableInvoices] = await Promise.all([
     // 客户基本信息 + 合同 + 联系人
     prisma.customer.findFirst({
       where: { id: customerId, deletedAt: null, ...access.customerScope },
@@ -98,6 +98,14 @@ export default async function CustomerReconciliationPage({
       select: { id: true, name: true, role: true },
       orderBy: { name: "asc" },
     }) : Promise.resolve([]),
+    canEdit ? prisma.invoice.findMany({
+      where: { customerId, status: "ISSUED", deletedAt: null },
+      select: {
+        id: true, invoiceNo: true, documentType: true, contractId: true,
+        contractLinks: { select: { contractId: true } },
+      },
+      orderBy: { invoiceDate: "desc" },
+    }) : Promise.resolve([]),
   ]);
 
   const invoiceStates = await getReconciliationInvoiceStateMap(
@@ -147,6 +155,12 @@ export default async function CustomerReconciliationPage({
         readOnly={!canEdit}
         canManage={canManage}
         invoiceStates={invoiceStates}
+        linkableInvoices={linkableInvoices.map((invoice) => ({
+          id: invoice.id,
+          invoiceNo: invoice.invoiceNo,
+          documentType: invoice.documentType,
+          contractIds: Array.from(new Set([invoice.contractId, ...invoice.contractLinks.map((link) => link.contractId)].filter((id): id is string => Boolean(id)))),
+        }))}
       />
     </div>
   );

@@ -30,6 +30,7 @@ import { formatDate, formatDateTime } from "@/lib/utils";
 import { calcCommission } from "@/lib/commissionCalc";
 import type { ReconciliationInvoiceState } from "@/lib/reconciliationInvoice";
 import { submitBillingRequest } from "@/actions/billingRequests";
+import { linkInvoiceToReconciliation } from "@/actions/invoiceArchive";
 
 // ── types ──────────────────────────────────────────────────────────────────────
 
@@ -132,6 +133,7 @@ type CustomerType = {
 };
 
 type User = { id: string; name: string; role: string };
+type LinkableInvoice = { id: string; invoiceNo: string; documentType: string; contractIds: string[] };
 
 type Props = {
   customer: CustomerType;
@@ -142,6 +144,7 @@ type Props = {
   readOnly?: boolean;
   canManage?: boolean;
   invoiceStates?: Record<string, ReconciliationInvoiceState>;
+  linkableInvoices?: LinkableInvoice[];
 };
 
 const RECONCILIATION_CURRENCY_OPTIONS = [
@@ -257,6 +260,7 @@ export function CustomerReconciliationDetailClient({
   readOnly = false,
   canManage = false,
   invoiceStates = {},
+  linkableInvoices = [],
 }: Props) {
   const [newStream, setNewStream] = useState<
     "FEE_ONLY" | "COMMISSION_ONLY" | null
@@ -399,6 +403,7 @@ export function CustomerReconciliationDetailClient({
           onToggleSelected={toggleSelected}
           onRefresh={refresh}
           invoiceStates={invoiceStates}
+          linkableInvoices={linkableInvoices}
           scopeAll={scopeAll}
         />
         <ReconciliationStreamSection
@@ -416,6 +421,7 @@ export function CustomerReconciliationDetailClient({
           onToggleSelected={toggleSelected}
           onRefresh={refresh}
           invoiceStates={invoiceStates}
+          linkableInvoices={linkableInvoices}
           scopeAll={scopeAll}
         />
       </div>
@@ -796,6 +802,7 @@ function ReconciliationStreamSection({
   onToggleSelected,
   onRefresh,
   invoiceStates,
+  linkableInvoices,
   scopeAll,
 }: {
   title: string;
@@ -812,6 +819,7 @@ function ReconciliationStreamSection({
   onToggleSelected: (recId: string) => void;
   onRefresh: () => void;
   invoiceStates: Record<string, ReconciliationInvoiceState>;
+  linkableInvoices: LinkableInvoice[];
   scopeAll: boolean;
 }) {
   const [showAllFuturePlans, setShowAllFuturePlans] = useState(false);
@@ -864,6 +872,7 @@ function ReconciliationStreamSection({
               onToggleSelected={onToggleSelected}
               onRefresh={onRefresh}
               invoiceState={invoiceStates[rec.id]}
+              linkableInvoices={linkableInvoices}
               scopeAll={scopeAll}
             />
           ))}
@@ -1070,6 +1079,7 @@ function MonthlyRecordRow({
   onToggleSelected,
   onRefresh,
   invoiceState,
+  linkableInvoices,
   scopeAll,
 }: {
   rec: Rec;
@@ -1083,6 +1093,7 @@ function MonthlyRecordRow({
   onToggleSelected: (recId: string) => void;
   onRefresh: () => void;
   invoiceState?: ReconciliationInvoiceState;
+  linkableInvoices: LinkableInvoice[];
   scopeAll: boolean;
 }) {
   const [expanded, setExpanded] = useState(defaultOpen);
@@ -1708,6 +1719,10 @@ function MonthlyRecordRow({
                 state={invoiceState}
                 reconciliationId={rec.id}
                 scopeAll={scopeAll}
+                contractId={rec.contract.id}
+                linkableInvoices={linkableInvoices}
+                readOnly={readOnly}
+                onRefresh={onRefresh}
               />
             </div>
           )}
@@ -1838,11 +1853,22 @@ function InvoiceSettlementState({
   state,
   reconciliationId,
   scopeAll,
+  contractId,
+  linkableInvoices,
+  readOnly,
+  onRefresh,
 }: {
   state?: ReconciliationInvoiceState;
   reconciliationId: string;
   scopeAll: boolean;
+  contractId: string;
+  linkableInvoices: LinkableInvoice[];
+  readOnly: boolean;
+  onRefresh: () => void;
 }) {
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState("");
+  const [linking, setLinking] = useState(false);
+  const availableInvoices = linkableInvoices.filter((invoice) => invoice.contractIds.includes(contractId));
   if (!state) {
     return (
       <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-3">
@@ -1869,6 +1895,21 @@ function InvoiceSettlementState({
             {"\u5f00\u5177 Invoice"}
           </Link>
         </div>
+        {!readOnly && availableInvoices.length > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3">
+            <select className="input min-w-56 flex-1" value={selectedInvoiceId} onChange={(event) => setSelectedInvoiceId(event.target.value)}>
+              <option value="">选择已开具 Invoice / 国内发票</option>
+              {availableInvoices.map((invoice) => <option key={invoice.id} value={invoice.id}>{invoice.invoiceNo} · {invoice.documentType === "DOMESTIC" ? "国内发票" : "Invoice"}</option>)}
+            </select>
+            <button type="button" className="btn-secondary" disabled={!selectedInvoiceId || linking} onClick={async () => {
+              setLinking(true);
+              const result = await linkInvoiceToReconciliation(reconciliationId, selectedInvoiceId);
+              setLinking(false);
+              if (!result.ok) return alert(result.error ?? "关联失败");
+              onRefresh();
+            }}>手动关联票据</button>
+          </div>
+        )}
       </div>
     );
   }
@@ -1926,7 +1967,9 @@ function InvoiceSettlementState({
                 href={
                   state.documentType === "DOMESTIC"
                     ? `/api/finance/domestic-invoices/${state.invoiceId}/original`
-                    : `/api/invoices/${state.invoiceId}/pdf`
+                    : state.originalFileUrl
+                      ? `${state.originalFileUrl}?download=1`
+                      : `/api/invoices/${state.invoiceId}/pdf`
                 }
                 className="inline-flex items-center rounded-md border border-brand-200 bg-white px-2.5 py-1 text-xs font-semibold text-brand-700 hover:bg-brand-50"
                 target="_blank"

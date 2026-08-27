@@ -12,6 +12,7 @@ import { ContactAdminModifyButton } from "./ContactAdminModifyButton";
 import { ChannelSplitRuleModal, type ExistingRule } from "../../customers/[id]/ChannelSplitRuleModal";
 import { ContractCompare } from "./ContractCompare";
 import { ContractWorkflowPanel, type ContractVersionRow } from "./ContractWorkflowPanel";
+import { AddendumForm, ContractNumberEditor } from "./ContractRecordTools";
 import {
   ReviewerActionsPanel,
   type ReviewRoundRow,
@@ -75,6 +76,10 @@ export default async function ContractDetailPage({
       annotations: {
         orderBy: { createdAt: "desc" },
         include: { version: { select: { versionNo: true } } },
+      },
+      addenda: {
+        orderBy: { createdAt: "desc" },
+        include: { uploadedBy: { select: { name: true } } },
       },
     },
   });
@@ -513,7 +518,10 @@ export default async function ContractDetailPage({
 
       {/* 合同基础信息 */}
       <section className="card p-5">
-        <h2 className="mb-4 font-semibold text-slate-900">合同基础信息</h2>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="font-semibold text-slate-900">合同基础信息</h2>
+          {isAdmin && <ContractNumberEditor contractId={contract.id} contractNo={contract.contractNo} />}
+        </div>
         <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-4">
           <Field label="合同编号" value={contract.contractNo} />
           <Field
@@ -550,6 +558,32 @@ export default async function ContractDetailPage({
             }
           />
         </dl>
+      </section>
+
+      <section className="card p-5">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="font-semibold text-slate-900">附加条款与补充文件</h2>
+            <p className="mt-1 text-xs text-slate-500">附加记录只追加不覆盖，保留上传人和时间。</p>
+          </div>
+          <AddendumForm contractId={contract.id} />
+        </div>
+        {contract.addenda.length === 0 ? (
+          <p className="rounded-lg bg-slate-50 px-4 py-6 text-center text-sm text-slate-400">暂无附加条款</p>
+        ) : (
+          <div className="space-y-3">
+            {contract.addenda.map((item) => (
+              <article key={item.id} className="rounded-lg border border-slate-200 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div><h3 className="font-medium text-slate-800">{item.title}</h3><p className="mt-1 text-xs text-slate-400">{item.uploadedBy.name} · {formatDateTime(item.createdAt)}{item.effectiveAt ? ` · 生效 ${formatDate(item.effectiveAt)}` : ""}</p></div>
+                  {item.fileUrl && <a href={item.fileUrl} target="_blank" rel="noreferrer" className="btn-outline inline-flex items-center gap-1.5 text-sm"><FileDown className="h-4 w-4" />下载补充文件</a>}
+                </div>
+                {item.terms && <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-600">{item.terms}</p>}
+                {item.fileName && <p className="mt-2 text-xs text-slate-400">文件：{item.fileName}</p>}
+              </article>
+            ))}
+          </div>
+        )}
       </section>
 
       {/* 合同字段展示：与创建合同一致分为四个业务板块 */}

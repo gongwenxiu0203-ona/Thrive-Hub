@@ -1,0 +1,3 @@
+ALTER TABLE "Invoice" ADD COLUMN "originalFileUrl" TEXT;
+ALTER TABLE "Invoice" ADD COLUMN "archiveOnly" BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE "Invoice" ADD COLUMN "archiveSource" TEXT NOT NULL DEFAULT 'SYSTEM';

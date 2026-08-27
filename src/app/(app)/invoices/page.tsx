@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { listInvoices } from "@/actions/invoices";
+import { getInvoiceFormOptions, listInvoices } from "@/actions/invoices";
 import { hasPermissionLevel } from "@/lib/permissionGuard";
 import { resolveUserPermission } from "@/lib/permissionResolver";
 import { requireSession } from "@/lib/session";
@@ -22,10 +22,10 @@ export default async function InvoicesPage({
   const invoiceStatus = status === "DRAFT" || status === "ISSUED" || status === "VOID"
     ? status
     : undefined;
-  const invoices = await listInvoices({
-    search: search || undefined,
-    status: invoiceStatus,
-  });
+  const [invoices, options] = await Promise.all([
+    listInvoices({ search: search || undefined, status: invoiceStatus }),
+    hasPermissionLevel(permission, "EDIT") ? getInvoiceFormOptions(true) : Promise.resolve(null),
+  ]);
 
   return (
     <InvoiceListClient
@@ -34,6 +34,7 @@ export default async function InvoicesPage({
       status={status}
       canEdit={hasPermissionLevel(permission, "EDIT")}
       canManage={hasPermissionLevel(permission, "MANAGE")}
+      archiveOptions={options ? { customers: options.customers, contracts: options.contracts.map(({ id, customerId, contractNo }) => ({ id, customerId, contractNo })) } : null}
     />
   );
 }

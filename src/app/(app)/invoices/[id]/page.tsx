@@ -30,6 +30,7 @@ export default async function InvoiceDetailPage({
       options={options}
       initialInvoice={invoice}
       canEdit={canEdit}
+      isAdmin={session.role === "ADMIN"}
     />
   );
 }

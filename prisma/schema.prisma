@@ -70,6 +70,7 @@ model User {
   // 合同模板与版本
   contractTemplatesUploaded           ContractTemplate[]          @relation("ContractTemplateUploader")
   contractVersionsCreated             ContractVersion[]           @relation("ContractVersionCreator")
+  contractAddendaUploaded             ContractAddendum[]          @relation("ContractAddendumUploader")
   contractReviews                     ContractReview[]
   // 项目 GMV 目标（员工 KPI）
   projectGmvTargetsAm                 ProjectGmvTarget[]          @relation("ProjectGmvTargetAm")
@@ -359,6 +360,7 @@ model Contract {
   reviewer               User?                    @relation("ContractReviewer", fields: [reviewerId], references: [id])
   template               ContractTemplate?        @relation(fields: [templateId], references: [id])
   versions               ContractVersion[]
+  addenda                ContractAddendum[]
   fieldReviews           ContractFieldReview[]
   reviews                ContractReview[]
   annotations            ContractAnnotation[]
@@ -1396,6 +1398,9 @@ model Invoice {
   terms                String?
   status               String    @default("DRAFT") // DRAFT | ISSUED | VOID
   pdfUrl               String?
+  originalFileUrl      String? // 手工上传的 Invoice 原件；与系统生成 pdfUrl 分开
+  archiveOnly          Boolean   @default(false) // 仅存档，不自动创建应收账款
+  archiveSource        String    @default("SYSTEM") // SYSTEM | MANUAL_UPLOAD
   deletedAt            DateTime?
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
@@ -1849,6 +1854,26 @@ model ContractVersion {
 
   @@unique([contractId, versionNo])
   @@index([contractId])
+}
+
+// 合同签署后的附加条款及补充文件。只追加存档，不覆盖原合同文件。
+model ContractAddendum {
+  id           String    @id @default(cuid())
+  contractId   String
+  title        String
+  terms        String?
+  effectiveAt  DateTime?
+  fileName     String?
+  fileUrl      String?
+  fileSize     Int?
+  uploadedById String
+  createdAt    DateTime  @default(now())
+
+  contract   Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  uploadedBy User     @relation("ContractAddendumUploader", fields: [uploadedById], references: [id])
+
+  @@index([contractId, createdAt])
+  @@index([uploadedById])
 }
 
 // 合同审核轮次（一次 PENDING/APPROVED/REJECTED 为一轮；退回后再提交累加 round）

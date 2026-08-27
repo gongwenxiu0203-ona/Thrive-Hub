@@ -1,5 +1,6 @@
 "use server";
 
+import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
@@ -107,6 +108,18 @@ async function requireCustomerRow(customerId: string, session: Awaited<ReturnTyp
 
 function str(fd: FormData, key: string): string {
   return String(fd.get(key) ?? "").trim();
+}
+
+function normalizedBusinessNumber(value: string): string {
+  return value.trim().replace(/\s+/g, "").toUpperCase();
+}
+
+async function requireApprovedInternalOwner(ownerId: string) {
+  const owner = await prisma.user.findFirst({
+    where: { id: ownerId, status: "APPROVED", role: { in: ["ADMIN", "USER", "LYNQ_STAFF"] } },
+    select: { id: true },
+  });
+  if (!owner) throw new Error("合同负责人必须是已审核的内部员工");
 }
 
 // Resolve the default reviewer ("Shallow"), falling back gracefully.
@@ -243,6 +256,9 @@ export async function updateContract(
   if (customerId) await requireCustomerRow(customerId, session);
   if (!contractNo) return { ok: false, error: "合同编号为必填项" };
   if (!customerId) return { ok: false, error: "请选择关联客户" };
+  if (contractNo !== existing.contractNo) {
+    return { ok: false, error: "合同编号只能由管理员在合同详情页单独修改，并填写修改原因" };
+  }
 
   const dup = await prisma.contract.findFirst({
     where: { contractNo, NOT: { id } },
@@ -649,7 +665,8 @@ export async function uploadTransactionalContract(
   }
 
   const saved = await saveUploadedFile(file);
-  const contractNo = await nextContractNoByPrefix("TX");
+  await requireApprovedInternalOwner(ownerId);
+  const contractNo = await nextContractNoByPrefix("COMPANY");
   const contract = await prisma.contract.create({
     data: {
       contractNo,
@@ -680,6 +697,135 @@ export async function uploadTransactionalContract(
 
   revalidatePath("/contracts");
   return { ok: true, contractId: contract.id };
+}
+
+export async function uploadChannelContract(fd: FormData): Promise<ContractSaveResult> {
+  try {
+    const session = await requireContractsPermission("EDIT");
+    const customerId = str(fd, "customerId");
+    const ownerId = str(fd, "ownerId") || session.userId;
+    const file = fd.get("file");
+    if (!customerId) return { ok: false, error: "请选择关联客户" };
+    if (!(file instanceof File)) return { ok: false, error: "请上传渠道商合同文件" };
+    await requireCustomerRow(customerId, session);
+    await requireApprovedInternalOwner(ownerId);
+    const saved = await saveUploadedFile(file);
+    let contract: { id: string } | null = null;
+    for (let attempt = 0; attempt < 4 && !contract; attempt++) {
+      try {
+        const contractNo = await nextContractNoByPrefix("CHANNEL");
+        contract = await prisma.$transaction(async (tx) => {
+          const created = await tx.contract.create({
+            data: {
+              contractNo,
+              customerId,
+              type: "CHANNEL",
+              status: "COMPLETED",
+              ownerId,
+              createdById: session.userId,
+              fileUrl: saved.fileUrl,
+              generatedDocUrl: saved.fileUrl,
+              fillMethod: "CHANNEL_ARCHIVE_UPLOAD",
+              uploadType: "CHANNEL_ARCHIVE",
+              uploadArchiveMode: "SIGNED_ARCHIVE",
+            },
+            select: { id: true },
+          });
+          await tx.attachment.create({ data: {
+            fileName: saved.fileName, fileUrl: saved.fileUrl, fileSize: saved.fileSize,
+            entityType: "CONTRACT", entityId: created.id, uploadedById: session.userId,
+          } });
+          return created;
+        });
+      } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") continue;
+        throw error;
+      }
+    }
+    if (!contract) return { ok: false, error: "渠道商合同编号生成冲突，请重试" };
+    await bumpCustomerStatus(customerId, "COOPERATING");
+    await ensureCustomerReconciliationPlan(contract.id, session.userId);
+    revalidatePath("/contracts");
+    revalidatePath(`/customers/${customerId}`);
+    revalidatePath("/finance");
+    return { ok: true, contractId: contract.id };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "上传失败" };
+  }
+}
+
+export async function updateContractNumber(
+  contractId: string,
+  nextNumberInput: string,
+  reasonInput: string,
+): Promise<ContractSaveResult> {
+  try {
+    const session = await requireContractRow(contractId, "MANAGE");
+    if (session.role !== "ADMIN") return { ok: false, error: "仅管理员可修改合同编号" };
+    const nextNumber = normalizedBusinessNumber(nextNumberInput);
+    const reason = reasonInput.trim();
+    if (!nextNumber) return { ok: false, error: "请输入新合同编号" };
+    if (reason.length < 2) return { ok: false, error: "请填写完整的修改原因" };
+    const existing = await prisma.contract.findUnique({ where: { id: contractId }, select: { contractNo: true } });
+    if (!existing) return { ok: false, error: "合同不存在" };
+    if (existing.contractNo === nextNumber) return { ok: false, error: "新编号与当前编号相同" };
+    const duplicate = await prisma.contract.findUnique({ where: { contractNo: nextNumber }, select: { id: true } });
+    if (duplicate) return { ok: false, error: "该合同编号已存在，不能重复" };
+    try {
+      await prisma.contract.update({ where: { id: contractId }, data: { contractNo: nextNumber } });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        return { ok: false, error: "该合同编号已存在，不能重复" };
+      }
+      throw error;
+    }
+    await writeAdminAudit({
+      actorId: session.userId, action: "CHANGE_CONTRACT_NUMBER", module: "contracts",
+      targetType: "Contract", targetId: contractId, targetLabel: nextNumber,
+      summary: `管理员修改合同编号：${existing.contractNo} → ${nextNumber}`,
+      before: { contractNo: existing.contractNo }, after: { contractNo: nextNumber }, metadata: { reason },
+    });
+    revalidatePath("/contracts");
+    revalidatePath(`/contracts/${contractId}`);
+    return { ok: true, contractId };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "修改失败" };
+  }
+}
+
+export async function addContractAddendum(fd: FormData): Promise<ContractSaveResult> {
+  try {
+    const contractId = str(fd, "contractId");
+    const session = await requireContractRow(contractId, "EDIT");
+    const title = str(fd, "title");
+    const terms = str(fd, "terms");
+    const effectiveAtText = str(fd, "effectiveAt");
+    const file = fd.get("file");
+    if (!title) return { ok: false, error: "请填写附加条款标题" };
+    if (!terms && !(file instanceof File)) return { ok: false, error: "请填写条款内容或上传补充合同文件" };
+    const saved = file instanceof File && file.size > 0 ? await saveUploadedFile(file) : null;
+    await prisma.$transaction(async (tx) => {
+      const addendum = await tx.contractAddendum.create({ data: {
+        contractId, title, terms: terms || null,
+        effectiveAt: effectiveAtText ? new Date(effectiveAtText) : null,
+        fileName: saved?.fileName ?? null, fileUrl: saved?.fileUrl ?? null, fileSize: saved?.fileSize ?? null,
+        uploadedById: session.userId,
+      } });
+      if (saved) await tx.attachment.create({ data: {
+        fileName: saved.fileName, fileUrl: saved.fileUrl, fileSize: saved.fileSize,
+        entityType: "CONTRACT_ADDENDUM", entityId: addendum.id, uploadedById: session.userId,
+      } });
+    });
+    await writeAdminAudit({
+      actorId: session.userId, action: "ADD_CONTRACT_ADDENDUM", module: "contracts",
+      targetType: "Contract", targetId: contractId, summary: `追加合同附加条款：${title}`,
+      metadata: { title, hasTerms: Boolean(terms), hasFile: Boolean(saved) },
+    });
+    revalidatePath(`/contracts/${contractId}`);
+    return { ok: true, contractId };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "保存失败" };
+  }
 }
 
 /** Resolve fixed Party B identity fields based on the selected company key.

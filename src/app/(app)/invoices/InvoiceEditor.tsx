@@ -16,6 +16,7 @@ import {
 import {
   createInvoice,
   updateInvoice,
+  updateInvoiceNumber,
   type InvoiceDetail,
   type InvoiceDraftInput,
   type InvoiceFormOptions,
@@ -38,6 +39,7 @@ type InvoiceEditorProps = {
   initialInvoice?: InvoiceDetail | null;
   initialError?: string;
   canEdit?: boolean;
+  isAdmin?: boolean;
 };
 
 const DEFAULT_TERMS =
@@ -236,6 +238,7 @@ export function InvoiceEditor({
   initialInvoice,
   initialError = "",
   canEdit = true,
+  isAdmin = false,
 }: InvoiceEditorProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -280,6 +283,10 @@ export function InvoiceEditor({
   );
   const [invoiceId, setInvoiceId] = useState(initialInvoice?.id ?? "");
   const [invoiceNo, setInvoiceNo] = useState(initialInvoice?.invoiceNo ?? "");
+  const [numberEditorOpen, setNumberEditorOpen] = useState(false);
+  const [nextInvoiceNo, setNextInvoiceNo] = useState(initialInvoice?.invoiceNo ?? "");
+  const [numberChangeReason, setNumberChangeReason] = useState("");
+  const [numberChangeError, setNumberChangeError] = useState("");
   const [status, setStatus] = useState(initialInvoice?.status ?? "DRAFT");
   const [customerId, setCustomerId] = useState(
     initialInvoice?.customerId ?? "",
@@ -842,6 +849,24 @@ export function InvoiceEditor({
                   value={invoiceNo || "首次保存后自动生成"}
                   readOnly
                 />
+                {isAdmin && initialInvoice?.id && (
+                  <div className="mt-2">
+                    <button type="button" className="text-xs font-medium text-brand-700 hover:underline" onClick={() => setNumberEditorOpen((value) => !value)}>
+                      管理员修改编号
+                    </button>
+                    {numberEditorOpen && <div className="mt-2 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                      <input className="input" value={nextInvoiceNo} onChange={(event) => setNextInvoiceNo(event.target.value)} placeholder="新 Invoice 编号" />
+                      <input className="input" value={numberChangeReason} onChange={(event) => setNumberChangeReason(event.target.value)} placeholder="修改原因（必填）" />
+                      {numberChangeError && <p className="text-xs text-rose-600">{numberChangeError}</p>}
+                      <button type="button" className="btn-primary text-xs" disabled={pending} onClick={() => startTransition(async () => {
+                        const result = await updateInvoiceNumber(initialInvoice.id, nextInvoiceNo, numberChangeReason);
+                        if (!result.ok) return setNumberChangeError(result.error ?? "修改失败");
+                        setInvoiceNo(result.invoiceNo ?? nextInvoiceNo.toUpperCase());
+                        setNumberEditorOpen(false); setNumberChangeReason(""); setNumberChangeError(""); router.refresh();
+                      })}>保存编号</button>
+                    </div>}
+                  </div>
+                )}
               </Field>
               <Field label="Invoice 日期" required>
                 <input

@@ -23,6 +23,7 @@ import {
 } from "@/lib/permissionGuard";
 import { requireSession } from "@/lib/session";
 import { actionError } from "@/lib/appError";
+import { writeAdminAudit } from "@/lib/adminObservability";
 
 const INVOICE_FEATURE = "finance.invoices";
 const INVOICE_STATUSES = ["DRAFT", "ISSUED", "VOID"] as const;
@@ -88,6 +89,10 @@ export type InvoiceListItem = {
   status: InvoiceStatus;
   createdByName: string | null;
   createdAt: string;
+  documentType: string;
+  originalFileUrl: string | null;
+  archiveOnly: boolean;
+  accountsReceivableId: string | null;
 };
 
 export type InvoiceDetail = {
@@ -113,6 +118,9 @@ export type InvoiceDetail = {
   terms: string | null;
   status: InvoiceStatus;
   pdfUrl: string | null;
+  originalFileUrl: string | null;
+  archiveOnly: boolean;
+  archiveSource: string;
   createdById: string | null;
   createdByName: string | null;
   createdAt: string;
@@ -997,6 +1005,9 @@ export async function getInvoiceReconciliationPrefill(
         terms: null,
         status: "DRAFT",
         pdfUrl: null,
+        originalFileUrl: null,
+        archiveOnly: false,
+        archiveSource: "SYSTEM",
         createdById: null,
         createdByName: null,
         createdAt: now,
@@ -1130,6 +1141,10 @@ export async function listInvoices(input?: {
     currencyTotals: summarizeCurrencyTotals(row.items),
     createdByName: row.createdBy?.name ?? null,
     createdAt: row.createdAt.toISOString(),
+    documentType: row.documentType,
+    originalFileUrl: row.originalFileUrl,
+    archiveOnly: row.archiveOnly,
+    accountsReceivableId: row.accountsReceivableId,
   }));
 }
 
@@ -1172,6 +1187,9 @@ export async function getInvoiceById(
     terms: row.terms,
     status: row.status as InvoiceStatus,
     pdfUrl: row.pdfUrl,
+    originalFileUrl: row.originalFileUrl,
+    archiveOnly: row.archiveOnly,
+    archiveSource: row.archiveSource,
     createdById: row.createdById,
     createdByName: row.createdBy?.name ?? null,
     createdAt: row.createdAt.toISOString(),
@@ -1328,6 +1346,57 @@ export async function updateInvoice(
     revalidatePath("/invoices");
     revalidatePath(`/invoices/${id}`);
     return { ok: true, id, invoiceNo: existing.invoiceNo };
+  } catch (error) {
+    return { ok: false, error: errorMessage(error) };
+  }
+}
+
+export async function updateInvoiceNumber(
+  id: string,
+  nextNumberInput: string,
+  reasonInput: string,
+): Promise<InvoiceSaveResult> {
+  try {
+    const session = await requireInvoicePermission("MANAGE");
+    if (session.role !== "ADMIN") return { ok: false, error: "仅管理员可修改 Invoice 编号" };
+    const nextNumber = nextNumberInput.trim().replace(/\s+/g, "").toUpperCase();
+    const reason = reasonInput.trim();
+    if (!nextNumber) return { ok: false, error: "请输入新 Invoice 编号" };
+    if (reason.length < 2) return { ok: false, error: "请填写完整的修改原因" };
+    const existing = await prisma.invoice.findUnique({
+      where: { id },
+      select: { id: true, invoiceNo: true, accountsReceivableId: true, deletedAt: true },
+    });
+    if (!existing || existing.deletedAt) return { ok: false, error: "Invoice 不存在" };
+    if (existing.invoiceNo === nextNumber) return { ok: false, error: "新编号与当前编号相同" };
+    const duplicate = await prisma.invoice.findUnique({ where: { invoiceNo: nextNumber }, select: { id: true } });
+    if (duplicate) return { ok: false, error: "该 Invoice 编号已存在，不能重复" };
+    try {
+      await prisma.$transaction(async (tx) => {
+        await tx.invoice.update({ where: { id }, data: { invoiceNo: nextNumber, pdfUrl: null } });
+        if (existing.accountsReceivableId) {
+          await tx.accountsReceivable.update({
+            where: { id: existing.accountsReceivableId },
+            data: { invoiceNo: nextNumber },
+          });
+        }
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        return { ok: false, error: "该 Invoice 编号已存在，不能重复" };
+      }
+      throw error;
+    }
+    await writeAdminAudit({
+      actorId: session.userId, action: "CHANGE_INVOICE_NUMBER", module: "finance",
+      targetType: "Invoice", targetId: id, targetLabel: nextNumber,
+      summary: `管理员修改 Invoice 编号：${existing.invoiceNo} → ${nextNumber}`,
+      before: { invoiceNo: existing.invoiceNo }, after: { invoiceNo: nextNumber }, metadata: { reason },
+    });
+    revalidatePath("/invoices");
+    revalidatePath(`/invoices/${id}`);
+    revalidatePath("/finance/workbench");
+    return { ok: true, id, invoiceNo: nextNumber };
   } catch (error) {
     return { ok: false, error: errorMessage(error) };
   }

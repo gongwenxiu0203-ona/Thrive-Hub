@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { FileDown, FilePenLine, Plus, Search, Trash2 } from "lucide-react";
+import { FileDown, FilePenLine, Plus, Search, Trash2, Upload } from "lucide-react";
 import {
   setInvoiceStatus,
   softDeleteInvoice,
@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { cn } from "@/lib/utils";
+import { createReceivableForArchivedInvoice, uploadInvoiceArchive } from "@/actions/invoiceArchive";
 
 const STATUS_LABELS: Record<string, string> = {
   DRAFT: "草稿",
@@ -26,16 +27,21 @@ export function InvoiceListClient({
   status,
   canEdit,
   canManage,
+  archiveOptions,
 }: {
   invoices: InvoiceListItem[];
   search: string;
   status: string;
   canEdit: boolean;
   canManage: boolean;
+  archiveOptions: null | { customers: { id: string; brandName: string }[]; contracts: { id: string; customerId: string; contractNo: string }[] };
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState("");
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadCustomerId, setUploadCustomerId] = useState("");
+  const [receivableInvoiceId, setReceivableInvoiceId] = useState<string | null>(null);
 
   function remove(id: string) {
     if (!window.confirm("确认将这张 Invoice 移入回收状态？历史业务数据不会立即清除。")) return;
@@ -73,9 +79,14 @@ export function InvoiceListClient({
         actions={(
           <div className="flex flex-wrap items-center gap-2">
             {canEdit && (
-              <Link href="/invoices/new" className="btn-primary">
-                <Plus className="h-4 w-4" /> 新建 Invoice
-              </Link>
+              <>
+                <button type="button" className="btn-secondary" onClick={() => setUploadOpen(true)}>
+                  <Upload className="h-4 w-4" /> 上传 Invoice
+                </button>
+                <Link href="/invoices/new" className="btn-primary">
+                  <Plus className="h-4 w-4" /> 新建 Invoice
+                </Link>
+              </>
             )}
           </div>
         )}
@@ -182,7 +193,7 @@ export function InvoiceListClient({
                         <FilePenLine className="h-4 w-4" />
                       </Link>
                       <a
-                        href={`/api/invoices/${invoice.id}/pdf`}
+                        href={invoice.originalFileUrl ? `${invoice.originalFileUrl}?download=1` : `/api/invoices/${invoice.id}/pdf`}
                         target="_blank"
                         rel="noreferrer"
                         aria-label={`下载 ${invoice.invoiceNo}`}
@@ -190,6 +201,11 @@ export function InvoiceListClient({
                       >
                         <FileDown className="h-4 w-4" />
                       </a>
+                      {canEdit && invoice.archiveOnly && !invoice.accountsReceivableId && (
+                        <button type="button" className="btn-secondary h-9 px-2 text-xs" onClick={() => setReceivableInvoiceId(invoice.id)}>
+                          创建应收
+                        </button>
+                      )}
                       {canManage && invoice.status === "ISSUED" && (
                         <button
                           type="button"
@@ -220,8 +236,52 @@ export function InvoiceListClient({
           </table>
         </div>
       )}
+
+      {uploadOpen && archiveOptions && (
+        <Modal title="上传 Invoice 原件" onClose={() => setUploadOpen(false)}>
+          <form action={(fd) => startTransition(async () => {
+            const result = await uploadInvoiceArchive(fd);
+            setMessage(result.ok ? "Invoice 已存档，不会自动创建应收账款。" : result.error ?? "上传失败。");
+            if (result.ok) { setUploadOpen(false); setUploadCustomerId(""); router.refresh(); }
+          })} className="space-y-4">
+            <Field label="Invoice 编号"><input className="input" name="invoiceNo" required /></Field>
+            <Field label="关联客户"><select className="input" name="customerId" required value={uploadCustomerId} onChange={(e) => setUploadCustomerId(e.target.value)}><option value="">请选择客户</option>{archiveOptions.customers.map((item) => <option key={item.id} value={item.id}>{item.brandName}</option>)}</select></Field>
+            <Field label="关联合同"><select className="input" name="contractId" required disabled={!uploadCustomerId}><option value="">请选择合同</option>{archiveOptions.contracts.filter((item) => item.customerId === uploadCustomerId).map((item) => <option key={item.id} value={item.id}>{item.contractNo}</option>)}</select></Field>
+            <Field label="Invoice 文件"><input className="input" name="file" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" required /></Field>
+            <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setUploadOpen(false)}>取消</Button><Button type="submit" disabled={pending}>上传并存档</Button></div>
+          </form>
+        </Modal>
+      )}
+
+      {receivableInvoiceId && (
+        <Modal title="手动创建应收账款" onClose={() => setReceivableInvoiceId(null)}>
+          <form action={(fd) => startTransition(async () => {
+            const result = await createReceivableForArchivedInvoice(receivableInvoiceId, {
+              amount: Number(fd.get("amount")), currency: String(fd.get("currency") ?? "USD"),
+              dueDate: String(fd.get("dueDate") ?? ""), exchangeRate: Number(fd.get("exchangeRate") ?? 1), remark: String(fd.get("remark") ?? ""),
+            });
+            setMessage(result.ok ? "应收账款已创建。" : result.error ?? "创建失败。");
+            if (result.ok) { setReceivableInvoiceId(null); router.refresh(); }
+          })} className="grid gap-4 sm:grid-cols-2">
+            <Field label="应收金额"><input className="input" name="amount" type="number" min="0.01" step="0.01" required /></Field>
+            <Field label="币种"><select className="input" name="currency" defaultValue="USD">{["USD","CNY","EUR","GBP","HKD","JPY","CAD","AUD","SGD"].map((code) => <option key={code}>{code}</option>)}</select></Field>
+            <Field label="到期日"><input className="input" name="dueDate" type="date" required /></Field>
+            <Field label="折本位币汇率"><input className="input" name="exchangeRate" type="number" min="0.000001" step="0.000001" defaultValue="1" required /></Field>
+            <div className="sm:col-span-2"><Field label="备注"><textarea className="input min-h-24" name="remark" /></Field></div>
+            <div className="flex justify-end gap-2 sm:col-span-2"><Button type="button" variant="secondary" onClick={() => setReceivableInvoiceId(null)}>取消</Button><Button type="submit" disabled={pending}>确认创建</Button></div>
+          </form>
+        </Modal>
+      )}
     </div>
   );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return <label className="block space-y-1.5 text-sm font-medium text-slate-700"><span>{label}</span>{children}</label>;
+}
+
+function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4" role="dialog" aria-modal="true"><div className="w-full max-w-2xl rounded-xl bg-white p-6 shadow-xl"><div className="mb-5 flex items-center justify-between"><h2 className="text-lg font-semibold text-slate-900">{title}</h2><button type="button" onClick={onClose} className="text-slate-500 hover:text-slate-900">关闭</button></div>{children}</div></div>;
 }
 
 function StatusBadge({ status }: { status: string }) {

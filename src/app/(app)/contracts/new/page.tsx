@@ -6,6 +6,7 @@ import { requireSession } from "@/lib/session";
 import { ContractV4Form } from "./ContractV4Form";
 import { UploadExistingForm } from "./UploadExistingForm";
 import { TransactionalUploadForm } from "./TransactionalUploadForm";
+import { ChannelUploadForm } from "./ChannelUploadForm";
 import { requireFeaturePermission } from "@/lib/permissionGuard";
 import { contractScope, creationReferenceCustomerScope } from "@/lib/dataScope";
 
@@ -23,7 +24,7 @@ export default async function NewContractPage({
   const sp = await searchParams;
   const customerId = sp.customerId;
   const contractId = sp.contractId; // 编辑模式
-  const mode = sp.mode === "upload" ? "upload" : sp.mode === "transactional" ? "transactional" : sp.mode === "new" ? "new" : null;
+  const mode = sp.mode === "upload" ? "upload" : sp.mode === "transactional" ? "transactional" : sp.mode === "channel" ? "channel" : sp.mode === "new" ? "new" : null;
 
   let customer: { id: string; brandName: string } | null = null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -77,7 +78,7 @@ export default async function NewContractPage({
       orderBy: { brandName: "asc" },
     }),
     prisma.user.findMany({
-      where: { status: "APPROVED" },
+      where: { status: "APPROVED", role: { in: ["ADMIN", "USER", "LYNQ_STAFF"] } },
       select: { id: true, name: true },
       orderBy: { name: "asc" },
     }),
@@ -118,7 +119,7 @@ export default async function NewContractPage({
           <h1 className="text-xl font-bold text-slate-900">新建合同</h1>
           <p className="mt-1 text-sm text-slate-500">请选择创建方式</p>
         </div>
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Link
             href={`/contracts/new?mode=new${qs}`}
             className="card flex flex-col gap-2 p-6 transition-colors hover:border-brand-400 hover:bg-brand-50/30"
@@ -143,6 +144,14 @@ export default async function NewContractPage({
             <p className="text-base font-semibold text-slate-800">上传事务性合同</p>
             <p className="text-sm text-slate-500">不识别字段、不关联客户、不走审核模板，仅上传源文件并归档。</p>
           </Link>
+          <Link
+            href={`/contracts/new?mode=channel${qs}`}
+            className="card flex flex-col gap-2 p-6 transition-colors hover:border-brand-400 hover:bg-brand-50/30"
+          >
+            <FileUp className="h-6 w-6 text-brand-600" />
+            <p className="text-base font-semibold text-slate-800">上传渠道商合同</p>
+            <p className="text-sm text-slate-500">关联客户后直接存档，不识别合同字段，自动生成 CHANNEL 编号。</p>
+          </Link>
         </div>
       </div>
     );
@@ -161,6 +170,26 @@ export default async function NewContractPage({
           </Link>
         </div>
         <TransactionalUploadForm users={users} currentUserId={session.userId} />
+      </div>
+    );
+  }
+
+  if (mode === "channel") {
+    return (
+      <div className="mx-auto max-w-4xl space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-xl font-bold text-slate-900">上传渠道商合同</h1>
+            <p className="mt-1 text-sm text-slate-500">关联客户、选择负责人并上传文件；系统仅存档，不识别字段。</p>
+          </div>
+          <Link href="/contracts/new" className="text-sm text-slate-500 hover:text-slate-700">返回创建方式</Link>
+        </div>
+        <ChannelUploadForm
+          customers={customers}
+          users={users}
+          currentUserId={session.userId}
+          presetCustomerId={customer?.id}
+        />
       </div>
     );
   }

@@ -15,6 +15,7 @@ export const ATTACHMENT_ENTITY_TYPES = [
   "TASK",
   "CONTRACT",
   "AFFILIATE",
+  "INVOICE",
 ] as const;
 
 export type AttachmentEntityType = (typeof ATTACHMENT_ENTITY_TYPES)[number];
@@ -94,6 +95,15 @@ export async function requireAttachmentEntityAccess(
         select: { id: true },
       });
       exists = Boolean(affiliate);
+      break;
+    }
+    case "INVOICE": {
+      await requireFeaturePermission(session, "finance.invoices", required);
+      const invoice = await prisma.invoice.findFirst({
+        where: { id: entityId, deletedAt: null },
+        select: { id: true },
+      });
+      exists = Boolean(invoice);
       break;
     }
   }
