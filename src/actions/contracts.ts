@@ -19,7 +19,11 @@ import { contractScope, creationReferenceCustomerScope } from "@/lib/dataScope";
 import type { PermLevel } from "@/lib/featurePermissions";
 import { requireFeaturePermission } from "@/lib/permissionGuard";
 import { writeAdminAudit } from "@/lib/adminObservability";
-import { ensureCustomerReconciliationPlan } from "@/lib/customerReconciliationPlan";
+import {
+  closeContractReconciliationPlans,
+  ensureCustomerReconciliationPlan,
+} from "@/lib/customerReconciliationPlan";
+import { parseDateOnlyUtc } from "@/lib/dateRange";
 
 const CONTRACT_EDIT_AUDIT_SELECT = {
   id: true,
@@ -387,6 +391,80 @@ export async function deleteContract(id: string) {
   revalidatePath("/finance");
   if (contract.customerId) revalidatePath(`/customers/${contract.customerId}`);
   redirect("/contracts");
+}
+
+export async function terminateContract(
+  id: string,
+  terminationDate: string,
+  terminationReason: string,
+) {
+  const session = await requireContractRow(id, "MANAGE");
+  if (session.role !== "ADMIN") throw new Error("仅管理员可终止合同");
+  const parsedDate = parseDateOnlyUtc(terminationDate);
+  const reason = terminationReason.trim();
+  if (!parsedDate) throw new Error("请填写有效的合同终止日期");
+  if (!reason) throw new Error("请填写合同终止原因");
+
+  const contract = await prisma.contract.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      contractNo: true,
+      customerId: true,
+      status: true,
+      startDate: true,
+      endDate: true,
+    },
+  });
+  if (!contract) throw new Error("合同不存在");
+  if (contract.status === "TERMINATED") throw new Error("该合同已经终止");
+  if (contract.startDate && parsedDate < contract.startDate) {
+    throw new Error("合同终止日期不能早于合同开始日期");
+  }
+
+  const auditReason = `合同 ${contract.contractNo} 于 ${terminationDate} 终止：${reason}`;
+  const now = new Date();
+  await prisma.$transaction(async (tx) => {
+    await tx.contract.update({
+      where: { id },
+      data: { status: "TERMINATED", endDate: parsedDate, updatedAt: now },
+    });
+    await tx.task.updateMany({
+      where: {
+        contractId: id,
+        deletedAt: null,
+        status: { notIn: ["DONE", "CANCELLED"] },
+      },
+      data: { status: "CANCELLED", returnReason: auditReason, updatedAt: now },
+    });
+  });
+
+  const reconciliationResult = await closeContractReconciliationPlans(
+    id,
+    parsedDate,
+    session.userId,
+    auditReason,
+  );
+  await writeAdminAudit({
+    actorId: session.userId,
+    action: "TERMINATE_CONTRACT",
+    module: "contracts",
+    targetType: "Contract",
+    targetId: id,
+    targetLabel: contract.contractNo,
+    summary: auditReason,
+    before: { status: contract.status, endDate: contract.endDate },
+    after: { status: "TERMINATED", endDate: parsedDate },
+    metadata: reconciliationResult,
+  });
+
+  revalidatePath("/contracts");
+  revalidatePath(`/contracts/${id}`);
+  revalidatePath("/finance");
+  if (contract.customerId) {
+    revalidatePath(`/customers/${contract.customerId}`);
+    revalidatePath(`/finance/customers/${contract.customerId}`);
+  }
 }
 
 /** 合同推进中 → 合同审核中. Seeds the per-field review rows + notifies reviewer. */

@@ -122,6 +122,7 @@ export const CONTRACT_STATUS_LABELS: Record<string, string> = {
   REJECTED: "审核退回",
   SIGNING: "合同签署中",
   COMPLETED: "合同签署完成",
+  TERMINATED: "合同终止",
 };
 
 export const CONTRACT_STATUS_ORDER = [
@@ -137,6 +138,7 @@ export const CONTRACT_STATUS_COLORS: Record<string, string> = {
   REJECTED: "bg-rose-100 text-rose-700",
   SIGNING: "bg-sky-100 text-sky-700",
   COMPLETED: "bg-emerald-100 text-emerald-700",
+  TERMINATED: "bg-amber-100 text-amber-800",
 };
 
 export const FEE_CYCLE_OPTIONS = ["无", "月度", "季度"];

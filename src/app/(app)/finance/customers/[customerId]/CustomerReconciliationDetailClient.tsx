@@ -853,21 +853,56 @@ function ReconciliationStreamSection({
   linkableInvoices: LinkableInvoice[];
   scopeAll: boolean;
 }) {
-  const [showAllFuturePlans, setShowAllFuturePlans] = useState(false);
-  const activeRecords = records.filter(
-    (record) => record.planStatus !== "PLANNED",
+  const [showPastPeriods, setShowPastPeriods] = useState(false);
+  const [showFuturePeriods, setShowFuturePeriods] = useState(false);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const sortedRecords = [...records].sort(
+    (left, right) =>
+      new Date(left.periodStart).getTime() -
+      new Date(right.periodStart).getTime(),
   );
-  const futurePlans = records
-    .filter((record) => record.planStatus === "PLANNED")
-    .sort(
-      (left, right) =>
-        new Date(left.periodStart).getTime() -
-        new Date(right.periodStart).getTime(),
-    );
-  const visibleFuturePlans = showAllFuturePlans
-    ? futurePlans
-    : futurePlans.slice(0, 1);
-  const visibleRecords = [...activeRecords, ...visibleFuturePlans];
+  const pastPeriods = sortedRecords.filter((record) => {
+    const end = new Date(record.periodEnd);
+    end.setHours(0, 0, 0, 0);
+    return end.getTime() < today.getTime();
+  });
+  const currentPeriods = sortedRecords.filter((record) => {
+    const start = new Date(record.periodStart);
+    const end = new Date(record.periodEnd);
+    start.setHours(0, 0, 0, 0);
+    end.setHours(0, 0, 0, 0);
+    return start.getTime() <= today.getTime() && end.getTime() >= today.getTime();
+  });
+  const futurePeriods = sortedRecords.filter((record) => {
+    const start = new Date(record.periodStart);
+    start.setHours(0, 0, 0, 0);
+    return start.getTime() > today.getTime();
+  });
+  const pastNeedsAttention = pastPeriods.filter(
+    (record) => record.status !== "CONFIRMED",
+  ).length;
+
+  function renderRows(periods: Rec[], defaultOpen: boolean) {
+    return periods.map((rec) => (
+      <MonthlyRecordRow
+        key={streamKind + "-" + rec.id}
+        rec={rec}
+        streamKind={streamKind}
+        defaultOpen={defaultOpen}
+        currentUserId={currentUserId}
+        users={users}
+        readOnly={readOnly}
+        canManage={canManage}
+        selected={selectedIds.includes(rec.id)}
+        onToggleSelected={onToggleSelected}
+        onRefresh={onRefresh}
+        invoiceState={invoiceStates[rec.id]}
+        linkableInvoices={linkableInvoices}
+        scopeAll={scopeAll}
+      />
+    ));
+  }
 
   return (
     <section className="card p-5">
@@ -888,42 +923,71 @@ function ReconciliationStreamSection({
           <p className="text-sm text-slate-400">暂无{title}记录</p>
         </div>
       ) : (
-        <div className="space-y-3">
-          {visibleRecords.map((rec, index) => (
-            <MonthlyRecordRow
-              key={streamKind + "-" + rec.id}
-              rec={rec}
-              streamKind={streamKind}
-              defaultOpen={index === 0 && rec.planStatus !== "PLANNED"}
-              currentUserId={currentUserId}
-              users={users}
-              readOnly={readOnly}
-              canManage={canManage}
-              selected={selectedIds.includes(rec.id)}
-              onToggleSelected={onToggleSelected}
-              onRefresh={onRefresh}
-              invoiceState={invoiceStates[rec.id]}
-              linkableInvoices={linkableInvoices}
-              scopeAll={scopeAll}
-            />
-          ))}
-          {futurePlans.length > 1 && (
+        <div className="space-y-4">
+          {pastPeriods.length > 0 && (
+            <div className="space-y-3">
+              <button
+                type="button"
+                className="flex w-full items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-left hover:border-slate-300 hover:bg-slate-100/80"
+                onClick={() => setShowPastPeriods((current) => !current)}
+              >
+                <span>
+                  <span className="block text-sm font-medium text-slate-700">过去期 · {pastPeriods.length} 条</span>
+                  <span className="mt-0.5 block text-xs text-slate-500">已结束的对账周期，按开始时间升序排列</span>
+                </span>
+                <span className="flex items-center gap-2">
+                  {pastNeedsAttention > 0 && (
+                    <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-medium text-amber-700">
+                      待处理 {pastNeedsAttention}
+                    </span>
+                  )}
+                  {showPastPeriods ? <ChevronUp className="h-4 w-4 text-slate-500" /> : <ChevronDown className="h-4 w-4 text-slate-500" />}
+                </span>
+              </button>
+              {showPastPeriods && <div className="space-y-3">{renderRows(pastPeriods, false)}</div>}
+            </div>
+          )}
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between px-1">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-900">当前期</h3>
+                <p className="text-xs text-slate-500">今天所在的对账周期</p>
+              </div>
+              {currentPeriods.length > 0 && (
+                <span className="rounded-full bg-brand-50 px-2 py-1 text-xs font-medium text-brand-700">
+                  {currentPeriods.length} 条
+                </span>
+              )}
+            </div>
+            {currentPeriods.length > 0 ? (
+              renderRows(currentPeriods, true)
+            ) : (
+              <div className="rounded-lg border border-dashed border-slate-200 px-4 py-5 text-center text-sm text-slate-400">
+                当前没有进行中的对账周期
+              </div>
+            )}
+          </div>
+
+          {futurePeriods.length > 0 && (
             <button
               type="button"
               className="flex w-full items-center justify-between rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-left text-sm text-slate-600 hover:border-brand-300 hover:bg-brand-50/40 hover:text-brand-700"
-              onClick={() => setShowAllFuturePlans((current) => !current)}
+              onClick={() => setShowFuturePeriods((current) => !current)}
             >
               <span>
-                {showAllFuturePlans
-                  ? "收起未来对账计划"
-                  : `展开其余 ${futurePlans.length - 1} 条未来对账计划`}
+                <span className="block font-medium">未来期 · {futurePeriods.length} 条</span>
+                <span className="mt-0.5 block text-xs text-slate-500">尚未开始的对账计划</span>
               </span>
-              {showAllFuturePlans ? (
+              {showFuturePeriods ? (
                 <ChevronUp className="h-4 w-4" />
               ) : (
                 <ChevronDown className="h-4 w-4" />
               )}
             </button>
+          )}
+          {showFuturePeriods && futurePeriods.length > 0 && (
+            <div className="space-y-3">{renderRows(futurePeriods, false)}</div>
           )}
         </div>
       )}
@@ -2088,6 +2152,20 @@ function BatchSubmitModal({
   const [correctedFeeAmounts, setCorrectedFeeAmounts] = useState<
     Record<string, string>
   >({});
+  const [correctedCurrencies, setCorrectedCurrencies] = useState<
+    Record<string, string>
+  >(() =>
+    Object.fromEntries(
+      records.map((record) => [
+        record.id,
+        currencyCode(
+          record.reconcileType === "FEE_ONLY"
+            ? record.fixedFeeCurrency
+            : record.commissionCurrency,
+        ),
+      ]),
+    ),
+  );
   const [loading, setLoading] = useState(false);
   const single = records.length === 1;
 
@@ -2149,6 +2227,10 @@ function BatchSubmitModal({
                       decisions[record.id] === "DISPUTED" &&
                       record.reconcileType === "FEE_ONLY"
                         ? Number(correctedFeeAmounts[record.id])
+                        : undefined,
+                    correctedCurrency:
+                      decisions[record.id] === "DISPUTED"
+                        ? correctedCurrencies[record.id]
                         : undefined,
                   }))
                 : undefined,
@@ -2264,7 +2346,14 @@ function BatchSubmitModal({
             {records.map((record) => {
               const fixedFee = record.reconcileType === "FEE_ONLY";
               const disputed = decisions[record.id] === "DISPUTED";
-              const symbol = currencySymbol(record.commissionCurrency || "USD");
+              const currentCurrency =
+                correctedCurrencies[record.id] ||
+                currencyCode(
+                  fixedFee
+                    ? record.fixedFeeCurrency
+                    : record.commissionCurrency,
+                );
+              const symbol = currencySymbol(currentCurrency);
               return (
                 <div
                   key={record.id}
@@ -2312,7 +2401,7 @@ function BatchSubmitModal({
                     </div>
                   </div>
                   {disputed && (
-                    <div className="mt-3 max-w-sm">
+                    <div className="mt-3 grid max-w-lg gap-3 sm:grid-cols-[minmax(0,1fr)_10rem]">
                       <label className="label">
                         {fixedFee ? "异议固费金额" : "纠正后的销售额"}{" "}
                         <span className="text-rose-600">*</span>
@@ -2348,6 +2437,25 @@ function BatchSubmitModal({
                               : "输入核实后的销售额"
                           }
                         />
+                      </div>
+                      <div>
+                        <label className="label">币种</label>
+                        <select
+                          className="input"
+                          value={currentCurrency}
+                          onChange={(event) =>
+                            setCorrectedCurrencies((current) => ({
+                              ...current,
+                              [record.id]: event.target.value,
+                            }))
+                          }
+                        >
+                          {RECONCILIATION_CURRENCY_OPTIONS.map((currency) => (
+                            <option key={currency.value} value={currency.value}>
+                              {currency.label}
+                            </option>
+                          ))}
+                        </select>
                       </div>
                     </div>
                   )}
@@ -2410,6 +2518,9 @@ function ReviewModal({
   onDone: () => void;
 }) {
   const [correctedAmount, setCorrectedAmount] = useState("");
+  const [correctedCurrency, setCorrectedCurrency] = useState(() =>
+    currencyCode(defaultCurrency),
+  );
   const [note, setNote] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -2424,6 +2535,7 @@ function ReviewModal({
       }
       if (isFixed) body.correctedFeeAmount = Number(correctedAmount);
       else body.correctedSalesAmount = Number(correctedAmount);
+      body.correctedCurrency = correctedCurrency;
     }
     const res = await fetch(`/api/finance/reconciliations/${recId}/review`, {
       method: "POST",
@@ -2461,26 +2573,40 @@ function ReviewModal({
               {isFixed ? "异议固费金额" : "纠正后的销售额"}{" "}
               <span className="text-rose-600">*</span>
             </label>
-            <div className="relative">
-              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-500">
-                {currencySymbol(defaultCurrency)}
-              </span>
-              <input
-                type="number"
-                className="input pl-7"
-                placeholder={
-                  isFixed
-                    ? "输入核实后应采用的固费金额"
-                    : "输入核实后应采用的销售额"
-                }
-                value={correctedAmount}
-                onChange={(e) => setCorrectedAmount(e.target.value)}
-                min={0}
-                step="0.01"
-              />
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem]">
+              <div className="relative">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-500">
+                  {currencySymbol(correctedCurrency)}
+                </span>
+                <input
+                  type="number"
+                  className="input pl-7"
+                  placeholder={
+                    isFixed
+                      ? "输入核实后应采用的固费金额"
+                      : "输入核实后应采用的销售额"
+                  }
+                  value={correctedAmount}
+                  onChange={(e) => setCorrectedAmount(e.target.value)}
+                  min={0}
+                  step="0.01"
+                />
+              </div>
+              <select
+                className="input"
+                value={correctedCurrency}
+                onChange={(event) => setCorrectedCurrency(event.target.value)}
+                aria-label="异议金额币种"
+              >
+                {RECONCILIATION_CURRENCY_OPTIONS.map((currency) => (
+                  <option key={currency.value} value={currency.value}>
+                    {currency.label}
+                  </option>
+                ))}
+              </select>
             </div>
             <p className="mt-1 text-xs text-slate-500">
-              币种沿用当前对账记录，不在异议环节修改。
+              默认沿用当前对账记录币种；如在此修改，以本次保存的币种为准。
             </p>
           </div>
         )}

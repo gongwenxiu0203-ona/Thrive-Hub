@@ -12,7 +12,7 @@ import { customerScope } from "@/lib/dataScope";
 import { requireFeaturePermission } from "@/lib/permissionGuard";
 import { parseDateOnlyUtc } from "@/lib/dateRange";
 import {
-  closeCustomerReconciliationPlans,
+  closeContractReconciliationPlans,
   ensureCustomerPlansForCooperatingCustomer,
 } from "@/lib/customerReconciliationPlan";
 
@@ -491,6 +491,17 @@ export async function updateCustomerStatus(id: string, status: string, cooperati
   if (status === "COOPERATION_DONE" && !parsedEndDate) {
     throw new Error("结束合作时必须填写有效的合作结束日期");
   }
+  const linkedContracts = status === "COOPERATION_DONE"
+    ? await prisma.contract.findMany({
+        where: {
+          customerId: customer.id,
+          deletedAt: null,
+          status: { not: "TERMINATED" },
+        },
+        select: { id: true, contractNo: true, status: true, endDate: true },
+      })
+    : [];
+  const onlyContract = linkedContracts.length === 1 ? linkedContracts[0] : null;
   await prisma.$transaction(async (tx) => {
     await tx.customer.update({
       where: { id: customer.id },
@@ -515,15 +526,39 @@ export async function updateCustomerStatus(id: string, status: string, cooperati
         afterJson: JSON.stringify({ status, cooperationEndDate: parsedEndDate }),
       },
     });
+    if (status === "COOPERATION_DONE" && parsedEndDate && onlyContract) {
+      await tx.contract.update({
+        where: { id: onlyContract.id },
+        data: { status: "TERMINATED", endDate: parsedEndDate, updatedAt: new Date() },
+      });
+      await tx.adminAuditLog.create({
+        data: {
+          actorId: session.userId,
+          action: "AUTO_TERMINATE_SINGLE_CUSTOMER_CONTRACT",
+          module: "contracts",
+          targetType: "Contract",
+          targetId: onlyContract.id,
+          summary: `客户结束合作，自动终止唯一关联合同 ${onlyContract.contractNo}`,
+          beforeJson: JSON.stringify({ status: onlyContract.status, endDate: onlyContract.endDate }),
+          afterJson: JSON.stringify({ status: "TERMINATED", endDate: parsedEndDate }),
+        },
+      });
+    }
   });
-  if (status === "COOPERATION_DONE" && parsedEndDate) {
-    await closeCustomerReconciliationPlans(customer.id, parsedEndDate, session.userId);
+  if (status === "COOPERATION_DONE" && parsedEndDate && onlyContract) {
+    await closeContractReconciliationPlans(
+      onlyContract.id,
+      parsedEndDate,
+      session.userId,
+      `客户结束合作，自动终止唯一关联合同 ${onlyContract.contractNo}`,
+    );
   } else if (status === "COOPERATING") {
     await ensureCustomerPlansForCooperatingCustomer(customer.id, session.userId);
   }
   revalidatePath("/customers");
   revalidatePath(`/customers/${id}`);
   revalidatePath("/finance");
+  if (onlyContract) revalidatePath(`/contracts/${onlyContract.id}`);
 }
 
 /**

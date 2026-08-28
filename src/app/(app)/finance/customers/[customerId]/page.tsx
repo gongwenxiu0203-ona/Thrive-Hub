@@ -6,6 +6,7 @@ import { CustomerReconciliationDetailClient } from "./CustomerReconciliationDeta
 import { getReconciliationAccess } from "@/lib/reconciliationAccess";
 import { hasPermissionLevel } from "@/lib/permissionGuard";
 import { getReconciliationInvoiceStateMap } from "@/lib/reconciliationInvoice";
+import { ensureCustomerPlansForCooperatingCustomer } from "@/lib/customerReconciliationPlan";
 
 export default async function CustomerReconciliationPage({
   params,
@@ -21,6 +22,15 @@ export default async function CustomerReconciliationPage({
   const { customerId } = await params;
   const sp = await searchParams;
 
+  const accessibleCustomer = await prisma.customer.findFirst({
+    where: { id: customerId, deletedAt: null, ...access.customerScope },
+    select: { id: true, status: true },
+  });
+  if (!accessibleCustomer) notFound();
+  if (canEdit && accessibleCustomer.status === "COOPERATING") {
+    await ensureCustomerPlansForCooperatingCustomer(customerId, session.userId);
+  }
+
   const [customer, reconciliations, users, linkableInvoices] = await Promise.all([
     // 客户基本信息 + 合同 + 联系人
     prisma.customer.findFirst({
@@ -28,7 +38,7 @@ export default async function CustomerReconciliationPage({
       include: {
         businessOwner: { select: { id: true, name: true, email: true } },
         contracts: {
-          where: { status: "COMPLETED", deletedAt: null },
+          where: { status: { in: ["COMPLETED", "TERMINATED"] }, deletedAt: null },
           select: {
             id: true,
             contractNo: true,

@@ -9,6 +9,19 @@ import { FeaturePermissionError } from "@/lib/permissionGuard";
 import { recalcReconciliation } from "@/lib/reconciliationCalc";
 import { errorResponse } from "@/lib/appError";
 
+const SUPPORTED_RECONCILIATION_CURRENCIES = new Set([
+  "USD", "CNY", "EUR", "GBP", "HKD", "JPY", "CAD", "AUD", "SGD",
+  "CHF", "NZD", "KRW", "INR", "AED",
+]);
+
+function normalizeReconciliationCurrency(value: unknown) {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toUpperCase();
+  return SUPPORTED_RECONCILIATION_CURRENCIES.has(normalized)
+    ? normalized
+    : null;
+}
+
 // POST /api/finance/reconciliations/[id]/review
 // 客户负责人确认或提出异议
 // body: { action: "APPROVED" | "DISPUTED", disputedSalesAmount?, note? }
@@ -34,10 +47,14 @@ export async function POST(
       disputedFeeAmount,
       correctedFeeAmount,
       salesAmountCurrency,
+      correctedCurrency,
       note,
     } = body;
     const correctedSales = correctedSalesAmount ?? disputedSalesAmount;
     const correctedFee = correctedFeeAmount ?? disputedFeeAmount;
+    const requestedCurrency = normalizeReconciliationCurrency(
+      correctedCurrency ?? salesAmountCurrency,
+    );
 
     if (action !== "APPROVED" && action !== "DISPUTED") {
       return NextResponse.json(
@@ -84,6 +101,13 @@ export async function POST(
     ) {
       return NextResponse.json(
         { error: "固费有异议时必须填写有效的异议固费金额" },
+        { status: 400 },
+      );
+    }
+
+    if (action === "DISPUTED" && !requestedCurrency) {
+      return NextResponse.json(
+        { error: "提出异议时必须选择有效币种" },
         { status: 400 },
       );
     }
@@ -178,13 +202,13 @@ export async function POST(
           const calc = await recalcReconciliation(id, { actualSalesAmount });
           Object.assign(updateData, { actualSalesAmount, ...calc });
         }
-        if (rec.reconcileType === "FEE_ONLY")
+        if (rec.reconcileType === "FEE_ONLY") {
           updateData.finalFeeAmount = Number(correctedFee);
-        // 同步更新销售额/抽佣货币（如果审核人指定）
-        if (rec.reconcileType !== "FEE_ONLY" && salesAmountCurrency) {
-          updateData.commissionCurrency = salesAmountCurrency;
+          updateData.fixedFeeCurrency = requestedCurrency;
+        } else {
+          updateData.commissionCurrency = requestedCurrency;
         }
-
+        // 同步更新销售额/抽佣货币（如果审核人指定）
         await tx.customerReconciliation.update({
           where: { id },
           data: updateData,
@@ -199,7 +223,9 @@ export async function POST(
               rec.reconcileType === "FEE_ONLY" ? null : Number(correctedSales),
             disputedFeeAmount:
               rec.reconcileType === "FEE_ONLY" ? Number(correctedFee) : null,
-            note,
+            note: [note, `异议金额币种：${requestedCurrency}`]
+              .filter(Boolean)
+              .join("；"),
             createdAt: new Date(),
           },
         });

@@ -154,10 +154,22 @@ export async function ensureCustomerReconciliationPlan(contractId: string, actor
   const now = new Date();
   const today = utcDate(now);
   const periods = buildCustomerReconciliationPlan(contract.startDate, contract.endDate);
+  const keys = periods.map((period) => automationKey(contract.id, period));
+  const existingKeys = new Set(
+    (
+      await prisma.customerReconciliation.findMany({
+        where: { automationKey: { in: keys } },
+        select: { automationKey: true },
+      })
+    )
+      .map((record) => record.automationKey)
+      .filter((key): key is string => Boolean(key)),
+  );
   let created = 0;
 
   for (const period of periods) {
     const key = automationKey(contract.id, period);
+    if (existingKeys.has(key)) continue;
     const planStatus = period.start <= today ? "OPEN" : "PLANNED";
     const openedAt = planStatus === "OPEN" ? now : null;
     try {
@@ -286,6 +298,78 @@ export async function closeCustomerReconciliationPlans(
             fromStatus: record.status,
             toStatus: record.status,
             note: `${reason}；该记录已有财务历史，保留原周期`,
+          },
+        });
+        preserved += 1;
+      }
+    }
+  });
+  return { cancelled, shortened, preserved };
+}
+
+// Contract-specific closure is intentionally kept separate from customer-wide closure.
+// This local helper is not part of the reconciliation-only release being staged.
+export async function closeContractReconciliationPlans(
+  contractId: string,
+  terminationDate: Date,
+  actorId: string,
+  reasonText?: string,
+) {
+  const endDate = utcDate(terminationDate);
+  const records = await prisma.customerReconciliation.findMany({
+    where: { contractId, deletedAt: null, planStatus: { not: "CANCELLED" } },
+    include: {
+      settlements: { select: { status: true } },
+      billingRequestLines: { select: { id: true }, take: 1 },
+      receiptAllocations: { where: { status: "ACTIVE" }, select: { id: true }, take: 1 },
+    },
+  });
+  const reason = reasonText?.trim() || `合同终止，终止日期调整为 ${endDate.toISOString().slice(0, 10)}`;
+  let cancelled = 0;
+  let shortened = 0;
+  let preserved = 0;
+
+  await prisma.$transaction(async (tx) => {
+    for (const record of records) {
+      const hasFinancialHistory = record.status === "CONFIRMED"
+        || record.settlements.some((item) => item.status === "SETTLED")
+        || record.billingRequestLines.length > 0
+        || record.receiptAllocations.length > 0;
+      if (record.periodStart > endDate) {
+        await tx.customerReconciliation.update({
+          where: { id: record.id },
+          data: { planStatus: "CANCELLED", adjustmentReason: reason, updatedAt: new Date() },
+        });
+        await tx.financeAuditLog.create({
+          data: {
+            entityType: "CUSTOMER_RECONCILIATION", entityId: record.id,
+            action: "CANCEL_AFTER_CONTRACT_TERMINATION", actorId,
+            fromStatus: record.planStatus, toStatus: "CANCELLED", note: reason,
+            metadata: JSON.stringify({ contractId, hasFinancialHistory, periodStart: record.periodStart, periodEnd: record.periodEnd }),
+          },
+        });
+        cancelled += 1;
+      } else if (record.periodEnd > endDate && !hasFinancialHistory) {
+        await tx.customerReconciliation.update({
+          where: { id: record.id },
+          data: { periodEnd: endDate, periodAdjusted: true, adjustmentReason: reason, updatedAt: new Date() },
+        });
+        await tx.reconciliationPeriodAudit.create({
+          data: {
+            reconciliationId: record.id, actorId,
+            beforeStart: record.periodStart, beforeEnd: record.periodEnd,
+            afterStart: record.periodStart, afterEnd: endDate, reason,
+          },
+        });
+        shortened += 1;
+      } else if (record.periodEnd > endDate) {
+        await tx.financeAuditLog.create({
+          data: {
+            entityType: "CUSTOMER_RECONCILIATION", entityId: record.id,
+            action: "CONTRACT_TERMINATION_PRESERVE_FINANCIAL_HISTORY", actorId,
+            fromStatus: record.status, toStatus: record.status,
+            note: `${reason}；该记录已有财务历史，保留原周期`,
+            metadata: JSON.stringify({ contractId }),
           },
         });
         preserved += 1;

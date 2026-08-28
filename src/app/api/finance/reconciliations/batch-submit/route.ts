@@ -13,8 +13,14 @@ type Decision = {
   decision: "APPROVED" | "DISPUTED";
   correctedSalesAmount?: number;
   correctedFeeAmount?: number;
+  correctedCurrency?: string;
 };
 class BatchSubmitConflict extends Error {}
+
+const SUPPORTED_RECONCILIATION_CURRENCIES = new Set([
+  "USD", "CNY", "EUR", "GBP", "HKD", "JPY", "CAD", "AUD", "SGD",
+  "CHF", "NZD", "KRW", "INR", "AED",
+]);
 
 function streamLabel(type: string) {
   return type === "FEE_ONLY" ? "固费对账" : "销售佣金对账";
@@ -24,6 +30,14 @@ function currencyKey(value: string) {
   if (["人民币", "人民币元", "¥", "RMB", "CNY"].includes(clean)) return "CNY";
   if (["美金", "美元", "$", "USD"].includes(clean)) return "USD";
   return clean;
+}
+
+function normalizedDecisionCurrency(value: unknown) {
+  if (typeof value !== "string") return undefined;
+  const normalized = currencyKey(value);
+  return SUPPORTED_RECONCILIATION_CURRENCIES.has(normalized)
+    ? normalized
+    : undefined;
 }
 
 export async function POST(request: Request) {
@@ -143,6 +157,7 @@ export async function POST(request: Request) {
             value.correctedFeeAmount == null
               ? undefined
               : Number(value.correctedFeeAmount),
+          correctedCurrency: normalizedDecisionCurrency(value.correctedCurrency),
         });
       }
       if (
@@ -157,6 +172,12 @@ export async function POST(request: Request) {
       for (const record of records) {
         const decision = decisionMap.get(record.id)!;
         if (decision.decision !== "DISPUTED") continue;
+        if (!decision.correctedCurrency) {
+          return NextResponse.json(
+            { error: "有异议时必须为每条记录选择有效币种" },
+            { status: 400 },
+          );
+        }
         if (record.reconcileType === "FEE_ONLY") {
           if (
             !Number.isFinite(decision.correctedFeeAmount) ||
@@ -260,6 +281,11 @@ export async function POST(request: Request) {
             finalSalesAmount: correctedSales,
             finalCommissionAmount: finalCommission,
             finalFeeAmount: correctedFee,
+            ...(decision.decision === "DISPUTED"
+              ? record.reconcileType === "FEE_ONLY"
+                ? { fixedFeeCurrency: decision.correctedCurrency }
+                : { commissionCurrency: decision.correctedCurrency }
+              : {}),
             settlementReminderSent: false,
             updatedAt: now,
           },
