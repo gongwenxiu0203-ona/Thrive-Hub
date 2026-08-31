@@ -5,6 +5,7 @@ import { getReconciliationAccess } from "@/lib/reconciliationAccess";
 import { FeaturePermissionError } from "@/lib/permissionGuard";
 import { recalcReconciliation } from "@/lib/reconciliationCalc";
 import { errorResponse } from "@/lib/appError";
+import { resolveSubmissionAmounts } from "@/lib/reconciliationSubmissionAmounts";
 
 const MAX_BATCH_SIZE = 100;
 type SubmitMode = "CUSTOMER_REVIEW" | "SKIP_CUSTOMER";
@@ -251,18 +252,10 @@ export async function POST(request: Request) {
         }
 
         const decision = decisionMap.get(record.id)!;
-        const correctedSales =
-          decision.decision === "DISPUTED"
-            ? Number(decision.correctedSalesAmount)
-            : record.actualSalesAmount;
-        const correctedFee =
-          decision.decision === "DISPUTED" &&
-          record.reconcileType === "FEE_ONLY"
-            ? Number(decision.correctedFeeAmount)
-            : (record.finalFeeAmount ?? record.feeAmount);
         const calc = calcMap.get(record.id);
-        const finalCommission =
-          calc?.commissionAmount ?? record.commissionAmount;
+        const { correctedSales, correctedFee, finalCommission } = resolveSubmissionAmounts(
+          record, decision, calc?.commissionAmount,
+        );
         const updated = await tx.customerReconciliation.updateMany({
           where: {
             id: record.id,
@@ -317,7 +310,7 @@ export async function POST(request: Request) {
               reconciliationId: record.id,
               reviewerId: session.userId,
               action: "FINAL_CONFIRMED",
-              note: "按纠正销售额直接确认",
+              note: `${record.reconcileType === "FEE_ONLY" ? "按纠正固费金额" : "按纠正销售额"}直接确认；币种：${decision.correctedCurrency}`,
               createdAt: now,
             },
           });

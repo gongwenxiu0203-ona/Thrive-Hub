@@ -1685,6 +1685,7 @@ function MonthlyRecordRow({
               )}
               {(isPendingReview || isDisputed) && (
                 <>
+                  {canManage && (
                   <button
                     onClick={() => {
                       setReviewAction("APPROVED");
@@ -1694,6 +1695,7 @@ function MonthlyRecordRow({
                   >
                     ✅ 无异议确认
                   </button>
+                  )}
                   <button
                     onClick={() => {
                       setReviewAction("DISPUTED");
@@ -1705,7 +1707,7 @@ function MonthlyRecordRow({
                   </button>
                 </>
               )}
-              {isDisputed && rec.submittedById === currentUserId && (
+              {isDisputed && canManage && (
                 <button
                   onClick={() => setShowConfirmModal(true)}
                   className="btn-primary text-sm"

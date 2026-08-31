@@ -1,5 +1,13 @@
 # Thrive Hub Handover
 
+## 2026-08-31 对账异议金额错误修复（本地未发布）
+
+- 生产追踪号 `ERR-MTCIXJVH-908871` 对应 batch-submit 的 Prisma 校验失败。固费异议缺少 correctedSalesAmount，被 Number(undefined) 转为 NaN 并写入 actualSalesAmount/finalSalesAmount；Prisma 误导性提示 Unknown argument submittedById，并非这次请求权限失败。
+- 新增 resolveSubmissionAmounts 按固费/销售佣金分别取纠正金额，固费保留原销售额；入库前拒绝非有限值/负数，返回稳定业务错误码 RECONCILIATION_INVALID_AMOUNT。最终确认审计区分固费与销售额并记录纠正币种。
+- 内部 ADMIN/USER 单条 DISPUTED 操作要求 EDIT；单条 APPROVED/最终确认仍要求 MANAGE。前端确认按钮同步 canManage，移除最终确认按钮的提交人限制；外部角色权限和 scope 不变。批量 SKIP_CUSTOMER 保留原有 EDIT 权限，不在本次收紧。
+- 新增 scripts/reconciliation-submission-amounts-test.ts；--prisma 为本地零匹配 ID 校验，已复现 NaN 导致 submittedById 错误并验证有限值参数通过，修改业务行数为 0。
+- 无 Schema/迁移、无生产写入，未 commit/push/deploy。管理员错误查询计划使用独立脱敏日志表；必须先向用户列明新增表和字段并获得 Schema 确认再实施。
+
 ## 2026-08-27 合同新建入口收紧为三类（本地未提交）
 
 - 新建合同首页仅保留品牌方合同、渠道商返佣合同、事务性合同三个入口；品牌方合同再进入“新建合同 / 上传已有合同”二级选择。

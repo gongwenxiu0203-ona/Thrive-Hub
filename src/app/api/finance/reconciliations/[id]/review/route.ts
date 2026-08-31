@@ -31,9 +31,13 @@ export async function POST(
 ) {
   try {
     const session = await requireSession();
-    const access = await getReconciliationAccess(session, "MANAGE", req);
     const { id } = await params;
     const body = await req.json();
+    // Internal editors may correct disputed amounts; approval stays a management action.
+    // External roles keep the existing management-level requirement and tenant scope.
+    const internalDispute = (session.role === "ADMIN" || session.role === "USER")
+      && body.action === "DISPUTED";
+    const access = await getReconciliationAccess(session, internalDispute ? "EDIT" : "MANAGE", req);
     if (Object.prototype.hasOwnProperty.call(body, "disputedOrders")) {
       return NextResponse.json(
         { error: "系统已取消单量异议，仅支持纠正销售额" },
