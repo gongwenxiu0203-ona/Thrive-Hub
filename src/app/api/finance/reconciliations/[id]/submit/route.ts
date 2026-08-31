@@ -4,6 +4,7 @@ import { requireSession } from "@/lib/session";
 import { getReconciliationAccess, scopedReconciliationWhere } from "@/lib/reconciliationAccess";
 import { FeaturePermissionError } from "@/lib/permissionGuard";
 import { errorResponse } from "@/lib/appError";
+import { assertConfirmationReadyForSubmission } from "@/lib/reconciliationCalc";
 
 // POST /api/finance/reconciliations/[id]/submit
 // 提交对账，状态变为 PENDING_REVIEW，通知指定审核人（或客户负责人）
@@ -27,6 +28,7 @@ export async function POST(
       },
     });
     if (!rec) return NextResponse.json({ error: "客户对账记录不存在、已删除或无权访问" }, { status: 404 });
+    assertConfirmationReadyForSubmission(rec);
     if (rec.status !== "DRAFT" && rec.status !== "DISPUTED") {
       return NextResponse.json({ error: "只有草稿或争议状态可以提交对账" }, { status: 400 });
     }

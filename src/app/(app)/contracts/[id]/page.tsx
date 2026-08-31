@@ -3,7 +3,8 @@ import { notFound } from "next/navigation";
 import { ExternalLink, FileDown, Pencil } from "lucide-react";
 import { BackButton } from "@/components/BackButton";
 import { prisma } from "@/lib/prisma";
-import { requireSession } from "@/lib/session";
+import { requireSession, adminHasFeature } from "@/lib/session";
+import { FrameworkContractDetail } from "./FrameworkContractDetail";
 import { Badge } from "@/components/ui/Badge";
 import { FileUploader } from "@/components/FileUploader";
 import { ContractFormModal } from "../ContractFormModal";
@@ -43,8 +44,10 @@ import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissi
 
 export default async function ContractDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ confirmation?: string }>;
 }) {
   const session = await requireSession();
   const { id } = await params;
@@ -58,6 +61,9 @@ export default async function ContractDetailPage({
         include: { splitRules: { where: { contractId: null }, take: 1 } },
       },
       splitRule: true,
+      template: { select: { name: true } },
+      receivingAccounts: { orderBy: { position: "asc" } },
+      projectConfirmations: { orderBy: { createdAt: "asc" } },
       createdBy: true,
       owner: true,
       reviewer: true,
@@ -102,6 +108,12 @@ export default async function ContractDetailPage({
     ) {
       notFound();
     }
+  }
+
+  if (contract.contractMode === "FRAMEWORK") {
+    const internal = session.role === "ADMIN" || session.role === "USER";
+    const canEdit = contract.status === "DRAFT" && internal && await adminHasFeature(session, "contracts.records", "EDIT") && await adminHasFeature(session, "contracts.create_upload", "EDIT");
+    return <FrameworkContractDetail contract={contract} isAdmin={session.role === "ADMIN"} canEdit={canEdit} internal={internal} selectedId={(await searchParams).confirmation} />;
   }
 
   const [users, files, customers] = await Promise.all([
@@ -340,7 +352,10 @@ export default async function ContractDetailPage({
               {labelOf(CONTRACT_STATUS_LABELS, contract.status)}
             </Badge>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {contract.type === "BRAND" && (session.role === "ADMIN" || session.role === "USER") && (
+              <Link href={`/contracts/${contract.id}/confirmations`} className="btn-secondary text-sm">项目确认书</Link>
+            )}
             {canConfigureSplitRule && contract.customerId && (
               <ChannelSplitRuleModal
                 customerId={contract.customerId}

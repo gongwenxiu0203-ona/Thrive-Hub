@@ -6,6 +6,7 @@ import { financeDataView, isStaff, reconciliationScope } from "@/lib/dataScope";
 import { requireFeaturePermission } from "@/lib/permissionGuard";
 import { requireSession } from "@/lib/session";
 import { createTwoStageFinanceApproval } from "@/lib/financeApproval";
+import { confirmationSubmissionIssue } from "@/lib/reconciliationConfirmation";
 
 const REQUEST_STATUSES = ["SUBMITTED", "PROCESSING"];
 
@@ -80,6 +81,10 @@ export async function submitBillingRequest(input: SubmitBillingRequestInput) {
         ok: false,
         error: "历史合并对账不能直接申请，请选择独立的固费或销售佣金记录。",
       };
+    const confirmationIssue = rows
+      .map((row) => confirmationSubmissionIssue(row))
+      .find((issue): issue is string => Boolean(issue));
+    if (confirmationIssue) return { ok: false, error: confirmationIssue };
     if (rows.some((row) => row.billingRequestLines.length > 0))
       return {
         ok: false,
@@ -110,7 +115,7 @@ export async function submitBillingRequest(input: SubmitBillingRequestInput) {
             (sum, row) =>
               sum +
               (row.reconcileType === "FEE_ONLY"
-                ? row.feeAmount
+                ? (row.finalFeeAmount ?? row.feeAmount)
                 : (row.finalCommissionAmount ?? row.commissionAmount)),
             0,
           ),
@@ -136,9 +141,10 @@ export async function submitBillingRequest(input: SubmitBillingRequestInput) {
             lines: {
               create: group.map((row, sortOrder) => ({
                 reconciliationId: row.id,
+                projectConfirmationId: row.projectConfirmationId,
                 requestedAmount: money(
                   row.reconcileType === "FEE_ONLY"
-                    ? row.feeAmount
+                    ? (row.finalFeeAmount ?? row.feeAmount)
                     : (row.finalCommissionAmount ?? row.commissionAmount),
                 ),
                 feeType:
@@ -245,6 +251,7 @@ export async function getBillingRequestInvoiceIds(id: string) {
         orderBy: { sortOrder: "asc" },
         select: {
           id: true,
+          projectConfirmationId: true,
           description: true,
           feeType: true,
           currency: true,
@@ -261,7 +268,7 @@ export async function getBillingRequestInvoiceIds(id: string) {
       },
       lines: {
         orderBy: { sortOrder: "asc" },
-        select: { reconciliationId: true },
+        select: { reconciliationId: true, projectConfirmationId: true },
       },
       invoices: { where: { deletedAt: null }, take: 1, select: { id: true } },
     },

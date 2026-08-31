@@ -42,6 +42,8 @@ export default async function CustomerReconciliationPage({
           select: {
             id: true,
             contractNo: true,
+            contractMode: true,
+            projectConfirmations: { where: { status: { in: ["EFFECTIVE", "TERMINATED"] } }, select: { id: true, number: true, title: true }, orderBy: { createdAt: "asc" } },
             partyA: true,
             // v3 字段
             promoPlatform: true,

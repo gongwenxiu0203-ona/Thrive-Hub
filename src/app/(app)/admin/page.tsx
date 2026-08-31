@@ -26,7 +26,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
     canSeeUsers ? prisma.user.findMany({
       orderBy: { createdAt: "desc" },
       select: {
-        id: true, name: true, email: true, role: true, status: true, brandName: true, uniqueCode: true, invitedById: true,
+        id: true, name: true, email: true, phone: true, role: true, status: true, brandName: true, uniqueCode: true, invitedById: true,
         invitedBy: { select: { id: true, name: true, email: true } }, createdAt: true,
       },
     }) : Promise.resolve([]),

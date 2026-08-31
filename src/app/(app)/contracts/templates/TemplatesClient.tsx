@@ -11,11 +11,13 @@ import { TEMPLATE_KEY_LABELS, TEMPLATE_KEYS } from "@/lib/contractTemplateKeys";
 import { uploadSeal } from "@/actions/contractStamp";
 import { formatDate } from "@/lib/utils";
 import { Modal } from "@/components/ui/Modal";
+import { CONTRACT_DOCUMENT_LABELS } from "@/lib/contractDocumentTypes";
 
 export interface TemplateRow {
   id: string;
   name: string;
   templateKey: string;
+  documentType: string;
   templateKeyLabel: string;
   description: string | null;
   uploaderName: string;
@@ -27,23 +29,26 @@ export function TemplatesClient({
   canDownloadTemplates,
   sealStatus,
   templates,
+  documentTypes,
 }: {
   isAdmin: boolean;
   canDownloadTemplates: boolean;
   sealStatus: Record<"FOSHAN" | "HONGKONG", boolean>;
   templates: TemplateRow[];
+  documentTypes: string[];
 }) {
   const [uploadOpen, setUploadOpen] = useState(false);
   const router = useRouter();
   const [pending, startTransition] = useTransition();
 
   // Group by templateKey
-  const grouped = TEMPLATE_KEYS.map((k) => ({
+  const legacy = documentTypes.includes("BRAND_LEGACY");
+  const grouped = (legacy ? TEMPLATE_KEYS : documentTypes).map((k) => ({
     key: k,
-    label: TEMPLATE_KEY_LABELS[k],
-    items: templates.filter((t) => t.templateKey === k),
+    label: legacy ? TEMPLATE_KEY_LABELS[k] : CONTRACT_DOCUMENT_LABELS[k],
+    items: templates.filter((t) => legacy ? t.templateKey === k : t.documentType === k),
   }));
-  const uncategorized = templates.filter((t) => !TEMPLATE_KEYS.includes(t.templateKey));
+  const uncategorized = legacy ? templates.filter((t) => !TEMPLATE_KEYS.includes(t.templateKey)) : [];
   if (uncategorized.length > 0) {
     grouped.push({ key: "OTHER", label: "其他", items: uncategorized });
   }
@@ -65,7 +70,7 @@ export function TemplatesClient({
         <p className="text-xs text-slate-400">
           {templates.length === 0
             ? "暂无模板，等待管理员上传"
-            : `共 ${templates.length} 个模板，按佣金机制分组`}
+            : `共 ${templates.length} 个模板，按${legacy ? "佣金机制" : "文件类型"}分组`}
         </p>
         {isAdmin && (
           <button
@@ -143,6 +148,7 @@ export function TemplatesClient({
 
       {uploadOpen && (
         <UploadModal
+          documentTypes={documentTypes}
           onClose={() => setUploadOpen(false)}
           onSaved={() => {
             setUploadOpen(false);
@@ -155,9 +161,11 @@ export function TemplatesClient({
 }
 
 function UploadModal({
+  documentTypes,
   onClose,
   onSaved,
 }: {
+  documentTypes: string[];
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -167,6 +175,7 @@ function UploadModal({
   // 同时给用户可见的"已选文件"反馈
   const [name, setName] = useState("");
   const [templateKey, setTemplateKey] = useState("");
+  const [documentType, setDocumentType] = useState(documentTypes[0]);
   const [description, setDescription] = useState("");
   const [file, setFile] = useState<File | null>(null);
 
@@ -196,11 +205,12 @@ function UploadModal({
     e.preventDefault();
     setError(null);
     if (!name.trim()) { setError("请填写模板名称"); return; }
-    if (!templateKey) { setError("请选择佣金机制类型"); return; }
+    if (documentType === "BRAND_LEGACY" && !templateKey) { setError("请选择佣金机制类型"); return; }
     if (!file) { setError("请选择 .docx 文件"); return; }
     const fd = new FormData();
     fd.append("name", name.trim());
     fd.append("templateKey", templateKey);
+    fd.append("documentType", documentType);
     fd.append("description", description);
     fd.append("file", file);
     startTransition(async () => {
@@ -224,7 +234,8 @@ function UploadModal({
               required
             />
           </div>
-          <div>
+          <label className="label">模板类型<select className="input mt-1" value={documentType} onChange={(e) => setDocumentType(e.target.value)}>{documentTypes.map((type) => <option key={type} value={type}>{CONTRACT_DOCUMENT_LABELS[type]}</option>)}</select></label>
+          {documentType === "BRAND_LEGACY" && <div>
             <label className="label">佣金机制类型 <span className="text-rose-500">*</span></label>
             <select
               className="input"
@@ -237,7 +248,7 @@ function UploadModal({
                 <option key={k} value={k}>{TEMPLATE_KEY_LABELS[k]}</option>
               ))}
             </select>
-          </div>
+          </div>}
           <div>
             <label className="label">备注（可选）</label>
             <textarea

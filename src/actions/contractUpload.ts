@@ -353,12 +353,12 @@ export async function uploadExistingContract(
   // 适用模板：① 用户手选优先；② 否则按 AI 识别出的佣金结算方式自动匹配同类型
   // 模板（命中则自动选用）；③ 仍无则 templateId 为 null，需在补填环节手动选择。
   let resolvedTemplate = templateId
-    ? await prisma.contractTemplate.findFirst({ where: { id: templateId, deletedAt: null }, select: { id: true, templateKey: true } })
+    ? await prisma.contractTemplate.findFirst({ where: { id: templateId, deletedAt: null, documentType: "BRAND_LEGACY" }, select: { id: true, templateKey: true } })
     : null;
   if (templateId && !resolvedTemplate) return { ok: false, error: "所选合同模板不存在或已停用，请重新选择" };
   if (!resolvedTemplate && typeof mapped.commissionType === "string" && mapped.commissionType.trim()) {
     resolvedTemplate = await prisma.contractTemplate.findFirst({
-      where: { templateKey: normalizeTemplateKey(mapped.commissionType), deletedAt: null },
+      where: { templateKey: normalizeTemplateKey(mapped.commissionType), deletedAt: null, documentType: "BRAND_LEGACY" },
       orderBy: { createdAt: "asc" },
       select: { id: true, templateKey: true },
     });

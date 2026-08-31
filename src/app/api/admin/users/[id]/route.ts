@@ -138,7 +138,7 @@ export async function GET(
   const { id } = await params;
   const target = await prisma.user.findUnique({
     where: { id },
-    select: { id: true, name: true, email: true, role: true, status: true },
+    select: { id: true, name: true, email: true, phone: true, role: true, status: true },
   });
   if (!target) return NextResponse.json({ error: "用户不存在" }, { status: 404 });
 
@@ -155,11 +155,12 @@ export async function PATCH(
 
   const { id } = await params;
   const body = await req.json();
-  const { role, status, brandName, newPassword } = body;
+  const { role, status, brandName, newPassword, phone } = body;
   const isStatusOnly = status !== undefined
     && role === undefined
     && brandName === undefined
-    && newPassword === undefined;
+    && newPassword === undefined
+    && phone === undefined;
   if (
     !isStatusOnly
     && !await adminHasFeature(auth.session, "admin.users", "EDIT")
@@ -168,7 +169,7 @@ export async function PATCH(
   }
   const previous = await prisma.user.findUnique({
     where: { id },
-    select: { id: true, name: true, email: true, role: true, status: true, brandName: true },
+    select: { id: true, name: true, email: true, phone: true, role: true, status: true, brandName: true },
   });
   if (!previous) return NextResponse.json({ error: "用户不存在" }, { status: 404 });
   if (
@@ -208,6 +209,14 @@ export async function PATCH(
   }
   if (status !== undefined) updateData.status = status;
   if (brandName !== undefined) updateData.brandName = brandName;
+  if (phone !== undefined) {
+    if (typeof phone !== "string") return NextResponse.json({ error: "联系电话格式错误" }, { status: 400 });
+    const normalizedPhone = phone.trim().replace(/[\s()-]/g, "");
+    if (normalizedPhone && (!/^\+?[0-9]{6,20}$/.test(normalizedPhone))) {
+      return NextResponse.json({ error: "联系电话应为6至20位数字，可带国际区号+" }, { status: 400 });
+    }
+    updateData.phone = normalizedPhone || null;
+  }
   if (newPassword !== undefined) {
     if (typeof newPassword !== "string" || newPassword.length < 6) {
       return NextResponse.json({ error: "新密码至少需要 6 位字符" }, { status: 400 });
@@ -225,7 +234,7 @@ export async function PATCH(
     targetLabel: user.name,
     summary: `更新用户：${user.name}`,
     before: previous,
-    after: { name: user.name, email: user.email, role: user.role, status: user.status, brandName: user.brandName, passwordChanged: newPassword !== undefined },
+    after: { name: user.name, email: user.email, phone: user.phone, role: user.role, status: user.status, brandName: user.brandName, passwordChanged: newPassword !== undefined },
   });
   await writeApiAccessLog({
     actorId: auth.session.userId,

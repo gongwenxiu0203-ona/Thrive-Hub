@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireFeaturePermission } from "@/lib/permissionGuard";
 import { requireSession } from "@/lib/session";
+import { PARTY_B_COMPANIES } from "@/lib/partyB";
 import { isStaff } from "@/lib/permissions";
 import { createTwoStageFinanceApproval, normalizeFinanceUrls, requireShallowFinanceReviewer } from "@/lib/financeApproval";
 
@@ -101,12 +102,14 @@ export async function saveCustomerBillingProfile(input: { customerId: string; na
   } catch (error) { return { ok: false, error: error instanceof Error ? error.message : "保存开票资料失败。" }; }
 }
 
-export async function saveFinanceAccountProfile(input: { id?: string; name: string; accountType: string; legalEntity: string; accountName: string; bankName?: string; accountNumber: string; currency?: string; country?: string; swiftCode?: string; bankAddress?: string; payeeAddress?: string; routingNumber?: string; note?: string; payerAccountKey?: string; attachmentUrls?: string[]; isDefault?: boolean }) {
+export async function saveFinanceAccountProfile(input: { id?: string; name: string; accountType: string; legalEntity: string; legalEntityKey?: string; accountName: string; bankName?: string; accountNumber: string; currency?: string; country?: string; swiftCode?: string; bankAddress?: string; payeeAddress?: string; routingNumber?: string; note?: string; payerAccountKey?: string; attachmentUrls?: string[]; isDefault?: boolean }) {
   try {
     const session = await requireSession();
     await requireFeaturePermission(session, "finance.profiles", "MANAGE");
     const accountNumber = input.accountNumber.replace(/\s+/g, "");
     const legalEntity = cleanText(input.legalEntity);
+    const legalEntityKey = input.legalEntityKey?.trim() || null;
+    if (legalEntityKey && (!["COMPANY_PAYER", "COMPANY_BANK"].includes(input.accountType) || !Object.hasOwn(PARTY_B_COMPANIES, legalEntityKey))) return { ok: false, error: "请选择有效的公司签约主体" };
     const currency = cleanCurrency(input.currency || (["CUSTOMER_BILLING", "COMPANY_PAYER", "SUPPLIER_PAYEE", "EMPLOYEE_REIMBURSEMENT"].includes(input.accountType) ? "CNY" : "USD"));
     if (!input.name.trim() || !legalEntity || !input.accountName.trim() || !accountNumber || !currency) return { ok: false, error: "请完整填写账户名称、主体、户名、账号和币种。" };
     const saved = await prisma.$transaction(async (tx) => {
@@ -114,7 +117,8 @@ export async function saveFinanceAccountProfile(input: { id?: string; name: stri
       if (duplicate) throw new Error("相同付款主体、账号和币种的财务账户已存在，请勿重复创建。");
       if (input.isDefault) await tx.financeAccountProfile.updateMany({ where: { legalEntity, currency, status: "ACTIVE" }, data: { isDefault: false } });
       const data = { name: cleanText(input.name), accountType: input.accountType || "COMPANY_BANK", legalEntity, accountName: cleanText(input.accountName), bankName: input.bankName ? cleanText(input.bankName) : null, accountNumber, currency, country: input.country?.trim().toUpperCase() || null, swiftCode: input.swiftCode?.replace(/\s+/g, "").toUpperCase() || null, bankAddress: input.bankAddress ? cleanText(input.bankAddress) : null, payeeAddress: input.payeeAddress ? cleanText(input.payeeAddress) : null, routingNumber: input.routingNumber?.trim() || null, note: input.note?.trim() || null, payerAccountKey: input.payerAccountKey?.trim() || null, attachmentUrls: JSON.stringify(normalizeFinanceUrls(input.attachmentUrls)), isDefault: !!input.isDefault };
-      return input.id ? tx.financeAccountProfile.update({ where: { id: input.id }, data }) : tx.financeAccountProfile.create({ data: { ...data, profileNo: refNo("ACC"), createdById: session.userId } });
+      const linkedData = { ...data, ...(input.legalEntityKey !== undefined ? { legalEntityKey } : {}) };
+      return input.id ? tx.financeAccountProfile.update({ where: { id: input.id }, data: linkedData }) : tx.financeAccountProfile.create({ data: { ...linkedData, profileNo: refNo("ACC"), createdById: session.userId } });
     });
     revalidatePath("/finance/workbench"); return { ok: true, id: saved.id };
   } catch (error) { return { ok: false, error: error instanceof Error ? error.message : "保存财务账户失败。" }; }

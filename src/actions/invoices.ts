@@ -25,6 +25,7 @@ import {
 import { requireSession } from "@/lib/session";
 import { actionError } from "@/lib/appError";
 import { writeAdminAudit } from "@/lib/adminObservability";
+import { confirmationSubmissionIssue } from "@/lib/reconciliationConfirmation";
 
 const INVOICE_FEATURE = "finance.invoices";
 const INVOICE_STATUSES = ["DRAFT", "ISSUED", "VOID"] as const;
@@ -39,6 +40,7 @@ type InvoiceFeeType = (typeof FEE_TYPES)[number];
 type InvoiceSummaryFeeType = InvoiceFeeType | "MIXED";
 
 export type InvoiceItemInput = {
+  projectConfirmationId?: string | null;
   feeType: InvoiceFeeType;
   currency: string;
   periodType: InvoicePeriodType;
@@ -378,6 +380,7 @@ function normalizeItems(items: InvoiceItemInput[]) {
       throw new Error(`第 ${index + 1} 行金额超出允许范围`);
     }
     return {
+      projectConfirmationId: cleanNullable(item.projectConfirmationId),
       feeType: item.feeType,
       currency: normalizeCurrency(item.currency),
       periodType: item.periodType,
@@ -832,6 +835,10 @@ export async function getInvoiceReconciliationPrefill(
         commissionAmount: true,
         commissionCurrency: true,
         finalCommissionAmount: true,
+        finalFeeAmount: true,
+        projectConfirmationId: true,
+        ruleSnapshot: true,
+        confirmedCommissionRate: true,
         invoiceLinks: {
           select: {
             invoice: {
@@ -863,6 +870,10 @@ export async function getInvoiceReconciliationPrefill(
         error: "只有状态为“已确认”的对账记录可以开具 Invoice",
       };
     }
+    const confirmationIssue = rows
+      .map((row) => confirmationSubmissionIssue(row))
+      .find((issue): issue is string => Boolean(issue));
+    if (confirmationIssue) return { ok: false, error: confirmationIssue };
     if (
       rows.some(
         (row) => !["FEE_ONLY", "COMMISSION_ONLY"].includes(row.reconcileType),
@@ -928,7 +939,7 @@ export async function getInvoiceReconciliationPrefill(
       const currency = currencies[index];
       const isFixedFee = row.reconcileType === "FEE_ONLY";
       const amount = isFixedFee
-        ? row.feeAmount
+        ? (row.finalFeeAmount ?? row.feeAmount)
         : (row.finalCommissionAmount ?? row.commissionAmount);
       if (!Number.isFinite(amount) || amount <= 0) {
         throw new Error(
@@ -937,6 +948,7 @@ export async function getInvoiceReconciliationPrefill(
       }
       return {
         id: `reconciliation-${row.id}`,
+        projectConfirmationId: row.projectConfirmationId,
         feeType: isFixedFee
           ? ("MONTHLY_FEE" as const)
           : ("SALES_COMMISSION" as const),
@@ -1056,6 +1068,9 @@ async function validateReconciliationLinksForCreate(
     },
     select: {
       id: true,
+      projectConfirmationId: true,
+      ruleSnapshot: true,
+      confirmedCommissionRate: true,
       invoiceLinks: {
         where: {
           invoice: { deletedAt: null, status: { not: "VOID" } },
@@ -1069,6 +1084,10 @@ async function validateReconciliationLinksForCreate(
       "\u90e8\u5206\u5bf9\u8d26\u8bb0\u5f55\u4e0d\u5b58\u5728\u3001\u672a\u786e\u8ba4\uff0c\u6216\u4e0e\u6240\u9009\u5ba2\u6237\u5408\u540c\u4e0d\u4e00\u81f4",
     );
   }
+  const confirmationIssue = rows
+    .map((row) => confirmationSubmissionIssue(row))
+    .find((issue): issue is string => Boolean(issue));
+  if (confirmationIssue) throw new Error(confirmationIssue);
   if (rows.some((row) => row.invoiceLinks.length > 0)) {
     throw new Error(
       "\u90e8\u5206\u5bf9\u8d26\u8bb0\u5f55\u5df2\u5173\u8054 Invoice\uff0c\u8bf7\u6253\u5f00\u5df2\u6709 Invoice \u5904\u7406",
@@ -1232,7 +1251,7 @@ export async function createInvoice(
             draft.contractLinks.map((link) => link.contractId),
           );
           const billingRequestId = input.billingRequestId?.trim() || null;
-          let billingRequestLines: Array<{ id: string; reconciliationId: string; requestedAmount: number; feeType: string; currency: string }> | null = null;
+          let billingRequestLines: Array<{ id: string; reconciliationId: string; projectConfirmationId: string | null; requestedAmount: number; feeType: string; currency: string }> | null = null;
           if (billingRequestId) {
             const request = await tx.billingRequest.findFirst({
               where: { id: billingRequestId, status: "PROCESSING", documentType: "INVOICE", customerId: draft.customerId },
@@ -1242,6 +1261,7 @@ export async function createInvoice(
                   select: {
                     id: true,
                     reconciliationId: true,
+                    projectConfirmationId: true,
                     requestedAmount: true,
                     feeType: true,
                     currency: true,
@@ -1267,12 +1287,23 @@ export async function createInvoice(
             billingRequestLines = request.lines.map((line) => ({
               id: line.id,
               reconciliationId: line.reconciliationId,
+              projectConfirmationId: line.projectConfirmationId,
               requestedAmount: line.requestedAmount,
               feeType: line.feeType,
               currency: line.currency,
             }));
           }
           const { items, contractLinks, ...invoiceData } = draft;
+          const sourcedItems = billingRequestLines
+            ? items.map((item, index) => ({
+                ...item,
+                projectConfirmationId:
+                  billingRequestLines[index]?.projectConfirmationId ?? null,
+              }))
+            : items;
+          if (billingRequestLines && sourcedItems.length !== billingRequestLines.length) {
+            throw new Error("Invoice 明细行必须与开票申请行逐一对应，不能新增或遗漏。");
+          }
           const billingRequestedTotal = billingRequestLines?.reduce((sum, line) => sum + line.requestedAmount, 0) ?? 0;
           if (billingRequestLines && (invoiceData.totalAmount <= 0 || invoiceData.totalAmount > billingRequestedTotal + 0.01)) {
             throw new Error("Invoice 金额必须大于 0，且不能超过开票申请金额。");
@@ -1286,7 +1317,7 @@ export async function createInvoice(
               documentType: "INVOICE",
               issuedAt: invoiceData.status === "ISSUED" ? new Date() : null,
               createdById: session.userId,
-              items: { create: items },
+              items: { create: sourcedItems },
               contractLinks: { create: contractLinks },
               reconciliationLinks: reconciliationIds.length
                 ? {

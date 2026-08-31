@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, type ReactNode } from "react";
+import { PARTY_B_COMPANIES } from "@/lib/partyB";
 import {
   ArrowLeft,
   Building2,
@@ -25,6 +26,7 @@ export type FinanceObjectOption = {
   subtitle?: string;
   customerId?: string;
   accountName?: string;
+  legalEntityKey?: string;
   accountNumber?: string;
   bankName?: string;
   currency?: string;
@@ -1101,6 +1103,7 @@ function ProfileForm({ data, disabled, onSubmit }: FormProps) {
   const [manualAffiliate, setManualAffiliate] = useState(false);
   const emptyProfile = () => ({
     ownerObjectId: "",
+    legalEntityKey: "",
     name: "",
     accountName: "",
     accountNumber: "",
@@ -1141,6 +1144,7 @@ function ProfileForm({ data, disabled, onSubmit }: FormProps) {
     setManualAffiliate(category === "AFFILIATE_PAYEE");
     setForm({
       ownerObjectId: row.id,
+      legalEntityKey: row.legalEntityKey ?? "",
       name: row.label,
       accountName: row.accountName ?? "",
       accountNumber: row.accountNumber ?? "",
@@ -1246,6 +1250,7 @@ function ProfileForm({ data, disabled, onSubmit }: FormProps) {
               <TextField label="资料名称" value={form.name} setValue={(value) => patch("name", value)} />
             )}
             <TextField label={companyLabel} value={form.accountName} setValue={(value) => patch("accountName", value)} />
+            {category === "COMPANY_PAYER" && <Field label="关联合同签约主体"><select className="input" value={form.legalEntityKey} onChange={(event) => patch("legalEntityKey", event.target.value)}><option value="">未关联（合同中仍可手动选择）</option>{Object.values(PARTY_B_COMPANIES).map((entity) => <option key={entity.key} value={entity.key}>{entity.label}</option>)}</select><p className="mt-1 text-xs text-slate-500">创建合同时，选择此主体会默认勾选本账户；不会改变已保存合同的账户快照。</p></Field>}
             <TextField label={category === "EMPLOYEE_REIMBURSEMENT" || category === "CHANNEL_PAYEE" ? "收款账号/银行账号" : "银行账号"} value={form.accountNumber} setValue={(value) => patch("accountNumber", value)} />
             <TextField label={category === "AFFILIATE_PAYEE" ? "银行名称及开户行" : "开户行"} value={form.bankName} setValue={(value) => patch("bankName", value)} />
             <TextField label={category === "AFFILIATE_PAYEE" ? "SWIFT Code" : "SWIFT Code/税号"} value={form.swiftCode} setValue={(value) => patch("swiftCode", value)} />
@@ -1269,6 +1274,7 @@ function ProfileForm({ data, disabled, onSubmit }: FormProps) {
                   name: form.name,
                   accountType: category,
                   legalEntity: form.accountName,
+                  legalEntityKey: category === "COMPANY_PAYER" ? form.legalEntityKey : undefined,
                   accountName: form.accountName,
                   bankName: form.bankName,
                   accountNumber: form.accountNumber,

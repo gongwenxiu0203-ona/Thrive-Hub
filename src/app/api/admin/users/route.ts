@@ -32,6 +32,7 @@ export async function GET(req: NextRequest) {
       id: true,
       name: true,
       email: true,
+      phone: true,
       role: true,
       status: true,
       brandName: true,
@@ -51,7 +52,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "无权限" }, { status: 403 });
 
   const body = await req.json();
-  const { name, email, password, role, brandName } = body;
+  const { name, email, password, role, brandName, phone } = body;
 
   if (!name || !email || !password) {
     return NextResponse.json({ error: "缺少必填字段" }, { status: 400 });
@@ -67,12 +68,17 @@ export async function POST(req: NextRequest) {
   }
 
   const uniqueCode = generateUniqueCode();
+  const normalizedPhone = typeof phone === "string" ? phone.trim().replace(/[\s()-]/g, "") : "";
+  if (normalizedPhone && !/^\+?[0-9]{6,20}$/.test(normalizedPhone)) {
+    return NextResponse.json({ error: "联系电话应为6至20位数字，可带国际区号+" }, { status: 400 });
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const user = await (prisma.user.create as any)({
     data: {
       name,
       email,
+      phone: normalizedPhone || null,
       passwordHash: await hashPassword(password),
       role: requestedRole,
       status: "APPROVED",
@@ -89,7 +95,7 @@ export async function POST(req: NextRequest) {
     targetId: user.id,
     targetLabel: user.name,
     summary: `创建用户：${user.name}`,
-    after: { name: user.name, email: user.email, role: user.role, status: user.status },
+    after: { name: user.name, email: user.email, phone: user.phone, role: user.role, status: user.status },
   });
   await writeApiAccessLog({
     actorId: session.userId,

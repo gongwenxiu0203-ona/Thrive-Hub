@@ -1,6 +1,45 @@
 # Thrive Hub Handover
 
-## 2026-08-31 系统错误查询（本地开发，未提交/部署）
+## 2026-08-31 主格式合同/项目确认书阶段3（进行中，未提交）
+
+- 本轮续改：FRAMEWORK合同详情已完全分流旧详情，按主合同/确认书/签署原件/附加条款分类；确认书以主合同下分栏切换展示国家、平台、Program、第三方平台、商品范围、收费、数据源及付款条款。合同列表FRAMEWORK使用新主合同完整性，不再套旧收费字段；草稿显示“待上传盖章版”。本地详情与列表只读验收通过，375px无页面横向溢出、浏览器无console error。
+- 导出保留原V3.2模板全部可选项，销售平台、Program、第三方平台、商品范围、收费模式、销售数据来源分别以☑/☐表示；自定义项写入“其他”，不再把未选择项删掉。三种导出范围结构及未修改其余OOXML部件测试通过；仍缺LibreOffice视觉渲染，不能宣称Word分页完全验收。
+- 签署闭环：新建主合同始终DRAFT，导出不改状态；资料完整且上传双方盖章版后才COMPLETED并推动客户合作中。上传已有主合同要求同一套完整字段、签署确认及真实PDF/Word后直接COMPLETED。新增盖章版私有鉴权下载、乐观锁、魔数、20MB、版本和审计；FRAMEWORK禁止走旧审核/手工完成状态。确认书上传盖章版后如字段实际变化，当前signedFileUrl失效，旧文件只保留在历史版本，必须重传才能生效。确认书生效再次验证主合同完整性和真实签署文件。
+- 新建合同导出后，合同详情不再要求重复补录或在上传时再次执行完整性拦截：直接展示此前保存的数据，必要时先编辑，不修改则一次上传“主合同 + 所选项目确认书”盖章完整版。完整性仍由创建/编辑/导出环节负责；归档只验证权限、文件真实性、并发版本和确认书归属。系统在同一事务中完成主合同签署归档，并把同一完整原件关联到本次勾选的确认书；详情页可直接下载该完整原件，确认书仍需逐份确认生效并独立生成对账。
+- 尚未完成且不能宣称完成：合并文件自动分拆/识别；单独项目确认书上传时选择主合同和新增/替换；确认书上传字段自动识别；Project.projectConfirmationId业务/UI关联；CAMPAIGN/PUBLISHER订单核定、尾期/附加项目费计划。上述后续不能复用旧AI合同映射硬套新字段。
+- 用户已确认新增 User.phone、FinanceAccountProfile.legalEntityKey、ContractTemplate.documentType、Project.projectConfirmationId；迁移 `20260831190000_contract_document_classification` 仅 ADD COLUMN/CREATE INDEX。本地主库停止 Next、checkpoint 后备份 `backups/dev_pre_deploy_20260831_153512.db`，已应用到第73个迁移，integrity_check=ok、外键错误0；生产未动。
+- 修复确认书 storeUrl 的空字符串/无效 URL 导致 new URL 抛异常：安全返回字段校验错误。草稿编号自动按主合同编号加序号；管理员改编号需原因/版本检查/全局去重及审计，作废仍占位。
+- 模板按 BRAND_LEGACY/FRAMEWORK_MASTER/PROJECT_CONFIRMATION/CHANNEL_REBATE 分类，品牌方与渠道入口各有模板页；旧创建/上传/导出解析限定历史模板。新建/上传新品牌方合同共用 FrameworkContractForm，新建为草稿，上传原件归档；联系人可选内部用户带出邮箱/电话，管理员可维护用户电话。
+- 主合同显示全部启用公司账户并多选；默认使用明确 legalEntityKey，历史无key账户按规范化公司名匹配。财务资料公司付款账户增加“关联合同签约主体”维护，未关联账户仍可手动选。新快照包含 routingNumber/payeeAddress/bankAddress；旧合同快照不随财务资料变化。
+- 新格式合同编辑不再打开 ContractV4Form；新增 updateFrameworkContract，版本冲突保护、修改原因及前后审计，保留签署文件和已有账户快照。已有确认书引用的账户禁止直接移除；生效确认书存在时禁止换签约主体。旧 updateContract/updateContractV4 服务端拒绝 FRAMEWORK，避免绕过页面写入旧收费字段。
+- Word导出实现基于用户V3.2模板的主合同/当前确认书/两者合并三种范围，仅在内存填充并下载；多账户/站点/收费字段结构测试通过，不改参考文件。尚未视觉验收：本机渲染脚本缺少 LibreOffice。不能宣称完整排版已通过。
+- 本轮账户选择测试、URL/草稿测试、确认书规则、Word三范围结构测试和tsc通过；外置临时空项目库 next build 两次通过79/79页面，本地dev已恢复3001。最后追加账户历史保留及列表文案后再跑tsc。空SQLite绝对路径需先用node:sqlite初始化再跑prepare-project-db，否则Windows schema engine报无详细信息错误。测试库位于系统TEMP/thrive-contract-build-7f42f68881d3437ab591e8eed4ce9703，不指向现有项目/BI库。
+- 页面只读验收：财务两家公司账户均可见，切换乙方正确切换默认勾选；375px单列表单，document.scrollWidth=375无横向溢出，已恢复桌面视口和原主体选择。未提交测试业务数据。浏览器日志仍保留08:29旧URL异常，当前源码已try/catch且草稿测试覆盖，不将历史日志误认为新回归。
+- 主合同编辑允许保留已停用的既有账户快照，新选账户仍必须启用；脱离财务资料的历史快照不自动删除。停用账户在表单标注。确认书列表统一显示编号，不重复显示旧title。
+- 未完成：整包主合同+确认书自动分拆/识别、确认书单独上传的主合同选择与新增/替换流程、新建主合同签署原件归档闭环、Project.projectConfirmationId业务/UI关联、导出完整字段/版面回归、阶段2列出的订单核定和尾期/附加费计划。新上传暂仍仅存主合同原件，确认书原件上传仍不识别；不可宣称用户本次全部需求已完成。
+- 多Agent sow_api/sow_ui/sow_finance均因workspace credits耗尽退出，未完成交付；主Agent继续整合并验证其部分工作。未commit/push/deploy。不要暂存无关 .claude/settings.local.json、output、临时scripts或用户文本文件。
+
+## 2026-08-31 主格式合同/项目确认书阶段2（本地代码，未提交）
+
+- 新建品牌方合同入口增加“主格式合同 + 项目确认书”：归档已签署主合同，保存甲乙方基础信息、联系人、负责人，并从财务资料中按乙方主体多选一个或多个公司付款账户；创建后进入独立确认书页。旧版品牌合同上传入口保留并明确标注历史兼容。
+- 项目确认书草稿/原件/生效 API 已接通：国家一行，销售平台、Program、第三方平台多选并支持自定义；月费、GMV服务佣金/总包佣金、存量/增量/全量基数、商品与数据源写入版本快照。确认书只能选择主合同冻结的收款账户；签署原件必须真实存在才能生效。
+- 每份生效确认书独立生成固费及佣金对账，主格式合同不再走旧合同整套计划，多个同期确认书互不覆盖；订单唯一归属键统一NFKC及大小写，防止同一订单跨确认书重复计佣。
+- PACKAGE总包佣金在每期对账必须人工保存实际比例后才可提交/审核/开票；CAMPAIGN/PUBLISHER在订单归属核定入口未完成前保持阻断，禁止错误使用客户总GMV。固费开票金额使用异议确认后的finalFeeAmount。
+- BillingRequestLine、InvoiceItem及国内发票明细传递projectConfirmationId；跨合同/跨确认书合并开票仍允许，但每行保留来源。确认书生效业务校验改为明确4xx/409，不再污染系统错误表为未知500。
+- Schema及迁移沿用用户已确认的20260831150000_contract_confirmation_foundation，纯CREATE/ADD，无DROP/DELETE/TRUNCATE；本地主库72迁移最新。纯规则、草稿、隔离迁移/零漂移测试、全量tsc和Next 79页构建通过；完整npm build的项目库准备步骤因Windows临时绝对SQLite URL报schema-engine错误，随后独立next build在外置项目库环境变量下成功。端口3001开发服务已恢复，浏览器只读验证主合同入口及THRAIVE/灵跃账户联动，未创建业务合同。
+- 尚未实现/不可宣称完成：CAMPAIGN/PUBLISHER订单核定操作页、历史确认书版本原件下载、合同终止尾期规则、附加项目费付款计划。未commit、未push、未部署。
+
+## 2026-08-31 主格式合同/项目确认书阶段1（本地代码，未提交）
+
+- 用户确认：客户→主格式合同→确认书分栏；多份生效确认书独立计费，同期不覆盖。同一订单仅归属一份；总包值在合同记录，对账提醒人工核定实际抽佣比例。乙方多收款账户；国家一行、多平台/Program/第三方平台选项支持手动新增。
+- 具体方案见 docs/contract-sow-redesign-plan.md。用户在Schema新增提醒后明确确认，已新增6表及Contract/CustomerReconciliation/InvoiceItem/BillingRequestLine/ManualBillingRequestItem的可空字段。迁移20260831150000_contract_confirmation_foundation仅CREATE TABLE/INDEX和ALTER ADD COLUMN，无破坏性操作；业务库未应用。
+- 新增contractConfirmationDraft.ts（草稿/生效条件、国家多行、多账户、版本化快照）及contractConfirmationRules.ts（明确百分数、独立周期键、超门槛、PACKAGE本期比例确认、核定GMV与币种校验）。不调用旧计算器、不写业务数据、尚无API/UI入口。
+- 两份纯逻辑回归、prisma validate、全量tsc通过；contract-confirmation-schema-test.cjs在临时合成空库验证迁移、旧字段保留、订单唯一性、多账户/范围、完整性、零Schema差异。此测试固定旧schema版本4bb722f并依赖node:sqlite，本地Node24通过。尚未generate客户端/应用业务库迁移，也未运行自动迁移的npm run build。
+- 后续：先备份并应用本地迁移，再接权限保护的主合同/确认书创建上传、生效版本、独立对账、订单归属及开票回传。须先分离legacy与FRAMEWORK路径，禁止主合同再重复生成一套费用；生效前校验客户/合同/账户归属。尾期、项目费等未实现，不可宣称全部功能完成。权限沿用canonical leaf，ADMIN/USER按功能权限全量数据。旧记录不转换、不重算。未commit/push/deploy。
+
+## 2026-08-31 系统错误查询（已部署 4bb722f）
+
+- 经用户确认已部署4bb722f：生产停止PM2后构建，备份 /root/www/backups/dev_pre_deploy_20260831_103533.db；新增日志表迁移成功，主库及备份 quick_check 均ok，项目库无待迁移。构建79页成功，PM2重启online；本机/公网login 200，未登录日志API401，管理员页307。未在生产制造测试异常或修改业务记录。此部署记录更新尚未提交。
 
 - 用户确认新增独立 SystemErrorLog 表；迁移 20260831113000_system_error_log 仅 CREATE TABLE/INDEX，不关联删除业务数据。已备份本地数据库至 backups/dev_pre_deploy_20260831_101301.db 后 migrate deploy，生产未执行本迁移。
 - 管理员面板新增“系统错误”，URL /admin?tab=errors；新增 canonical leaf admin.system_errors，默认仅 ADMIN MANAGE，后端还实时验证数据库角色 ADMIN 和 APPROVED，读 READ、更新 EDIT。

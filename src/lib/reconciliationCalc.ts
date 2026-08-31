@@ -1,5 +1,13 @@
 import { prisma } from "@/lib/prisma";
 import { calcCommission } from "@/lib/commissionCalc";
+import { calculateConfirmationCommission } from "./contractConfirmationRules";
+import { readReconciliationConfirmation, confirmationSubmissionIssue, type ConfirmationReconciliation } from "./reconciliationConfirmation";
+import { AppError } from "./appError";
+
+export function assertConfirmationReadyForSubmission(rec: ConfirmationReconciliation) {
+  const issue = confirmationSubmissionIssue(rec);
+  if (issue) throw new AppError(issue, 400, "CONFIRMATION_RECONCILIATION_NOT_READY");
+}
 
 export async function recalcReconciliation(
   recId: string,
@@ -8,6 +16,11 @@ export async function recalcReconciliation(
   const rec = await prisma.customerReconciliation.findUnique({
     where: { id: recId },
     select: {
+      projectConfirmationId: true,
+      ruleSnapshot: true,
+      confirmedCommissionRate: true,
+      reconcileType: true,
+      commissionCurrency: true,
       commissionRate: true,
       actualSalesAmount: true,
       gmvBaseline: true,
@@ -22,6 +35,28 @@ export async function recalcReconciliation(
     },
   });
   if (!rec) return { actualCommissionRate: 0, commissionAmount: 0, betResult: "NA" };
+
+  if (rec.projectConfirmationId) {
+    if (rec.reconcileType === "FEE_ONLY") return { actualCommissionRate: 0, commissionAmount: 0, betResult: "NA" };
+    const draft = readReconciliationConfirmation(rec);
+    if (!draft?.commission) throw new AppError("项目确认书佣金快照无效", 400);
+    const rate = typeof patch.confirmedCommissionRate === "number" ? patch.confirmedCommissionRate : rec.confirmedCommissionRate;
+    assertConfirmationReadyForSubmission({ ...rec, confirmedCommissionRate: rate });
+    const commission = draft.commission;
+    try {
+      const result = calculateConfirmationCommission({
+        mode: commission.mode, scope: commission.basis,
+        currency: commission.currency,
+        gmvCurrency: typeof patch.commissionCurrency === "string" ? patch.commissionCurrency : rec.commissionCurrency,
+        effectiveGmv: typeof patch.actualSalesAmount === "number" ? patch.actualSalesAmount : rec.actualSalesAmount,
+        ratePercent: commission.serviceRatePercent,
+        thresholdAmount: commission.threshold, thresholdCurrency: commission.thresholdCurrency ?? undefined,
+        overrideRatePercent: rate == null ? undefined : rate * 100,
+        overrideRateConfirmed: rate != null,
+      });
+      return { actualCommissionRate: result.ratePercent / 100, commissionAmount: result.commissionAmount, betResult: "NA" };
+    } catch (error) { throw new AppError(error instanceof Error ? error.message : "确认书佣金计算失败", 400); }
+  }
 
   const actualSalesAmount = typeof patch.actualSalesAmount === "number"
     ? patch.actualSalesAmount

@@ -20,6 +20,7 @@ export async function POST(
 
     const rec = await prisma.customerReconciliation.findFirst({ where: scopedReconciliationWhere(id, access.scope) });
     if (!rec) return NextResponse.json({ error: "对账记录不存在或您无权访问" }, { status: 404 });
+    if (rec.projectConfirmationId) return NextResponse.json({ error: "项目确认书必须按推广范围、订单唯一归属核定销售数据，不能直接拉取整个客户的BI总额" }, { status: 400 });
     if (rec.status !== "DRAFT") {
       return NextResponse.json({ error: "只有草稿状态可以重新拉取 BI 数据" }, { status: 400 });
     }

@@ -6,6 +6,7 @@ type TemplateLike = {
   id: string;
   name: string;
   templateKey: string;
+  documentType?: string;
   fileUrl: string;
   deletedAt?: Date | string | null;
 };
@@ -48,7 +49,7 @@ export async function resolveContractTemplateBuffer(
   }
 
   const candidates = await prisma.contractTemplate.findMany({
-    where: { templateKey: template.templateKey },
+    where: { templateKey: template.templateKey, documentType: template.documentType ?? "BRAND_LEGACY" },
     select: {
       id: true,
       name: true,

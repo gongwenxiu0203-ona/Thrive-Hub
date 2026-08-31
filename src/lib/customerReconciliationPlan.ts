@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { ensureEffectiveConfirmationPlans } from "@/lib/contractConfirmationPlan";
 
 function reconciliationCurrency(value: string | null | undefined) {
   const normalized = String(value ?? "").trim().toUpperCase();
@@ -141,6 +142,9 @@ export async function ensureCustomerReconciliationPlan(contractId: string, actor
     where: { id: contractId },
     include: { customer: { select: { status: true, cooperationEndDate: true } } },
   });
+  if (contract?.contractMode === "FRAMEWORK") {
+    return ensureEffectiveConfirmationPlans(contract.id);
+  }
   if (!contract || contract.status !== "COMPLETED" || !contract.customerId || !contract.startDate || !contract.endDate) {
     return { created: 0, skipped: true };
   }

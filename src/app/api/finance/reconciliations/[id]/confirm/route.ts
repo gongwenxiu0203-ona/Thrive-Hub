@@ -7,6 +7,7 @@ import {
 } from "@/lib/reconciliationAccess";
 import { FeaturePermissionError } from "@/lib/permissionGuard";
 import { errorResponse } from "@/lib/appError";
+import { assertConfirmationReadyForSubmission } from "@/lib/reconciliationCalc";
 
 // POST /api/finance/reconciliations/[id]/confirm
 // 双方最终确认（争议后的最终版本），锁定数据 + 创建结算记录
@@ -36,6 +37,7 @@ export async function POST(
         { status: 400 },
       );
     }
+    assertConfirmationReadyForSubmission(rec);
 
     await prisma.$transaction(async (tx) => {
       const finalOrders = rec.actualOrders;

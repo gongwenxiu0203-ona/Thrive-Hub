@@ -31,6 +31,7 @@ type UserRecord = {
   id: string;
   name: string;
   email: string;
+  phone?: string | null;
   role: string;
   status: string;
   brandName: string | null;
@@ -156,6 +157,7 @@ export function AdminClient({
   const [newName, setNewName] = useState("");
   const [newEmail, setNewEmail] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [editPhone, setEditPhone] = useState("");
   const [newRole, setNewRole] = useState("ADMIN");
   const [newBrandName, setNewBrandName] = useState("");
   const [removalUser, setRemovalUser] = useState<UserRecord | null>(null);
@@ -193,6 +195,7 @@ export function AdminClient({
     setEditRole(u.role);
     setEditStatus(u.status);
     setEditBrandName(u.brandName ?? "");
+    setEditPhone(u.phone ?? "");
     setEditNewPassword("");
     setError("");
   }
@@ -205,6 +208,7 @@ export function AdminClient({
           role: editRole,
           status: editStatus,
           brandName: editBrandName || null,
+          phone: editPhone,
         };
         if (editNewPassword.trim()) {
           if (editNewPassword.length < 6) {
@@ -629,7 +633,7 @@ export function AdminClient({
                 {displayed.map((u) => (
                   <tr key={u.id}>
                     <td className="font-medium">{u.name}</td>
-                    <td className="text-slate-500">{u.email}</td>
+                    <td className="text-slate-500">{u.email}<div className="mt-1">{editingId === u.id ? <input aria-label={`${u.name}联系电话`} type="tel" maxLength={30} className="input text-xs" placeholder="联系电话（可选）" value={editPhone} onChange={(e) => setEditPhone(e.target.value)} /> : <span className="text-xs">电话：{u.phone || "未填写"}</span>}</div></td>
                     <td>
                       {editingId === u.id ? (
                         <select

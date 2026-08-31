@@ -39,6 +39,7 @@ model User {
   id            String   @id @default(cuid())
   name          String
   email         String   @unique
+  phone         String?
   passwordHash  String
   role          String   @default("USER") // ADMIN | USER | LYNQ_STAFF | BRAND | CHANNEL
   status        String   @default("APPROVED") // PENDING | APPROVED | REJECTED
@@ -277,6 +278,7 @@ model CustomerAuthorizationInfo {
 model Contract {
   id         String  @id @default(cuid())
   contractNo String  @unique
+  contractMode String? // null = existing contract; FRAMEWORK = master contract with independent confirmations
   customerId String? // 新建/上传已有合同必须从客户管理中选取；事务性合同允许为空
   type       String  @default("CHANNEL") // CHANNEL 渠道商 | BRAND 品牌方 | REBATE 返佣 | TRANSACTIONAL 事务性合同
   status     String  @default("IN_PROGRESS") // IN_PROGRESS 推进中 | REVIEWING 审核中 | SIGNING 签署中 | COMPLETED 签署完成
@@ -394,6 +396,110 @@ model Contract {
   invoiceLinks           InvoiceContract[]
   splitRule              ChannelSplitRule?
   billingRequests        BillingRequest[]
+  projectConfirmations   ContractProjectConfirmation[]
+  receivingAccounts      ContractReceivingAccount[]
+}
+
+// Independent, versioned commercial terms under one framework contract.
+model ContractProjectConfirmation {
+  id            String    @id @default(cuid())
+  contractId    String
+  number        String    @unique
+  title         String
+  status        String    @default("DRAFT") // DRAFT | EFFECTIVE | TERMINATED | VOIDED
+  startDate     DateTime?
+  endDate       DateTime?
+  effectiveAt   DateTime?
+  terminatedAt  DateTime?
+  signedFileUrl String?
+  version       Int       @default(1)
+  details       String    @default("{}") // Validated JSON: contacts, products, fee rules and payment terms
+  createdById   String // Audit scalar retained even if the operator is removed
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  contract           Contract                     @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  versions           ContractConfirmationVersion[]
+  scopes             ContractConfirmationScope[]
+  orderAttributions  ContractOrderAttribution[]
+  reconciliations    CustomerReconciliation[]
+  invoiceItems       InvoiceItem[]
+  billingLines       BillingRequestLine[]
+  manualBillingItems ManualBillingRequestItem[]
+  projects           Project[]
+
+  @@index([contractId, status])
+}
+
+model ContractConfirmationVersion {
+  id             String   @id @default(cuid())
+  confirmationId String
+  version        Int
+  snapshot       String // Immutable validated JSON of all effective terms/scopes
+  reason         String
+  actorId        String
+  createdAt      DateTime @default(now())
+
+  confirmation ContractProjectConfirmation @relation(fields: [confirmationId], references: [id], onDelete: Restrict)
+
+  @@unique([confirmationId, version])
+}
+
+model ContractConfirmationScope {
+  id                  String @id @default(cuid())
+  confirmationId      String
+  country             String // One country/site per row
+  salesPlatforms      String @default("[]")
+  programs            String @default("[]")
+  thirdPartyPlatforms String @default("[]")
+  position            Int    @default(0)
+
+  confirmation ContractProjectConfirmation @relation(fields: [confirmationId], references: [id], onDelete: Restrict)
+
+  @@index([confirmationId, position])
+}
+
+model ContractReceivingAccount {
+  id               String   @id @default(cuid())
+  contractId       String
+  financeProfileId String? // Optional source ID; signed snapshot must survive profile changes
+  snapshot         String
+  position         Int      @default(0)
+  createdAt        DateTime @default(now())
+
+  contract Contract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+
+  @@index([contractId, position])
+}
+
+model ContractCustomOption {
+  id              String   @id @default(cuid())
+  category        String // COUNTRY | SALES_PLATFORM | PROGRAM | THIRD_PARTY_PLATFORM etc.
+  value           String
+  normalizedValue String
+  createdById     String
+  createdAt       DateTime @default(now())
+
+  @@unique([category, normalizedValue])
+}
+
+// One order belongs to exactly one confirmation, even across overlapping contracts.
+model ContractOrderAttribution {
+  id             String   @id @default(cuid())
+  customerId     String // Validated against confirmation.contract.customerId by the service
+  platform       String
+  storeKey       String
+  orderKey       String
+  confirmationId String
+  actorId        String
+  reason         String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  confirmation ContractProjectConfirmation @relation(fields: [confirmationId], references: [id], onDelete: Restrict)
+
+  @@unique([customerId, platform, storeKey, orderKey])
+  @@index([confirmationId])
 }
 
 model ContractFieldReview {
@@ -813,6 +919,7 @@ model Project {
 
   customerId     String? // 关联客户（自动带出商务/后端负责人）
   contractId     String? // 关联合同（整合合作 = 签署完成的合同）
+  projectConfirmationId String? // FRAMEWORK合同下关联的具体项目确认书
   ownerId        String? // 项目负责人（默认创建人，可手动修改）
   promoPlatforms String  @default("[]") // JSON string[]：推广平台（可多选/手动新增）
   targetSites    String  @default("[]") // JSON string[]：目标站点（可多选/手动新增）
@@ -836,12 +943,14 @@ model Project {
 
   customer   Customer?          @relation(fields: [customerId], references: [id], onDelete: SetNull)
   contract   Contract?          @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  projectConfirmation ContractProjectConfirmation? @relation(fields: [projectConfirmationId], references: [id], onDelete: SetNull)
   createdBy  User               @relation("ProjectCreator", fields: [createdById], references: [id])
   owner      User?              @relation("ProjectOwner", fields: [ownerId], references: [id])
   entries    ProjectEntry[]
   gmvTargets ProjectGmvTarget[]
 
   @@index([customerId])
+  @@index([projectConfirmationId])
   @@index([type])
   @@index([status])
 }
@@ -964,6 +1073,10 @@ model CustomerReconciliation {
   id         String @id @default(cuid())
   customerId String
   contractId String
+  projectConfirmationId String?
+  ruleSnapshot String? // Effective confirmation version/rules; null retains legacy calculation
+  confirmedCommissionRate Float? // Explicitly confirmed decimal rate; distinct from computed actualCommissionRate
+  projectConfirmation ContractProjectConfirmation? @relation(fields: [projectConfirmationId], references: [id], onDelete: Restrict)
 
   source              String    @default("MANUAL") // AUTO | MANUAL | ADJUSTMENT
   planStatus          String    @default("OPEN") // PLANNED | OPEN | CANCELLED
@@ -1054,6 +1167,7 @@ model CustomerReconciliation {
   @@index([status])
   @@index([deletedAt])
   @@index([contractId, reconcileType, periodStart])
+  @@index([projectConfirmationId, reconcileType, periodStart])
   @@index([planStatus, periodStart])
 }
 
@@ -1482,6 +1596,8 @@ model InvoiceReconciliation {
 
 model InvoiceItem {
   id                String   @id @default(cuid())
+  projectConfirmationId String?
+  projectConfirmation ContractProjectConfirmation? @relation(fields: [projectConfirmationId], references: [id], onDelete: Restrict)
   invoiceId         String
   feeType           String   @default("MONTHLY_FEE") // MONTHLY_FEE | SALES_COMMISSION
   currency          String   @default("USD")
@@ -1503,6 +1619,7 @@ model InvoiceItem {
   @@index([invoiceId])
   @@index([feeType])
   @@index([sortOrder])
+  @@index([projectConfirmationId])
 }
 
 // 销售漏斗（独立建模，不复用 Project.stage —— Project.stage 是项目流程）
@@ -1564,6 +1681,8 @@ model CustomerBillingProfile {
 
 model ManualBillingRequestItem {
   id                String   @id @default(cuid())
+  projectConfirmationId String?
+  projectConfirmation ContractProjectConfirmation? @relation(fields: [projectConfirmationId], references: [id], onDelete: Restrict)
   requestId         String
   description       String
   feeType           String // MONTHLY_FEE | SALES_COMMISSION | AFFILIATE_FEE
@@ -1590,10 +1709,13 @@ model ManualBillingRequestItem {
 
   @@index([requestId, sortOrder])
   @@index([feeType])
+  @@index([projectConfirmationId])
 }
 
 model BillingRequestLine {
   id               String   @id @default(cuid())
+  projectConfirmationId String?
+  projectConfirmation ContractProjectConfirmation? @relation(fields: [projectConfirmationId], references: [id], onDelete: Restrict)
   requestId        String
   reconciliationId String
   requestedAmount  Float
@@ -1607,6 +1729,7 @@ model BillingRequestLine {
 
   @@unique([requestId, reconciliationId, feeType])
   @@index([reconciliationId])
+  @@index([projectConfirmationId])
 }
 
 model BillingDocumentAllocation {
@@ -1846,6 +1969,7 @@ model ContractTemplate {
   id           String    @id @default(cuid())
   name         String // 显示名（如 "全量·固佣同模板"）
   templateKey  String // 见上枚举（多模板可共享 key）
+  documentType String @default("BRAND_LEGACY") // BRAND_LEGACY | FRAMEWORK_MASTER | PROJECT_CONFIRMATION | CHANNEL_REBATE
   fileUrl      String // 服务器存储路径
   description  String?
   uploadedById String
@@ -1857,6 +1981,7 @@ model ContractTemplate {
   contracts Contract[]
 
   @@index([templateKey])
+  @@index([documentType, deletedAt])
   @@index([deletedAt])
 }
 
@@ -2129,6 +2254,7 @@ model FinanceAccountProfile {
   name            String
   accountType     String // COMPANY_BANK | SUPPLIER_BANK | EMPLOYEE | OTHER
   legalEntity     String
+  legalEntityKey  String? // THRAIVE | LINGYUE；旧数据为空时兼容名称匹配
   accountName     String
   bankName        String?
   accountNumber   String
@@ -2150,6 +2276,7 @@ model FinanceAccountProfile {
   createdBy User @relation(fields: [createdById], references: [id], onDelete: Restrict)
 
   @@index([legalEntity, status])
+  @@index([accountType, legalEntityKey, status])
   @@index([accountType, status])
   @@index([currency, status])
 }

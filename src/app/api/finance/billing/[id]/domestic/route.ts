@@ -100,8 +100,8 @@ export async function POST(
       );
     const saved = await saveUploadedFile(file);
     const sourceItems = billing.manualItems.length
-      ? billing.manualItems.map((item) => ({ feeType: item.feeType, currency: item.currency, periodType: item.periodType, periodLabel: item.periodLabel, description: item.description, promoPlatform: item.promoPlatform, targetSite: item.targetSite, affiliatePlatform: item.affiliatePlatform, quantity: item.quantity, unitPrice: item.unitPrice, amount: item.amount, serviceMonths: item.serviceMonths, netAmount: item.netAmount, taxRate: item.taxRate, taxAmount: item.taxAmount, grossAmount: item.grossAmount, sortOrder: item.sortOrder }))
-      : billing.lines.map((line, sortOrder) => ({ feeType: line.feeType === "FIXED_FEE" ? "MONTHLY_FEE" : "SALES_COMMISSION", currency: line.currency, periodType: "DATE_RANGE", periodLabel: "国内发票申请", description: line.feeType === "FIXED_FEE" ? "固定费" : "销售佣金", promoPlatform: null, targetSite: null, affiliatePlatform: null, quantity: 1, unitPrice: line.requestedAmount, amount: line.requestedAmount, serviceMonths: null, netAmount: null, taxRate: null, taxAmount: null, grossAmount: null, sortOrder }));
+      ? billing.manualItems.map((item) => ({ projectConfirmationId: item.projectConfirmationId, feeType: item.feeType, currency: item.currency, periodType: item.periodType, periodLabel: item.periodLabel, description: item.description, promoPlatform: item.promoPlatform, targetSite: item.targetSite, affiliatePlatform: item.affiliatePlatform, quantity: item.quantity, unitPrice: item.unitPrice, amount: item.amount, serviceMonths: item.serviceMonths, netAmount: item.netAmount, taxRate: item.taxRate, taxAmount: item.taxAmount, grossAmount: item.grossAmount, sortOrder: item.sortOrder }))
+      : billing.lines.map((line, sortOrder) => ({ projectConfirmationId: line.projectConfirmationId, feeType: line.feeType === "FIXED_FEE" ? "MONTHLY_FEE" : "SALES_COMMISSION", currency: line.currency, periodType: "DATE_RANGE", periodLabel: "国内发票申请", description: line.feeType === "FIXED_FEE" ? "固定费" : "销售佣金", promoPlatform: null, targetSite: null, affiliatePlatform: null, quantity: 1, unitPrice: line.requestedAmount, amount: line.requestedAmount, serviceMonths: null, netAmount: null, taxRate: null, taxAmount: null, grossAmount: null, sortOrder }));
     const sourceTotal = sourceItems.reduce((sum, item) => sum + item.amount, 0);
     const domesticLines = sourceItems.map((item) => {
       const ratio = sourceTotal > 0 ? item.amount / sourceTotal : 0;
@@ -135,6 +135,7 @@ export async function POST(
           createdById: session.userId,
           items: {
             create: sourceItems.map((line) => ({
+              projectConfirmationId: line.projectConfirmationId,
               feeType: line.feeType,
               currency: line.currency,
               periodType: line.periodType,

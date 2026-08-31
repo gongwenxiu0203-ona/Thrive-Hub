@@ -31,6 +31,7 @@ import { calcCommission } from "@/lib/commissionCalc";
 import type { ReconciliationInvoiceState } from "@/lib/reconciliationInvoice";
 import { submitBillingRequest } from "@/actions/billingRequests";
 import { linkInvoiceToReconciliation } from "@/actions/invoiceArchive";
+import { readReconciliationConfirmation, confirmationSubmissionIssue } from "@/lib/reconciliationConfirmation";
 
 // ── types ──────────────────────────────────────────────────────────────────────
 
@@ -45,6 +46,9 @@ type Review = {
 };
 
 type Rec = {
+  projectConfirmationId?: string | null;
+  ruleSnapshot?: string | null;
+  confirmedCommissionRate?: number | null;
   id: string;
   createdAt: Date | string;
   status: string;
@@ -95,6 +99,8 @@ type Rec = {
 };
 
 type Contract = {
+  contractMode?: string | null;
+  projectConfirmations?: { id: string; number: string; title: string }[];
   id: string;
   contractNo: string;
   partyA: string | null;
@@ -269,9 +275,14 @@ export function CustomerReconciliationDetailClient({
   const searchParams = useSearchParams();
   const scopeAll = searchParams.get("scope") === "all";
   const [, startTransition] = useTransition();
-  const visibleReconciliations = contract
+  const confirmationTabs = contract?.projectConfirmations ?? [];
+  const selectedConfirmationId = searchParams.get("confirmationId") || confirmationTabs[0]?.id;
+  const contractRecords = contract
     ? reconciliations.filter((rec) => rec.contract.id === contract.id)
     : reconciliations;
+  const visibleReconciliations = contract?.contractMode === "FRAMEWORK"
+    ? contractRecords.filter((rec) => rec.projectConfirmationId === selectedConfirmationId)
+    : contractRecords;
   const fixedReconciliations = visibleReconciliations.filter(
     (rec) => rec.reconcileType !== "COMMISSION_ONLY",
   );
@@ -417,6 +428,16 @@ export function CustomerReconciliationDetailClient({
         </section>
       )}
       <BasicInfoSection customer={customer} contract={contract} />
+      {contract?.contractMode === "FRAMEWORK" && (
+        <section className="rounded-lg border border-[#e7e0ef] bg-white p-4">
+          <h2 className="font-semibold text-slate-800">项目确认书</h2>
+          <p className="mt-1 text-sm text-slate-600">各确认书独立计费、独立对账；请切换查看。勾选记录可跨确认书统一申请开票。</p>
+          <nav aria-label="选择项目确认书" className="mt-3 flex flex-wrap gap-2">
+            {confirmationTabs.map((item) => <Link key={item.id} aria-current={selectedConfirmationId === item.id ? "page" : undefined} className={selectedConfirmationId === item.id ? "btn-primary" : "btn-secondary"} href={`/finance/customers/${customer.id}?contractId=${contract.id}&confirmationId=${item.id}`}>{item.number} · {item.title}</Link>)}
+          </nav>
+          {!confirmationTabs.length && <p className="mt-3 text-sm text-slate-600">暂无生效确认书，请在主合同中新增并生效后生成对账。</p>}
+        </section>
+      )}
 
       <div className="grid items-start gap-6 xl:grid-cols-2">
         <ReconciliationStreamSection
@@ -424,7 +445,7 @@ export function CustomerReconciliationDetailClient({
           description="按固费服务周期独立确认和结算"
           records={fixedReconciliations}
           streamKind="fixed"
-          canCreate={Boolean(contract) && !readOnly}
+          canCreate={Boolean(contract) && contract?.contractMode !== "FRAMEWORK" && !readOnly}
           onCreate={() => setNewStream("FEE_ONLY")}
           currentUserId={currentUserId}
           users={users}
@@ -442,7 +463,7 @@ export function CustomerReconciliationDetailClient({
           description="按销售归属周期拉取 BI 数据并计算佣金"
           records={commissionReconciliations}
           streamKind="commission"
-          canCreate={Boolean(contract) && !readOnly}
+          canCreate={Boolean(contract) && contract?.contractMode !== "FRAMEWORK" && !readOnly}
           onCreate={() => setNewStream("COMMISSION_ONLY")}
           currentUserId={currentUserId}
           users={users}
@@ -1219,7 +1240,11 @@ function MonthlyRecordRow({
   // ── 实时计算抽佣（基于合同 v3 字段 + 当前 actualSalesAmount）─────────────────
   // 不依赖 DB 快照的 actualCommissionRate / commissionAmount，避免历史数据陈旧
   const parsedContractRate = parseRatePct(rec.contract.commissionRate);
-  const liveCalc = calcCommission({
+  const confirmation = readReconciliationConfirmation(rec);
+  const confirmationIssue = confirmationSubmissionIssue(rec);
+  const [packageRate, setPackageRate] = useState(rec.confirmedCommissionRate == null ? "" : String(rec.confirmedCommissionRate * 100));
+  const [savingRate, setSavingRate] = useState(false);
+  const liveCalc = rec.projectConfirmationId ? { actualCommissionRate: rec.actualCommissionRate, commissionAmount: isConfirmed ? (rec.finalCommissionAmount ?? rec.commissionAmount) : rec.commissionAmount, note: "按确认书生效版本计算" } : calcCommission({
     commissionType: rec.contract.commissionType ?? "FIXED",
     contractRate: parsedContractRate,
     thresholdAmount: rec.contract.thresholdAmount ?? null,
@@ -1451,7 +1476,27 @@ function MonthlyRecordRow({
             </dl>
           </div>
           {/* ── 计算过程 ── */}
-          {!isFixedStream && (
+          {rec.projectConfirmationId && (
+            <section className="rounded-md bg-slate-50 p-4 text-sm text-slate-700 space-y-2">
+              <h3 className="font-semibold">确认书生效版本计费规则 · {confirmation?.title ?? "快照待核对"}</h3>
+              {isFixedStream ? <p>月度服务费：{confirmation?.monthlyFee?.currency} {confirmation?.monthlyFee?.amount}</p> : <>
+                <p>收费模式：{confirmation?.commission?.mode === "PACKAGE" ? "总包佣金" : "GMV服务佣金"} · 计佣范围：{({ ALL: "全量", EXCESS: "超过月度门槛部分", CAMPAIGN: "按Campaign核定", PUBLISHER: "按联盟伙伴核定" } as Record<string, string>)[confirmation?.commission?.basis ?? ""]}</p>
+                {confirmation?.commission?.basis === "EXCESS" && <p>月度门槛：{confirmation.commission.thresholdCurrency} {confirmation.commission.threshold}；仅超出部分计佣。</p>}
+                {confirmation?.commission?.mode === "PACKAGE" && <>
+                  <p>合同总包值：{confirmation.commission.packageValue}；请核定本期实际抽佣比例。</p>
+                  {!readOnly && isDraft && <div className="flex flex-wrap items-end gap-2"><label className="space-y-1">实际抽佣比例（%）<input className="input block w-36" type="number" min="0" max="100" step="any" value={packageRate} onChange={(event) => setPackageRate(event.target.value)} /></label><button className="btn-secondary" disabled={savingRate || packageRate.trim() === ""} onClick={async () => {
+                    const percent = Number(packageRate);
+                    if (!Number.isFinite(percent) || percent < 0 || percent > 100) { alert("比例必须为0%至100%"); return; }
+                    setSavingRate(true);
+                    try { const response = await fetch(`/api/finance/reconciliations/${rec.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirmedCommissionRate: percent / 100 }) }); if (!response.ok) { alert((await response.json()).error); return; } onRefresh(); } finally { setSavingRate(false); }
+                  }}>{savingRate ? "保存中…" : "保存并核定比例"}</button></div>}
+                </>}
+                <p>销售数据须符合确认书推广范围并完成订单唯一归属核定，不能使用整个客户的BI总额。</p>
+              </>}
+              {confirmationIssue && <p role="status" className="text-amber-800">{confirmationIssue}</p>}
+            </section>
+          )}
+          {!isFixedStream && !rec.projectConfirmationId && (
             <div>
               <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
                 抽佣计算过程

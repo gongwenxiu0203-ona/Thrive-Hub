@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { getReconciliationAccess } from "@/lib/reconciliationAccess";
 import { FeaturePermissionError } from "@/lib/permissionGuard";
-import { recalcReconciliation } from "@/lib/reconciliationCalc";
+import { recalcReconciliation, assertConfirmationReadyForSubmission } from "@/lib/reconciliationCalc";
 import { errorResponse } from "@/lib/appError";
 import { resolveSubmissionAmounts } from "@/lib/reconciliationSubmissionAmounts";
 
@@ -131,6 +131,7 @@ export async function POST(request: Request) {
       );
 
     const decisionMap = new Map<string, Decision>();
+    for (const record of records) assertConfirmationReadyForSubmission(record);
     const calcMap = new Map<
       string,
       Awaited<ReturnType<typeof recalcReconciliation>>

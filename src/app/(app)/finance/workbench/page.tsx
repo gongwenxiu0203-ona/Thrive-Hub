@@ -663,6 +663,7 @@ export default async function FinanceWorkbenchPage() {
                     label: account.name,
                     subtitle: account.legalEntity,
                     category: accountCategory(account.accountType),
+                    legalEntityKey: account.legalEntityKey ?? undefined,
                     accountName: account.accountName,
                     accountNumber: account.accountNumber,
                     bankName: account.bankName ?? undefined,

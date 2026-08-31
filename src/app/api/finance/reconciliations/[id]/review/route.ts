@@ -6,7 +6,7 @@ import {
   scopedReconciliationWhere,
 } from "@/lib/reconciliationAccess";
 import { FeaturePermissionError } from "@/lib/permissionGuard";
-import { recalcReconciliation } from "@/lib/reconciliationCalc";
+import { recalcReconciliation, assertConfirmationReadyForSubmission } from "@/lib/reconciliationCalc";
 import { errorResponse } from "@/lib/appError";
 
 const SUPPORTED_RECONCILIATION_CURRENCIES = new Set([
@@ -84,6 +84,7 @@ export async function POST(
         { status: 400 },
       );
     }
+    assertConfirmationReadyForSubmission(rec);
     if (
       action === "DISPUTED" &&
       rec.reconcileType !== "FEE_ONLY" &&

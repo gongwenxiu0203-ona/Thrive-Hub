@@ -118,6 +118,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "部分合同不存在、不属于该客户，或客户当前不是合作中状态" }, { status: 404 });
     }
     const incompleteContract = contracts.find((contract) => contract.status !== "COMPLETED");
+    if (contracts.some((contract) => contract.contractMode === "FRAMEWORK")) {
+      return NextResponse.json({ error: "主格式合同请进入项目确认书并生效，系统将按每份确认书独立生成对账；不能按主合同重复创建" }, { status: 400 });
+    }
     if (incompleteContract) {
       return NextResponse.json({ error: `合同 ${incompleteContract.contractNo} 尚未签署完成，不能创建对账` }, { status: 400 });
     }

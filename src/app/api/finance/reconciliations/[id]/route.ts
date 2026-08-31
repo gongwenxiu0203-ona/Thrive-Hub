@@ -6,6 +6,7 @@ import { getReconciliationAccess, scopedReconciliationWhere } from "@/lib/reconc
 import { FeaturePermissionError } from "@/lib/permissionGuard";
 import { recalcReconciliation } from "@/lib/reconciliationCalc";
 import { parseDateOnlyUtc } from "@/lib/dateRange";
+import { readReconciliationConfirmation } from "@/lib/reconciliationConfirmation";
 
 // GET /api/finance/reconciliations/[id]
 export async function GET(
@@ -70,6 +71,7 @@ export async function PATCH(
     // 货币字段任何状态可改
     const currencyFields = ["fixedFeeCurrency", "commissionCurrency"];
     const draftOnlyFields = [
+      "confirmedCommissionRate",
       "periodStart", "periodEnd",
       "betType", "betOrderCount", "betSalesAmount",
       "actualOrders", "actualSalesAmount",
@@ -77,6 +79,15 @@ export async function PATCH(
     ];
 
     const data: Record<string, unknown> = { updatedAt: new Date() };
+    if ("confirmedCommissionRate" in body) {
+      const draft = readReconciliationConfirmation(existing);
+      if (!existing.projectConfirmationId || existing.reconcileType === "FEE_ONLY" || draft?.commission?.mode !== "PACKAGE") {
+        return NextResponse.json({ error: "只有总包佣金对账可以核定实际比例" }, { status: 400 });
+      }
+      if (typeof body.confirmedCommissionRate !== "number" || !Number.isFinite(body.confirmedCommissionRate) || body.confirmedCommissionRate < 0 || body.confirmedCommissionRate > 1) {
+        return NextResponse.json({ error: "实际抽佣比例必须为0%至100%" }, { status: 400 });
+      }
+    }
 
     // 货币字段
     for (const key of currencyFields) {
@@ -121,6 +132,7 @@ export async function PATCH(
       const periodChanged = parsedPeriodStart.getTime() !== existing.periodStart.getTime()
         || parsedPeriodEnd.getTime() !== existing.periodEnd.getTime();
       if (periodChanged) {
+        if (existing.projectConfirmationId) return NextResponse.json({ error: "确认书对账周期由生效版本生成，请通过确认书调整流程处理" }, { status: 400 });
         const reason = typeof body.adjustmentReason === "string" ? body.adjustmentReason.trim() : "";
         if (!reason) {
           return NextResponse.json({ error: "调整对账周期时必须填写调整原因" }, { status: 400 });
@@ -138,6 +150,7 @@ export async function PATCH(
           where: {
             id: { not: id },
             contractId: existing.contractId,
+            projectConfirmationId: existing.projectConfirmationId,
             deletedAt: null,
             reconcileType: { in: conflictingTypes },
             periodStart: { lte: parsedPeriodEnd },
@@ -175,6 +188,9 @@ export async function PATCH(
 
     const periodChanged = data.periodAdjusted === true;
     const result = await prisma.$transaction(async (tx) => {
+      if ("confirmedCommissionRate" in data) {
+        await tx.financeAuditLog.create({ data: { entityType: "CUSTOMER_RECONCILIATION", entityId: id, action: "CONFIRM_PACKAGE_RATE", actorId: session.userId, note: "核定本期总包佣金实际抽佣比例", metadata: JSON.stringify({ before: existing.confirmedCommissionRate, after: data.confirmedCommissionRate }) } });
+      }
       if (periodChanged) {
         await tx.reconciliationPeriodAudit.create({
           data: {

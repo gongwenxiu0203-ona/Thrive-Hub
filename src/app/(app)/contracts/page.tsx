@@ -1,5 +1,5 @@
 ﻿import Link from "next/link";
-import { FilePlus, FolderOpen } from "lucide-react";
+import { FilePlus } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -16,6 +16,7 @@ import {
 import { formatDate } from "@/lib/utils";
 import { ScopeToggle } from "@/components/ScopeToggle";
 import { isStaff } from "@/lib/dataScope";
+import { frameworkMissingFields } from "@/lib/frameworkCompleteness";
 
 export const metadata = { title: "合同管理 · Thraive联盟营销系统" };
 
@@ -117,7 +118,7 @@ export default async function ContractsPage({
     prisma.contract.findMany({
       where: { ...contractScope(sess, view), deletedAt: null } as any,
       orderBy: { createdAt: "desc" },
-      include: { customer: true, owner: true, reviewer: true, createdBy: true },
+      include: { customer: true, owner: true, reviewer: true, createdBy: true, _count: { select: { receivingAccounts: true, projectConfirmations: true } } },
     }),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prisma.customer.findMany({
@@ -171,20 +172,7 @@ export default async function ContractsPage({
         actions={
           <div className="flex items-center gap-2">
             {isStaff(session.role) && <ScopeToggle />}
-            {isStaff(session.role) && (
-              <>
-                <Link
-                  href="/contracts/templates"
-                  className="btn-secondary flex items-center gap-1.5 text-sm"
-                >
-                  <FolderOpen className="h-4 w-4" />
-                  合同模板库
-                </Link>
-                <Link href="/contracts/new" className="btn-primary flex items-center gap-1.5 text-sm">
-                  <FilePlus className="h-4 w-4" /> 新建合同
-                </Link>
-              </>
-            )}
+            {isStaff(session.role) && <Link href="/contracts/new" className="btn-primary flex items-center gap-1.5 text-sm"><FilePlus className="h-4 w-4" /> 新建合同</Link>}
           </div>
         }
       />
@@ -221,7 +209,8 @@ export default async function ContractsPage({
             </thead>
             <tbody className="divide-y divide-slate-50">
               {contracts.map((ct) => {
-                const missingFields = missingContractFields(ct as unknown as Record<string, unknown>);
+                const framework = ct.contractMode === "FRAMEWORK";
+                const missingFields = framework ? frameworkMissingFields(ct, ct._count.receivingAccounts) : missingContractFields(ct as unknown as Record<string, unknown>);
                 return (
                 <tr key={ct.id} className="group hover:bg-slate-50/60 transition-colors">
                   <td className="px-4 py-3">
@@ -231,6 +220,7 @@ export default async function ContractsPage({
                     >
                       {ct.contractNo}
                     </Link>
+                    {framework && <p className="mt-1 text-xs text-slate-500">主格式合同 · {ct._count.projectConfirmations} 份确认书</p>}
                   </td>
                   <td className="px-4 py-3">
                     {ct.customer ? (
@@ -258,11 +248,11 @@ export default async function ContractsPage({
                   </td>
                   <td className="px-4 py-3 text-sm text-slate-700">{ct.owner?.name ?? <span className="text-slate-300">—</span>}</td>
                   <td className="px-4 py-3 text-sm text-slate-700">{ct.reviewer?.name ?? <span className="text-slate-300">—</span>}</td>
-                  <td className="px-4 py-3 text-xs font-mono text-slate-600">{ct.feeAmount ?? <span className="text-slate-300">—</span>}</td>
-                  <td className="px-4 py-3 text-xs font-mono text-slate-600">{ct.commissionRate ?? <span className="text-slate-300">—</span>}</td>
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3 text-xs text-slate-600">{framework ? "按确认书" : ct.feeAmount ?? <span className="text-slate-300">—</span>}</td>
+                  <td className="px-4 py-3 text-xs text-slate-600">{framework ? "按确认书" : ct.commissionRate ?? <span className="text-slate-300">—</span>}</td>
+                  <td className="px-4 py-3" title={missingFields.join("；")}>
                     <Badge className={CONTRACT_STATUS_COLORS[ct.status]}>
-                      {labelOf(CONTRACT_STATUS_LABELS, ct.status)}
+                      {framework && ct.status === "DRAFT" ? "草稿·待上传盖章版" : labelOf(CONTRACT_STATUS_LABELS, ct.status)}
                     </Badge>
                   </td>
                   <td className="px-4 py-3">
@@ -272,7 +262,7 @@ export default async function ContractsPage({
                       </Badge>
                     ) : (
                       <Badge className="border border-emerald-200 bg-emerald-50 text-emerald-700">
-                        完整
+                        {framework ? ct.status === "DRAFT" ? "资料完整·待签署" : "主合同完整" : "完整"}
                       </Badge>
                     )}
                   </td>

@@ -27,6 +27,7 @@ import { parseDateOnlyUtc } from "@/lib/dateRange";
 
 const CONTRACT_EDIT_AUDIT_SELECT = {
   id: true,
+  contractMode: true,
   contractNo: true,
   status: true,
   customerId: true,
@@ -252,6 +253,7 @@ export async function updateContract(
     select: CONTRACT_EDIT_AUDIT_SELECT,
   });
   if (!existing) return { ok: false, error: "合同不存在" };
+  if (existing.contractMode === "FRAMEWORK") return { ok: false, error: "请使用主格式合同编辑入口；项目收费字段在确认书中维护" };
   if (existing.status === "COMPLETED" && session.role !== "ADMIN") {
     return { ok: false, error: "已签署完成的合同仅管理员可以修改，请联系管理员" };
   }
@@ -475,6 +477,7 @@ export async function submitForReview(id: string) {
     include: { fieldReviews: true },
   });
   if (!contract) throw new Error("合同不存在");
+  if (contract.contractMode === "FRAMEWORK") throw new Error("新格式主合同不走旧审核流程，请在主合同页上传盖章版完成签署");
   if (contract.status !== "IN_PROGRESS") {
     throw new Error("仅「合同推进中」状态可提交审核");
   }
@@ -588,6 +591,7 @@ export async function finalizeReview(contractId: string) {
     where: { id: contractId },
   });
   if (!contract) throw new Error("合同不存在");
+  if (contract.contractMode === "FRAMEWORK") throw new Error("新格式主合同不走旧审核流程，请在主合同页上传盖章版完成签署");
   if (contract.status !== "REVIEWING") {
     throw new Error("仅「合同审核中」状态可完成审核");
   }
@@ -657,6 +661,7 @@ export async function markCompleted(id: string) {
   const session = await requireContractRow(id, "MANAGE");
   const contract = await prisma.contract.findUnique({ where: { id } });
   if (!contract) throw new Error("合同不存在");
+  if (contract.contractMode === "FRAMEWORK") throw new Error("新格式主合同必须上传双方盖章原件后自动完成签署，不能手动改状态");
   if (contract.status !== "SIGNING") {
     throw new Error("仅「合同签署中」状态可标记签署完成");
   }
@@ -968,7 +973,7 @@ export async function createContractV4(
   if (requiresTemplate && !payload.templateId) return { ok: false, error: "请选择适用的合同模板" };
   const selectedTemplate = payload.templateId
     ? await prisma.contractTemplate.findFirst({
-      where: { id: payload.templateId, deletedAt: null },
+      where: { id: payload.templateId, deletedAt: null, documentType: "BRAND_LEGACY" },
       select: { templateKey: true },
     })
     : null;
@@ -1078,6 +1083,7 @@ export async function updateContractV4(
     select: CONTRACT_EDIT_AUDIT_SELECT,
   });
   if (!existing) return { ok: false, error: "合同不存在" };
+  if (existing.contractMode === "FRAMEWORK") return { ok: false, error: "请使用主格式合同编辑入口；项目收费字段在确认书中维护" };
   if (existing.status === "COMPLETED" && session.role !== "ADMIN") {
     return { ok: false, error: "已签署完成的合同仅管理员可以修改，请联系管理员" };
   }
@@ -1090,7 +1096,7 @@ export async function updateContractV4(
   let templateKey = payload.commissionType;
   if (payload.templateId) {
     const selectedTemplate = await prisma.contractTemplate.findFirst({
-      where: { id: payload.templateId, deletedAt: null },
+      where: { id: payload.templateId, deletedAt: null, documentType: "BRAND_LEGACY" },
       select: { templateKey: true },
     });
     if (!selectedTemplate) return { ok: false, error: "合同模板不存在或已删除" };
