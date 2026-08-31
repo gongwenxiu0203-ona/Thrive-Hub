@@ -15,6 +15,7 @@ import {
 import { PermissionsPanel } from "./PermissionsPanel";
 import { IntakeReviewPanel } from "./IntakeReviewPanel";
 import { EmailSettingsPanel } from "./EmailSettingsPanel";
+import { SystemErrorsPanel } from "./SystemErrorsPanel";
 import {
   AdminOverviewPanel,
   ApiAccessPanel,
@@ -108,7 +109,7 @@ const ROLE_COLORS: Record<string, string> = {
   CHANNEL: "bg-teal-100 text-teal-700",
 };
 
-type AdminTab = "overview" | "intake" | "pending" | "all" | "permissions" | "quality" | "audit" | "api" | "email";
+type AdminTab = "overview" | "intake" | "pending" | "all" | "permissions" | "quality" | "audit" | "api" | "email" | "errors";
 
 export function AdminClient({
   initialUsers,
@@ -118,9 +119,11 @@ export function AdminClient({
   auditLogs,
   apiLogs,
   permissions,
+  isAdmin,
 }: {
   initialUsers: UserRecord[];
-  initialTab: "intake" | "overview";
+  initialTab: "intake" | "overview" | "errors";
+  isAdmin: boolean;
   overview: AdminOverview;
   qualityIssues: DataQualityIssue[];
   auditLogs: AuditLogRow[];
@@ -131,6 +134,7 @@ export function AdminClient({
     PERM_LEVELS.indexOf(permissions[feature] ?? "NONE") >=
     PERM_LEVELS.indexOf(required);
   const readableTabs: AdminTab[] = [
+    ...(isAdmin && hasAtLeast("admin.system_errors", "READ") ? ["errors" as const] : []),
     ...(hasAtLeast("intake.review", "READ") ? ["intake" as const] : []),
     ...(hasAtLeast("admin.users", "READ") ? ["overview" as const, "all" as const] : []),
     ...(hasAtLeast("admin.registration_review", "READ") ? ["pending" as const] : []),
@@ -545,6 +549,7 @@ export function AdminClient({
 
       {/* Tabs */}
       <div className="tab-strip overflow-x-auto">
+        {isAdmin && hasAtLeast("admin.system_errors", "READ") && <button type="button" onClick={() => setTab("errors")} className={tab === "errors" ? "tab-trigger tab-trigger-active" : "tab-trigger"}>系统错误</button>}
         {hasAtLeast("intake.review", "READ") && (
           <button type="button" onClick={() => setTab("intake")} className={tab === "intake" ? "tab-trigger tab-trigger-active" : "tab-trigger"}>信息收集审核</button>
         )}
@@ -589,6 +594,7 @@ export function AdminClient({
       {tab === "quality" && hasAtLeast("admin.data_quality", "READ") && <DataQualityPanel issues={qualityIssues} />}
       {tab === "audit" && hasAtLeast("admin.audit", "READ") && <AuditLogPanel logs={auditLogs} />}
       {tab === "api" && hasAtLeast("admin.api_access", "READ") && <ApiAccessPanel logs={apiLogs} />}
+      {tab === "errors" && isAdmin && hasAtLeast("admin.system_errors", "READ") && <SystemErrorsPanel canEdit={hasAtLeast("admin.system_errors", "EDIT")} />}
       {tab === "email" && hasAtLeast("admin.api_access", "READ") && <EmailSettingsPanel canManage={hasAtLeast("admin.api_access", "MANAGE")} />}
 
       {error && !showCreate && (

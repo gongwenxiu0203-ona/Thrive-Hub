@@ -96,6 +96,7 @@ export function routeRequirement(
   if (startsWithRoute(pathname, "/reminders")) return { features: ["reminders.records"] };
   if (startsWithRoute(pathname, "/recycle-bin")) return { features: RECYCLE_FEATURES, required: "MANAGE", mode: "all" };
   if (startsWithRoute(pathname, "/admin")) {
+    if (searchParams?.get("tab") === "errors") return { features: ["admin.system_errors"] };
     return searchParams?.get("tab") === "intake"
       ? { features: ["intake.review"] }
       : { features: [...ADMIN_FEATURES, "intake.review"] };

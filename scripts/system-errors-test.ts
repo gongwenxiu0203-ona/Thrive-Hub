@@ -1,0 +1,26 @@
+import assert from "node:assert/strict";
+import { classifySystemError, sanitizeTechnicalDetails } from "../src/lib/systemErrorCatalog";
+import { resolveEffectivePermission } from "../src/lib/permissionResolver";
+import { canAccessRoute } from "../src/lib/routePermissions";
+
+const sensitive = "password=DO_NOT_STORE token=secret-bank-62220000";
+const input = { name: "PrismaClientValidationError", message: sensitive, stack: sensitive, meta: { account: sensitive }, cause: sensitive };
+const safe = sanitizeTechnicalDetails(input);
+assert.equal(safe.includes("DO_NOT_STORE"), false);
+assert.equal(safe.includes("62220000"), false);
+assert.equal(JSON.parse(safe).errorType, "PrismaClientValidationError");
+assert.equal(classifySystemError(input), "DATABASE_VALIDATION");
+assert.equal(classifySystemError({ name: "PrismaClientKnownRequestError", code: "P2002" }), "DATABASE_CONFLICT");
+assert.equal(classifySystemError({ name: "PrismaClientKnownRequestError", code: "P2021" }), "DATABASE_UNAVAILABLE");
+assert.equal(classifySystemError({ name: "AppError", code: "RECONCILIATION_INVALID_AMOUNT" }), "RECONCILIATION_INVALID_AMOUNT");
+assert.equal(classifySystemError({ name: "FeaturePermissionError", code: "FEATURE_PERMISSION_DENIED", status: 403 }), "PERMISSION_DENIED");
+assert.equal(sanitizeTechnicalDetails({ name: sensitive, code: sensitive }).includes(sensitive), false);
+const throwing = new Proxy({}, { get() { throw new Error(sensitive); } });
+assert.doesNotThrow(() => sanitizeTechnicalDetails(throwing));
+assert.doesNotThrow(() => classifySystemError(throwing));
+assert.equal(resolveEffectivePermission({ role: "ADMIN", feature: "admin.system_errors" }), "MANAGE");
+for (const role of ["USER", "BRAND", "CHANNEL"]) assert.equal(resolveEffectivePermission({ role, feature: "admin.system_errors" }), "NONE");
+assert.equal(resolveEffectivePermission({ role: "ADMIN", feature: "admin.system_errors", userPermissions: [{ feature: "admin.system_errors", level: "READ" }] }), "READ");
+assert.equal(canAccessRoute("/admin", new URLSearchParams("tab=errors"), { "admin.system_errors": "READ" }), true);
+assert.equal(canAccessRoute("/admin", new URLSearchParams("tab=errors"), { "admin.users": "MANAGE" }), false);
+console.log("System errors: sanitization, classification, permission leaf and route tests passed.");

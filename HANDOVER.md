@@ -1,12 +1,23 @@
 # Thrive Hub Handover
 
-## 2026-08-31 对账异议金额错误修复（本地未发布）
+## 2026-08-31 系统错误查询（本地开发，未提交/部署）
+
+- 用户确认新增独立 SystemErrorLog 表；迁移 20260831113000_system_error_log 仅 CREATE TABLE/INDEX，不关联删除业务数据。已备份本地数据库至 backups/dev_pre_deploy_20260831_101301.db 后 migrate deploy，生产未执行本迁移。
+- 管理员面板新增“系统错误”，URL /admin?tab=errors；新增 canonical leaf admin.system_errors，默认仅 ADMIN MANAGE，后端还实时验证数据库角色 ADMIN 和 APPROVED，读 READ、更新 EDIT。
+- GET /api/admin/system-errors 按追踪码/分类、模块、UTC+8 日期、状态筛选，每页20条；PATCH 更新处理状态/备注，已解决必填备注并记录解决人和时间。
+- appError 的 normalizeError/errorResponse/actionError 接入 Next after 异步记录，CLI 回退异步；失败不阻塞原业务且不递归。AppError 保留原code/message并增加traceCode，响应头 X-Error-Code 用追踪号；未知错误仍 ERR。只覆盖统一错误处理入口，不保证捕获所有直接返回的4xx或未捕获异常，历史ERR不会补录。
+- 不保存原始message/stack/meta/参数，只保留白名单类型、Prisma code和NaN/未知参数/缺少参数诊断标志。常见错误字典支持查询故障时显示。
+- Prisma validate/generate/migrate deploy、独立tsc、next build（临时独立项目库环境）、脱敏/分类/leaf及route测试、真实API权限/筛选/状态保存和Next after请求结束落库、桌面和390px浏览器布局均通过。本地仅保留3条明确说明为测试的日志，均已解决，未改业务记录；端口3001开发服务已恢复。
+- 本次新增源文件：SystemErrorsPanel.tsx、system-errors API、systemErrorCatalog.ts、systemErrorLog.ts、两份system-errors测试脚本及迁移；未commit/push/deploy。
+
+## 2026-08-31 对账异议金额错误修复（已部署 d66479c）
 
 - 生产追踪号 `ERR-MTCIXJVH-908871` 对应 batch-submit 的 Prisma 校验失败。固费异议缺少 correctedSalesAmount，被 Number(undefined) 转为 NaN 并写入 actualSalesAmount/finalSalesAmount；Prisma 误导性提示 Unknown argument submittedById，并非这次请求权限失败。
 - 新增 resolveSubmissionAmounts 按固费/销售佣金分别取纠正金额，固费保留原销售额；入库前拒绝非有限值/负数，返回稳定业务错误码 RECONCILIATION_INVALID_AMOUNT。最终确认审计区分固费与销售额并记录纠正币种。
 - 内部 ADMIN/USER 单条 DISPUTED 操作要求 EDIT；单条 APPROVED/最终确认仍要求 MANAGE。前端确认按钮同步 canManage，移除最终确认按钮的提交人限制；外部角色权限和 scope 不变。批量 SKIP_CUSTOMER 保留原有 EDIT 权限，不在本次收紧。
 - 新增 scripts/reconciliation-submission-amounts-test.ts；--prisma 为本地零匹配 ID 校验，已复现 NaN 导致 submittedById 错误并验证有限值参数通过，修改业务行数为 0。
-- 无 Schema/迁移、无生产写入，未 commit/push/deploy。管理员错误查询计划使用独立脱敏日志表；必须先向用户列明新增表和字段并获得 Schema 确认再实施。
+- 无 Schema/迁移。d66479c 已 commit/push 并经用户确认部署；本地完整 build、独立 tsc 和金额回归通过。生产先停止 PM2 后构建，备份 /root/www/backups/dev_pre_deploy_20260831_100210.db，两库均无待迁移；构建成功重启后 PM2 online、本机及公网 login HTTP 200、未登录 finance HTTP 307。未执行真实业务异议保存测试。生产 .env 与未跟踪文件保留。
+- 管理员错误查询入口随后经用户 Schema 确认已本地实施，见本文顶部；尚未提交或部署。
 
 ## 2026-08-27 合同新建入口收紧为三类（本地未提交）
 

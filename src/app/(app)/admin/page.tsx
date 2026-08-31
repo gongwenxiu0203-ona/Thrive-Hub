@@ -16,7 +16,8 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
   const canSeeAudit = canRead("admin.audit");
   const canSeeApi = canRead("admin.api_access");
   const canSeeIntake = canRead("intake.review");
-  if (!canSeeUsers && !canSeeQuality && !canSeeAudit && !canSeeApi && !canSeeIntake) {
+  const canSeeErrors = session.role === "ADMIN" && canRead("admin.system_errors");
+  if (!canSeeUsers && !canSeeQuality && !canSeeAudit && !canSeeApi && !canSeeIntake && !canSeeErrors) {
     redirect("/dashboard");
   }
   const sp = await searchParams;
@@ -72,7 +73,8 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
 
   return <AdminClient
     initialUsers={usersWithExtra}
-    initialTab={sp.tab === "intake" && canSeeIntake ? "intake" : "overview"}
+    initialTab={sp.tab === "errors" && canSeeErrors ? "errors" : sp.tab === "intake" && canSeeIntake ? "intake" : "overview"}
+    isAdmin={session.role === "ADMIN"}
     permissions={permissions}
     overview={{ totalUsers: users.length, pendingUsers: users.filter((user) => user.status === "PENDING").length, auditCount: auditLogs.length, apiFailureCount }}
     qualityIssues={qualityIssues}

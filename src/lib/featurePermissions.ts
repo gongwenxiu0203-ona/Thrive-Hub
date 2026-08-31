@@ -92,6 +92,7 @@ export const FEATURES: FeatureDefinition[] = [
   { key: "admin.data_quality", label: "数据质量", group: "系统管理", module: "管理员面板", legacyKey: "admin" },
   { key: "admin.audit", label: "操作审计", group: "系统管理", module: "管理员面板", legacyKey: "admin" },
   { key: "admin.api_access", label: "API 访问记录", group: "系统管理", module: "管理员面板", legacyKey: "admin" },
+  { key: "admin.system_errors", label: "系统错误查询", group: "系统管理", module: "管理员面板", legacyKey: "admin" },
 ];
 
 const allFeatures = (level: PermLevel) =>

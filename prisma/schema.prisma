@@ -12,6 +12,29 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Sanitized diagnostic events; deliberately independent of business record lifecycle.
+model SystemErrorLog {
+  id               String   @id @default(cuid())
+  traceCode        String   @unique
+  category         String
+  context          String
+  module           String
+  statusCode       Int
+  message          String
+  technicalDetails String
+  status           String   @default("OPEN") // OPEN | IN_PROGRESS | RESOLVED
+  resolutionNote   String?
+  resolvedById     String?
+  resolvedAt       DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([createdAt])
+  @@index([module, createdAt])
+  @@index([status, createdAt])
+  @@index([category, createdAt])
+}
+
 model User {
   id            String   @id @default(cuid())
   name          String
