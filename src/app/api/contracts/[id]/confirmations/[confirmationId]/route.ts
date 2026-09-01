@@ -4,8 +4,8 @@ import path from "node:path";
 import { prisma } from "@/lib/prisma";
 import { AppError } from "@/lib/appError";
 import { saveUploadedFile } from "@/lib/upload";
-import { activateContractConfirmation } from "@/lib/contractConfirmationPlan";
-import { authorizeConfirmation, confirmationResponseError, decodeConfirmation, expectedVersion, saveConfirmationDraft } from "@/lib/contractConfirmationStore";
+import { activateConfirmationReplacement, activateContractConfirmation, finalizeExistingUploadedConfirmation } from "@/lib/contractConfirmationPlan";
+import { authorizeConfirmation, confirmationResponseError, decodeConfirmation, expectedVersion, saveConfirmationDraft, saveConfirmationReplacementDraft } from "@/lib/contractConfirmationStore";
 
 type Context = { params: Promise<{ id: string; confirmationId: string }> };
 const extensions = new Set([".pdf", ".docx", ".doc"]);
@@ -31,6 +31,7 @@ export async function PATCH(request: NextRequest, context: Context) {
   try {
     const { id, confirmationId } = await context.params;
     const renumber = request.nextUrl.searchParams.get("action") === "renumber";
+    const replacement = request.nextUrl.searchParams.get("action") === "replace";
     const { session } = await authorizeConfirmation(id, renumber ? "MANAGE" : "EDIT");
     const body = await request.json();
     if (!body || typeof body !== "object" || Array.isArray(body)) throw new AppError("请求格式错误", 400);
@@ -54,7 +55,19 @@ export async function PATCH(request: NextRequest, context: Context) {
       });
       return NextResponse.json({ confirmation: decodeConfirmation(confirmation) });
     }
-    return NextResponse.json({ confirmation: await saveConfirmationDraft(id, session.userId, body.draft, confirmationId, expectedVersion(body.expectedVersion), typeof body.reason === "string" ? body.reason : "") });
+    if (body.draft?.workflowMode === "FORM") {
+      if (!body.draft.templateId || !await prisma.contractTemplate.findFirst({ where: { id: body.draft.templateId, documentType: "PROJECT_CONFIRMATION", deletedAt: null }, select: { id: true } })) throw new AppError("在线新建项目确认书必须选择有效的确认书模板", 400);
+    }
+    if (replacement) {
+      const confirmation = await saveConfirmationReplacementDraft(id, confirmationId, session.userId, body.draft, Number(body.pendingVersion), typeof body.reason === "string" ? body.reason : "");
+      return NextResponse.json({ confirmation, activated: false, replacement: true });
+    }
+    const saved = await saveConfirmationDraft(id, session.userId, body.draft, confirmationId, expectedVersion(body.expectedVersion), typeof body.reason === "string" ? body.reason : "");
+    const confirmationCount = await prisma.contractProjectConfirmation.count({ where: { contractId: id } });
+    const result = confirmationCount === 1
+      ? await finalizeExistingUploadedConfirmation(id, saved.id, session.userId, saved.version)
+      : { confirmation: saved, activated: false };
+    return NextResponse.json({ confirmation: decodeConfirmation(result.confirmation), activated: result.activated });
   } catch (error) { return confirmationResponseError(error); }
 }
 export async function POST(request: NextRequest, context: Context) {
@@ -74,15 +87,19 @@ export async function PUT(request: NextRequest, context: Context) {
   let persisted = false;
   try {
     const { id, confirmationId } = await context.params;
-    const { session } = await authorizeConfirmation(id, "EDIT");
+    const { session, contract } = await authorizeConfirmation(id, "EDIT");
+    const replacement = request.nextUrl.searchParams.get("action") === "replace";
     if (Number(request.headers.get("content-length")) > 21 * 1024 * 1024) throw new AppError("文件超过20MB限制", 400);
     const form = await request.formData();
     const file = form.get("file");
     if (!(file instanceof File) || !file.size || file.size > 20 * 1024 * 1024 || !extensions.has(path.extname(file.name).toLowerCase())) throw new AppError("请上传20MB以内的PDF或Word签署文件", 400);
-    const version = expectedVersion(Number(form.get("expectedVersion")));
+    const version = replacement ? Number(form.get("expectedVersion")) : expectedVersion(Number(form.get("expectedVersion")));
+    if (replacement && (!Number.isInteger(version) || version < 1)) throw new AppError("缺少有效替换草稿版本号，请刷新后重试", 409);
     const reason = String(form.get("reason") ?? "").trim();
     if (!reason || reason.length > 2000) throw new AppError("请填写上传/替换文件原因（最多2000字）", 400);
-    const current = await prisma.contractProjectConfirmation.findFirst({ where: { id: confirmationId, contractId: id, status: "DRAFT", version } });
+    const current = await prisma.contractProjectConfirmation.findFirst({ where: replacement
+      ? { id: confirmationId, contractId: id, status: "EFFECTIVE", pendingVersion: version, pendingDetails: { not: null } }
+      : { id: confirmationId, contractId: id, status: "DRAFT", version } });
     if (!current) throw new AppError("确认书已生效或版本已变更，请刷新后重试", 409);
     // Reject disguised executable files before storing the server-generated filename.
     const magic = new Uint8Array(await file.slice(0, 8).arrayBuffer());
@@ -92,13 +109,31 @@ export async function PUT(request: NextRequest, context: Context) {
     uploaded = (await saveUploadedFile(file)).fileUrl;
     const fileUrl = uploaded;
     const confirmation = await prisma.$transaction(async tx => {
+      if (replacement) {
+        const updated = await tx.contractProjectConfirmation.updateMany({ where: { id: confirmationId, contractId: id, status: "EFFECTIVE", pendingVersion: version }, data: { pendingSignedFileUrl: fileUrl, pendingVersion: { increment: 1 } } });
+        if (updated.count !== 1) throw new AppError("替换草稿版本已变更，请刷新后重试", 409);
+        await tx.financeAuditLog.create({ data: { entityType: "CONTRACT_CONFIRMATION", entityId: confirmationId, action: "UPLOAD_REPLACEMENT_ORIGINAL", actorId: session.userId, note: reason, metadata: JSON.stringify({ contractId: id, pendingVersion: version + 1, fileUrl }) } });
+        return tx.contractProjectConfirmation.findUniqueOrThrow({ where: { id: confirmationId } });
+      }
       const updated = await tx.contractProjectConfirmation.updateMany({ where: { id: confirmationId, contractId: id, status: "DRAFT", version }, data: { signedFileUrl: fileUrl, version: { increment: 1 } } });
       if (updated.count !== 1) throw new AppError("确认书版本已变更，请刷新后重试", 409);
       await tx.contractConfirmationVersion.create({ data: { confirmationId, version: version + 1, actorId: session.userId, reason, snapshot: JSON.stringify({ schemaVersion: 1, data: decodeConfirmation(current).draft, signedFileUrl: fileUrl }) } });
       return tx.contractProjectConfirmation.findUniqueOrThrow({ where: { id: confirmationId } });
     });
     persisted = true;
-    return NextResponse.json({ confirmation: decodeConfirmation(confirmation) });
+    if (replacement) {
+      await activateConfirmationReplacement(id, confirmationId, session.userId, confirmation.pendingVersion);
+      const effective = await prisma.contractProjectConfirmation.findUniqueOrThrow({ where: { id: confirmationId } });
+      return NextResponse.json({ confirmation: decodeConfirmation(effective), activated: true, replacement: true });
+    }
+    // 已有合同的上传文件本身就是双方签署原件。字段完整时直接生效并生成独立对账；
+    // 从模板新建的合同仍保留人工“确认生效”步骤。
+    if (contract.uploadType === "EXISTING" || decodeConfirmation(confirmation).draft.workflowMode === "SIGNED_UPLOAD" || decodeConfirmation(confirmation).draft.workflowMode === "FORM") {
+      await activateContractConfirmation(confirmationId, session.userId, confirmation.version);
+      const effective = await prisma.contractProjectConfirmation.findUniqueOrThrow({ where: { id: confirmationId } });
+      return NextResponse.json({ confirmation: decodeConfirmation(effective), activated: true });
+    }
+    return NextResponse.json({ confirmation: decodeConfirmation(confirmation), activated: false });
   } catch (error) {
     // Only remove this request's new orphan; prior signed files and audit versions remain.
     if (uploaded && !persisted) await unlink(storedPath(uploaded)).catch(() => undefined);

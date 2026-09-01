@@ -5,7 +5,7 @@ import {
 } from "../src/lib/contractConfirmationDraft";
 
 const draft: ContractConfirmationDraft = {
-  contractId: "contract-test", title: "项目确认书", brand: "测试品牌", storeUrl: "",
+  contractId: "contract-test", title: "项目确认书", workflowMode: "FORM", templateId: "template-test", brand: "测试品牌", storeUrl: "",
   startDate: "2026-08-01", endDate: "2026-12-31", minimumMonths: 0,
   partyAContact: { name: "甲", email: "a@example.com", phone: "" },
   partyBContact: { name: "乙", email: "b@example.com", phone: "" },

@@ -17,6 +17,8 @@ import { formatDate } from "@/lib/utils";
 import { ScopeToggle } from "@/components/ScopeToggle";
 import { isStaff } from "@/lib/dataScope";
 import { frameworkMissingFields } from "@/lib/frameworkCompleteness";
+import { decodeConfirmation } from "@/lib/contractConfirmationStore";
+import { parseEffectiveConfirmation } from "@/lib/contractConfirmationDraft";
 
 export const metadata = { title: "合同管理 · Thraive联盟营销系统" };
 
@@ -118,7 +120,11 @@ export default async function ContractsPage({
     prisma.contract.findMany({
       where: { ...contractScope(sess, view), deletedAt: null } as any,
       orderBy: { createdAt: "desc" },
-      include: { customer: true, owner: true, reviewer: true, createdBy: true, _count: { select: { receivingAccounts: true, projectConfirmations: true } } },
+      include: {
+        customer: true, owner: true, reviewer: true, createdBy: true,
+        projectConfirmations: { orderBy: [{ startDate: "desc" }, { createdAt: "desc" }] },
+        _count: { select: { receivingAccounts: true, projectConfirmations: true } },
+      },
     }),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prisma.customer.findMany({
@@ -210,7 +216,26 @@ export default async function ContractsPage({
             <tbody className="divide-y divide-slate-50">
               {contracts.map((ct) => {
                 const framework = ct.contractMode === "FRAMEWORK";
-                const missingFields = framework ? frameworkMissingFields(ct, ct._count.receivingAccounts) : missingContractFields(ct as unknown as Record<string, unknown>);
+                const decodedConfirmations = framework
+                  ? ct.projectConfirmations.flatMap((row) => {
+                      try { return [{ row, draft: decodeConfirmation(row).draft }]; }
+                      catch { return []; }
+                    })
+                  : [];
+                const latestConfirmation = decodedConfirmations
+                  .slice()
+                  .sort((a, b) => (b.draft.startDate ?? "").localeCompare(a.draft.startDate ?? "") || b.row.createdAt.getTime() - a.row.createdAt.getTime())[0];
+                const confirmationIssues = decodedConfirmations.flatMap(({ row, draft }) => {
+                  try { parseEffectiveConfirmation(draft); return row.signedFileUrl ? [] : [`${row.number}：缺少签署原件`]; }
+                  catch { return [`${row.number}：字段不完整`]; }
+                });
+                const missingFields = framework
+                  ? [...frameworkMissingFields(ct, ct._count.receivingAccounts), ...confirmationIssues]
+                  : missingContractFields(ct as unknown as Record<string, unknown>);
+                const displayStart = framework ? latestConfirmation?.draft.startDate : ct.startDate;
+                const displayEnd = framework ? latestConfirmation?.draft.endDate : ct.endDate;
+                const monthlyFee = latestConfirmation?.draft.monthlyFee;
+                const commission = latestConfirmation?.draft.commission;
                 return (
                 <tr key={ct.id} className="group hover:bg-slate-50/60 transition-colors">
                   <td className="px-4 py-3">
@@ -241,15 +266,15 @@ export default async function ContractsPage({
                     </span>
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-600">
-                    {ct.startDate ? formatDate(ct.startDate) : <span className="text-slate-300">—</span>}
+                    {displayStart ? formatDate(displayStart) : <span className="text-slate-300">—</span>}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-600">
-                    {ct.endDate ? formatDate(ct.endDate) : <span className="text-slate-300">—</span>}
+                    {displayEnd ? formatDate(displayEnd) : <span className="text-slate-300">—</span>}
                   </td>
                   <td className="px-4 py-3 text-sm text-slate-700">{ct.owner?.name ?? <span className="text-slate-300">—</span>}</td>
                   <td className="px-4 py-3 text-sm text-slate-700">{ct.reviewer?.name ?? <span className="text-slate-300">—</span>}</td>
-                  <td className="px-4 py-3 text-xs text-slate-600">{framework ? "按确认书" : ct.feeAmount ?? <span className="text-slate-300">—</span>}</td>
-                  <td className="px-4 py-3 text-xs text-slate-600">{framework ? "按确认书" : ct.commissionRate ?? <span className="text-slate-300">—</span>}</td>
+                  <td className="px-4 py-3 text-xs text-slate-600">{framework ? monthlyFee ? `${monthlyFee.currency} ${monthlyFee.amount}` : "0" : ct.feeAmount ?? <span className="text-slate-300">—</span>}</td>
+                  <td className="px-4 py-3 text-xs text-slate-600">{framework ? commission ? commission.mode === "PACKAGE" ? `总包 ${commission.currency} ${commission.packageValue ?? "—"}` : `${commission.serviceRatePercent ?? 0}%` : "0%" : ct.commissionRate ?? <span className="text-slate-300">—</span>}</td>
                   <td className="px-4 py-3" title={missingFields.join("；")}>
                     <Badge className={CONTRACT_STATUS_COLORS[ct.status]}>
                       {framework && ct.status === "DRAFT" ? "草稿·待上传盖章版" : labelOf(CONTRACT_STATUS_LABELS, ct.status)}
@@ -262,7 +287,7 @@ export default async function ContractsPage({
                       </Badge>
                     ) : (
                       <Badge className="border border-emerald-200 bg-emerald-50 text-emerald-700">
-                        {framework ? ct.status === "DRAFT" ? "资料完整·待签署" : "主合同完整" : "完整"}
+                        {framework ? decodedConfirmations.length ? "主合同及确认书完整" : ct.status === "DRAFT" ? "资料完整·待签署" : "主合同完整·待确认书" : "完整"}
                       </Badge>
                     )}
                   </td>

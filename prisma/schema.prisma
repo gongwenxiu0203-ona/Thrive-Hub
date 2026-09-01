@@ -414,6 +414,9 @@ model ContractProjectConfirmation {
   signedFileUrl String?
   version       Int       @default(1)
   details       String    @default("{}") // Validated JSON: contacts, products, fee rules and payment terms
+  pendingDetails       String? // Replacement draft; current EFFECTIVE details remain live until signed activation
+  pendingSignedFileUrl String? // Signed original for the pending replacement version
+  pendingVersion       Int     @default(0) // Optimistic concurrency token for replacement drafting
   createdById   String // Audit scalar retained even if the operator is removed
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt

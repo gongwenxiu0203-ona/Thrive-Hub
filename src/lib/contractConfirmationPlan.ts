@@ -22,10 +22,11 @@ async function assertSignedOriginalExists(fileUrl: string) {
 
 /** Called only from a permission-checked server entry. Injectable DB is for isolated tests. */
 export async function activateContractConfirmation(
-  confirmationId: string, actorId: string, expectedVersion: number, db: PrismaClient = prisma,
+  confirmationId: string, actorId: string, expectedVersion: number, db: PrismaClient | Prisma.TransactionClient = prisma,
+  options: { fromDateExclusive?: string; automationNamespace?: string } = {},
 ) {
   if (!Number.isInteger(expectedVersion) || expectedVersion < 1) throw new AppError("确认书版本无效，请刷新后重试", 409);
-  return db.$transaction(async (tx) => {
+  const execute = async (tx: Prisma.TransactionClient) => {
     const actor = await tx.user.findUnique({ where: { id: actorId }, select: { role: true, status: true } });
     if (!actor || !["ADMIN", "USER"].includes(actor.role) || actor.status !== "APPROVED") throw new AppError("仅有效内部员工可操作确认书", 403);
     const sow = await tx.contractProjectConfirmation.findUnique({
@@ -62,9 +63,10 @@ export async function activateContractConfirmation(
     const allowed = new Set(contractedAccounts.map((account) => account.financeProfileId));
     if (draft.receivingAccountIds.some((id) => !allowed.has(id))) throw new AppError("确认书收款账户必须选自主格式合同约定的账户", 400);
     const periods = buildConfirmationPeriods({
-      confirmationId: sow.id, startDate: draft.startDate!, endDate: draft.endDate!,
+      confirmationId: sow.id, automationNamespace: options.automationNamespace,
+      startDate: draft.startDate!, endDate: draft.endDate!,
       fixedFeeEnabled: draft.monthlyFee !== null, commissionEnabled: draft.commission !== null,
-    });
+    }).filter((period) => !options.fromDateExclusive || period.startDate > options.fromDateExclusive);
     const version = sow.version + 1;
     const now = new Date();
     const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
@@ -111,7 +113,105 @@ export async function activateContractConfirmation(
       metadata: JSON.stringify({ contractId: contract.id, version, generatedRecords: periods.length }),
     } });
     return { id: sow.id, created: periods.length, alreadyEffective: false, version };
+  };
+  return "$transaction" in db ? db.$transaction(execute, { timeout: 30000 }) : execute(db);
+}
+
+export async function activateConfirmationReplacement(
+  contractId: string, confirmationId: string, actorId: string, expectedPendingVersion: number,
+) {
+  const current = await prisma.contractProjectConfirmation.findFirst({ where: { id: confirmationId, contractId } });
+  if (!current || current.status !== "EFFECTIVE") throw new AppError("没有可生效的确认书替换版本", 409);
+  if (current.pendingVersion !== expectedPendingVersion || !current.pendingDetails) throw new AppError("替换草稿版本已变更，请刷新后重试", 409);
+  if (!current.pendingSignedFileUrl) throw new AppError("请先上传替换版本的签署原件", 400);
+  const pending = JSON.parse(current.pendingDetails);
+  if (pending.schemaVersion !== 1) throw new AppError("不支持的替换版本格式", 400);
+  parseEffectiveConfirmation(pending.data);
+  await assertSignedOriginalExists(current.pendingSignedFileUrl);
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  return prisma.$transaction(async (tx) => {
+    const future = await tx.customerReconciliation.findMany({
+      where: { projectConfirmationId: confirmationId, deletedAt: null, planStatus: "PLANNED", periodStart: { gt: new Date(`${today}T23:59:59.999Z`) } },
+      select: { id: true, automationKey: true },
+    });
+    for (const row of future) {
+      await tx.customerReconciliation.update({ where: { id: row.id }, data: {
+        planStatus: "CANCELLED", adjustmentReason: `项目确认书 ${current.number} 替换版本 v${current.version + 1} 生效`,
+        automationKey: row.automationKey ? `${row.automationKey}:replaced:v${current.version}` : null,
+      } });
+    }
+    await tx.contractConfirmationScope.deleteMany({ where: { confirmationId } });
+    const updated = await tx.contractProjectConfirmation.updateMany({
+      where: { id: confirmationId, contractId, status: "EFFECTIVE", pendingVersion: expectedPendingVersion },
+      data: {
+        status: "DRAFT", details: current.pendingDetails!, signedFileUrl: current.pendingSignedFileUrl,
+        pendingDetails: null, pendingSignedFileUrl: null, pendingVersion: 0, effectiveAt: null,
+      },
+    });
+    if (updated.count !== 1) throw new AppError("替换版本已被其他人修改，请刷新后重试", 409);
+    const result = await activateContractConfirmation(confirmationId, actorId, current.version, tx, {
+      fromDateExclusive: today, automationNamespace: `${confirmationId}:v${current.version + 1}`,
+    });
+    await tx.financeAuditLog.create({ data: {
+      entityType: "CONTRACT_CONFIRMATION", entityId: confirmationId, action: "ACTIVATE_REPLACEMENT", actorId,
+      fromStatus: `EFFECTIVE_V${current.version}`, toStatus: `EFFECTIVE_V${current.version + 1}`,
+      note: "确认书替换版本签署生效；历史已开账记录保留，未来计划按新版本重建",
+      metadata: JSON.stringify({ contractId, previousVersion: current.version, version: current.version + 1, created: result.created }),
+    } });
+    return result;
   }, { timeout: 30000 });
+}
+
+/**
+ * “上传已有合同”上传的是已签署的主格式合同 + 项目确认书完整版。
+ * 补齐确认书字段后复用该原件并直接生效；模板新建流程不得调用此方法。
+ */
+export async function finalizeExistingUploadedConfirmation(
+  contractId: string, confirmationId: string, actorId: string, expectedVersion: number,
+) {
+  const row = await prisma.contractProjectConfirmation.findFirst({
+    where: { id: confirmationId, contractId },
+    include: { contract: { select: { id: true, uploadType: true, status: true, fileUrl: true } } },
+  });
+  if (!row) throw new AppError("确认书不存在", 404);
+  if (row.contract.uploadType !== "EXISTING") return { confirmation: row, activated: false };
+  if (row.status === "EFFECTIVE") return { confirmation: row, activated: true };
+  if (row.status !== "DRAFT" || row.version !== expectedVersion) throw new AppError("确认书状态或版本已变更，请刷新后重试", 409);
+  if (row.contract.status !== "COMPLETED" || !row.contract.fileUrl) throw new AppError("上传已有合同缺少已签署原件，请返回主合同补充", 400);
+
+  const snapshot = JSON.parse(row.details);
+  if (snapshot.schemaVersion !== 1) throw new AppError("不支持的确认书版本", 400);
+  try {
+    parseEffectiveConfirmation(snapshot.data);
+  } catch {
+    // 草稿允许分次保存；仅当生效必填字段全部齐备后自动完成签署。
+    return { confirmation: row, activated: false };
+  }
+
+  await assertSignedOriginalExists(row.contract.fileUrl);
+  const signedFileUrl = row.contract.fileUrl;
+  const linked = await prisma.$transaction(async (tx) => {
+    const updated = await tx.contractProjectConfirmation.updateMany({
+      where: { id: confirmationId, contractId, status: "DRAFT", version: expectedVersion },
+      data: { signedFileUrl, version: { increment: 1 } },
+    });
+    if (updated.count !== 1) throw new AppError("确认书已被其他人修改，请刷新后重试", 409);
+    await tx.contractConfirmationVersion.create({
+      data: {
+        confirmationId,
+        version: expectedVersion + 1,
+        actorId,
+        reason: "上传已有合同字段补齐，复用已签署完整合同原件",
+        snapshot: JSON.stringify({ schemaVersion: 1, data: snapshot.data, signedFileUrl, source: "EXISTING_CONTRACT_ORIGINAL" }),
+      },
+    });
+    return tx.contractProjectConfirmation.findUniqueOrThrow({ where: { id: confirmationId } });
+  });
+  await activateContractConfirmation(confirmationId, actorId, linked.version);
+  return {
+    confirmation: await prisma.contractProjectConfirmation.findUniqueOrThrow({ where: { id: confirmationId } }),
+    activated: true,
+  };
 }
 
 /** Existing records are never rebuilt from live contract terms. */

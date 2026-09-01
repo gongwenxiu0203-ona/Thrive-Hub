@@ -97,6 +97,7 @@ function parseDate(value: string): number {
  */
 export function buildConfirmationPeriods(input: {
   confirmationId: string;
+  automationNamespace?: string;
   startDate: string;
   endDate: string;
   fixedFeeEnabled: boolean;
@@ -122,7 +123,7 @@ export function buildConfirmationPeriods(input: {
       const startDate = date.toISOString().slice(0, 10);
       const endDate = new Date(end).toISOString().slice(0, 10);
       result.push({ confirmationId: input.confirmationId, kind, index, startDate, endDate,
-        automationKey: `confirmation:${encodeURIComponent(input.confirmationId)}:${kind}:${startDate}:${endDate}` });
+        automationKey: `confirmation:${encodeURIComponent(input.automationNamespace || input.confirmationId)}:${kind}:${startDate}:${endDate}` });
       start = end + DAY_MS;
     }
   }

@@ -42,6 +42,8 @@ const contact = z.object({
 export const confirmationDraftSchema = z.object({
   contractId: requiredText("主合同ID", 100),
   title: text(), // Compatibility snapshot label; new records use their server-generated number.
+  workflowMode: z.enum(["FORM", "SIGNED_UPLOAD"]).default("FORM"),
+  templateId: z.string().trim().max(100).nullable().default(null),
   brand: text(),
   storeUrl: optionalHttpUrl,
   startDate: date.nullable(),

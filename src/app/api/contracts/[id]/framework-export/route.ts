@@ -25,8 +25,15 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const confirmationId = request.nextUrl.searchParams.get("confirmationId");
     const row = selection !== "master" && confirmationId ? await prisma.contractProjectConfirmation.findFirst({ where: { id: confirmationId, contractId: id } }) : null;
     if (selection !== "master" && !row) throw new AppError("请选择当前主合同下的项目确认书", 400);
-    const confirmation = row ? { number: row.number, draft: parseEffectiveConfirmation(decodeConfirmation(row).draft) } : undefined;
-    const templatePath = await resolveContractFilePath(contract.template.fileUrl, ["contract-templates"]);
+    const decoded = row ? decodeConfirmation(row) : null;
+    const confirmation = row && decoded ? { number: row.number, draft: parseEffectiveConfirmation(decoded.pendingDraft || decoded.draft) } : undefined;
+    let exportTemplate = contract.template;
+    if (selection === "confirmation" && confirmation?.draft.templateId) {
+      const selectedTemplate = await prisma.contractTemplate.findFirst({ where: { id: confirmation.draft.templateId, documentType: "PROJECT_CONFIRMATION", deletedAt: null } });
+      if (!selectedTemplate) throw new AppError("所选项目确认书模板不存在或已停用", 400);
+      exportTemplate = selectedTemplate;
+    }
+    const templatePath = await resolveContractFilePath(exportTemplate.fileUrl, ["contract-templates"]);
     if (!templatePath) throw new AppError("合同模板文件不存在", 404);
     const accounts = contract.receivingAccounts.map(a => JSON.parse(a.snapshot));
     let bytes: Buffer;

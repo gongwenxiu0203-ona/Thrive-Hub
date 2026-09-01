@@ -13,7 +13,7 @@ export async function authorizeConfirmation(contractId: string, level: "READ" | 
   if (!session) throw new AppError("请先登录", 401);
   const user = await prisma.user.findUnique({ where: { id: session.userId }, select: { role: true, status: true } });
   if (!user || !["ADMIN", "USER"].includes(user.role) || user.role !== session.role || user.status !== "APPROVED" || !await adminHasFeature(session, "contracts.records", level)) throw new AppError("无此合同操作权限", 403);
-  const contract = await prisma.contract.findFirst({ where: { id: contractId, deletedAt: null, ...contractScope(session, "all"), type: "BRAND", customer: { deletedAt: null } }, select: { id: true, contractNo: true, contractMode: true, type: true, status: true, customerId: true, partyA: true, partyAContact: true, partyAEmail: true, partyAPhone: true, partyBContact: true, partyBEmail: true, partyBPhone: true, customer: { select: { id: true, brandName: true } } } });
+  const contract = await prisma.contract.findFirst({ where: { id: contractId, deletedAt: null, ...contractScope(session, "all"), type: "BRAND", customer: { deletedAt: null } }, select: { id: true, contractNo: true, contractMode: true, type: true, status: true, uploadType: true, fileUrl: true, customerId: true, partyA: true, partyAContact: true, partyAEmail: true, partyAPhone: true, partyBContact: true, partyBEmail: true, partyBPhone: true, customer: { select: { id: true, brandName: true } } } });
   if (!contract) throw new AppError("品牌方合同或关联客户不存在", 404);
   return { session, contract };
 }
@@ -26,9 +26,10 @@ export function confirmationResponseError(error: unknown) {
   return errorResponse(error, "contracts.confirmations");
 }
 
-export function decodeConfirmation<T extends { details: string }>(row: T) {
+export function decodeConfirmation<T extends { details: string; pendingDetails?: string | null }>(row: T) {
   const snapshot = JSON.parse(row.details);
-  return { ...row, draft: confirmationDraftSchema.parse(snapshot.data) };
+  const pendingSnapshot = row.pendingDetails ? JSON.parse(row.pendingDetails) : null;
+  return { ...row, draft: confirmationDraftSchema.parse(snapshot.data), pendingDraft: pendingSnapshot ? confirmationDraftSchema.parse(pendingSnapshot.data) : null };
 }
 
 export function expectedVersion(value: unknown): number {
@@ -91,5 +92,33 @@ export async function saveConfirmationDraft(contractId: string, actorId: string,
     // materializes current scope rows once, so historical scopes are never erased.
     await storeOptions(tx, draft, actorId);
     return decodeConfirmation(confirmation);
+  });
+}
+
+export async function saveConfirmationReplacementDraft(
+  contractId: string, confirmationId: string, actorId: string, input: unknown,
+  pendingVersion: number, reason = "建立确认书替换版本",
+) {
+  const draft = confirmationDraftSchema.parse(input);
+  if (draft.contractId !== contractId) throw new AppError("确认书与主合同不匹配", 400);
+  if (!reason.trim() || reason.length > 2000) throw new AppError("请填写替换原因（最多2000字）", 400);
+  return prisma.$transaction(async (tx) => {
+    const current = await tx.contractProjectConfirmation.findFirst({ where: { id: confirmationId, contractId, status: "EFFECTIVE" } });
+    if (!current) throw new AppError("只有已签署生效的确认书可以建立替换版本", 409);
+    if (current.pendingVersion !== pendingVersion) throw new AppError("替换草稿已被其他人修改，请刷新后重试", 409);
+    await validateAccounts(tx, contractId, draft);
+    const details = confirmationDraftSnapshot({ ...draft, title: current.number });
+    const contentChanged = Boolean(current.pendingSignedFileUrl && current.pendingDetails !== details);
+    const updated = await tx.contractProjectConfirmation.updateMany({
+      where: { id: confirmationId, contractId, status: "EFFECTIVE", pendingVersion },
+      data: { pendingDetails: details, ...(contentChanged ? { pendingSignedFileUrl: null } : {}), pendingVersion: { increment: 1 } },
+    });
+    if (updated.count !== 1) throw new AppError("替换草稿已被其他人修改，请刷新后重试", 409);
+    await storeOptions(tx, draft, actorId);
+    await tx.financeAuditLog.create({ data: {
+      entityType: "CONTRACT_CONFIRMATION", entityId: confirmationId, action: "SAVE_REPLACEMENT_DRAFT", actorId,
+      note: reason.trim(), metadata: JSON.stringify({ contractId, activeVersion: current.version, pendingVersion: pendingVersion + 1, signedFileInvalidated: contentChanged }),
+    } });
+    return decodeConfirmation(await tx.contractProjectConfirmation.findUniqueOrThrow({ where: { id: confirmationId } }));
   });
 }
