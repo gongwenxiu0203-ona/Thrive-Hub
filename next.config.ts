@@ -6,6 +6,8 @@ const nextConfig: NextConfig = {
     "pdf-parse",
     "nodemailer",
     "xlsx",
+    "exceljs",
+    "unzipper",
     "@napi-rs/canvas",
   ],
   experimental: {

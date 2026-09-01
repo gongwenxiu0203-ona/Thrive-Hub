@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
-import { parseSheetSample, type Row } from "@/lib/excel";
+import { type Row } from "@/lib/excel";
+import { parseSheetSampleFromFile } from "@/lib/excelStream";
 import { suggestMapping } from "@/lib/salesImport";
 import { randomUUID } from "crypto";
-import { writeFile, readdir, unlink, stat, open, readFile } from "fs/promises";
+import { writeFile, readdir, unlink, stat, open } from "fs/promises";
 import path from "path";
 import os from "os";
 import { hasBiPermission } from "@/lib/biAuthorization";
@@ -107,7 +108,7 @@ export async function POST(req: Request) {
 
   let fileName = "";
   let platform = "";
-  let rawBuffer: ArrayBuffer;
+  let rawBuffer: Uint8Array | null = null;
 
   if (isRawUpload) {
     fileName = decodeUploadHeader(req.headers.get("x-file-name")).trim();
@@ -119,11 +120,6 @@ export async function POST(req: Request) {
       // Raw-body uploads are written chunk-by-chunk. Unlike req.formData(),
       // this does not retain another complete ~80 MB copy while receiving it.
       await streamRequestToTempFile(req, tempPath);
-      const saved = await readFile(tempPath);
-      rawBuffer = saved.buffer.slice(
-        saved.byteOffset,
-        saved.byteOffset + saved.byteLength,
-      ) as ArrayBuffer;
     } catch (error) {
       await unlink(tempPath).catch(() => {});
       if (error instanceof Error && error.message.startsWith("UPLOAD_TOO_LARGE:")) {
@@ -164,7 +160,12 @@ export async function POST(req: Request) {
       );
     }
     fileName = file.name;
-    rawBuffer = await file.arrayBuffer();
+    rawBuffer = new Uint8Array(await file.arrayBuffer());
+    try {
+      await writeFile(tempPath, rawBuffer);
+    } catch (error) {
+      return errorResponse(error, "sales.parse.temp-file");
+    }
   }
 
   // Parse ONLY the header + 5 sample rows for the column mapping UI.
@@ -172,8 +173,9 @@ export async function POST(req: Request) {
   // avoiding the CPU-blocking synchronous parse that caused the "解析中..." hang.
   let sample: { columns: string[]; sampleRows: Row[]; totalRows: number };
   try {
-    sample = parseSheetSample(rawBuffer, 5, fileName);
-  } catch {
+    sample = await parseSheetSampleFromFile(tempPath, fileName, 5);
+  } catch (error) {
+    console.error("[sales.parse.workbook]", error instanceof Error ? { name: error.name, message: error.message } : { name: "Unknown" });
     await unlink(tempPath).catch(() => {});
     return NextResponse.json(
       {
@@ -198,14 +200,6 @@ export async function POST(req: Request) {
   // Step 2 (upload) reads this buffer and performs the full parse there.
   // Storing raw bytes (not parsed JSON) means Step 1 is always O(sample_rows)
   // regardless of how many rows the file contains.
-  if (!isRawUpload) {
-    try {
-      await writeFile(tempPath, Buffer.from(rawBuffer));
-    } catch (e) {
-      return errorResponse(e, "sales.parse.temp-file");
-    }
-  }
-
   // Fire-and-forget cleanup of stale temp files.
   cleanupOldTempFiles();
 

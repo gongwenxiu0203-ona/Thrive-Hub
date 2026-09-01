@@ -3,15 +3,15 @@ import { errorResponse } from "@/lib/appError";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 import { convertRow, getMappableFields, FIELD_HINTS } from "@/lib/salesImport";
-import { parseSheetChunks } from "@/lib/excel";
-import { readFile, unlink, stat } from "fs/promises";
+import { parseSheetChunksFromFile } from "@/lib/excelStream";
+import { unlink, stat } from "fs/promises";
 import path from "path";
 import os from "os";
 import { hasBiPermission } from "@/lib/biAuthorization";
 import { customerScope } from "@/lib/dataScope";
 
-// Allow up to 5 minutes for large xlsx parsing + DB writes
-export const maxDuration = 300;
+// Allow up to 10 minutes for 500k+ row streaming imports + DB writes.
+export const maxDuration = 600;
 
 // Step 2 of the BI import flow.
 //
@@ -38,12 +38,12 @@ function tempFilePath(tempId: string): string {
   return path.join(os.tmpdir(), `${TEMP_PREFIX}${tempId}${TEMP_EXT}`);
 }
 
-async function readTempFile(tempId: string): Promise<Buffer | null> {
+async function validTempFilePath(tempId: string): Promise<string | null> {
   if (!isSafeUUID(tempId)) return null;
   try {
     const fileStat = await stat(tempFilePath(tempId));
     if (fileStat.size <= 0 || fileStat.size > MAX_UPLOAD_BYTES) return null;
-    return await readFile(tempFilePath(tempId));
+    return tempFilePath(tempId);
   } catch {
     return null;
   }
@@ -146,8 +146,8 @@ export async function POST(req: Request) {
     // Keep a single reference to the raw file buffer. parseSheetChunks avoids
     // the former ArrayBuffer copy and does not materialize a second full-file
     // Row[] allocation.
-    const rawFile = await readTempFile(tempId);
-    if (!rawFile) {
+    const rawFilePath = await validTempFilePath(tempId);
+    if (!rawFilePath) {
       return NextResponse.json(
         {
           error:
@@ -201,7 +201,7 @@ export async function POST(req: Request) {
           },
         });
 
-        for (const rawRows of parseSheetChunks(rawFile, PARSE_CHUNK_SIZE)) {
+        for await (const rawRows of parseSheetChunksFromFile(rawFilePath, fileName || "upload.xlsx", PARSE_CHUNK_SIZE)) {
           const pendingRecords = [];
           for (const rawRow of rawRows) {
             const sourceRowNumber = logicalRowIndex + 2;
@@ -280,9 +280,8 @@ export async function POST(req: Request) {
 
         return batch.id;
       },
-      // Large imports can legitimately need more than two minutes on the
-      // production 2 GB host. Keep this below the route's five-minute limit.
-      { timeout: 270_000 },
+      // Preserve atomicity while allowing 500k+ row imports to finish.
+      { maxWait: 10_000, timeout: 9 * 60 * 1000 },
     );
 
     // Clean up temp file only after the atomic sales transaction succeeds.
