@@ -2,7 +2,6 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { createFrameworkContract, updateFrameworkContract } from "@/actions/contractFramework";
 import { Button } from "@/components/ui/Button";
 import { defaultContractAccountIds } from "@/lib/contractAccountSelection";
 
@@ -52,11 +51,21 @@ export function FrameworkContractForm({ mode, existing, presetCustomerId, templa
     }
 
     startTransition(async () => {
-    setError("");
-    const result = await (existing ? updateFrameworkContract(form) : createFrameworkContract(form));
-    if (!result.ok) return setError(result.error);
-    router.push(`/contracts/${result.id}/confirmations`);
-    router.refresh();
+      setError("");
+      try {
+        const response = await fetch("/api/contracts/framework-submit", {
+          method: "POST",
+          body: form,
+        });
+        const result = await response.json() as { ok: true; id: string } | { ok: false; error: string };
+        if (!response.ok || !result.ok) {
+          return setError(result.ok ? "保存主合同失败，请重试" : result.error);
+        }
+        router.push(`/contracts/${result.id}/confirmations`);
+        router.refresh();
+      } catch {
+        setError("上传请求中断，请检查网络后重试；已填写内容仍保留在当前页面");
+      }
     });
   }
 
