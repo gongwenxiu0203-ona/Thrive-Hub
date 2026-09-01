@@ -40,8 +40,10 @@ function isStaff(role: string) {
 const PAGE_SIZE = 50;
 // Filter options are shared by all BI tabs. Keep the derived values briefly so
 // repeated tab switches do not rebuild the same option lists from raw records.
-const BI_FILTER_CACHE_TTL_MS = 60 * 1000;
+const BI_FILTER_CACHE_TTL_MS = 5 * 60 * 1000;
 const BI_DASHBOARD_CACHE_TTL_MS = 45 * 1000;
+const BI_FILTER_CACHE_MAX_ENTRIES = 20;
+const BI_DASHBOARD_CACHE_MAX_ENTRIES = 6;
 
 type AffTypeRow = { platformAffiliateName: string; affiliateType: string | null };
 type BiFilterContext = {
@@ -59,28 +61,29 @@ type UploadBatchRow = {
 };
 
 const biFilterCache = new Map<string, { expiresAt: number; value: BiFilterContext }>();
-const biDashboardRecordCache = new Map<string, { expiresAt: number; value: DashboardRecord[] }>();
+const biDashboardRecordCache = new Map<string, { expiresAt: number; value: DashboardQueryData }>();
 const biDashboardAffiliateCache = new Map<string, { expiresAt: number; value: DashboardAffiliate[] }>();
 
-const dashboardRecordSelect = {
-  orderDate: true,
-  affiliatePlatform: true,
-  affiliateProgram: true,
-  brand: true,
-  affiliateName: true,
-  affiliateType: true,
-  asin: true,
-  parentAsin: true,
-  storeProductLabel: true,
-  revenue: true,
-  commission: true,
-  commissionRate: true,
-  totalFee: true,
-  unitsSold: true,
-  clicks: true,
-} satisfies Prisma.SalesRecordSelect;
+function setBoundedCache<T>(
+  cache: Map<string, { expiresAt: number; value: T }>,
+  key: string,
+  value: T,
+  ttlMs: number,
+  maxEntries: number,
+) {
+  const now = Date.now();
+  for (const [cacheKey, entry] of cache) {
+    if (entry.expiresAt <= now) cache.delete(cacheKey);
+  }
+  cache.delete(key);
+  cache.set(key, { expiresAt: now + ttlMs, value });
+  while (cache.size > maxEntries) {
+    const oldestKey = cache.keys().next().value as string | undefined;
+    if (!oldestKey) break;
+    cache.delete(oldestKey);
+  }
+}
 
-type DashboardRecord = Prisma.SalesRecordGetPayload<{ select: typeof dashboardRecordSelect }>;
 type DashboardAffiliate = {
   platformAffiliateName: string;
   internalAffiliateName: string | null;
@@ -128,22 +131,116 @@ function stableCacheKey(value: unknown): string {
     .join(",")}}`;
 }
 
-async function getDashboardRecords(where: Prisma.SalesRecordWhereInput): Promise<DashboardRecord[]> {
+async function loadDashboardQueryData(where: Prisma.SalesRecordWhereInput) {
+  const [
+    totals,
+    programGroups,
+    platformGroups,
+    brandGroups,
+    typeGroups,
+    rateGroups,
+    creatorGroups,
+    productGroups,
+    affiliateGroups,
+    dailyGroups,
+  ] = await Promise.all([
+    prisma.salesRecord.aggregate({
+      where,
+      _count: true,
+      _sum: { revenue: true, commission: true, unitsSold: true },
+    }),
+    prisma.salesRecord.groupBy({ where, by: ["affiliateProgram"], _sum: { revenue: true } }),
+    prisma.salesRecord.groupBy({ where, by: ["affiliatePlatform"], _sum: { revenue: true } }),
+    prisma.salesRecord.groupBy({ where, by: ["brand"], _sum: { revenue: true } }),
+    prisma.salesRecord.groupBy({
+      where,
+      by: ["affiliateName", "affiliateType"],
+      _sum: { revenue: true },
+    }),
+    prisma.salesRecord.groupBy({ where, by: ["commissionRate"], _count: true }),
+    prisma.salesRecord.groupBy({
+      where,
+      by: ["affiliatePlatform", "affiliateProgram", "affiliateName", "affiliateType"],
+      _sum: { revenue: true, unitsSold: true, commission: true, clicks: true },
+    }),
+    prisma.salesRecord.groupBy({
+      where,
+      by: ["affiliatePlatform", "affiliateProgram", "storeProductLabel", "brand", "parentAsin", "asin"],
+      _sum: { revenue: true, unitsSold: true, commission: true },
+    }),
+    prisma.salesRecord.groupBy({
+      where,
+      by: ["affiliateName"],
+      _sum: { revenue: true },
+      _min: { orderDate: true },
+    }),
+    prisma.salesRecord.groupBy({
+      where,
+      by: ["orderDate"],
+      _sum: { revenue: true, unitsSold: true },
+      orderBy: { orderDate: "asc" },
+    }),
+  ]);
+
+  const topPublisherNames = [...affiliateGroups]
+    .sort((a, b) => (b._sum.revenue ?? 0) - (a._sum.revenue ?? 0))
+    .slice(0, 8)
+    .map((row) => row.affiliateName);
+  const topBrandNames = [...brandGroups]
+    .sort((a, b) => (b._sum.revenue ?? 0) - (a._sum.revenue ?? 0))
+    .slice(0, 8)
+    .map((row) => row.brand);
+
+  const [publisherTrendGroups, brandTrendGroups, acosGroups] = await Promise.all([
+    topPublisherNames.length
+      ? prisma.salesRecord.groupBy({
+          where: { AND: [where, { affiliateName: { in: topPublisherNames } }] },
+          by: ["orderDate", "affiliateName"],
+          _sum: { revenue: true },
+        })
+      : Promise.resolve([]),
+    topBrandNames.length
+      ? prisma.salesRecord.groupBy({
+          where: { AND: [where, { brand: { in: topBrandNames } }] },
+          by: ["orderDate", "brand"],
+          _sum: { revenue: true },
+        })
+      : Promise.resolve([]),
+    prisma.salesRecord.groupBy({
+      where,
+      by: ["orderDate", "brand"],
+      _sum: { revenue: true, totalFee: true },
+    }),
+  ]);
+
+  return {
+    totals,
+    programGroups,
+    platformGroups,
+    brandGroups,
+    typeGroups,
+    rateGroups,
+    creatorGroups,
+    productGroups,
+    affiliateGroups,
+    dailyGroups,
+    topPublisherNames,
+    topBrandNames,
+    publisherTrendGroups,
+    brandTrendGroups,
+    acosGroups,
+  };
+}
+
+type DashboardQueryData = Awaited<ReturnType<typeof loadDashboardQueryData>>;
+
+async function getDashboardRecords(where: Prisma.SalesRecordWhereInput): Promise<DashboardQueryData> {
   const key = stableCacheKey(where);
   const cached = biDashboardRecordCache.get(key);
   if (cached && cached.expiresAt > Date.now()) return cached.value;
 
-  const value = await prisma.salesRecord.findMany({
-    where,
-    orderBy: { orderDate: "asc" },
-    // The dashboard aggregates these fields only. Selecting the full record
-    // serializes dozens of unused fields for every sales row.
-    select: dashboardRecordSelect,
-  });
-  biDashboardRecordCache.set(key, {
-    expiresAt: Date.now() + BI_DASHBOARD_CACHE_TTL_MS,
-    value,
-  });
+  const value = await loadDashboardQueryData(where);
+  setBoundedCache(biDashboardRecordCache, key, value, BI_DASHBOARD_CACHE_TTL_MS, BI_DASHBOARD_CACHE_MAX_ENTRIES);
   return value;
 }
 
@@ -162,10 +259,7 @@ async function getDashboardAffiliates(): Promise<DashboardAffiliate[]> {
       promoContents: true,
     },
   }) as DashboardAffiliate[];
-  biDashboardAffiliateCache.set(key, {
-    expiresAt: Date.now() + BI_DASHBOARD_CACHE_TTL_MS,
-    value,
-  });
+  setBoundedCache(biDashboardAffiliateCache, key, value, BI_DASHBOARD_CACHE_TTL_MS, BI_DASHBOARD_CACHE_MAX_ENTRIES);
   return value;
 }
 
@@ -222,7 +316,7 @@ async function getBiFilterContext(baseWhere: Prisma.SalesRecordWhereInput): Prom
       labels: uniq(labels.map((r) => r.storeProductLabel)),
     },
   };
-  biFilterCache.set(key, { expiresAt: now + BI_FILTER_CACHE_TTL_MS, value });
+  setBoundedCache(biFilterCache, key, value, BI_FILTER_CACHE_TTL_MS, BI_FILTER_CACHE_MAX_ENTRIES);
   return value;
 }
 
@@ -236,6 +330,25 @@ export default async function BIPage({
 
   const role = session.role;
   const brandName = session.brandName ?? null;
+  // The dashboard previously loaded every historical row on first visit. With
+  // large BI tables this serialized hundreds of thousands of records before
+  // the page could render. Default to a clearly marked rolling 12-month view;
+  // users can still switch to all history from the filter bar.
+  if (role !== "CHANNEL" && (!sp.tab || sp.tab === "dashboard") && !sp.from && !sp.to && sp.scope !== "all") {
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth() - 11, 1);
+    const date = (value: Date) =>
+      `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(sp)) {
+      if (value) params.set(key, value);
+    }
+    params.set("from", date(start));
+    params.set("to", date(now));
+    params.set("scope", "recent");
+    if (!params.get("tab")) params.set("tab", "dashboard");
+    redirect(`/bi?${params.toString()}`);
+  }
   if (role === "CHANNEL" && !sp.from && !sp.to) {
     const now = new Date();
     const year = now.getFullYear();
@@ -337,7 +450,7 @@ export default async function BIPage({
             <Link
               key={t.key}
               href={`/bi?${params.toString()}`}
-              prefetch
+              prefetch={false}
               className={cn(
                 "tab-trigger",
                 active
@@ -393,7 +506,7 @@ async function DashboardTab({
   isBrand?: boolean;
   regions?: string[];
 }) {
-  const [records, affPromo] = await Promise.all([
+  const [dashboardData, affPromo] = await Promise.all([
     getDashboardRecords(where),
     getDashboardAffiliates(),
   ]);
@@ -435,7 +548,7 @@ async function DashboardTab({
   // 按发布时间降序（空时间排最后）
   promoContentRows.sort((a, b) => (b.publishedAt || "").localeCompare(a.publishedAt || ""));
 
-  if (records.length === 0) {
+  if (dashboardData.totals._count === 0) {
     const emptyChannelOpts: FilterOptions = isChannel
       ? {
           platforms: [],
@@ -452,7 +565,7 @@ async function DashboardTab({
       : filterOptions;
     return (
       <>
-        <BIFilters options={emptyChannelOpts} isChannel={isChannel} />
+        <BIFilters options={emptyChannelOpts} isChannel={isChannel} historyScopeEnabled={!isChannel} />
         <EmptyState
           title="暂无符合条件的销售数据"
           description="清空筛选或在「数据上传」中导入推广销售数据"
@@ -462,30 +575,33 @@ async function DashboardTab({
   }
 
   // KPI totals
-  const totalRevenue = records.reduce((s, r) => s + r.revenue, 0);
-  const totalCommission = records.reduce((s, r) => s + r.commission, 0);
-  const totalUnits = records.reduce((s, r) => s + r.unitsSold, 0);
+  const totalRevenue = dashboardData.totals._sum.revenue ?? 0;
+  const totalCommission = dashboardData.totals._sum.commission ?? 0;
+  const totalUnits = dashboardData.totals._sum.unitsSold ?? 0;
 
-  // Group helper
-  const group = (key: (r: (typeof records)[number]) => string) => {
-    const m = new Map<string, number>();
-    for (const r of records) {
-      const k = key(r) || "未知";
-      m.set(k, (m.get(k) ?? 0) + r.revenue);
+  const sumNamedGroups = <T,>(rows: T[], key: (row: T) => string, value: (row: T) => number) => {
+    const values = new Map<string, number>();
+    for (const row of rows) {
+      const name = key(row) || "未知";
+      values.set(name, (values.get(name) ?? 0) + value(row));
     }
-    return [...m.entries()]
+    return [...values.entries()]
       .map(([name, value]) => ({ name, value: Math.round(value * 100) / 100 }))
       .sort((a, b) => b.value - a.value);
   };
 
-  const programDist = group((r) => r.affiliateProgram ?? "未知");
-  const platformDist = group((r) => r.affiliatePlatform);
-  const typeDist = group((r) => resolveType(r.affiliateName, r.affiliateType) || "未分类");
-  const brandBars = group((r) => r.brand).slice(0, 12);
+  const programDist = sumNamedGroups(dashboardData.programGroups, (r) => r.affiliateProgram ?? "未知", (r) => r._sum.revenue ?? 0);
+  const platformDist = sumNamedGroups(dashboardData.platformGroups, (r) => r.affiliatePlatform, (r) => r._sum.revenue ?? 0);
+  const typeDist = sumNamedGroups(
+    dashboardData.typeGroups,
+    (r) => resolveType(r.affiliateName, r.affiliateType) || "未分类",
+    (r) => r._sum.revenue ?? 0,
+  );
+  const brandBars = sumNamedGroups(dashboardData.brandGroups, (r) => r.brand, (r) => r._sum.revenue ?? 0).slice(0, 12);
 
   // Commission rate distribution: for >= 1% round to integer, for < 1% keep 2 decimal places.
   const rateCounts = new Map<string, number>();
-  for (const r of records) {
+  for (const r of dashboardData.rateGroups) {
     const rawPct = r.commissionRate * 100; // convert decimal rate to percentage
     let key: string;
     if (rawPct >= 1) {
@@ -495,7 +611,7 @@ async function DashboardTab({
     } else {
       key = "0%";
     }
-    rateCounts.set(key, (rateCounts.get(key) ?? 0) + 1);
+    rateCounts.set(key, (rateCounts.get(key) ?? 0) + r._count);
   }
   const commissionRateDist = [...rateCounts.entries()]
     // parseFloat("1.00%") = 1, parseFloat("10.00%") = 10 — correct numeric sort
@@ -514,7 +630,7 @@ async function DashboardTab({
     clicks: number;
   };
   const creatorMap = new Map<string, CreatorAgg>();
-  for (const r of records) {
+  for (const r of dashboardData.creatorGroups) {
     const k = `${r.affiliatePlatform}|${r.affiliateProgram ?? ""}|${r.affiliateName}`;
     const existing = creatorMap.get(k) ?? {
       platform: r.affiliatePlatform,
@@ -526,10 +642,10 @@ async function DashboardTab({
       commission: 0,
       clicks: 0,
     };
-    existing.revenue += r.revenue;
-    existing.unitsSold += r.unitsSold;
-    existing.commission += r.commission;
-    existing.clicks += r.clicks;
+    existing.revenue += r._sum.revenue ?? 0;
+    existing.unitsSold += r._sum.unitsSold ?? 0;
+    existing.commission += r._sum.commission ?? 0;
+    existing.clicks += r._sum.clicks ?? 0;
     creatorMap.set(k, existing);
   }
   const topCreators = [...creatorMap.values()]
@@ -559,7 +675,7 @@ async function DashboardTab({
     commission: number;
   };
   const productMap = new Map<string, ProductAgg>();
-  for (const r of records) {
+  for (const r of dashboardData.productGroups) {
     const k = `${r.affiliatePlatform}|${r.brand}|${r.asin ?? ""}`;
     const existing = productMap.get(k) ?? {
       platform: r.affiliatePlatform,
@@ -572,9 +688,9 @@ async function DashboardTab({
       unitsSold: 0,
       commission: 0,
     };
-    existing.revenue += r.revenue;
-    existing.unitsSold += r.unitsSold;
-    existing.commission += r.commission;
+    existing.revenue += r._sum.revenue ?? 0;
+    existing.unitsSold += r._sum.unitsSold ?? 0;
+    existing.commission += r._sum.commission ?? 0;
     productMap.set(k, existing);
   }
   const topProducts = [...productMap.values()]
@@ -588,37 +704,23 @@ async function DashboardTab({
     }));
 
   // New affiliates (first-order in window)
-  const affiliateFirst = new Map<
-    string,
-    { revenue: number; firstDate: Date }
-  >();
-  for (const r of records) {
-    const existing = affiliateFirst.get(r.affiliateName);
-    if (!existing || r.orderDate < existing.firstDate) {
-      affiliateFirst.set(r.affiliateName, {
-        revenue: r.revenue,
-        firstDate: r.orderDate,
-      });
-    } else {
-      existing.revenue += r.revenue;
-    }
-  }
-  const newAffiliates = [...affiliateFirst.entries()]
-    .sort((a, b) => b[1].firstDate.getTime() - a[1].firstDate.getTime())
+  const newAffiliates = dashboardData.affiliateGroups
+    .filter((row) => row._min.orderDate)
+    .sort((a, b) => b._min.orderDate!.getTime() - a._min.orderDate!.getTime())
     .slice(0, 20)
-    .map(([name, v]) => ({
-      name,
-      revenue: Math.round(v.revenue * 100) / 100,
-      firstDate: v.firstDate.toISOString().slice(0, 10),
+    .map((row) => ({
+      name: row.affiliateName,
+      revenue: Math.round((row._sum.revenue ?? 0) * 100) / 100,
+      firstDate: row._min.orderDate!.toISOString().slice(0, 10),
     }));
 
   // Daily / Weekly / Monthly trend
   const dayMap = new Map<string, { revenue: number; unitsSold: number }>();
-  for (const r of records) {
+  for (const r of dashboardData.dailyGroups) {
     const d = r.orderDate.toISOString().slice(0, 10);
     const existing = dayMap.get(d) ?? { revenue: 0, unitsSold: 0 };
-    existing.revenue += r.revenue;
-    existing.unitsSold += r.unitsSold;
+    existing.revenue += r._sum.revenue ?? 0;
+    existing.unitsSold += r._sum.unitsSold ?? 0;
     dayMap.set(d, existing);
   }
   const daily = [...dayMap.entries()]
@@ -631,15 +733,15 @@ async function DashboardTab({
 
   // Weekly = ISO week-start (Monday)
   const weekMap = new Map<string, { revenue: number; unitsSold: number }>();
-  for (const r of records) {
+  for (const r of dashboardData.dailyGroups) {
     const d = new Date(r.orderDate);
     const day = d.getUTCDay();
     const diff = (day + 6) % 7;
     d.setUTCDate(d.getUTCDate() - diff);
     const k = d.toISOString().slice(0, 10);
     const existing = weekMap.get(k) ?? { revenue: 0, unitsSold: 0 };
-    existing.revenue += r.revenue;
-    existing.unitsSold += r.unitsSold;
+    existing.revenue += r._sum.revenue ?? 0;
+    existing.unitsSold += r._sum.unitsSold ?? 0;
     weekMap.set(k, existing);
   }
   const weekly = [...weekMap.entries()]
@@ -651,11 +753,11 @@ async function DashboardTab({
     }));
 
   const monthMap = new Map<string, { revenue: number; unitsSold: number }>();
-  for (const r of records) {
+  for (const r of dashboardData.dailyGroups) {
     const k = r.orderDate.toISOString().slice(0, 7);
     const existing = monthMap.get(k) ?? { revenue: 0, unitsSold: 0 };
-    existing.revenue += r.revenue;
-    existing.unitsSold += r.unitsSold;
+    existing.revenue += r._sum.revenue ?? 0;
+    existing.unitsSold += r._sum.unitsSold ?? 0;
     monthMap.set(k, existing);
   }
   const monthly = [...monthMap.entries()]
@@ -666,24 +768,15 @@ async function DashboardTab({
       unitsSold: v.unitsSold,
     }));
 
-  // Build series-by-key trend matrices (top N keys by total revenue)
-  const buildSeries = (keyFn: (r: (typeof records)[number]) => string) => {
-    const totals = new Map<string, number>();
-    for (const r of records) {
-      const k = keyFn(r);
-      totals.set(k, (totals.get(k) ?? 0) + r.revenue);
-    }
-    const top = [...totals.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 8)
-      .map(([k]) => k);
+  // Build monthly series from database-grouped rows. This keeps the original
+  // top-eight chart semantics without shipping every sales row into Node.
+  const buildSeries = <T,>(rows: T[], top: string[], keyFn: (row: T) => string, dateFn: (row: T) => Date, valueFn: (row: T) => number) => {
     const monthly: Record<string, Record<string, number>> = {};
-    for (const r of records) {
+    for (const r of rows) {
       const k = keyFn(r);
-      if (!top.includes(k)) continue;
-      const m = r.orderDate.toISOString().slice(0, 7);
+      const m = dateFn(r).toISOString().slice(0, 7);
       monthly[m] = monthly[m] ?? {};
-      monthly[m][k] = (monthly[m][k] ?? 0) + r.revenue;
+      monthly[m][k] = (monthly[m][k] ?? 0) + valueFn(r);
     }
     return Object.entries(monthly)
       .sort((a, b) => a[0].localeCompare(b[0]))
@@ -693,27 +786,37 @@ async function DashboardTab({
         return row;
       });
   };
-  const publisherTrend = buildSeries((r) => r.affiliateName);
-  const brandTrend = buildSeries((r) => r.brand);
+  const publisherTrend = buildSeries(
+    dashboardData.publisherTrendGroups,
+    dashboardData.topPublisherNames,
+    (r) => r.affiliateName,
+    (r) => r.orderDate,
+    (r) => r._sum.revenue ?? 0,
+  );
+  const brandTrend = buildSeries(
+    dashboardData.brandTrendGroups,
+    dashboardData.topBrandNames,
+    (r) => r.brand,
+    (r) => r.orderDate,
+    (r) => r._sum.revenue ?? 0,
+  );
 
   // ACOS trend per brand (totalFee/revenue)
   const acosTotals = new Map<
     string,
     Map<string, { fee: number; rev: number }>
   >();
-  for (const r of records) {
+  for (const r of dashboardData.acosGroups) {
     const b = r.brand;
     const m = r.orderDate.toISOString().slice(0, 7);
     const byMonth = acosTotals.get(b) ?? new Map();
     const cell = byMonth.get(m) ?? { fee: 0, rev: 0 };
-    cell.fee += r.totalFee;
-    cell.rev += r.revenue;
+    cell.fee += r._sum.totalFee ?? 0;
+    cell.rev += r._sum.revenue ?? 0;
     byMonth.set(m, cell);
     acosTotals.set(b, byMonth);
   }
-  const allMonths = [
-    ...new Set(records.map((r) => r.orderDate.toISOString().slice(0, 7))),
-  ].sort();
+  const allMonths = [...new Set(dashboardData.acosGroups.map((r) => r.orderDate.toISOString().slice(0, 7)))].sort();
   const acosTrend = allMonths.map((m) => {
     const row: Record<string, string | number> = { month: m };
     for (const [b, byMonth] of acosTotals.entries()) {
@@ -749,7 +852,7 @@ async function DashboardTab({
 
   return (
     <>
-      <BIFilters options={channelFilterOptions} isChannel={isChannel} />
+      <BIFilters options={channelFilterOptions} isChannel={isChannel} historyScopeEnabled={!isChannel} />
 
       <div className="grid gap-4 lg:grid-cols-3">
         <StatCard

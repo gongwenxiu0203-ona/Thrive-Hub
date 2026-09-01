@@ -3,7 +3,7 @@
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { MultiSelectFilter } from "@/components/ui/MultiSelectFilter";
 import { DateRangeFilter } from "./DateRangeFilter";
-import { X } from "lucide-react";
+import { CalendarRange, History, X } from "lucide-react";
 import { useState, useEffect, useTransition } from "react";
 import { EMPTY_FILTER_VALUE } from "@/lib/salesRecordFilters";
 
@@ -40,9 +40,11 @@ export type FilterOptions = {
 export function BIFilters({
   options,
   isChannel = false,
+  historyScopeEnabled = false,
 }: {
   options: FilterOptions;
   isChannel?: boolean;
+  historyScopeEnabled?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -78,6 +80,25 @@ export function BIFilters({
     });
   }
 
+  function setHistoryScope(scope: "recent" | "all") {
+    const next = new URLSearchParams(sp.toString());
+    next.delete("page");
+    if (scope === "all") {
+      next.delete("from");
+      next.delete("to");
+      next.set("scope", "all");
+    } else {
+      const now = new Date();
+      const start = new Date(now.getFullYear(), now.getMonth() - 11, 1);
+      const date = (value: Date) =>
+        `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+      next.set("from", date(start));
+      next.set("to", date(now));
+      next.set("scope", "recent");
+    }
+    startTransition(() => router.push(`${pathname}?${next.toString()}`));
+  }
+
   const hasAny = FILTER_KEYS.some((k) => sp.get(k));
 
   const toOpts = (xs: string[]) => [
@@ -87,9 +108,30 @@ export function BIFilters({
 
   return (
     <div className="filter-bar !block p-4" aria-busy={isPending}>
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-slate-700">筛选器</h2>
-        {hasAny && (
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-700">筛选器</h2>
+          {historyScopeEnabled && (
+            <p className="mt-0.5 text-xs text-slate-500">
+              {sp.get("scope") === "all"
+                ? "当前显示全部历史数据"
+                : sp.get("scope") === "recent"
+                  ? "为提高加载速度，首次默认显示最近 12 个月"
+                  : "当前显示自定义日期范围"}
+            </p>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {historyScopeEnabled && (sp.get("scope") === "all" ? (
+            <button type="button" onClick={() => setHistoryScope("recent")} className="btn-secondary btn-sm">
+              <CalendarRange className="h-3.5 w-3.5" /> 最近 12 个月
+            </button>
+          ) : (
+            <button type="button" onClick={() => setHistoryScope("all")} className="btn-secondary btn-sm">
+              <History className="h-3.5 w-3.5" /> 全部历史
+            </button>
+          ))}
+          {hasAny && (
           <button
             type="button"
             onClick={clearAll}
@@ -98,7 +140,8 @@ export function BIFilters({
             <X className="h-3 w-3" />
             清空全部
           </button>
-        )}
+          )}
+        </div>
       </div>
       <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-4">
         <FilterCell label="订单日期 Order Date">

@@ -3,8 +3,8 @@ import { errorResponse } from "@/lib/appError";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 import { convertRow, getMappableFields, FIELD_HINTS } from "@/lib/salesImport";
-import { parseSheet } from "@/lib/excel";
-import { readFile, unlink } from "fs/promises";
+import { parseSheetChunks } from "@/lib/excel";
+import { readFile, unlink, stat } from "fs/promises";
 import path from "path";
 import os from "os";
 import { hasBiPermission } from "@/lib/biAuthorization";
@@ -20,14 +20,14 @@ export const maxDuration = 300;
 // converts them, then writes to DB inside a single transaction.
 // Temp file is deleted after processing (success or validation failure).
 
-type Row = Record<string, unknown>;
-
 const TEMP_PREFIX = "sales-parse-";
 // Temp files are now raw binary (file buffer), not parsed JSON.
 // The .bin extension matches what parse/route.ts writes.
 const TEMP_EXT = ".bin";
+const MAX_UPLOAD_BYTES = 105 * 1024 * 1024;
 /** Max records per createMany call — avoids DB variable-count limits. */
 const CHUNK_SIZE = 500;
+const PARSE_CHUNK_SIZE = 1_000;
 
 /** Validate UUID format to prevent path traversal. */
 function isSafeUUID(id: string): boolean {
@@ -38,18 +38,12 @@ function tempFilePath(tempId: string): string {
   return path.join(os.tmpdir(), `${TEMP_PREFIX}${tempId}${TEMP_EXT}`);
 }
 
-async function readTempRows(tempId: string): Promise<Row[] | null> {
+async function readTempFile(tempId: string): Promise<Buffer | null> {
   if (!isSafeUUID(tempId)) return null;
   try {
-    // Read the raw binary buffer saved by Step 1 (parse) and do the full
-    // xlsx parse here. This is where the CPU-intensive work now happens,
-    // keeping Step 1 near-instant for large files.
-    const buf = await readFile(tempFilePath(tempId));
-    const arrayBuffer = buf.buffer.slice(
-      buf.byteOffset,
-      buf.byteOffset + buf.byteLength,
-    ) as ArrayBuffer;
-    return parseSheet(arrayBuffer) as Row[];
+    const fileStat = await stat(tempFilePath(tempId));
+    if (fileStat.size <= 0 || fileStat.size > MAX_UPLOAD_BYTES) return null;
+    return await readFile(tempFilePath(tempId));
   } catch {
     return null;
   }
@@ -93,23 +87,6 @@ export async function POST(req: Request) {
     }
     if (!customerId) {
       return NextResponse.json({ error: "请选择关联客户后再导入" }, { status: 400 });
-    }
-
-    // Read parsed rows from temp file (written by parse step).
-    const rows = await readTempRows(tempId);
-    if (!rows) {
-      return NextResponse.json(
-        {
-          error:
-            "上传会话已过期或无效，请重新选择文件并映射字段后再次导入",
-        },
-        { status: 400 },
-      );
-    }
-
-    if (rows.length === 0) {
-      deleteTempFile(tempId);
-      return NextResponse.json({ error: "没有可导入的数据行" }, { status: 400 });
     }
 
     // Required user-mapped fields (skip fields with auto-fallback, e.g. brand / affiliatePlatform / commissionRate).
@@ -166,6 +143,20 @@ export async function POST(req: Request) {
       );
     }
 
+    // Keep a single reference to the raw file buffer. parseSheetChunks avoids
+    // the former ArrayBuffer copy and does not materialize a second full-file
+    // Row[] allocation.
+    const rawFile = await readTempFile(tempId);
+    if (!rawFile) {
+      return NextResponse.json(
+        {
+          error:
+            "上传会话已过期或无效，请重新选择文件并映射字段后再次导入",
+        },
+        { status: 400 },
+      );
+    }
+
     const affMap = new Map<
       string,
       { type: string; internalName: string | null }
@@ -190,59 +181,11 @@ export async function POST(req: Request) {
       });
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const records: any[] = [];
     const skipped: number[] = [];
-
     const customerBrandName = customer?.brandName ?? null;
-    for (let i = 0; i < rows.length; i++) {
-      const result = convertRow(rows[i], mapping, platform, customerId, customerBrandName);
-      if (!result) {
-        skipped.push(i + 2);
-        continue;
-      }
-      const r = result.record;
-
-      // Brand fallback to customer.
-      if (!r.brand && customer) r.brand = customer.brandName ?? "";
-
-      // Affiliate type / internal name lookup.
-      const affKey = (r.affiliateName ?? "").toLowerCase().trim();
-      if (affKey) {
-        const a = affMap.get(affKey);
-        if (a) {
-          r.affiliateType = a.type;
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (r as any).internalAffiliateName = a.internalName;
-        }
-      }
-
-      // Parent Asin / Store-Product Label lookup.
-      const asinKey = [r.brand, r.store, r.region, r.asin]
-        .map((x) => (x ?? "").toString().trim().toLowerCase())
-        .join("||");
-      const am = asinMap.get(asinKey);
-      if (am) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (r as any).parentAsin = am.parentAsin;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (r as any).storeProductLabel = am.storeProductLabel;
-      }
-
-      records.push(r);
-    }
-
-    if (records.length === 0) {
-      deleteTempFile(tempId);
-      return NextResponse.json(
-        {
-          error:
-            "未能识别任何有效数据行。请确认「订单日期 / 联盟商名称 / 销售金额」列已正确映射且数据非空。",
-          skipped,
-        },
-        { status: 400 },
-      );
-    }
+    const importedAffiliateNames = new Map<string, string>();
+    let importedCount = 0;
+    let logicalRowIndex = 0;
 
     // Write batch + records in a single transaction for data consistency.
     // Chunk createMany to stay within DB variable-count limits (SQLite ≤ 32766).
@@ -258,16 +201,63 @@ export async function POST(req: Request) {
           },
         });
 
-        const withBatch = records.map((r) => ({ ...r, batchId: batch.id }));
-        for (let i = 0; i < withBatch.length; i += CHUNK_SIZE) {
-          await tx.salesRecord.createMany({
-            data: withBatch.slice(i, i + CHUNK_SIZE),
-          });
+        for (const rawRows of parseSheetChunks(rawFile, PARSE_CHUNK_SIZE)) {
+          const pendingRecords = [];
+          for (const rawRow of rawRows) {
+            const sourceRowNumber = logicalRowIndex + 2;
+            logicalRowIndex += 1;
+            const result = convertRow(
+              rawRow,
+              mapping,
+              platform,
+              customerId,
+              customerBrandName,
+            );
+            if (!result) {
+              skipped.push(sourceRowNumber);
+              continue;
+            }
+            const record = result.record;
+
+            if (!record.brand) record.brand = customer.brandName ?? "";
+
+            const affiliateName = (record.affiliateName ?? "").trim();
+            const affKey = affiliateName.toLowerCase();
+            if (affKey) {
+              importedAffiliateNames.set(affKey, affiliateName);
+              const affiliate = affMap.get(affKey);
+              if (affiliate) {
+                record.affiliateType = affiliate.type;
+                record.internalAffiliateName = affiliate.internalName;
+              }
+            }
+
+            const asinKey = [record.brand, record.store, record.region, record.asin]
+              .map((value) => (value ?? "").toString().trim().toLowerCase())
+              .join("||");
+            const asinMapping = asinMap.get(asinKey);
+            if (asinMapping) {
+              record.parentAsin = asinMapping.parentAsin;
+              record.storeProductLabel = asinMapping.storeProductLabel;
+            }
+
+            pendingRecords.push({ ...record, batchId: batch.id });
+          }
+
+          for (let index = 0; index < pendingRecords.length; index += CHUNK_SIZE) {
+            const chunk = pendingRecords.slice(index, index + CHUNK_SIZE);
+            await tx.salesRecord.createMany({ data: chunk });
+            importedCount += chunk.length;
+          }
+        }
+
+        if (importedCount === 0) {
+          throw new Error("NO_VALID_SALES_ROWS");
         }
 
         await tx.salesBatch.update({
           where: { id: batch.id },
-          data: { recordCount: records.length },
+          data: { recordCount: importedCount },
         });
 
         await tx.adminAuditLog.create({
@@ -278,11 +268,11 @@ export async function POST(req: Request) {
             targetType: "SalesBatch",
             targetId: batch.id,
             targetLabel: fileName || platform || null,
-            summary: `导入 BI 销售数据 ${records.length} 条`,
+            summary: `导入 BI 销售数据 ${importedCount} 条`,
             metadataJson: JSON.stringify({
               customerId,
               platform,
-              importedCount: records.length,
+              importedCount,
               skippedCount: skipped.length,
             }),
           },
@@ -290,39 +280,36 @@ export async function POST(req: Request) {
 
         return batch.id;
       },
-      { timeout: 120_000 }, // 2 min — full xlsx parse now happens in upload step
+      // Large imports can legitimately need more than two minutes on the
+      // production 2 GB host. Keep this below the route's five-minute limit.
+      { timeout: 270_000 },
     );
 
-    // Clean up temp file after successful import.
+    // Clean up temp file only after the atomic sales transaction succeeds.
     deleteTempFile(tempId);
 
     // Auto-add unknown affiliates to the library (status: 待开发)
     let newAffiliateCount = 0;
     try {
-      const uniqueNames = [...new Set(records.map((r) => r.affiliateName as string).filter(Boolean))];
-      if (uniqueNames.length > 0) {
-        const existing = await prisma.affiliate.findMany({
-          where: { platformAffiliateName: { in: uniqueNames }, deletedAt: null },
-          select: { platformAffiliateName: true },
-        });
-        const existingSet = new Set(existing.map((a) => a.platformAffiliateName));
-        const toCreate = uniqueNames.filter((n) => !existingSet.has(n));
-        if (toCreate.length > 0) {
-          for (const name of toCreate) {
-            try {
-              await prisma.affiliate.create({
-                data: {
-                  platformAffiliateName: name,
-                  developmentStatus: "待开发 Not Yet Contacted",
-                  affiliateType: "待定",
-                  tags: "[]",
-                },
-              });
-              newAffiliateCount++;
-            } catch {
-              // Another import may have created the affiliate after our lookup.
-            }
-          }
+      const toCreate = [...importedAffiliateNames]
+        .filter(([normalizedName]) => !affMap.has(normalizedName))
+        .map(([, name]) => ({
+          platformAffiliateName: name,
+          developmentStatus: "待开发 Not Yet Contacted",
+          affiliateType: "待定",
+          tags: "[]",
+        }));
+      if (toCreate.length > 0) {
+        // One bulk insert replaces a network/SQLite round trip per affiliate.
+        // Affiliate currently has no unique-name constraint, so createMany is
+        // equivalent to the previous pre-checked sequential create loop.
+        const result = await prisma.affiliate.createMany({ data: toCreate });
+        newAffiliateCount = result.count;
+        for (const affiliate of toCreate) {
+          affMap.set(affiliate.platformAffiliateName.toLowerCase().trim(), {
+            type: affiliate.affiliateType,
+            internalName: null,
+          });
         }
       }
     } catch (e) {
@@ -331,13 +318,22 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({
-      imported: records.length,
+      imported: importedCount,
       skipped,
       errors: [],
       batchId,
       newAffiliateCount,
     });
   } catch (err) {
+    if (err instanceof Error && err.message === "NO_VALID_SALES_ROWS") {
+      return NextResponse.json(
+        {
+          error:
+            "未能识别任何有效数据行。请确认「订单日期 / 联盟商名称 / 销售金额」列已正确映射且数据非空。",
+        },
+        { status: 400 },
+      );
+    }
     return errorResponse(err, "sales.upload");
   }
 }

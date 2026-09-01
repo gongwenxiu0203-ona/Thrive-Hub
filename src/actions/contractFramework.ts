@@ -47,7 +47,18 @@ export async function createFrameworkContract(form: FormData): Promise<Result> {
     const templateId = text(form, "templateId");
     const template = templateId ? await prisma.contractTemplate.findFirst({ where: { id: templateId, documentType: "FRAMEWORK_MASTER", deletedAt: null }, select: { id: true } }) : null;
     if (createFromTemplate && !template) return { ok: false, error: "请先上传并选择主格式合同模板" };
-    if (!customerId || !partyA || !partyB || !accountIds.length) return { ok: false, error: "请填写甲方公司并选择客户、乙方主体及至少一个收款账户" };
+    const missingBasics = [
+      !customerId ? "关联客户" : null,
+      !partyA ? "甲方公司名称/发票抬头" : null,
+      !partyB ? "乙方签约主体" : null,
+      !accountIds.length ? "乙方收款账户" : null,
+    ].filter((value): value is string => Boolean(value));
+    if (missingBasics.length) {
+      return { ok: false, error: `以下必填信息未随表单提交：${missingBasics.join("、")}。请核对后重试` };
+    }
+    // The combined diagnostic above also guarantees this branch; keep the
+    // explicit guard so TypeScript narrows the selected company below.
+    if (!partyB) return { ok: false, error: "请选择有效乙方签约主体" };
     if (!createFromTemplate) {
       const masterFields = Object.fromEntries(["partyA", "partyACreditCode", "partyAAddress", "partyAContact", "partyAEmail", "partyAPhone", "partyBCompany", "partyBContact", "partyBEmail", "partyBPhone"].map(key => [key, text(form, key)]));
       const missing = frameworkMissingFields(masterFields, accountIds.length);

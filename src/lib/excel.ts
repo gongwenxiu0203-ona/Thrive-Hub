@@ -1,17 +1,22 @@
 import * as XLSX from "xlsx";
 
 export type Row = Record<string, string | number | boolean | null>;
+export type SheetInput = ArrayBuffer | Uint8Array;
 
-function isBinaryWorkbook(buffer: ArrayBuffer): boolean {
-  const bytes = new Uint8Array(buffer);
+function asBytes(buffer: SheetInput): Uint8Array {
+  return buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : buffer;
+}
+
+function isBinaryWorkbook(buffer: SheetInput): boolean {
+  const bytes = asBytes(buffer);
   const isZip = bytes[0] === 0x50 && bytes[1] === 0x4b;
   const isOle = bytes[0] === 0xd0 && bytes[1] === 0xcf
     && bytes[2] === 0x11 && bytes[3] === 0xe0;
   return isZip || isOle;
 }
 
-function decodeDelimitedText(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
+function decodeDelimitedText(buffer: SheetInput): string {
+  const bytes = asBytes(buffer);
   if (bytes[0] === 0xff && bytes[1] === 0xfe) {
     return new TextDecoder("utf-16le").decode(bytes);
   }
@@ -28,7 +33,7 @@ function decodeDelimitedText(buffer: ArrayBuffer): string {
 }
 
 function readWorkbook(
-  buffer: ArrayBuffer,
+  buffer: SheetInput,
   options: { sheetRows?: number } = {},
 ) {
   return isBinaryWorkbook(buffer)
@@ -86,25 +91,89 @@ function transposeVertical(raw: unknown[][]): Row {
  *    - Horizontal table format: row 1 = headers, rows 2+ = one customer each
  *    - Vertical form format: col A = field label, col B = value (single customer)
  */
-export function parseSheet(buffer: ArrayBuffer): Row[] {
+export function parseSheet(buffer: SheetInput): Row[] {
+  return Array.from(parseSheetChunks(buffer)).flat();
+}
+
+/**
+ * Parse the first worksheet in bounded row chunks.
+ *
+ * `XLSX.read` still has to inflate an xlsx workbook, but this avoids creating
+ * one additional object for every worksheet row at the same time. Large BI
+ * imports can consume each yielded chunk and release it before reading the
+ * next one instead of retaining a second full-file `Row[]` allocation.
+ */
+export function* parseSheetChunks(
+  buffer: SheetInput,
+  chunkSize = 1_000,
+): Generator<Row[], void, void> {
   const wb = readWorkbook(buffer);
   const sheetName = wb.SheetNames[0];
-  if (!sheetName) return [];
+  if (!sheetName) return;
   const sheet = wb.Sheets[sheetName];
+  const ref = sheet["!ref"];
+  if (!ref) return;
+  const fullRange = XLSX.utils.decode_range(ref);
 
-  // Read raw 2-D array first for format detection
-  const raw = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+  // Only inspect a small prefix for layout detection. The previous
+  // implementation materialized the entire worksheet as a 2-D array and then
+  // materialized it again as objects, which roughly doubled peak row memory.
+  const detectionRange = XLSX.utils.encode_range({
+    s: fullRange.s,
+    e: { c: fullRange.e.c, r: Math.min(fullRange.e.r, fullRange.s.r + 9) },
+  });
+  const sample = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
     header: 1,
     defval: "",
+    range: detectionRange,
   });
 
-  if (isVerticalForm(raw)) {
+  if (isVerticalForm(sample)) {
     // Single-customer vertical intake form → produce exactly one Row
-    return [transposeVertical(raw)];
+    const raw = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+      header: 1,
+      defval: "",
+    });
+    yield [transposeVertical(raw)];
+    return;
   }
 
-  // Standard horizontal table
-  return XLSX.utils.sheet_to_json<Row>(sheet, { defval: "", raw: false });
+  if (fullRange.e.r <= fullRange.s.r) return;
+
+  // Ask SheetJS to generate its canonical header names (including duplicate
+  // and blank-header suffixes) from just the header and first data row. This
+  // keeps field mappings identical to parseSheetSample().
+  const headerProbeRange = XLSX.utils.encode_range({
+    s: fullRange.s,
+    e: { c: fullRange.e.c, r: Math.min(fullRange.e.r, fullRange.s.r + 1) },
+  });
+  const headerProbe = XLSX.utils.sheet_to_json<Row>(sheet, {
+    defval: "",
+    raw: false,
+    range: headerProbeRange,
+  });
+  const headers = Object.keys(headerProbe[0] ?? {});
+  if (headers.length === 0) return;
+
+  const safeChunkSize = Math.max(1, Math.floor(chunkSize));
+  for (
+    let startRow = fullRange.s.r + 1;
+    startRow <= fullRange.e.r;
+    startRow += safeChunkSize
+  ) {
+    const endRow = Math.min(fullRange.e.r, startRow + safeChunkSize - 1);
+    const range = XLSX.utils.encode_range({
+      s: { c: fullRange.s.c, r: startRow },
+      e: { c: fullRange.e.c, r: endRow },
+    });
+    const rows = XLSX.utils.sheet_to_json<Row>(sheet, {
+      header: headers,
+      defval: "",
+      raw: false,
+      range,
+    });
+    if (rows.length > 0) yield rows;
+  }
 }
 
 /**
@@ -121,7 +190,7 @@ export function parseSheet(buffer: ArrayBuffer): Row[] {
  * Step 2 (upload) can call parseSheet() for the full data.
  */
 export function parseSheetSample(
-  buffer: ArrayBuffer,
+  buffer: SheetInput,
   maxSampleRows = 5,
   fileName = "",
 ): { columns: string[]; sampleRows: Row[]; totalRows: number } {
@@ -162,8 +231,8 @@ export function parseSheetSample(
   return { columns, sampleRows: rows.slice(0, maxSampleRows), totalRows };
 }
 
-function countDelimitedDataRows(buffer: ArrayBuffer): number {
-  const bytes = new Uint8Array(buffer);
+function countDelimitedDataRows(buffer: SheetInput): number {
+  const bytes = asBytes(buffer);
   let text: string;
   if (bytes[0] === 0xff && bytes[1] === 0xfe) {
     text = new TextDecoder("utf-16le").decode(bytes);
