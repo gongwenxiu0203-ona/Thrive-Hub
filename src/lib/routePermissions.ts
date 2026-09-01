@@ -82,10 +82,12 @@ export function routeRequirement(
   if (startsWithRoute(pathname, "/invoices")) return { features: ["finance.invoices"] };
   if (startsWithRoute(pathname, "/operations")) {
     const tab = searchParams?.get("tab");
+    // Legacy receivables URL is retained only as a permission-safe redirect
+    // to the current finance workbench; the old page no longer exists.
+    if (tab === "ar") return { features: ["finance.receivables"] };
     const byTab: Record<string, string> = {
       revenue: "operations.revenue",
       count: "operations.customer_count",
-      ar: "finance.receivables",
       pipeline: "operations.sales_pipeline",
       kpi: "operations.employee_kpi",
     };
@@ -129,7 +131,7 @@ const LANDING_CANDIDATES = [
   ["/affiliates", ["affiliates.records"]],
   ["/finance", ["finance.customer_reconciliation", "finance.channel_reconciliation", "finance.affiliate_reconciliation"]],
   ["/invoices", ["finance.invoices"]],
-  ["/operations", ["operations.revenue", "operations.customer_count", "finance.receivables", "operations.sales_pipeline", "operations.employee_kpi"]],
+  ["/operations", ["operations.revenue", "operations.customer_count", "operations.sales_pipeline", "operations.employee_kpi"]],
   ["/reminders", ["reminders.records"]],
   ["/admin", [...ADMIN_FEATURES, "intake.review"]],
 ] as const;

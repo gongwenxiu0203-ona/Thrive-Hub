@@ -13,7 +13,6 @@ export const dynamic = "force-dynamic";
 const TAB_FEATURES = {
   revenue: "operations.revenue",
   count: "operations.customer_count",
-  ar: "finance.receivables",
   pipeline: "operations.sales_pipeline",
   kpi: "operations.employee_kpi",
 } as const;
@@ -29,32 +28,25 @@ export default async function FinanceOperationsPage({
   if (!isStaff(session.role)) redirect("/dashboard");
   const sp = await searchParams;
   const permissionEntries = await Promise.all(
-    Object.entries({
-      ...TAB_FEATURES,
-      invoices: "finance.invoices",
-    }).map(async ([key, feature]) => [
+    Object.entries(TAB_FEATURES).map(async ([key, feature]) => [
       key,
       await resolveUserPermission(session.userId, feature),
     ] as const),
   );
-  const permissions = Object.fromEntries(permissionEntries) as Record<
-    OperationsTab | "invoices",
-    PermLevel
-  >;
+  const permissions = Object.fromEntries(permissionEntries) as Record<OperationsTab, PermLevel>;
   const readableTabs = (Object.keys(TAB_FEATURES) as OperationsTab[]).filter(
     (tab) => hasPermissionLevel(permissions[tab], "READ"),
   );
-  if (readableTabs.length === 0 && !hasPermissionLevel(permissions.invoices, "READ")) {
-    redirect("/dashboard");
-  }
+  if (readableTabs.length === 0) redirect("/dashboard");
 
   const month = sp.month || currentMonthKey();
   const { start: monthStart, end: monthEnd } = monthRange(month);
   const requestedTab = sp.tab as OperationsTab | undefined;
+  if (sp.tab === "ar") redirect("/finance/workbench");
   const initialTab = requestedTab && readableTabs.includes(requestedTab)
     ? requestedTab
     : readableTabs[0];
-  if (!initialTab) redirect("/invoices");
+  if (!initialTab) redirect("/dashboard");
   if (requestedTab && requestedTab !== initialTab) {
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries(sp)) {
@@ -70,7 +62,7 @@ export default async function FinanceOperationsPage({
   const scopeView: "all" = "all";
   const needsSnapshots = initialTab === "revenue" || initialTab === "count";
 
-  const [snapshots, reconciliations, ars, pipelines, customers, users] = await Promise.all([
+  const [snapshots, reconciliations, pipelines, users] = await Promise.all([
     needsSnapshots ? prisma.clientRevenueSnapshot.findMany({
       where: { month },
       include: {
@@ -104,23 +96,11 @@ export default async function FinanceOperationsPage({
         actualSalesAmount: true,
       },
     }) : Promise.resolve([]),
-    initialTab === "ar" ? prisma.accountsReceivable.findMany({
-      include: {
-        customer: { select: { id: true, brandName: true } },
-        followOwner: { select: { id: true, name: true } },
-      },
-      orderBy: { dueDate: "asc" },
-    }) : Promise.resolve([]),
     initialTab === "pipeline" ? prisma.salesPipeline.findMany({
       include: { bdOwner: { select: { id: true, name: true } } },
       orderBy: { createdAt: "desc" },
     }) : Promise.resolve([]),
-    initialTab === "ar" ? prisma.customer.findMany({
-      where: { deletedAt: null },
-      select: { id: true, brandName: true },
-      orderBy: { brandName: "asc" },
-    }) : Promise.resolve([]),
-    (initialTab === "ar" || initialTab === "pipeline" || initialTab === "kpi") ? prisma.user.findMany({
+    (initialTab === "pipeline" || initialTab === "kpi") ? prisma.user.findMany({
       where: { role: { in: ["ADMIN", "USER"] }, status: "APPROVED" },
       select: { id: true, name: true },
       orderBy: { name: "asc" },
@@ -211,25 +191,6 @@ export default async function FinanceOperationsPage({
         signingCompany: s.signingCompany,
         receivingCompany: s.receivingCompany,
       }))}
-      ars={ars.map((a) => ({
-        id: a.id,
-        customerId: a.customerId,
-        customerName: a.customer?.brandName ?? "—",
-        invoiceNo: a.invoiceNo,
-        invoiceDate: a.invoiceDate.toISOString(),
-        invoiceAmount: a.invoiceAmount,
-        currency: a.currency,
-        exchangeRate: a.exchangeRate,
-        amountRmb: a.amountRmb,
-        receivedAmount: a.receivedAmount,
-        dueDate: a.dueDate.toISOString(),
-        actualReceivedDate: a.actualReceivedDate?.toISOString() ?? null,
-        status: a.status,
-        riskLevel: a.riskLevel,
-        followOwnerId: a.followOwnerId,
-        followOwnerName: a.followOwner?.name ?? "—",
-        remark: a.remark,
-      }))}
       pipelines={pipelines.map((p) => ({
         id: p.id,
         prospectName: p.prospectName,
@@ -248,7 +209,6 @@ export default async function FinanceOperationsPage({
         nextFollowUpAt: p.nextFollowUpAt?.toISOString() ?? null,
         remark: p.remark,
       }))}
-      customers={customers}
       users={users}
       countSummary={countSummary}
       kpiRows={kpiRows}

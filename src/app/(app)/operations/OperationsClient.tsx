@@ -4,8 +4,8 @@ import { useEffect, useState, useMemo, useTransition } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
-  Plus, RefreshCw, TrendingUp, Users, FileText, Target, Pencil, Trash2,
-  CheckCircle2, AlertTriangle, Award, ReceiptText,
+  Plus, RefreshCw, TrendingUp, Users, Target, Pencil, Trash2,
+  CheckCircle2, AlertTriangle, Award,
 } from "lucide-react";
 import { EmployeeKpiTab } from "./EmployeeKpiTab";
 import type { EmployeeKpiRow } from "@/actions/employeeKpi";
@@ -15,11 +15,10 @@ import { Modal } from "@/components/ui/Modal";
 import { cn, formatDate } from "@/lib/utils";
 import {
   STAGE_LABELS, STAGE_ORDER, CLIENT_STATUS_LABELS, REVENUE_GRADE_COLORS,
-  AR_STATUS_LABELS, AR_STATUS_COLORS, AR_RISK_COLORS,
 } from "@/lib/financeOperations";
 import {
   generateMonthlySnapshot, updateSnapshot,
-  deleteSnapshot, createAR, updateAR, deleteAR, refreshArRisks,
+  deleteSnapshot,
   createPipeline, updatePipelineStage, updatePipeline, deletePipeline,
 } from "@/actions/financeOperations";
 import { PERM_LEVELS, type PermLevel } from "@/lib/featurePermissions";
@@ -52,26 +51,6 @@ export type SnapshotRow = {
   receivingCompany: string | null;
 };
 
-export type ArRow = {
-  id: string;
-  customerId: string | null;
-  customerName: string;
-  invoiceNo: string;
-  invoiceDate: string;
-  invoiceAmount: number;
-  currency: string;
-  exchangeRate: number;
-  amountRmb: number;
-  receivedAmount: number;
-  dueDate: string;
-  actualReceivedDate: string | null;
-  status: string;
-  riskLevel: string;
-  followOwnerId: string | null;
-  followOwnerName: string;
-  remark: string | null;
-};
-
 export type PipelineRow = {
   id: string;
   prospectName: string;
@@ -99,7 +78,7 @@ type CountSummary = {
   gradeS: number; gradeA: number; gradeB: number; gradeC: number;
 };
 
-type Tab = "revenue" | "count" | "ar" | "pipeline" | "kpi";
+type Tab = "revenue" | "count" | "pipeline" | "kpi";
 
 function hasPermissionLevel(actual: PermLevel, required: PermLevel): boolean {
   return PERM_LEVELS.indexOf(actual) >= PERM_LEVELS.indexOf(required);
@@ -113,9 +92,7 @@ export function OperationsClient({
   initialTab,
   month,
   snapshots,
-  ars,
   pipelines,
-  customers,
   users,
   countSummary,
   kpiRows,
@@ -129,9 +106,7 @@ export function OperationsClient({
   initialTab: Tab;
   month: string;
   snapshots: SnapshotRow[];
-  ars: ArRow[];
   pipelines: PipelineRow[];
-  customers: Customer[];
   users: UserOption[];
   countSummary: CountSummary;
   kpiRows: EmployeeKpiRow[];
@@ -140,18 +115,17 @@ export function OperationsClient({
   kpiProjectId: string;
   kpiProjects: { id: string; name: string }[];
   kpiCustomers: Customer[];
-  permissions: Record<Tab | "invoices", PermLevel>;
+  permissions: Record<Tab, PermLevel>;
 }) {
   const router = useRouter();
   const sp = useSearchParams();
   const [tab, setTab] = useState<Tab>(initialTab);
-  const isReceivablesWorkbench = tab === "ar";
 
   useEffect(() => {
     setTab(initialTab);
   }, [initialTab]);
 
-  const canRead = (key: Tab | "invoices") =>
+  const canRead = (key: Tab) =>
     hasPermissionLevel(permissions[key], "READ");
   const canEdit = (key: Tab) =>
     hasPermissionLevel(permissions[key], "EDIT");
@@ -175,32 +149,23 @@ export function OperationsClient({
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <PageHeader
-          title={isReceivablesWorkbench ? "开票与收款" : "经营驾驶舱"}
-          description={isReceivablesWorkbench
-            ? "应收账款跟进、风险刷新与 Invoice 开具"
-            : "收入与现金流、客户经营、销售漏斗与项目 KPI"}
+          title="经营驾驶舱"
+          description="收入与现金流、客户经营、销售漏斗与项目 KPI"
         />
       </div>
 
       {/* Tabs */}
       <div className="tab-strip">
-        {(isReceivablesWorkbench ? ([
-          { key: "ar", label: "应收账款", icon: FileText },
-        ] as const) : ([
+        {([
           { key: "revenue", label: "收入与现金流", icon: TrendingUp },
           { key: "count", label: "客户经营", icon: Users },
-        ] as const)).filter((item) => canRead(item.key)).map((item) => (
+        ] as const).filter((item) => canRead(item.key)).map((item) => (
           <button key={item.key} onClick={() => setTabUrl(item.key)}
             className={cn("tab-trigger", tab === item.key && "tab-trigger-active")}>
             <item.icon className="h-4 w-4" /> {item.label}
           </button>
         ))}
-        {isReceivablesWorkbench && canRead("invoices") && (
-          <Link href="/invoices" className="tab-trigger">
-            <ReceiptText className="h-4 w-4" /> Invoice
-          </Link>
-        )}
-        {!isReceivablesWorkbench && ([
+        {([
           { key: "pipeline", label: "销售漏斗", icon: Target },
           { key: "kpi", label: "项目与 KPI", icon: Award },
         ] as const).filter((item) => canRead(item.key)).map((item) => (
@@ -215,9 +180,6 @@ export function OperationsClient({
       )}
       {tab === "count" && (
         <ClientCountTab summary={countSummary} month={month} onMonthChange={setMonth} />
-      )}
-      {tab === "ar" && (
-        <ARTab ars={ars} customers={customers} users={users} canEdit={canEdit("ar")} canManage={canManage("ar")} />
       )}
       {tab === "pipeline" && (
         <PipelineTab pipelines={pipelines} users={users} canEdit={canEdit("pipeline")} canManage={canManage("pipeline")} />
@@ -542,337 +504,6 @@ function ClientCountTab({
         </div>
       </div>
     </div>
-  );
-}
-
-// =============================================================================
-// Tab 3: Accounts Receivable
-// =============================================================================
-
-function ARTab({
-  ars, customers, users, canEdit, canManage,
-}: { ars: ArRow[]; customers: Customer[]; users: UserOption[]; canEdit: boolean; canManage: boolean }) {
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
-  const [showCreate, setShowCreate] = useState(false);
-  const [editing, setEditing] = useState<ArRow | null>(null);
-  const [filterCust, setFilterCust] = useState("");
-  const [filterMonth, setFilterMonth] = useState("");
-  const [filterRisk, setFilterRisk] = useState("");
-  const [filterOwner, setFilterOwner] = useState("");
-  const [notice, setNotice] = useState<{ type: "success" | "error"; text: string } | null>(null);
-
-  const filtered = useMemo(() => {
-    return ars.filter((a) => {
-      if (filterCust && a.customerId !== filterCust) return false;
-      if (filterRisk && a.riskLevel !== filterRisk) return false;
-      if (filterOwner && a.followOwnerId !== filterOwner) return false;
-      if (filterMonth) {
-        const d = a.invoiceDate.slice(0, 7); // YYYY-MM
-        if (d !== filterMonth) return false;
-      }
-      return true;
-    });
-  }, [ars, filterCust, filterMonth, filterRisk, filterOwner]);
-
-  const totals = useMemo(() => {
-    const totalInvoice = filtered.reduce((s, a) => s + a.amountRmb, 0);
-    const totalReceived = filtered.reduce((s, a) => s + (a.receivedAmount * (a.currency === "USD" ? a.exchangeRate : 1)), 0);
-    const totalUnreceived = totalInvoice - totalReceived;
-    const totalOverdue = filtered.filter((a) => a.status === "OVERDUE").reduce((s, a) => s + (a.amountRmb - a.receivedAmount * (a.currency === "USD" ? a.exchangeRate : 1)), 0);
-    const totalRed = filtered.filter((a) => a.riskLevel === "RED").reduce((s, a) => s + (a.amountRmb - a.receivedAmount * (a.currency === "USD" ? a.exchangeRate : 1)), 0);
-    return { totalInvoice, totalReceived, totalUnreceived, totalOverdue, totalRed };
-  }, [filtered]);
-
-  function onRefresh() {
-    setNotice(null);
-    startTransition(async () => {
-      try {
-        const result = await refreshArRisks();
-        if (!result.ok) {
-          setNotice({ type: "error", text: result.error ?? "刷新失败，请稍后重试" });
-          return;
-        }
-        setNotice({ type: "success", text: `风险状态刷新完成，更新 ${result.updated} 条记录` });
-        router.refresh();
-      } catch (error) {
-        console.error("Failed to refresh AR risks", error);
-        setNotice({ type: "error", text: "刷新失败，请稍后重试" });
-      }
-    });
-  }
-
-  function onDelete(id: string) {
-    if (!confirm("确认删除该应收账款记录？")) return;
-    setNotice(null);
-    startTransition(async () => {
-      try {
-        const result = await deleteAR(id);
-        if (!result.ok) {
-          setNotice({ type: "error", text: result.error ?? "删除失败，请稍后重试" });
-          return;
-        }
-        setNotice({ type: "success", text: "应收账款记录已删除" });
-        router.refresh();
-      } catch (error) {
-        console.error("Failed to delete accounts receivable", error);
-        setNotice({ type: "error", text: "删除失败，请稍后重试" });
-      }
-    });
-  }
-
-  return (
-    <div className="space-y-4">
-      <div className="card flex flex-wrap items-center gap-3 p-4">
-        <select className="input h-9 w-40 text-sm" value={filterCust} onChange={(e) => setFilterCust(e.target.value)}>
-          <option value="">全部客户</option>
-          {customers.map((c) => <option key={c.id} value={c.id}>{c.brandName}</option>)}
-        </select>
-        <input type="month" className="input h-9 w-36 text-sm" value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)} placeholder="开票月份" />
-        <select className="input h-9 w-32 text-sm" value={filterRisk} onChange={(e) => setFilterRisk(e.target.value)}>
-          <option value="">全部风险</option>
-          <option value="GREEN">绿色 — 正常</option>
-          <option value="YELLOW">黄色 — 轻度</option>
-          <option value="ORANGE">橙色 — 中度</option>
-          <option value="RED">红色 — 严重</option>
-        </select>
-        <select className="input h-9 w-32 text-sm" value={filterOwner} onChange={(e) => setFilterOwner(e.target.value)}>
-          <option value="">全部跟进人</option>
-          {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-        </select>
-        {canEdit && <button onClick={onRefresh} disabled={pending} className="btn-secondary text-sm">
-          <RefreshCw className={cn("h-4 w-4", pending && "animate-spin")} />刷新风险
-        </button>}
-        {canEdit && <button onClick={() => setShowCreate(true)} className="btn-primary ml-auto text-sm">
-          <Plus className="h-4 w-4" />新增应收
-        </button>}
-      </div>
-
-      {notice && (
-        <div className={cn("rounded-lg border px-3 py-2 text-sm", notice.type === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-rose-200 bg-rose-50 text-rose-700")}>
-          {notice.text}
-        </div>
-      )}
-
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <StatCard label="应收总额 (RMB)" value={`¥${totals.totalInvoice.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} />
-        <StatCard label="已收总额" value={`¥${totals.totalReceived.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} accent="text-emerald-600" />
-        <StatCard label="未收余额" value={`¥${totals.totalUnreceived.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} accent="text-amber-600" />
-        <StatCard label="超期金额" value={`¥${totals.totalOverdue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} accent="text-rose-600" />
-        <StatCard label="红色风险" value={`¥${totals.totalRed.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} accent="text-rose-700" />
-      </div>
-
-      <div className="card overflow-x-auto">
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="border-b border-slate-100 bg-slate-50 text-[11px] text-slate-500">
-              <th className="px-3 py-2 text-left font-medium">发票号</th>
-              <th className="px-3 py-2 text-left font-medium">客户</th>
-              <th className="px-3 py-2 text-left font-medium">开票日</th>
-              <th className="px-3 py-2 text-right font-medium">发票金额</th>
-              <th className="px-3 py-2 text-right font-medium">RMB</th>
-              <th className="px-3 py-2 text-right font-medium">已收</th>
-              <th className="px-3 py-2 text-right font-medium">未收</th>
-              <th className="px-3 py-2 text-left font-medium">到期日</th>
-              <th className="px-3 py-2 text-left font-medium">状态</th>
-              <th className="px-3 py-2 text-left font-medium">风险</th>
-              <th className="px-3 py-2 text-left font-medium">跟进人</th>
-              <th className="px-3 py-2"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.length === 0 ? (
-              <tr><td colSpan={12} className="py-10 text-center text-slate-400">暂无应收记录</td></tr>
-            ) : filtered.map((a) => {
-              const receivedRmb = a.receivedAmount * (a.currency === "USD" ? a.exchangeRate : 1);
-              const unreceived = a.amountRmb - receivedRmb;
-              return (
-                <tr key={a.id} className="border-b border-slate-50 hover:bg-slate-50/50">
-                  <td className="px-3 py-2 font-mono text-slate-700">{a.invoiceNo}</td>
-                  <td className="px-3 py-2 text-slate-800">
-                    {a.customerId ? <Link href={`/customers/${a.customerId}`} className="hover:text-brand-600 hover:underline">{a.customerName}</Link> : a.customerName}
-                  </td>
-                  <td className="px-3 py-2 text-slate-500">{formatDate(a.invoiceDate)}</td>
-                  <td className="px-3 py-2 text-right">{a.currency === "USD" ? "$" : "¥"}{a.invoiceAmount.toLocaleString()}</td>
-                  <td className="px-3 py-2 text-right">¥{a.amountRmb.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
-                  <td className="px-3 py-2 text-right text-emerald-600">¥{receivedRmb.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
-                  <td className={cn("px-3 py-2 text-right font-medium", unreceived > 0 ? "text-amber-600" : "text-slate-400")}>¥{unreceived.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
-                  <td className="px-3 py-2 text-slate-500">{formatDate(a.dueDate)}</td>
-                  <td className="px-3 py-2">
-                    <span className={cn("rounded-full px-2 py-0.5 text-[10px]", AR_STATUS_COLORS[a.status])}>{AR_STATUS_LABELS[a.status]}</span>
-                  </td>
-                  <td className="px-3 py-2">
-                    <span className={cn("inline-block h-3 w-3 rounded-full", AR_RISK_COLORS[a.riskLevel])} title={a.riskLevel}></span>
-                  </td>
-                  <td className="px-3 py-2 text-slate-600">{a.followOwnerName}</td>
-                  <td className="px-3 py-2 text-right">
-                    <span className="flex justify-end gap-1">
-                      {canEdit && <button onClick={() => setEditing(a)} className="rounded p-1 text-slate-300 hover:bg-slate-100 hover:text-slate-600">
-                        <Pencil className="h-3.5 w-3.5" />
-                      </button>}
-                      {canManage && (
-                        <button onClick={() => onDelete(a.id)} className="rounded p-1 text-slate-300 hover:bg-rose-50 hover:text-rose-500">
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      )}
-                    </span>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-
-      {showCreate && <ARCreateModal customers={customers} users={users} onClose={() => setShowCreate(false)} />}
-      {editing && <AREditModal ar={editing} users={users} onClose={() => setEditing(null)} />}
-    </div>
-  );
-}
-
-function ARCreateModal({ customers, users, onClose }: { customers: Customer[]; users: UserOption[]; onClose: () => void }) {
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
-  const [f, setF] = useState({
-    customerId: "", invoiceNo: "", invoiceDate: "", invoiceAmount: "",
-    currency: "USD" as "USD" | "RMB", exchangeRate: "7.2",
-    dueDate: "", followOwnerId: "", remark: "",
-  });
-  const [err, setErr] = useState<string | null>(null);
-
-  function set<K extends keyof typeof f>(k: K, v: typeof f[K]) { setF((p) => ({ ...p, [k]: v })); }
-
-  function onSubmit() {
-    setErr(null);
-    startTransition(async () => {
-      const r = await createAR({
-        customerId: f.customerId || null,
-        invoiceNo: f.invoiceNo,
-        invoiceDate: f.invoiceDate,
-        invoiceAmount: parseFloat(f.invoiceAmount),
-        currency: f.currency,
-        exchangeRate: parseFloat(f.exchangeRate),
-        dueDate: f.dueDate,
-        followOwnerId: f.followOwnerId || null,
-        remark: f.remark || null,
-      });
-      if (!r.ok) { setErr(r.error ?? "保存失败"); return; }
-      onClose(); router.refresh();
-    });
-  }
-
-  return (
-    <Modal open onClose={onClose} title="新增应收账款" size="md">
-        <div className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <label className="label">发票号 *</label>
-              <input className="input" value={f.invoiceNo} onChange={(e) => set("invoiceNo", e.target.value)} placeholder="INV-2026-001" />
-            </div>
-            <div>
-              <label className="label">客户</label>
-              <select className="input" value={f.customerId} onChange={(e) => set("customerId", e.target.value)}>
-                <option value="">未关联</option>
-                {customers.map((c) => <option key={c.id} value={c.id}>{c.brandName}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="label">开票日期 *</label>
-              <input type="date" className="input" value={f.invoiceDate} onChange={(e) => set("invoiceDate", e.target.value)} />
-            </div>
-            <div>
-              <label className="label">应收到期日 *</label>
-              <input type="date" className="input" value={f.dueDate} onChange={(e) => set("dueDate", e.target.value)} />
-            </div>
-            <div>
-              <label className="label">发票金额 *</label>
-              <input type="number" step="0.01" className="input" value={f.invoiceAmount} onChange={(e) => set("invoiceAmount", e.target.value)} />
-            </div>
-            <div>
-              <label className="label">货币</label>
-              <select className="input" value={f.currency} onChange={(e) => set("currency", e.target.value as "USD" | "RMB")}>
-                <option value="USD">USD</option><option value="RMB">RMB</option>
-              </select>
-            </div>
-            {f.currency === "USD" && (
-              <div>
-                <label className="label">USD→RMB 汇率</label>
-                <input type="number" step="0.01" className="input" value={f.exchangeRate} onChange={(e) => set("exchangeRate", e.target.value)} />
-              </div>
-            )}
-            <div>
-              <label className="label">跟进人</label>
-              <select className="input" value={f.followOwnerId} onChange={(e) => set("followOwnerId", e.target.value)}>
-                <option value="">未指定</option>
-                {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-              </select>
-            </div>
-          </div>
-          <div>
-            <label className="label">备注</label>
-            <textarea className="input min-h-[60px]" value={f.remark} onChange={(e) => set("remark", e.target.value)} />
-          </div>
-          {err && <div className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-sm text-rose-600">{err}</div>}
-          <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-            <button onClick={onClose} className="btn-secondary text-sm">取消</button>
-            <button onClick={onSubmit} disabled={pending} className="btn-primary text-sm">{pending ? "保存中…" : "新增"}</button>
-          </div>
-        </div>
-    </Modal>
-  );
-}
-
-function AREditModal({ ar, users, onClose }: { ar: ArRow; users: UserOption[]; onClose: () => void }) {
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
-  const [receivedAmount, setReceivedAmount] = useState(String(ar.receivedAmount));
-  const [actualReceivedDate, setActualReceivedDate] = useState(ar.actualReceivedDate?.slice(0, 10) ?? "");
-  const [followOwnerId, setFollowOwnerId] = useState(ar.followOwnerId ?? "");
-  const [remark, setRemark] = useState(ar.remark ?? "");
-  const [err, setErr] = useState<string | null>(null);
-
-  function onSave() {
-    startTransition(async () => {
-      const r = await updateAR(ar.id, {
-        receivedAmount: parseFloat(receivedAmount) || 0,
-        actualReceivedDate: actualReceivedDate || null,
-        followOwnerId: followOwnerId || null,
-        remark: remark || null,
-      });
-      if (!r.ok) { setErr(r.error ?? "保存失败"); return; }
-      onClose(); router.refresh();
-    });
-  }
-
-  return (
-    <Modal open onClose={onClose} title={<>编辑 {ar.invoiceNo}</>} size="sm">
-        <div className="space-y-4">
-          <div>
-            <label className="label">已收金额（{ar.currency}）</label>
-            <input type="number" step="0.01" className="input" value={receivedAmount} onChange={(e) => setReceivedAmount(e.target.value)} />
-          </div>
-          <div>
-            <label className="label">实际收款日期</label>
-            <input type="date" className="input" value={actualReceivedDate} onChange={(e) => setActualReceivedDate(e.target.value)} />
-          </div>
-          <div>
-            <label className="label">跟进人</label>
-            <select className="input" value={followOwnerId} onChange={(e) => setFollowOwnerId(e.target.value)}>
-              <option value="">未指定</option>
-              {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="label">备注</label>
-            <textarea className="input min-h-[60px]" value={remark} onChange={(e) => setRemark(e.target.value)} />
-          </div>
-          {err && <div className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-sm text-rose-600">{err}</div>}
-          <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-            <button onClick={onClose} className="btn-secondary text-sm">取消</button>
-            <button onClick={onSave} disabled={pending} className="btn-primary text-sm">{pending ? "保存中…" : "保存"}</button>
-          </div>
-        </div>
-    </Modal>
   );
 }
 

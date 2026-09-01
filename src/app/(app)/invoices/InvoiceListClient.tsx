@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { FileDown, FilePenLine, Plus, Search, Trash2, Upload } from "lucide-react";
+import { FileDown, FilePenLine, Plus, Trash2, Upload } from "lucide-react";
 import {
   setInvoiceStatus,
   softDeleteInvoice,
@@ -14,6 +14,9 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { cn } from "@/lib/utils";
 import { createReceivableForArchivedInvoice, uploadInvoiceArchive } from "@/actions/invoiceArchive";
+import { FilterBar, SearchFilter } from "@/components/ui/Filters";
+import { MultiSelectFilter } from "@/components/ui/MultiSelectFilter";
+import { useSearchParams } from "next/navigation";
 
 const STATUS_LABELS: Record<string, string> = {
   DRAFT: "草稿",
@@ -23,25 +26,44 @@ const STATUS_LABELS: Record<string, string> = {
 
 export function InvoiceListClient({
   invoices,
-  search,
-  status,
   canEdit,
   canManage,
   archiveOptions,
 }: {
   invoices: InvoiceListItem[];
-  search: string;
-  status: string;
   canEdit: boolean;
   canManage: boolean;
   archiveOptions: null | { customers: { id: string; brandName: string }[]; contracts: { id: string; customerId: string; contractNo: string }[] };
 }) {
   const router = useRouter();
+  const params = useSearchParams();
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState("");
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploadCustomerId, setUploadCustomerId] = useState("");
   const [receivableInvoiceId, setReceivableInvoiceId] = useState<string | null>(null);
+  const csv = (key: string) => (params.get(key) ?? "").split(",").map((value) => value.trim()).filter(Boolean);
+  const invoiceNos = csv("invoiceNo");
+  const customers = csv("customer");
+  const contracts = csv("contract");
+  const feeTypes = csv("feeType");
+  const invoiceDates = csv("invoiceDate");
+  const statuses = csv("status");
+  const query = (params.get("q") ?? "").trim().toLowerCase();
+  const filteredInvoices = invoices.filter((invoice) =>
+    (!invoiceNos.length || invoiceNos.includes(invoice.invoiceNo)) &&
+    (!customers.length || customers.includes(invoice.customerName)) &&
+    (!contracts.length || contracts.includes(invoice.contractNo ?? "")) &&
+    (!feeTypes.length || feeTypes.includes(invoice.feeType)) &&
+    (!invoiceDates.length || invoiceDates.includes(invoice.invoiceDate.slice(0, 10))) &&
+    (!statuses.length || statuses.includes(invoice.status)) &&
+    (!query || [invoice.invoiceNo, invoice.customerName, invoice.contractNo ?? ""].some((value) => value.toLowerCase().includes(query)))
+  );
+  const option = (values: string[], label?: (value: string) => string) => [...new Set(values.filter(Boolean))].sort().map((value) => ({ value, label: label?.(value) ?? value }));
+  const currencyTotals = [...filteredInvoices.reduce((totals, invoice) => {
+    for (const item of invoice.currencyTotals) totals.set(item.currency, (totals.get(item.currency) ?? 0) + item.amount);
+    return totals;
+  }, new Map<string, number>())].sort(([a], [b]) => a.localeCompare(b));
 
   function remove(id: string) {
     if (!window.confirm("确认将这张 Invoice 移入回收状态？历史业务数据不会立即清除。")) return;
@@ -75,7 +97,7 @@ export function InvoiceListClient({
     <div className="space-y-5">
       <PageHeader
         title="开票与收款"
-        description="统一查看 Invoice 与应收账款，跟进从开票到回款的完整流程。"
+        description="统一查看 Invoice 开具记录、文件与状态。"
         actions={(
           <div className="flex flex-wrap items-center gap-2">
             {canEdit && (
@@ -94,33 +116,19 @@ export function InvoiceListClient({
       <div className="border-b border-slate-200">
         <nav className="-mb-px flex gap-6" aria-label="开票与收款视图">
           <Link href="/invoices" aria-current="page" className="border-b-2 border-brand-600 pb-3 text-sm font-medium text-brand-700">Invoice</Link>
-          <Link href="/operations?tab=ar" className="border-b-2 border-transparent pb-3 text-sm font-medium text-slate-500 transition-colors hover:text-slate-700">应收账款</Link>
         </nav>
       </div>
 
 
-      <form className="filter-bar" action="/invoices" method="get">
-        <label className="relative min-w-[220px] flex-1">
-          <span className="sr-only">搜索 Invoice</span>
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <input
-            className="input pl-9"
-            name="search"
-            defaultValue={search}
-            placeholder="搜索 Invoice 编号、客户或合同"
-          />
-        </label>
-        <label>
-          <span className="sr-only">状态</span>
-          <select className="input min-w-36" name="status" defaultValue={status}>
-            <option value="">全部状态</option>
-            <option value="DRAFT">草稿</option>
-            <option value="ISSUED">已开具</option>
-            <option value="VOID">已作废</option>
-          </select>
-        </label>
-        <Button type="submit" variant="primary">筛选</Button>
-      </form>
+      <FilterBar>
+        <SearchFilter placeholder="搜索 Invoice 编号、客户或合同" />
+        <MultiSelectFilter paramKey="invoiceNo" placeholder="Invoice 编号" options={option(invoices.map((row) => row.invoiceNo))} />
+        <MultiSelectFilter paramKey="customer" placeholder="客户" options={option(invoices.map((row) => row.customerName))} />
+        <MultiSelectFilter paramKey="contract" placeholder="合同编号" options={option(invoices.map((row) => row.contractNo ?? ""))} />
+        <MultiSelectFilter paramKey="feeType" placeholder="费用类型" options={option(invoices.map((row) => row.feeType), (value) => value === "SALES_COMMISSION" ? "销售佣金" : value === "MIXED" ? "混合费用" : "月度服务费")} />
+        <MultiSelectFilter paramKey="invoiceDate" placeholder="Invoice 日期" options={option(invoices.map((row) => row.invoiceDate.slice(0, 10)))} />
+        <MultiSelectFilter paramKey="status" placeholder="状态" options={option(invoices.map((row) => row.status), (value) => STATUS_LABELS[value] ?? value)} />
+      </FilterBar>
 
       {message && (
         <div role="status" className="rounded-lg border border-[#e7e0ef] bg-white px-4 py-3 text-sm text-slate-700">
@@ -128,7 +136,7 @@ export function InvoiceListClient({
         </div>
       )}
 
-      {invoices.length === 0 ? (
+      {filteredInvoices.length === 0 ? (
         <EmptyState
           title="暂无 Invoice"
           description="选择客户和合同后创建第一张 Invoice。"
@@ -153,7 +161,7 @@ export function InvoiceListClient({
               </tr>
             </thead>
             <tbody>
-              {invoices.map((invoice) => (
+              {filteredInvoices.map((invoice) => (
                 <tr key={invoice.id}>
                   <td>
                     <Link href={`/invoices/${invoice.id}`} className="font-medium text-brand-700 hover:underline">
@@ -235,6 +243,13 @@ export function InvoiceListClient({
             </tbody>
           </table>
         </div>
+      )}
+
+      {currencyTotals.length > 0 && (
+        <section className="flex flex-wrap items-center justify-end gap-x-6 gap-y-2 rounded-xl border border-slate-200 bg-white px-4 py-3" aria-label="当前筛选结果金额汇总">
+          <span className="text-sm text-slate-500">当前筛选结果 · {filteredInvoices.length} 张 Invoice</span>
+          {currencyTotals.map(([currency, amount]) => <span key={currency} className="text-sm font-semibold tabular-nums text-slate-900">{currency} {amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>)}
+        </section>
       )}
 
       {uploadOpen && archiveOptions && (

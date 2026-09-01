@@ -7,7 +7,7 @@ import type { PermLevel } from "@/lib/featurePermissions";
 import { hasPermissionLevel } from "@/lib/permissionGuard";
 import { resolveUserPermission } from "@/lib/permissionResolver";
 import {
-  calcRevenueGrade, calcArStatus, calcArRiskLevel,
+  calcRevenueGrade,
   probabilityForStage, currentMonthKey,
 } from "@/lib/financeOperations";
 import { activeSalesRecordWhere } from "@/lib/activeSalesScope";
@@ -17,7 +17,7 @@ export type SaveResult = { ok: boolean; error?: string; id?: string };
 
 async function canOperate(
   userId: string,
-  feature: "operations.revenue" | "finance.receivables" | "operations.sales_pipeline",
+  feature: "operations.revenue" | "operations.sales_pipeline",
   required: Exclude<PermLevel, "NONE">,
 ) {
   return hasPermissionLevel(await resolveUserPermission(userId, feature), required);
@@ -232,163 +232,6 @@ export async function deleteSnapshot(id: string): Promise<SaveResult> {
   revalidatePath("/operations");
   revalidatePath("/dashboard");
   return { ok: true, id };
-}
-
-// =============================================================================
-// Accounts Receivable
-// =============================================================================
-
-export async function createAR(payload: {
-  customerId?: string | null;
-  invoiceNo: string;
-  invoiceDate: string;
-  invoiceAmount: number;
-  currency: "USD" | "RMB";
-  exchangeRate?: number;
-  receivedAmount?: number;
-  dueDate: string;
-  actualReceivedDate?: string | null;
-  followOwnerId?: string | null;
-  remark?: string | null;
-}): Promise<SaveResult> {
-  const session = await requireSession();
-  if (!(await canOperate(session.userId, "finance.receivables", "EDIT"))) return { ok: false, error: "无权操作" };
-  if (!payload.invoiceNo?.trim()) return { ok: false, error: "请填写发票号" };
-  if (!payload.invoiceDate) return { ok: false, error: "请选择开票日期" };
-  if (!payload.dueDate) return { ok: false, error: "请选择应收到期日" };
-  if (!(payload.invoiceAmount > 0)) return { ok: false, error: "发票金额需大于 0" };
-  if (payload.customerId) {
-    const customer = await prisma.customer.findFirst({
-      where: { id: payload.customerId, deletedAt: null },
-      select: { id: true },
-    });
-    if (!customer) return { ok: false, error: "所选客户不存在或已删除" };
-  }
-  if (payload.followOwnerId) {
-    const owner = await prisma.user.findFirst({
-      where: {
-        id: payload.followOwnerId,
-        status: "APPROVED",
-        role: { in: ["ADMIN", "USER"] },
-      },
-      select: { id: true },
-    });
-    if (!owner) return { ok: false, error: "所选跟进负责人不可用" };
-  }
-
-  const exchangeRate = payload.exchangeRate && payload.exchangeRate > 0
-    ? payload.exchangeRate
-    : (payload.currency === "USD" ? DEFAULT_USD_RMB : 1);
-  const amountRmb = payload.currency === "USD" ? payload.invoiceAmount * exchangeRate : payload.invoiceAmount;
-  const dueDate = new Date(payload.dueDate);
-  const receivedAmount = payload.receivedAmount ?? 0;
-  const actualReceivedDate = payload.actualReceivedDate ? new Date(payload.actualReceivedDate) : null;
-  const row = { invoiceAmount: payload.invoiceAmount, receivedAmount, dueDate, actualReceivedDate };
-  const status = calcArStatus(row);
-  const riskLevel = calcArRiskLevel(row);
-
-  // Unique invoice number guard
-  const dup = await prisma.accountsReceivable.findUnique({ where: { invoiceNo: payload.invoiceNo } });
-  if (dup) return { ok: false, error: "发票号已存在" };
-
-  const ar = await prisma.accountsReceivable.create({
-    data: {
-      customerId: payload.customerId || null,
-      invoiceNo: payload.invoiceNo.trim(),
-      invoiceDate: new Date(payload.invoiceDate),
-      invoiceAmount: payload.invoiceAmount,
-      currency: payload.currency,
-      exchangeRate,
-      amountRmb,
-      receivedAmount,
-      dueDate,
-      actualReceivedDate,
-      status,
-      riskLevel,
-      followOwnerId: payload.followOwnerId || null,
-      remark: payload.remark || null,
-    },
-  });
-  revalidatePath("/operations");
-  void session;
-  return { ok: true, id: ar.id };
-}
-
-export async function updateAR(
-  id: string,
-  patch: {
-    receivedAmount?: number;
-    actualReceivedDate?: string | null;
-    followOwnerId?: string | null;
-    remark?: string | null;
-  },
-): Promise<SaveResult> {
-  const session = await requireSession();
-  if (!(await canOperate(session.userId, "finance.receivables", "EDIT"))) return { ok: false, error: "无权操作" };
-  const existing = await prisma.accountsReceivable.findUnique({ where: { id } });
-  if (!existing) return { ok: false, error: "记录不存在" };
-
-  const receivedAmount = patch.receivedAmount ?? existing.receivedAmount;
-  const actualReceivedDate = patch.actualReceivedDate !== undefined
-    ? (patch.actualReceivedDate ? new Date(patch.actualReceivedDate) : null)
-    : existing.actualReceivedDate;
-  const row = {
-    invoiceAmount: existing.invoiceAmount,
-    receivedAmount,
-    dueDate: existing.dueDate,
-    actualReceivedDate,
-  };
-  const status = calcArStatus(row);
-  const riskLevel = calcArRiskLevel(row);
-  await prisma.accountsReceivable.update({
-    where: { id },
-    data: {
-      receivedAmount,
-      actualReceivedDate,
-      status,
-      riskLevel,
-      followOwnerId: patch.followOwnerId ?? existing.followOwnerId,
-      remark: patch.remark ?? existing.remark,
-    },
-  });
-  revalidatePath("/operations");
-  void session;
-  return { ok: true, id };
-}
-
-export async function deleteAR(id: string): Promise<SaveResult> {
-  const session = await requireSession();
-  if (!(await canOperate(session.userId, "finance.receivables", "MANAGE"))) return { ok: false, error: "无权删除应收账款" };
-  const deleted = await prisma.accountsReceivable.deleteMany({ where: { id } });
-  if (deleted.count === 0) return { ok: false, error: "应收账款记录不存在或已被删除" };
-  revalidatePath("/operations");
-  return { ok: true, id };
-}
-
-/** Bulk recalculate status + riskLevel for every AR row using today as the reference date. */
-export async function refreshArRisks(): Promise<{ ok: boolean; updated: number; error?: string }> {
-  const session = await requireSession();
-  if (!(await canOperate(session.userId, "finance.receivables", "EDIT"))) {
-    return { ok: false, updated: 0, error: "无权刷新应收账款风险，请联系管理员授予应收账款编辑权限" };
-  }
-  const all = await prisma.accountsReceivable.findMany();
-  let updated = 0;
-  for (const a of all) {
-    const row = {
-      invoiceAmount: a.invoiceAmount,
-      receivedAmount: a.receivedAmount,
-      dueDate: a.dueDate,
-      actualReceivedDate: a.actualReceivedDate,
-    };
-    const status = calcArStatus(row);
-    const riskLevel = calcArRiskLevel(row);
-    if (status !== a.status || riskLevel !== a.riskLevel) {
-      await prisma.accountsReceivable.update({ where: { id: a.id }, data: { status, riskLevel } });
-      updated++;
-    }
-  }
-  revalidatePath("/operations");
-  return { ok: true, updated };
 }
 
 // =============================================================================
