@@ -98,5 +98,9 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  // The BI parse route authenticates and authorizes inside the route itself.
+  // Excluding it here is intentional: Next middleware buffers/replays request
+  // bodies, which breaks true streaming and can make a valid ~78 MiB workbook
+  // appear larger than the application limit.
+  matcher: ["/((?!api/sales/parse|_next/static|_next/image|favicon.ico).*)"],
 };

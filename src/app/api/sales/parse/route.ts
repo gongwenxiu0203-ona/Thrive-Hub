@@ -48,7 +48,7 @@ async function streamRequestToTempFile(
 
   const declaredSize = Number(req.headers.get("content-length") || 0);
   if (Number.isFinite(declaredSize) && declaredSize > MAX_UPLOAD_BYTES) {
-    throw new Error("UPLOAD_TOO_LARGE");
+    throw new Error(`UPLOAD_TOO_LARGE:${declaredSize}:0`);
   }
 
   const handle = await open(tempPath, "wx");
@@ -59,7 +59,9 @@ async function streamRequestToTempFile(
       const { done, value } = await reader.read();
       if (done) break;
       received += value.byteLength;
-      if (received > MAX_UPLOAD_BYTES) throw new Error("UPLOAD_TOO_LARGE");
+      if (received > MAX_UPLOAD_BYTES) {
+        throw new Error(`UPLOAD_TOO_LARGE:${declaredSize || 0}:${received}`);
+      }
       await handle.write(value);
     }
     if (received === 0) throw new Error("EMPTY_UPLOAD_BODY");
@@ -124,9 +126,15 @@ export async function POST(req: Request) {
       ) as ArrayBuffer;
     } catch (error) {
       await unlink(tempPath).catch(() => {});
-      if (error instanceof Error && error.message === "UPLOAD_TOO_LARGE") {
+      if (error instanceof Error && error.message.startsWith("UPLOAD_TOO_LARGE:")) {
+        const [, declared = "0", received = "0"] = error.message.split(":");
+        const observedBytes = Math.max(Number(declared) || 0, Number(received) || 0);
         return NextResponse.json(
-          { error: "文件超过 105 MB，请拆分文件后再上传" },
+          {
+            error: `服务器收到的上传请求为 ${(observedBytes / 1024 / 1024).toFixed(2)} MB，超过 105 MB 限制。请刷新页面后重试；若文件本身小于限制，请联系管理员并提供此数值。`,
+            declaredBytes: Number(declared) || 0,
+            receivedBytes: Number(received) || 0,
+          },
           { status: 413 },
         );
       }

@@ -27,13 +27,40 @@ export function FrameworkContractForm({ mode, existing, presetCustomerId, templa
     setPartyB(nextPartyB);
     setSelectedAccountIds(defaultContractAccountIds(accounts, nextPartyB));
   }
-  return <form className="card space-y-7 p-4 sm:p-6" action={(form) => startTransition(async () => {
+
+  function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formElement = event.currentTarget;
+    if (!formElement.reportValidity()) return;
+
+    // Snapshot the browser form synchronously. Passing React's action FormData
+    // into a deferred transition caused large multipart forms (notably the
+    // signed contract upload) to arrive at the server without their text and
+    // checkbox fields.
+    const form = new FormData(formElement);
+    if (!existing) {
+      const missing = [
+        !String(form.get("customerId") ?? "").trim() ? "关联客户" : null,
+        !String(form.get("partyA") ?? "").trim() ? "甲方公司名称/发票抬头" : null,
+        !String(form.get("partyBCompany") ?? "").trim() ? "乙方签约主体" : null,
+        form.getAll("receivingAccountIds").length === 0 ? "乙方收款账户" : null,
+      ].filter(Boolean);
+      if (missing.length) {
+        setError(`请补充：${missing.join("、")}`);
+        return;
+      }
+    }
+
+    startTransition(async () => {
     setError("");
     const result = await (existing ? updateFrameworkContract(form) : createFrameworkContract(form));
     if (!result.ok) return setError(result.error);
     router.push(`/contracts/${result.id}/confirmations`);
     router.refresh();
-  })}>
+    });
+  }
+
+  return <form className="card space-y-7 p-4 sm:p-6" onSubmit={submit} encType="multipart/form-data">
     <input type="hidden" name="flow" value={mode} />
     {existing && <><input type="hidden" name="contractId" value={existing.id} /><input type="hidden" name="expectedUpdatedAt" value={existing.updatedAt} /></>}
     <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-4"><div><h2 className="font-semibold text-slate-900">主合同资料</h2><p className="mt-1 max-w-2xl text-sm text-slate-500">两个入口使用同一套字段。合作范围、国家站点、平台及收费条款不在主合同重复填写。</p></div><a href="/contracts/templates?scope=brand" target="_blank" rel="noreferrer" className="text-sm text-brand-700 hover:underline">查看 / 上传品牌方模板 ↗</a></div>
