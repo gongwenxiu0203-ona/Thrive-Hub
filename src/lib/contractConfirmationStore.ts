@@ -67,7 +67,6 @@ async function storeOptions(tx: Prisma.TransactionClient, draft: ContractConfirm
 export async function saveConfirmationDraft(contractId: string, actorId: string, input: unknown, id?: string, version?: number, reason = "新建确认书草稿") {
   const draft = confirmationDraftSchema.parse(input);
   if (draft.contractId !== contractId) throw new AppError("确认书与主合同不匹配", 400);
-  if (!reason.trim() || reason.length > 2000) throw new AppError("请填写修改原因（最多2000字）", 400);
   return prisma.$transaction(async tx => {
     const contract = await tx.contract.findFirst({ where: { id: contractId, type: "BRAND", deletedAt: null, customer: { deletedAt: null } }, select: { id: true, contractNo: true } });
     if (!contract) throw new AppError("合同或客户不存在", 404);
@@ -77,6 +76,8 @@ export async function saveConfirmationDraft(contractId: string, actorId: string,
     const number = existing?.number ?? nextConfirmationNumber(contract.contractNo, (await tx.contractProjectConfirmation.findMany({ where: { number: { startsWith: `${contract.contractNo}-` } }, select: { number: true } })).map(row => row.number));
     draft.title = number;
     const data = { title: number, startDate: draft.startDate ? new Date(draft.startDate + "T00:00:00Z") : null, endDate: draft.endDate ? new Date(draft.endDate + "T00:00:00Z") : null, details: confirmationDraftSnapshot(draft) };
+    if (existing && existing.details === data.details) return decodeConfirmation(existing);
+    if (!reason.trim() || reason.length > 2000) throw new AppError("请填写修改原因（最多2000字）", 400);
     let confirmation;
     if (id) {
       const signedContentChanged = Boolean(existing?.signedFileUrl && existing.details !== data.details);
@@ -102,13 +103,14 @@ export async function saveConfirmationReplacementDraft(
 ) {
   const draft = confirmationDraftSchema.parse(input);
   if (draft.contractId !== contractId) throw new AppError("确认书与主合同不匹配", 400);
-  if (!reason.trim() || reason.length > 2000) throw new AppError("请填写替换原因（最多2000字）", 400);
   return prisma.$transaction(async (tx) => {
     const current = await tx.contractProjectConfirmation.findFirst({ where: { id: confirmationId, contractId, status: "EFFECTIVE" } });
     if (!current) throw new AppError("只有已签署生效的确认书可以建立替换版本", 409);
     if (current.pendingVersion !== pendingVersion) throw new AppError("替换草稿已被其他人修改，请刷新后重试", 409);
     await validateAccounts(tx, contractId, draft);
     const details = confirmationDraftSnapshot({ ...draft, title: current.number });
+    if (current.pendingDetails === details) return decodeConfirmation(current);
+    if (!reason.trim() || reason.length > 2000) throw new AppError("请填写替换原因（最多2000字）", 400);
     const contentChanged = Boolean(current.pendingSignedFileUrl && current.pendingDetails !== details);
     const updated = await tx.contractProjectConfirmation.updateMany({
       where: { id: confirmationId, contractId, status: "EFFECTIVE", pendingVersion },
