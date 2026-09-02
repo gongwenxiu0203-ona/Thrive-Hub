@@ -88,6 +88,7 @@ export async function saveConfirmationDraft(contractId: string, actorId: string,
       confirmation = await tx.contractProjectConfirmation.create({ data: { ...data, contractId, number, createdById: actorId } });
     }
     await tx.contractConfirmationVersion.create({ data: { confirmationId: confirmation.id, version: confirmation.version, snapshot: JSON.stringify({ schemaVersion: 1, data: draft, signedFileUrl: confirmation.signedFileUrl }), reason: reason.trim(), actorId } });
+    await tx.financeAuditLog.create({ data: { entityType: "CONTRACT_CONFIRMATION", entityId: confirmation.id, action: "SAVE_CONFIRMATION_DRAFT", actorId, note: reason.trim(), metadata: JSON.stringify({ contractId, version: confirmation.version, created: !existing }) } });
     // Draft ranges remain in immutable version snapshots. The activation service
     // materializes current scope rows once, so historical scopes are never erased.
     await storeOptions(tx, draft, actorId);

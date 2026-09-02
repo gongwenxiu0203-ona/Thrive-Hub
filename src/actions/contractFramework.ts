@@ -38,6 +38,7 @@ export async function createFrameworkContract(form: FormData): Promise<Result> {
     if (!isStaff(session.role)) return { ok: false, error: "仅内部员工可以创建主格式合同" };
     const customerId = text(form, "customerId");
     const ownerId = text(form, "ownerId") || session.userId;
+    const reviewerId = text(form, "reviewerId");
     const partyBCompany = text(form, "partyBCompany") as PartyBCompanyKey;
     const partyA = text(form, "partyA");
     const partyB = Object.hasOwn(PARTY_B_COMPANIES, partyBCompany) ? PARTY_B_COMPANIES[partyBCompany] : null;
@@ -76,13 +77,15 @@ export async function createFrameworkContract(form: FormData): Promise<Result> {
         ? magic[0] === 0x50 && magic[1] === 0x4b
         : [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1].every((v, i) => magic[i] === v);
     if (!createFromTemplate && !valid) return { ok: false, error: "文件内容与扩展名不匹配" };
-    const [customer, owner, accounts] = await Promise.all([
+    const [customer, owner, reviewer, accounts] = await Promise.all([
       prisma.customer.findFirst({ where: { id: customerId, deletedAt: null, ...creationReferenceCustomerScope(session) }, select: { id: true } }),
       prisma.user.findFirst({ where: { id: ownerId, status: "APPROVED", role: { in: ["ADMIN", "USER"] } }, select: { id: true } }),
+      reviewerId ? prisma.user.findFirst({ where: { id: reviewerId, status: "APPROVED", role: { in: ["ADMIN", "USER"] } }, select: { id: true } }) : Promise.resolve(null),
       prisma.financeAccountProfile.findMany({ where: { id: { in: accountIds }, accountType: { in: ["COMPANY_PAYER", "COMPANY_BANK"] }, status: "ACTIVE" }, select: { id: true, name: true, legalEntity: true, accountName: true, accountNumber: true, bankName: true, swiftCode: true, bankAddress: true, routingNumber: true, payeeAddress: true, currency: true } }),
     ]);
     if (!customer) return { ok: false, error: "客户不存在或不在可选范围" };
     if (!owner) return { ok: false, error: "合同负责人不是有效内部用户" };
+    if (createFromTemplate && !reviewer) return { ok: false, error: "请选择有效的内部审核人" };
     if (accounts.length !== accountIds.length) return { ok: false, error: "部分收款账户已停用或不是公司账户，请重新选择" };
     const saved = createFromTemplate ? { fileUrl: null } : await saveUploadedFile(file as File);
     uploadedUrl = saved.fileUrl;
@@ -97,7 +100,7 @@ export async function createFrameworkContract(form: FormData): Promise<Result> {
           const contractNo = `${prefix}${String(max + 1).padStart(3, "0")}`;
           const contract = await tx.contract.create({ data: {
             contractNo, contractMode: "FRAMEWORK", customerId, type: "BRAND", status: createFromTemplate ? "DRAFT" : "COMPLETED",
-            ownerId, createdById: session.userId, fileUrl: saved.fileUrl, templateId: template?.id ?? null, uploadType: createFromTemplate ? null : "EXISTING",
+            ownerId, reviewerId: reviewer?.id ?? null, createdById: session.userId, fileUrl: saved.fileUrl, templateId: template?.id ?? null, uploadType: createFromTemplate ? "WEBSITE_CREATE" : "EXISTING",
             uploadArchiveMode: createFromTemplate ? null : "SIGNED_ARCHIVE", extractedBy: "MANUAL",
             partyA, partyACreditCode: text(form, "partyACreditCode") || null,
             partyAAddress: text(form, "partyAAddress") || null, partyAContact: text(form, "partyAContact") || null,
@@ -108,6 +111,7 @@ export async function createFrameworkContract(form: FormData): Promise<Result> {
             ...(saved.fileUrl ? { versions: { create: { versionNo: 1, fileUrl: saved.fileUrl, fileType: ext.slice(1), reason: "主格式合同签署原件归档", createdById: session.userId } } } : {}),
             receivingAccounts: { create: accounts.map((account, position) => ({ financeProfileId: account.id, snapshot: snapshotAccount(account), position })) },
           }, select: { id: true } });
+          await tx.financeAuditLog.create({ data: { entityType: "CONTRACT", entityId: contract.id, action: "CREATE_FRAMEWORK", fromStatus: null, toStatus: createFromTemplate ? "DRAFT" : "COMPLETED", actorId: session.userId, note: createFromTemplate ? "网站创建品牌方合同" : "上传已有品牌方合同并直接归档为签署完成", metadata: JSON.stringify({ reviewerId: reviewer?.id ?? null, flow: createFromTemplate ? "create" : "upload" }) } });
           return contract;
         });
         persisted = true;
@@ -134,7 +138,7 @@ export async function updateFrameworkContract(form: FormData): Promise<Result> {
     const { session, contract } = await authorizeConfirmation(id, "EDIT");
     await requireFeaturePermission(session, "contracts.create_upload", "EDIT");
     if (contract.contractMode !== "FRAMEWORK") return { ok: false, error: "历史合同请使用原字段编辑入口" };
-    if (contract.status !== "DRAFT") return { ok: false, error: "已签署主合同资料已冻结；如需变更，请通过附加条款或重新签署新版本" };
+    if (contract.status === "COMPLETED" && session.role !== "ADMIN") return { ok: false, error: "合同签署完成后仅管理员可以修改" };
     const reason = text(form, "changeReason");
     if (!reason || reason.length > 2000) return { ok: false, error: "请填写修改原因（最多2000字）" };
     const updatedAt = new Date(text(form, "expectedUpdatedAt"));
@@ -149,6 +153,8 @@ export async function updateFrameworkContract(form: FormData): Promise<Result> {
       if (!current) throw new Error("合同已被修改，请刷新后重试");
       const owner = await tx.user.findFirst({ where: { id: text(form, "ownerId"), status: "APPROVED", role: { in: ["ADMIN", "USER"] } }, select: { id: true } });
       if (!owner) throw new Error("请选择有效内部负责人");
+      const reviewer = await tx.user.findFirst({ where: { id: text(form, "reviewerId"), status: "APPROVED", role: { in: ["ADMIN", "USER"] } }, select: { id: true } });
+      if (!reviewer) throw new Error("请选择有效内部审核人");
       const accounts = await tx.financeAccountProfile.findMany({ where: { id: { in: accountIds }, status: "ACTIVE", accountType: { in: ["COMPANY_PAYER", "COMPANY_BANK"] } } });
       const retainedIds = new Set(current.receivingAccounts.flatMap(row => row.financeProfileId ? [row.financeProfileId] : []));
       const activeIds = new Set(accounts.map(account => account.id));
@@ -159,7 +165,7 @@ export async function updateFrameworkContract(form: FormData): Promise<Result> {
       const templateId = text(form, "templateId");
       if (templateId && !await tx.contractTemplate.findFirst({ where: { id: templateId, documentType: "FRAMEWORK_MASTER", deletedAt: null }, select: { id: true } })) throw new Error("所选主格式合同模板无效");
       const fields = {
-        ownerId: owner.id, templateId: templateId || null, partyA: text(form, "partyA"),
+        ownerId: owner.id, reviewerId: reviewer.id, templateId: templateId || null, partyA: text(form, "partyA"),
         partyACreditCode: text(form, "partyACreditCode") || null, partyAAddress: text(form, "partyAAddress") || null,
         partyAContact: text(form, "partyAContact") || null, partyAEmail: text(form, "partyAEmail") || null, partyAPhone: text(form, "partyAPhone") || null,
         partyBCompany, partyBCreditCode: partyB.creditCode, partyBLegalRep: partyB.legalRep, partyBAddress: partyB.address,
@@ -168,6 +174,9 @@ export async function updateFrameworkContract(form: FormData): Promise<Result> {
       };
       const changed = await tx.contract.updateMany({ where: { id, updatedAt, status: current.status, deletedAt: null }, data: fields });
       if (changed.count !== 1) throw new Error("合同已被修改，请刷新后重试");
+      if (current.status === "REVIEWING" && current.reviewerId !== reviewer.id) {
+        await tx.contractReview.updateMany({ where: { contractId: id, status: "PENDING" }, data: { reviewerId: reviewer.id } });
+      }
       // Existing selected accounts keep their original snapshot; only new selections take a new snapshot.
       // Detached historical snapshots remain archived even if their finance profile no longer exists.
       const removed = current.receivingAccounts.filter(row => row.financeProfileId && !accountIds.includes(row.financeProfileId));
@@ -180,7 +189,7 @@ export async function updateFrameworkContract(form: FormData): Promise<Result> {
           await tx.contractReceivingAccount.create({ data: { contractId: id, financeProfileId: account.id, snapshot: snapshotAccount(account), position } });
         }
       }
-      await tx.financeAuditLog.create({ data: { entityType: "CONTRACT", entityId: id, action: "UPDATE_FRAMEWORK", actorId: session.userId, note: reason, metadata: JSON.stringify({ before: Object.fromEntries(Object.keys(fields).map(key => [key, current[key as keyof typeof current]])), after: fields, previousAccounts: current.receivingAccounts, selectedAccountIds: accountIds }) } });
+      await tx.financeAuditLog.create({ data: { entityType: "CONTRACT", entityId: id, action: "UPDATE_FRAMEWORK", fromStatus: current.status, toStatus: current.status, actorId: session.userId, note: reason, metadata: JSON.stringify({ before: Object.fromEntries(Object.keys(fields).map(key => [key, current[key as keyof typeof current]])), after: fields, previousAccounts: current.receivingAccounts, selectedAccountIds: accountIds }) } });
     });
     revalidatePath("/contracts"); revalidatePath(`/contracts/${id}`); revalidatePath(`/contracts/${id}/confirmations`);
     return { ok: true, id };

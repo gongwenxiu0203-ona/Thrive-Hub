@@ -33,7 +33,7 @@ export async function POST(request: NextRequest, { params }: Context) {
   try {
     const { id } = await params;
     const { session, contract } = await authorizeConfirmation(id, "EDIT");
-    if (contract.contractMode !== "FRAMEWORK" || contract.status !== "DRAFT") throw new AppError("仅草稿主合同可上传盖章版完成签署", 409);
+    if (contract.contractMode !== "FRAMEWORK" || contract.status !== "SIGNING") throw new AppError("仅处于合同签署中的主合同可上传盖章版完成签署", 409);
     if (Number(request.headers.get("content-length")) > 21 * 1024 * 1024) throw new AppError("文件超过20MB限制", 400);
     const form = await request.formData();
     const confirmationIds = [...new Set(form.getAll("confirmationIds").map(String).map(value => value.trim()).filter(Boolean))];
@@ -52,9 +52,9 @@ export async function POST(request: NextRequest, { params }: Context) {
     uploaded = (await saveUploadedFile(file)).fileUrl;
     const fileUrl = uploaded;
     await prisma.$transaction(async tx => {
-      const current = await tx.contract.findFirst({ where: { id, deletedAt: null, contractMode: "FRAMEWORK", status: "DRAFT", updatedAt: expected }, select: { id: true } });
+      const current = await tx.contract.findFirst({ where: { id, deletedAt: null, contractMode: "FRAMEWORK", status: "SIGNING", updatedAt: expected }, select: { id: true } });
       if (!current) throw new AppError("合同已被修改，请刷新后重试", 409);
-      const updated = await tx.contract.updateMany({ where: { id, status: "DRAFT", updatedAt: expected, deletedAt: null }, data: { fileUrl, status: "COMPLETED", uploadArchiveMode: "SIGNED_ARCHIVE" } });
+      const updated = await tx.contract.updateMany({ where: { id, status: "SIGNING", updatedAt: expected, deletedAt: null }, data: { fileUrl, status: "COMPLETED", uploadArchiveMode: "SIGNED_ARCHIVE" } });
       if (updated.count !== 1) throw new AppError("合同已被修改，请刷新后重试", 409);
       const latest = await tx.contractVersion.aggregate({ where: { contractId: id }, _max: { versionNo: true } });
       await tx.contractVersion.create({ data: { contractId: id, versionNo: (latest._max.versionNo ?? 0) + 1, fileUrl, fileType: ext.slice(1), reason, createdById: session.userId } });
@@ -67,7 +67,7 @@ export async function POST(request: NextRequest, { params }: Context) {
           await tx.contractConfirmationVersion.create({ data: { confirmationId: confirmation.id, version: confirmation.version + 1, actorId: session.userId, reason: `与主合同盖章完整版一并归档：${reason}`, snapshot: JSON.stringify({ schemaVersion: 1, data: draft, signedFileUrl: fileUrl, combinedWithFramework: true }) } });
         }
       }
-      await tx.financeAuditLog.create({ data: { entityType: "CONTRACT", entityId: id, action: "ARCHIVE_SIGNED_FRAMEWORK", actorId: session.userId, fromStatus: "DRAFT", toStatus: "COMPLETED", note: reason, metadata: JSON.stringify({ fileUrl, signedConfirmed: true, confirmationIds }) } });
+      await tx.financeAuditLog.create({ data: { entityType: "CONTRACT", entityId: id, action: "ARCHIVE_SIGNED_FRAMEWORK", actorId: session.userId, fromStatus: "SIGNING", toStatus: "COMPLETED", note: reason, metadata: JSON.stringify({ fileUrl, signedConfirmed: true, confirmationIds }) } });
     });
     persisted = true;
     if (contract.customerId) await bumpCustomerStatus(contract.customerId, "COOPERATING");

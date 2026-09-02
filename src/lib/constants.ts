@@ -117,6 +117,7 @@ export const CONTRACT_TYPE_LABELS: Record<string, string> = {
 };
 
 export const CONTRACT_STATUS_LABELS: Record<string, string> = {
+  DRAFT: "字段填写中",
   IN_PROGRESS: "合同推进中",
   REVIEWING: "合同审核中",
   REJECTED: "审核退回",
@@ -133,6 +134,7 @@ export const CONTRACT_STATUS_ORDER = [
 ];
 
 export const CONTRACT_STATUS_COLORS: Record<string, string> = {
+  DRAFT: "bg-violet-50 text-violet-700",
   IN_PROGRESS: "bg-slate-100 text-slate-700",
   REVIEWING: "bg-amber-100 text-amber-700",
   REJECTED: "bg-rose-100 text-rose-700",

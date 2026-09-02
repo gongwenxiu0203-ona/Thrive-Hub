@@ -6,10 +6,10 @@ import { Button } from "@/components/ui/Button";
 import { defaultContractAccountIds } from "@/lib/contractAccountSelection";
 
 type Account = { id: string; name: string; legalEntity: string; legalEntityKey?: string | null; accountName: string; accountNumber: string; currency: string; status?: string };
-export type FrameworkInitial = { id: string; updatedAt: string; customerId: string | null; ownerId: string | null; templateId: string | null; partyBCompany: string | null; receivingAccountIds: string[] } & Partial<Record<"partyA" | "partyACreditCode" | "partyAAddress" | "partyAContact" | "partyAPhone" | "partyAEmail" | "partyBContact" | "partyBEmail" | "partyBPhone" | "remark", string | null>>;
-type Props = { mode: "create" | "upload"; existing?: FrameworkInitial; presetCustomerId?: string; templates: { id: string; name: string }[]; customers: Array<{ id: string; brandName: string }>; users: Array<{ id: string; name: string; email: string; phone: string | null }>; accounts: Account[]; currentUserId: string; partyBOptions: Array<{ key: string; label: string; name: string }> };
+export type FrameworkInitial = { id: string; updatedAt: string; customerId: string | null; ownerId: string | null; reviewerId: string | null; templateId: string | null; partyBCompany: string | null; receivingAccountIds: string[] } & Partial<Record<"partyA" | "partyACreditCode" | "partyAAddress" | "partyAContact" | "partyAPhone" | "partyAEmail" | "partyBContact" | "partyBEmail" | "partyBPhone" | "remark", string | null>>;
+type Props = { mode: "create" | "upload"; existing?: FrameworkInitial; presetCustomerId?: string; templates: { id: string; name: string }[]; customers: Array<{ id: string; brandName: string }>; users: Array<{ id: string; name: string; email: string; phone: string | null }>; accounts: Account[]; currentUserId: string; defaultReviewerId?: string; partyBOptions: Array<{ key: string; label: string; name: string }> };
 
-export function FrameworkContractForm({ mode, existing, presetCustomerId, templates, customers, users, accounts, currentUserId, partyBOptions }: Props) {
+export function FrameworkContractForm({ mode, existing, presetCustomerId, templates, customers, users, accounts, currentUserId, defaultReviewerId, partyBOptions }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [partyB, setPartyB] = useState(existing?.partyBCompany || partyBOptions[0]?.key || "");
@@ -76,6 +76,7 @@ export function FrameworkContractForm({ mode, existing, presetCustomerId, templa
     <section className="space-y-4"><h3 className="text-sm font-semibold text-slate-800">基本信息</h3><div className="grid gap-4 md:grid-cols-2">
       <Field label="关联客户 *"><select name="customerId" disabled={!!existing} defaultValue={existing?.customerId || presetCustomerId || ""} required className="input"><option value="">请选择</option>{customers.map((item) => <option key={item.id} value={item.id}>{item.brandName}</option>)}</select></Field>
       <Field label="合同负责人 *"><select name="ownerId" defaultValue={existing?.ownerId || currentUserId} required className="input">{users.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field>
+      {(existing || mode === "create") && <Field label="审核人 *"><select name="reviewerId" defaultValue={existing?.reviewerId || defaultReviewerId || ""} required className="input"><option value="">请选择审核人</option>{users.map((item) => <option key={item.id} value={item.id}>{item.name}{item.email ? ` · ${item.email}` : ""}</option>)}</select><span className="block text-xs font-normal text-slate-500">网站创建合同默认 Shallow Wan，可手动改选其他内部账号。</span></Field>}
     </div></section>
     <section className="space-y-4"><h3 className="text-sm font-semibold text-slate-800">甲方信息</h3><div className="grid gap-4 md:grid-cols-2">
       <Field label="甲方公司名称/发票抬头 *"><input name="partyA" defaultValue={existing?.partyA || ""} required className="input" /></Field>
@@ -98,9 +99,21 @@ export function FrameworkContractForm({ mode, existing, presetCustomerId, templa
     <fieldset className="space-y-2"><legend className="text-sm font-semibold text-slate-800">乙方收款账户（可多选）*</legend><p className="text-xs text-slate-500">展示所有启用公司账户，默认勾选签约主体关联账户；原合同停用账户可保留历史快照。</p>{accounts.length ? <div className="grid gap-2 md:grid-cols-2">{accounts.map((account) => <label key={account.id} className="flex items-start gap-2 rounded-lg border border-slate-200 p-3 text-sm"><input type="checkbox" name="receivingAccountIds" value={account.id} checked={selectedAccountIds.includes(account.id)} onChange={(event) => setSelectedAccountIds((current) => event.target.checked ? [...new Set([...current, account.id])] : current.filter((id) => id !== account.id))} className="mt-1 accent-brand-600" /><span className="min-w-0 break-all"><b>{account.name}</b>{account.status && account.status !== "ACTIVE" && <span className="ml-2 text-xs text-amber-700">已停用 · 历史账户</span>}<br/><span className="text-slate-500">{account.accountName} · 尾号 {account.accountNumber.slice(-4)}</span></span></label>)}</div> : <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">暂无启用的公司付款账户，请先在财务资料中维护。</p>}</fieldset>
     <section className="space-y-3"><h3 className="text-sm font-semibold text-slate-800">合同模板与文件</h3><Field label={!existing && mode === "create" ? "合同模板 *" : "合同模板（可选）"}><select name="templateId" required={!existing && mode === "create"} className="input" defaultValue={existing ? existing.templateId || "" : templates[0]?.id || ""}><option value="">请选择主格式合同模板</option>{templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></Field>{!templates.length && <p className="text-sm text-amber-800">暂无主格式合同模板，请先从本页右上角模板入口上传。</p>}{existing ? <p className="text-sm text-slate-600">本次只修改主合同资料，不替换签署原件、不重写已有确认书或对账。</p> : mode === "upload" ? <div className="space-y-3"><Field label="已签署主格式合同原件 *"><input name="file" type="file" accept=".pdf,.doc,.docx" required className="input" /></Field><label className="flex items-start gap-2 text-sm text-slate-700"><input type="checkbox" name="signedConfirmed" value="true" required defaultChecked className="mt-1" />确认上传文件为双方已签字/盖章的完整主格式合同原件；资料补充完整后直接标记签署完成</label></div> : <p className="text-sm text-slate-500">保存为主合同草稿，继续填写项目确认书后选择导出范围。未上传签署原件前不会标记签署完成。</p>}</section>
     <Field label="备注"><textarea name="remark" defaultValue={existing?.remark || ""} rows={3} className="input" /></Field>
-    {existing && <Field label="修改原因 *"><textarea name="changeReason" required maxLength={2000} rows={2} className="input" /></Field>}
+    {existing && <section className="rounded-xl border border-amber-200 bg-amber-50/70 p-4">
+      <Field label="本次修改原因 *">
+        <textarea
+          name="changeReason"
+          required
+          maxLength={2000}
+          rows={3}
+          className="input bg-white"
+          placeholder="请说明修改了哪些合同信息及修改原因；保存后将写入操作审计记录"
+        />
+      </Field>
+      <p className="mt-2 text-xs text-amber-800">修改原因必填，最多 2000 字；不会展示在合同正文中。</p>
+    </section>}
     {error && <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
-    <div className="flex flex-col-reverse justify-end gap-2 border-t border-slate-100 pt-4 sm:flex-row"><Button type="submit" disabled={pending || !accounts.length}>{pending ? "保存中…" : existing ? "保存主合同修改" : mode === "upload" ? "归档并进入项目确认书" : "创建并进入项目确认书"}</Button></div>
+    <div className="flex flex-col-reverse justify-end gap-2 border-t border-slate-100 pt-4 sm:flex-row"><Button type="submit" disabled={pending || !accounts.length}>{pending ? "保存中…" : existing ? "填写原因并保存主合同修改" : mode === "upload" ? "归档并进入项目确认书" : "创建并进入项目确认书"}</Button></div>
   </form>;
 }
 

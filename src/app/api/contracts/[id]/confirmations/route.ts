@@ -22,7 +22,7 @@ export async function GET(_request: NextRequest, context: Context) {
       prisma.contractProjectConfirmation.findMany({ where: { contractId: id }, orderBy: { createdAt: "asc" }, include: { versions: { orderBy: { version: "desc" }, select: { version: true, actorId: true, reason: true, createdAt: true } } } }),
       prisma.financeAccountProfile.findMany({ where: { id: { in: accountIds }, accountType: { in: ["COMPANY_PAYER", "COMPANY_BANK"] }, status: "ACTIVE" }, select: { id: true, name: true, accountName: true, accountNumber: true, legalEntity: true, bankName: true, swiftCode: true, bankAddress: true, currency: true }, orderBy: { name: "asc" } }),
       prisma.contractCustomOption.findMany({ select: { category: true, value: true }, orderBy: { value: "asc" } }),
-      adminHasFeature(session, "contracts.records", "EDIT"), adminHasFeature(session, "contracts.records", "MANAGE"),
+      adminHasFeature(session, "contracts.records", "EDIT").then((allowed) => allowed && (contract.status !== "COMPLETED" || session.role === "ADMIN")), adminHasFeature(session, "contracts.records", "MANAGE"),
       prisma.user.findMany({ where: { role: { in: ["ADMIN", "USER"] }, status: "APPROVED" }, select: { id: true, name: true, email: true, phone: true }, orderBy: { name: "asc" } }),
       prisma.contractTemplate.findMany({ where: { documentType: "PROJECT_CONFIRMATION", deletedAt: null }, select: { id: true, name: true }, orderBy: { createdAt: "desc" } }),
     ]);
@@ -33,7 +33,8 @@ export async function GET(_request: NextRequest, context: Context) {
 export async function POST(request: NextRequest, context: Context) {
   try {
     const { id } = await context.params;
-    const { session } = await authorizeConfirmation(id, "EDIT");
+    const { session, contract } = await authorizeConfirmation(id, "EDIT");
+    if (contract.status === "COMPLETED" && session.role !== "ADMIN") throw new AppError("合同签署完成后仅管理员可以新增项目确认书", 403);
     const body = await request.json();
     if (!body || typeof body !== "object" || Array.isArray(body)) throw new AppError("请求格式错误", 400);
     if (body.draft?.workflowMode === "FORM") {

@@ -32,7 +32,8 @@ export async function PATCH(request: NextRequest, context: Context) {
     const { id, confirmationId } = await context.params;
     const renumber = request.nextUrl.searchParams.get("action") === "renumber";
     const replacement = request.nextUrl.searchParams.get("action") === "replace";
-    const { session } = await authorizeConfirmation(id, renumber ? "MANAGE" : "EDIT");
+    const { session, contract } = await authorizeConfirmation(id, renumber ? "MANAGE" : "EDIT");
+    if (contract.status === "COMPLETED" && session.role !== "ADMIN") throw new AppError("合同签署完成后仅管理员可以修改项目确认书", 403);
     const body = await request.json();
     if (!body || typeof body !== "object" || Array.isArray(body)) throw new AppError("请求格式错误", 400);
     if (renumber) {
@@ -73,7 +74,8 @@ export async function PATCH(request: NextRequest, context: Context) {
 export async function POST(request: NextRequest, context: Context) {
   try {
     const { id, confirmationId } = await context.params;
-    const { session } = await authorizeConfirmation(id, "MANAGE");
+    const { session, contract } = await authorizeConfirmation(id, "MANAGE");
+    if (contract.status === "COMPLETED" && session.role !== "ADMIN") throw new AppError("合同签署完成后仅管理员可以变更项目确认书状态", 403);
     if (request.nextUrl.searchParams.get("action") !== "activate") throw new AppError("不支持的操作", 400);
     const body = await request.json();
     if (!body || typeof body !== "object" || Array.isArray(body)) throw new AppError("请求格式错误", 400);
@@ -88,6 +90,7 @@ export async function PUT(request: NextRequest, context: Context) {
   try {
     const { id, confirmationId } = await context.params;
     const { session, contract } = await authorizeConfirmation(id, "EDIT");
+    if (contract.status === "COMPLETED" && session.role !== "ADMIN") throw new AppError("合同签署完成后仅管理员可以上传或替换项目确认书", 403);
     const replacement = request.nextUrl.searchParams.get("action") === "replace";
     if (Number(request.headers.get("content-length")) > 21 * 1024 * 1024) throw new AppError("文件超过20MB限制", 400);
     const form = await request.formData();

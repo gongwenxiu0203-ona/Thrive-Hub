@@ -12,11 +12,12 @@ import { frameworkMissingFields } from "@/lib/frameworkCompleteness";
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    await authorizeConfirmation(id, "READ");
+    const { session } = await authorizeConfirmation(id, "READ");
     const selection = request.nextUrl.searchParams.get("selection") || "both";
     if (!["master", "confirmation", "both"].includes(selection)) throw new AppError("导出范围无效", 400);
     const contract = await prisma.contract.findUniqueOrThrow({ where: { id }, include: { template: true, receivingAccounts: { orderBy: { position: "asc" } } } });
     if (contract.contractMode !== "FRAMEWORK") throw new AppError("历史合同请使用原导出入口", 400);
+    if (!["SIGNING", "COMPLETED"].includes(contract.status)) throw new AppError("请先提交并通过审核，或在合同详情页选择跳过审核后再导出", 409);
     if (!contract.template || contract.template.documentType !== "FRAMEWORK_MASTER") throw new AppError("主合同尚未选择主格式合同模板", 400);
     const missing = frameworkMissingFields(contract, contract.receivingAccounts.length);
     if (missing.length) throw new AppError(`请补齐主合同资料后导出：${missing.join("、")}`, 400);
@@ -46,6 +47,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       }, selection as "master" | "confirmation" | "both", confirmation);
     } catch (error) { throw new AppError(error instanceof Error ? error.message : "模板填充失败", 400); }
     const filename = `${contract.contractNo}-${selection}${row ? `-${row.number}` : ""}.docx`;
+    await prisma.financeAuditLog.create({ data: { entityType: "CONTRACT", entityId: id, action: "EXPORT_FRAMEWORK", actorId: session.userId, note: `导出${selection === "master" ? "主格式合同" : selection === "confirmation" ? "项目确认书" : "主格式合同＋项目确认书"}`, metadata: JSON.stringify({ selection, confirmationId: row?.id ?? null, confirmationNumber: row?.number ?? null }) } });
     return new NextResponse(Uint8Array.from(bytes), { headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`, "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff" } });
   } catch (error) { return confirmationResponseError(error); }
 }

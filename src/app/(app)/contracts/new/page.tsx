@@ -11,6 +11,7 @@ import { FrameworkContractForm } from "./FrameworkContractForm";
 import { requireFeaturePermission } from "@/lib/permissionGuard";
 import { contractScope, creationReferenceCustomerScope } from "@/lib/dataScope";
 import { PARTY_B_COMPANIES } from "@/lib/partyB";
+import { REVIEWER_EMAIL } from "@/lib/contractReviewer";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "新建合同 · Thraive联盟营销系统" };
@@ -72,6 +73,8 @@ export default async function NewContractPage({ searchParams }: { searchParams: 
     }),
   ]);
   const channelUserById = new Map(channelUsers.map((item) => [item.id, item]));
+  const defaultReviewerId = users.find((item) => item.email.toLowerCase() === REVIEWER_EMAIL)?.id
+    ?? users.find((item) => item.name.toLowerCase().includes("shallow"))?.id;
   const customers = customerRows.map((item) => ({
     id: item.id,
     brandName: item.brandName,
@@ -88,13 +91,13 @@ export default async function NewContractPage({ searchParams }: { searchParams: 
       ]);
       const initial = {
         id: existingContract.id, updatedAt: existingContract.updatedAt.toISOString(), customerId: existingContract.customerId,
-        ownerId: existingContract.ownerId, templateId: existingContract.templateId, partyBCompany: existingContract.partyBCompany,
+        ownerId: existingContract.ownerId, reviewerId: existingContract.reviewerId, templateId: existingContract.templateId, partyBCompany: existingContract.partyBCompany,
         receivingAccountIds: selectedAccounts.flatMap(row => row.financeProfileId ? [row.financeProfileId] : []),
         partyA: existingContract.partyA, partyACreditCode: existingContract.partyACreditCode, partyAAddress: existingContract.partyAAddress,
         partyAContact: existingContract.partyAContact, partyAPhone: existingContract.partyAPhone, partyAEmail: existingContract.partyAEmail,
         partyBContact: existingContract.partyBContact, partyBEmail: existingContract.partyBEmail, partyBPhone: existingContract.partyBPhone, remark: existingContract.remark,
       };
-      return <div className="mx-auto max-w-5xl space-y-6"><PageHeader title="编辑主格式合同" description={`合同编号：${existingContract.contractNo}；合作和收费规则仍在各项目确认书维护。`} backHref={`/contracts/${existingContract.id}`} backLabel="返回合同" /><FrameworkContractForm mode="create" existing={initial} templates={frameworkTemplates} customers={customers} users={users.filter(user => ["ADMIN", "USER"].includes(user.role))} accounts={accounts} currentUserId={session.userId} partyBOptions={Object.values(PARTY_B_COMPANIES).map(({ key, label, name }) => ({ key, label, name }))} /></div>;
+      return <div className="mx-auto max-w-5xl space-y-6"><PageHeader title="编辑主格式合同" description={`合同编号：${existingContract.contractNo}；签署完成前可修改，保存时必须填写修改原因。`} backHref={`/contracts/${existingContract.id}`} backLabel="返回合同" /><FrameworkContractForm mode="create" existing={initial} templates={frameworkTemplates} customers={customers} users={users.filter(user => ["ADMIN", "USER"].includes(user.role))} accounts={accounts} currentUserId={session.userId} defaultReviewerId={defaultReviewerId} partyBOptions={Object.values(PARTY_B_COMPANIES).map(({ key, label, name }) => ({ key, label, name }))} /></div>;
     }
     return <div className="mx-auto max-w-4xl space-y-6"><div><h1 className="text-xl font-bold text-slate-900">编辑合同</h1><p className="mt-1 text-sm text-slate-500">合同编号：{existingContract.contractNo}</p></div><ContractV4Form customers={customers} users={users} templates={templates} presetCustomerId={customer?.id} presetCustomerName={customer?.brandName} currentUserId={session.userId} existingContract={existingContract} /></div>;
   }
@@ -125,7 +128,7 @@ export default async function NewContractPage({ searchParams }: { searchParams: 
       orderBy: [{ legalEntity: "asc" }, { name: "asc" }],
     });
     const partyBOptions = Object.values(PARTY_B_COMPANIES).map(({ key, label, name }) => ({ key, label, name }));
-    return <div className="mx-auto max-w-5xl space-y-6"><PageHeader title={frameworkFlow === "upload" ? "上传已有主格式合同" : "新建主格式合同"} description="新建与上传已有使用同一套双方资料、联系人和收款账户字段；项目合作与计费规则在确认书维护" backHref={`/contracts/new?mode=brand${customerQuery}`} backLabel="返回品牌方合同" /><FrameworkContractForm mode={frameworkFlow} presetCustomerId={customer?.id} templates={frameworkTemplates} customers={customers} users={users.filter((item) => ["ADMIN", "USER"].includes(item.role))} accounts={accounts} currentUserId={session.userId} partyBOptions={partyBOptions} /></div>;
+    return <div className="mx-auto max-w-5xl space-y-6"><PageHeader title={frameworkFlow === "upload" ? "上传已有主格式合同" : "新建主格式合同"} description="新建与上传已有使用同一套双方资料、联系人和收款账户字段；项目合作与计费规则在确认书维护" backHref={`/contracts/new?mode=brand${customerQuery}`} backLabel="返回品牌方合同" /><FrameworkContractForm mode={frameworkFlow} presetCustomerId={customer?.id} templates={frameworkTemplates} customers={customers} users={users.filter((item) => ["ADMIN", "USER"].includes(item.role))} accounts={accounts} currentUserId={session.userId} defaultReviewerId={defaultReviewerId} partyBOptions={partyBOptions} /></div>;
   }
 
   if (mode === "transactional") return <div className="mx-auto max-w-3xl space-y-6"><PageHeader title="事务性合同" description="填写负责人并上传源文件" backHref="/contracts/new" backLabel="返回合同类型" /><TransactionalUploadForm users={users} currentUserId={session.userId} /></div>;

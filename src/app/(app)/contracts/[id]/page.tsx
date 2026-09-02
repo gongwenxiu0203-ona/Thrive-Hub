@@ -5,6 +5,7 @@ import { BackButton } from "@/components/BackButton";
 import { prisma } from "@/lib/prisma";
 import { requireSession, adminHasFeature } from "@/lib/session";
 import { FrameworkContractDetail } from "./FrameworkContractDetail";
+import type { FrameworkTimelineRow } from "./FrameworkWorkflow";
 import { Badge } from "@/components/ui/Badge";
 import { FileUploader } from "@/components/FileUploader";
 import { ContractFormModal } from "../ContractFormModal";
@@ -112,8 +113,21 @@ export default async function ContractDetailPage({
 
   if (contract.contractMode === "FRAMEWORK") {
     const internal = session.role === "ADMIN" || session.role === "USER";
-    const canEdit = contract.status === "DRAFT" && internal && await adminHasFeature(session, "contracts.records", "EDIT") && await adminHasFeature(session, "contracts.create_upload", "EDIT");
-    return <FrameworkContractDetail contract={contract} isAdmin={session.role === "ADMIN"} canEdit={canEdit} internal={internal} selectedId={(await searchParams).confirmation} />;
+    const canEdit = (contract.status !== "COMPLETED" || session.role === "ADMIN") && internal && await adminHasFeature(session, "contracts.records", "EDIT") && await adminHasFeature(session, "contracts.create_upload", "EDIT");
+    const confirmationIds = contract.projectConfirmations.map((row) => row.id);
+    const auditRows = await prisma.financeAuditLog.findMany({
+      where: { OR: [{ entityType: "CONTRACT", entityId: contract.id }, { entityType: "CONTRACT_CONFIRMATION", entityId: { in: confirmationIds.length ? confirmationIds : ["__none__"] } }] },
+      orderBy: { createdAt: "desc" },
+      include: { actor: { select: { name: true, email: true } } },
+      take: 200,
+    });
+    const timeline: FrameworkTimelineRow[] = auditRows.map((row) => ({ id: row.id, action: row.action, actor: row.actor.name || row.actor.email, note: row.note, fromStatus: row.fromStatus, toStatus: row.toStatus, createdAt: row.createdAt.toISOString() }));
+    if (!timeline.some((row) => row.action === "CREATE_FRAMEWORK")) timeline.push({ id: `created-${contract.id}`, action: "CREATE_FRAMEWORK", actor: contract.createdBy.name, note: contract.uploadType === "EXISTING" ? "上传已有品牌方合同" : "网站创建品牌方合同", fromStatus: null, toStatus: contract.uploadType === "EXISTING" ? "COMPLETED" : "DRAFT", createdAt: contract.createdAt.toISOString() });
+    for (const version of contract.versions) timeline.push({ id: `version-${version.id}`, action: "VERSION_FILE", actor: version.createdBy?.name ?? "—", note: `v${version.versionNo} · ${version.reason}`, fromStatus: null, toStatus: null, createdAt: version.createdAt.toISOString() });
+    for (const review of contract.reviews) if (!timeline.some((row) => row.action === "SUBMIT_REVIEW" && row.createdAt === review.createdAt.toISOString())) timeline.push({ id: `review-${review.id}`, action: "REVIEW_ROUND", actor: review.reviewer?.name ?? "—", note: `第 ${review.round} 轮审核 · ${review.status === "PENDING" ? "审核中" : review.status === "APPROVED" ? "已通过" : "已退回"}`, fromStatus: null, toStatus: review.status === "PENDING" ? "REVIEWING" : review.status === "APPROVED" ? "SIGNING" : "REJECTED", createdAt: review.updatedAt.toISOString() });
+    timeline.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const canReview = contract.status === "REVIEWING" && (session.role === "ADMIN" || contract.reviewerId === session.userId);
+    return <FrameworkContractDetail contract={contract} isAdmin={session.role === "ADMIN"} canEdit={canEdit} canReview={canReview} internal={internal} selectedId={(await searchParams).confirmation} timeline={timeline} />;
   }
 
   const [users, files, customers] = await Promise.all([
