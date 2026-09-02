@@ -6,7 +6,7 @@ export type FrameworkDocumentData = {
   partyAContact: string; partyAEmail: string; partyAPhone: string;
   partyB: string; partyBCreditCode: string; partyBAddress: string;
   partyBContact: string; partyBEmail: string; partyBPhone: string;
-  accounts: Array<{ accountName?: string; bankName?: string; bankAddress?: string; accountNumber?: string; swiftCode?: string; routingNumber?: string }>;
+  accounts: Array<{ accountName?: string; bankName?: string; bankAddress?: string; accountNumber?: string; swiftCode?: string; routingNumber?: string; bankAccountType?: string }>;
 };
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 function plain(xml: string) {
@@ -114,7 +114,7 @@ export async function fillFrameworkDocument(template: Buffer, master: FrameworkD
   });
   masterXml = masterXml.replace(/<w:tbl\b[^>]*>[\s\S]*?<\/w:tbl>/g, table => {
     const text = plain(table);
-    if (text.startsWith("账户名称")) return master.accounts.map(a => keyValues(table, { "账户名称": a.accountName || "", "开户银行": a.bankName || "", "银行地址": a.bankAddress || "", "银行账号": a.accountNumber || "", "SWIFT CODE": a.swiftCode || "不适用", "路由ABA": a.routingNumber || "不适用", "账户类型": "以收款银行账户资料为准" })).join("");
+    if (text.startsWith("账户名称")) return master.accounts.map(a => keyValues(table, { "账户名称": a.accountName || "", "开户银行": a.bankName || "", "银行地址": a.bankAddress || "", "银行账号": a.accountNumber || "", "SWIFT CODE": a.swiftCode || "不适用", "路由ABA": a.routingNumber || "不适用", "账户类型": a.bankAccountType || "不适用" })).join("");
     if (text.startsWith("项目甲方乙方")) return tableRows(table, [["地址", master.partyAAddress, master.partyBAddress], ["指定联系人及电话", `${master.partyAContact} ${master.partyAPhone}`, `${master.partyBContact} ${master.partyBPhone}`], ["电子邮箱", master.partyAEmail, master.partyBEmail]], true);
     return table;
   });

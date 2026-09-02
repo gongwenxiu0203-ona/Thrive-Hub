@@ -33,6 +33,7 @@ export type FinanceObjectOption = {
   bankAddress?: string;
   payeeAddress?: string;
   routingNumber?: string;
+  bankAccountType?: string;
   note?: string;
   swiftCode?: string;
   editable?: boolean;
@@ -1112,6 +1113,7 @@ function ProfileForm({ data, disabled, onSubmit }: FormProps) {
     bankAddress: "",
     payeeAddress: "",
     routingNumber: "",
+    bankAccountType: "",
     note: "",
     currency: ["CHANNEL_PAYEE", "AFFILIATE_PAYEE"].includes(category) ? "USD" : "CNY",
   });
@@ -1131,7 +1133,7 @@ function ProfileForm({ data, disabled, onSubmit }: FormProps) {
             : [];
   const usesSystemName = ["CUSTOMER_BILLING", "CHANNEL_PAYEE", "EMPLOYEE_REIMBURSEMENT"].includes(category);
   const companyLabel = ["CUSTOMER_BILLING", "COMPANY_PAYER", "SUPPLIER_PAYEE"].includes(category)
-    ? "公司名称/发票抬头"
+    ? category === "COMPANY_PAYER" ? "公司名称/发票抬头/账户名称" : "公司名称/发票抬头"
     : "账户名称";
   const startNew = () => {
     setEditingId("");
@@ -1153,6 +1155,7 @@ function ProfileForm({ data, disabled, onSubmit }: FormProps) {
       bankAddress: row.bankAddress ?? row.address ?? "",
       payeeAddress: row.payeeAddress ?? "",
       routingNumber: row.routingNumber ?? "",
+      bankAccountType: row.bankAccountType ?? "",
       note: row.note ?? "",
       currency: row.currency ?? (["CHANNEL_PAYEE", "AFFILIATE_PAYEE"].includes(category) ? "USD" : "CNY"),
     });
@@ -1249,11 +1252,13 @@ function ProfileForm({ data, disabled, onSubmit }: FormProps) {
             ) : (
               <TextField label="资料名称" value={form.name} setValue={(value) => patch("name", value)} />
             )}
-            <TextField label={companyLabel} value={form.accountName} setValue={(value) => patch("accountName", value)} />
             {category === "COMPANY_PAYER" && <Field label="关联合同签约主体"><select className="input" value={form.legalEntityKey} onChange={(event) => patch("legalEntityKey", event.target.value)}><option value="">未关联（合同中仍可手动选择）</option>{Object.values(PARTY_B_COMPANIES).map((entity) => <option key={entity.key} value={entity.key}>{entity.label}</option>)}</select><p className="mt-1 text-xs text-slate-500">创建合同时，选择此主体会默认勾选本账户；不会改变已保存合同的账户快照。</p></Field>}
+            <TextField label={companyLabel} value={form.accountName} setValue={(value) => patch("accountName", value)} />
             <TextField label={category === "EMPLOYEE_REIMBURSEMENT" || category === "CHANNEL_PAYEE" ? "收款账号/银行账号" : "银行账号"} value={form.accountNumber} setValue={(value) => patch("accountNumber", value)} />
-            <TextField label={category === "AFFILIATE_PAYEE" ? "银行名称及开户行" : "开户行"} value={form.bankName} setValue={(value) => patch("bankName", value)} />
+            <TextField label={category === "AFFILIATE_PAYEE" ? "银行名称及开户行" : category === "COMPANY_PAYER" ? "开户银行" : "开户行"} value={form.bankName} setValue={(value) => patch("bankName", value)} />
             <TextField label={category === "AFFILIATE_PAYEE" ? "SWIFT Code" : "SWIFT Code/税号"} value={form.swiftCode} setValue={(value) => patch("swiftCode", value)} />
+            {category === "COMPANY_PAYER" && <TextField label="路由 ABA" value={form.routingNumber} setValue={(value) => patch("routingNumber", value)} />}
+            {category === "COMPANY_PAYER" && <TextField label="账户类型" value={form.bankAccountType} setValue={(value) => patch("bankAccountType", value)} />}
             <TextField label="银行地址" value={form.bankAddress} setValue={(value) => patch("bankAddress", value)} />
             {category === "AFFILIATE_PAYEE" && (
               <>
@@ -1283,6 +1288,7 @@ function ProfileForm({ data, disabled, onSubmit }: FormProps) {
                   bankAddress: form.bankAddress,
                   payeeAddress: form.payeeAddress,
                   routingNumber: form.routingNumber,
+                  bankAccountType: form.bankAccountType,
                   note: form.note,
                   payerAccountKey: form.ownerObjectId || undefined,
                 });

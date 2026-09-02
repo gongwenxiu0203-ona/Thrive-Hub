@@ -24,7 +24,7 @@ function text(form: FormData, key: string) {
 function snapshotAccount(account: {
   id: string; name: string; legalEntity: string; accountName: string;
   accountNumber: string; bankName: string | null; swiftCode: string | null;
-  bankAddress: string | null; routingNumber: string | null; payeeAddress: string | null; currency: string;
+  bankAddress: string | null; routingNumber: string | null; bankAccountType: string | null; payeeAddress: string | null; currency: string;
 }) {
   return JSON.stringify({ schemaVersion: 1, profileId: account.id, ...account });
 }
@@ -81,7 +81,7 @@ export async function createFrameworkContract(form: FormData): Promise<Result> {
       prisma.customer.findFirst({ where: { id: customerId, deletedAt: null, ...creationReferenceCustomerScope(session) }, select: { id: true } }),
       prisma.user.findFirst({ where: { id: ownerId, status: "APPROVED", role: { in: ["ADMIN", "USER"] } }, select: { id: true } }),
       reviewerId ? prisma.user.findFirst({ where: { id: reviewerId, status: "APPROVED", role: { in: ["ADMIN", "USER"] } }, select: { id: true } }) : Promise.resolve(null),
-      prisma.financeAccountProfile.findMany({ where: { id: { in: accountIds }, accountType: { in: ["COMPANY_PAYER", "COMPANY_BANK"] }, status: "ACTIVE" }, select: { id: true, name: true, legalEntity: true, accountName: true, accountNumber: true, bankName: true, swiftCode: true, bankAddress: true, routingNumber: true, payeeAddress: true, currency: true } }),
+      prisma.financeAccountProfile.findMany({ where: { id: { in: accountIds }, accountType: { in: ["COMPANY_PAYER", "COMPANY_BANK"] }, status: "ACTIVE" }, select: { id: true, name: true, legalEntity: true, accountName: true, accountNumber: true, bankName: true, swiftCode: true, bankAddress: true, routingNumber: true, bankAccountType: true, payeeAddress: true, currency: true } }),
     ]);
     if (!customer) return { ok: false, error: "客户不存在或不在可选范围" };
     if (!owner) return { ok: false, error: "合同负责人不是有效内部用户" };

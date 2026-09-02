@@ -2267,6 +2267,7 @@ model FinanceAccountProfile {
   bankAddress     String?
   payeeAddress    String?
   routingNumber   String?
+  bankAccountType String?
   note            String?
   payerAccountKey String?
   attachmentUrls  String   @default("[]")

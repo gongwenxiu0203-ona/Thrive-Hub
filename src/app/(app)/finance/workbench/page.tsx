@@ -671,6 +671,7 @@ export default async function FinanceWorkbenchPage() {
                     bankAddress: account.bankAddress ?? undefined,
                     payeeAddress: account.payeeAddress ?? undefined,
                     routingNumber: account.routingNumber ?? undefined,
+                    bankAccountType: account.bankAccountType ?? undefined,
                     note: account.note ?? undefined,
                     swiftCode: account.swiftCode ?? undefined,
                     editable: true,

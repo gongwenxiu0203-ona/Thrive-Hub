@@ -102,7 +102,7 @@ export async function saveCustomerBillingProfile(input: { customerId: string; na
   } catch (error) { return { ok: false, error: error instanceof Error ? error.message : "保存开票资料失败。" }; }
 }
 
-export async function saveFinanceAccountProfile(input: { id?: string; name: string; accountType: string; legalEntity: string; legalEntityKey?: string; accountName: string; bankName?: string; accountNumber: string; currency?: string; country?: string; swiftCode?: string; bankAddress?: string; payeeAddress?: string; routingNumber?: string; note?: string; payerAccountKey?: string; attachmentUrls?: string[]; isDefault?: boolean }) {
+export async function saveFinanceAccountProfile(input: { id?: string; name: string; accountType: string; legalEntity: string; legalEntityKey?: string; accountName: string; bankName?: string; accountNumber: string; currency?: string; country?: string; swiftCode?: string; bankAddress?: string; payeeAddress?: string; routingNumber?: string; bankAccountType?: string; note?: string; payerAccountKey?: string; attachmentUrls?: string[]; isDefault?: boolean }) {
   try {
     const session = await requireSession();
     await requireFeaturePermission(session, "finance.profiles", "MANAGE");
@@ -116,7 +116,12 @@ export async function saveFinanceAccountProfile(input: { id?: string; name: stri
       const duplicate = await tx.financeAccountProfile.findFirst({ where: { legalEntity, accountNumber, currency, status: "ACTIVE", ...(input.id ? { id: { not: input.id } } : {}) }, select: { id: true } });
       if (duplicate) throw new Error("相同付款主体、账号和币种的财务账户已存在，请勿重复创建。");
       if (input.isDefault) await tx.financeAccountProfile.updateMany({ where: { legalEntity, currency, status: "ACTIVE" }, data: { isDefault: false } });
-      const data = { name: cleanText(input.name), accountType: input.accountType || "COMPANY_BANK", legalEntity, accountName: cleanText(input.accountName), bankName: input.bankName ? cleanText(input.bankName) : null, accountNumber, currency, country: input.country?.trim().toUpperCase() || null, swiftCode: input.swiftCode?.replace(/\s+/g, "").toUpperCase() || null, bankAddress: input.bankAddress ? cleanText(input.bankAddress) : null, payeeAddress: input.payeeAddress ? cleanText(input.payeeAddress) : null, routingNumber: input.routingNumber?.trim() || null, note: input.note?.trim() || null, payerAccountKey: input.payerAccountKey?.trim() || null, attachmentUrls: JSON.stringify(normalizeFinanceUrls(input.attachmentUrls)), isDefault: !!input.isDefault };
+      const normalizedSwiftCode = input.swiftCode
+        ?.split("/")
+        .map((code) => code.replace(/\s+/g, "").toUpperCase())
+        .filter(Boolean)
+        .join(" / ") || null;
+      const data = { name: cleanText(input.name), accountType: input.accountType || "COMPANY_BANK", legalEntity, accountName: cleanText(input.accountName), bankName: input.bankName ? cleanText(input.bankName) : null, accountNumber, currency, country: input.country?.trim().toUpperCase() || null, swiftCode: normalizedSwiftCode, bankAddress: input.bankAddress ? cleanText(input.bankAddress) : null, payeeAddress: input.payeeAddress ? cleanText(input.payeeAddress) : null, routingNumber: input.routingNumber?.trim() || null, bankAccountType: input.bankAccountType?.trim() || null, note: input.note?.trim() || null, payerAccountKey: input.payerAccountKey?.trim() || null, attachmentUrls: JSON.stringify(normalizeFinanceUrls(input.attachmentUrls)), isDefault: !!input.isDefault };
       const linkedData = { ...data, ...(input.legalEntityKey !== undefined ? { legalEntityKey } : {}) };
       return input.id ? tx.financeAccountProfile.update({ where: { id: input.id }, data: linkedData }) : tx.financeAccountProfile.create({ data: { ...linkedData, profileNo: refNo("ACC"), createdById: session.userId } });
     });
