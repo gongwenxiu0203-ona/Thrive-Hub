@@ -64,10 +64,9 @@ export async function PATCH(request: NextRequest, context: Context) {
       return NextResponse.json({ confirmation, activated: false, replacement: true });
     }
     const saved = await saveConfirmationDraft(id, session.userId, body.draft, confirmationId, expectedVersion(body.expectedVersion), typeof body.reason === "string" ? body.reason : "");
-    const confirmationCount = await prisma.contractProjectConfirmation.count({ where: { contractId: id } });
-    const result = confirmationCount === 1
-      ? await finalizeExistingUploadedConfirmation(id, saved.id, session.userId, saved.version)
-      : { confirmation: saved, activated: false };
+    // Re-check every saved confirmation. Uploaded-existing contracts reuse the
+    // signed combined original for each complete confirmation; other flows no-op here.
+    const result = await finalizeExistingUploadedConfirmation(id, saved.id, session.userId, saved.version);
     return NextResponse.json({ confirmation: decodeConfirmation(result.confirmation), activated: result.activated });
   } catch (error) { return confirmationResponseError(error); }
 }
@@ -129,14 +128,11 @@ export async function PUT(request: NextRequest, context: Context) {
       const effective = await prisma.contractProjectConfirmation.findUniqueOrThrow({ where: { id: confirmationId } });
       return NextResponse.json({ confirmation: decodeConfirmation(effective), activated: true, replacement: true });
     }
-    // 已有合同的上传文件本身就是双方签署原件。字段完整时直接生效并生成独立对账；
-    // 从模板新建的合同仍保留人工“确认生效”步骤。
-    if (contract.uploadType === "EXISTING" || decodeConfirmation(confirmation).draft.workflowMode === "SIGNED_UPLOAD" || decodeConfirmation(confirmation).draft.workflowMode === "FORM") {
-      await activateContractConfirmation(confirmationId, session.userId, confirmation.version);
-      const effective = await prisma.contractProjectConfirmation.findUniqueOrThrow({ where: { id: confirmationId } });
-      return NextResponse.json({ confirmation: decodeConfirmation(effective), activated: true });
-    }
-    return NextResponse.json({ confirmation: decodeConfirmation(confirmation), activated: false });
+    // Whichever creation method was used, uploading the signed original is the
+    // explicit final signing action. It immediately locks and activates this version.
+    await activateContractConfirmation(confirmationId, session.userId, confirmation.version);
+    const effective = await prisma.contractProjectConfirmation.findUniqueOrThrow({ where: { id: confirmationId } });
+    return NextResponse.json({ confirmation: decodeConfirmation(effective), activated: true });
   } catch (error) {
     // Only remove this request's new orphan; prior signed files and audit versions remain.
     if (uploaded && !persisted) await unlink(storedPath(uploaded)).catch(() => undefined);

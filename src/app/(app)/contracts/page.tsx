@@ -193,7 +193,7 @@ export default async function ContractsPage({
       {contracts.length === 0 ? (
         <EmptyState title="暂无合同" description="点击右上角新建合同" />
       ) : (
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50/60">
@@ -211,6 +211,7 @@ export default async function ContractsPage({
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">字段状态</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">创建人</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">创建时间</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">创建方式</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
@@ -293,6 +294,12 @@ export default async function ContractsPage({
                   </td>
                   <td className="px-4 py-3 text-sm text-slate-700">{ct.createdBy?.name ?? <span className="text-slate-300">—</span>}</td>
                   <td className="px-4 py-3 text-xs text-slate-400">{formatDate(ct.createdAt)}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-600">{{
+                    WEBSITE_CREATE: "网站创建",
+                    EXISTING: "上传已有",
+                    TRANSACTIONAL: "事务性合同",
+                    CHANNEL_ARCHIVE: "渠道合同归档",
+                  }[ct.uploadType || ""] || "历史记录"}</td>
                 </tr>
                 );
               })}

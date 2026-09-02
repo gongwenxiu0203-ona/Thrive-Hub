@@ -40,11 +40,10 @@ export async function POST(request: NextRequest, context: Context) {
     if (body.draft?.workflowMode === "FORM") {
       if (!body.draft.templateId || !await prisma.contractTemplate.findFirst({ where: { id: body.draft.templateId, documentType: "PROJECT_CONFIRMATION", deletedAt: null }, select: { id: true } })) throw new AppError("在线新建项目确认书必须选择有效的确认书模板", 400);
     }
-    const priorCount = await prisma.contractProjectConfirmation.count({ where: { contractId: id } });
     const saved = await saveConfirmationDraft(id, session.userId, body.draft);
-    const result = priorCount === 0
-      ? await finalizeExistingUploadedConfirmation(id, saved.id, session.userId, saved.version)
-      : { confirmation: saved, activated: false };
+    // Every confirmation under an uploaded-existing contract belongs to the
+    // already signed combined original. The helper safely no-ops for website-created contracts.
+    const result = await finalizeExistingUploadedConfirmation(id, saved.id, session.userId, saved.version);
     return NextResponse.json({ confirmation: decodeConfirmation(result.confirmation), activated: result.activated }, { status: 201 });
   } catch (error) { return confirmationResponseError(error); }
 }

@@ -7,7 +7,7 @@ import { confirmationDraftSchema, type ContractConfirmationDraft as Draft } from
 
 type Row = { id: string; number: string; title: string; status: string; version: number; signedFileUrl: string | null; pendingSignedFileUrl: string | null; pendingVersion: number; draft: Draft; pendingDraft: Draft | null; versions: { version?: number; versionNo?: number; createdAt?: string }[] };
 type Data = {
-  contract: { id: string; contractNo: string; type: string; status: string; contractMode: string; partyA: string | null; partyAContact: string | null; partyAEmail: string | null; partyAPhone: string | null; partyBContact: string | null; partyBEmail: string | null; partyBPhone: string | null; customer: { id: string; brandName: string } | null };
+  contract: { id: string; contractNo: string; type: string; status: string; contractMode: string; uploadType: string | null; partyA: string | null; partyAContact: string | null; partyAEmail: string | null; partyAPhone: string | null; partyBContact: string | null; partyBEmail: string | null; partyBPhone: string | null; customer: { id: string; brandName: string } | null };
   users: { id: string; name: string; email: string; phone: string | null }[];
   canRenumber: boolean;
   canEdit: boolean; canManage: boolean;
@@ -51,7 +51,9 @@ export function ConfirmationEditor({ contractId }: { contractId: string }) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [reason, setReason] = useState("");
-  const [file, setFile] = useState<File | null>(null);
+  const [uploadingId, setUploadingId] = useState("");
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadReason, setUploadReason] = useState("");
   const [newNumber, setNewNumber] = useState("");
   const [numberReason, setNumberReason] = useState("");
   const [exportSelection, setExportSelection] = useState("both");
@@ -67,19 +69,20 @@ export function ConfirmationEditor({ contractId }: { contractId: string }) {
   const opts = (key: string) => [...new Set([...(defaults[key] || []), ...(data?.options.filter(o => o.category === key).map(o => o.value) || [])])];
   const editable = !!data?.canEdit && (!editing || editing.status === "DRAFT" || replacement);
   const unsaved = !!editing && !!draft && JSON.stringify(replacement ? editing.pendingDraft : editing.draft) !== JSON.stringify(draft);
-  function open(row: Row | null, asReplacement = false, workflow: "FORM" | "SIGNED_UPLOAD" = "FORM") {
+  function open(row: Row | null, asReplacement = false, workflow?: "FORM" | "SIGNED_UPLOAD") {
     if (draft && !window.confirm("离开当前编辑内容？未保存的修改会丢失。")) return;
     const next = row ? structuredClone(asReplacement && row.pendingDraft ? row.pendingDraft : row.draft) : initial(contractId);
-    next.workflowMode = workflow;
-    if (workflow === "FORM" && !next.templateId) next.templateId = data?.confirmationTemplates[0]?.id || null;
-    if (workflow === "SIGNED_UPLOAD") next.templateId = null;
+    const selectedWorkflow = workflow ?? next.workflowMode;
+    next.workflowMode = selectedWorkflow;
+    if (selectedWorkflow === "FORM" && !next.templateId) next.templateId = data?.confirmationTemplates[0]?.id || null;
+    if (selectedWorkflow === "SIGNED_UPLOAD") next.templateId = null;
     if (!row && data) {
       next.partyAContact = { name: data.contract.partyAContact || "", email: data.contract.partyAEmail || "", phone: data.contract.partyAPhone || "" };
       next.partyBContact = { name: data.contract.partyBContact || "", email: data.contract.partyBEmail || "", phone: data.contract.partyBPhone || "" };
       next.brand = data.contract.customer?.brandName || "";
       next.receivingAccountIds = data.bankAccounts.map(account => account.id);
     }
-    setReplacement(asReplacement); setEditing(row); setDraft(next); setReason(""); setFile(null); setError(""); setNotice(""); setNewNumber(row?.number || ""); setNumberReason("");
+    setReplacement(asReplacement); setEditing(row); setDraft(next); setReason(""); setError(""); setNotice(""); setNewNumber(row?.number || ""); setNumberReason("");
   }
   function beginCreate() {
     if (!data) return;
@@ -107,7 +110,6 @@ export function ConfirmationEditor({ contractId }: { contractId: string }) {
       const payload = editing ? replacement ? { draft, pendingVersion: editing.pendingVersion, reason } : { draft, expectedVersion: editing.version, reason } : { draft };
       const body = await request(url, { method: editing ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const fresh = await load(); const saved = fresh.confirmations.find(r => r.id === body.confirmation.id);
-      if (saved) { setEditing(saved); setDraft(structuredClone(replacement && saved.pendingDraft ? saved.pendingDraft : saved.draft)); }
       setReason("");
       setNotice(body.activated
         ? "字段已补齐，已复用上传的签署原件；主合同和项目确认书均已签署完成，并已生成独立对账。"
@@ -115,7 +117,10 @@ export function ConfirmationEditor({ contractId }: { contractId: string }) {
           ? "替换草稿已保存。当前已生效版本继续有效；上传新版本签署原件后才会完成版本切换。"
         : previouslySigned && !saved?.signedFileUrl
           ? "草稿已保存。由于确认书内容发生修改，原盖章版仅保留在历史版本中；请重新上传与当前内容一致的签署原件。"
-          : "草稿已保存。上传签署原件后，可按生效条件继续处理。");
+          : "草稿已保存。可在确认书记录右侧直接上传签署原件。");
+      setDraft(null);
+      setEditing(null);
+      setReplacement(false);
     } catch (e) { setError(e instanceof Error ? e.message : "保存失败"); } finally { setBusy(false); }
   }
   async function renumber() {
@@ -139,19 +144,30 @@ export function ConfirmationEditor({ contractId }: { contractId: string }) {
       setNotice("已导出填充后的Word合同，请核对内容后签署。");
     } catch (e) { setError(e instanceof Error ? e.message : "导出失败"); } finally { setBusy(false); }
   }
-  async function upload() {
-    if (!editing || !file) return;
-    if (unsaved) { setError("请先保存表单修改，再上传签署原件。"); return; }
-    if (!reason.trim()) { setError("请填写本次上传原件的原因。"); return; }
-    if (file.size > 20 * 1024 * 1024) { setError("签署原件不能超过20MB。"); return; }
-    setBusy(true); setError(""); setNotice("");
-    try { const form = new FormData(); form.set("file", file); form.set("expectedVersion", String(replacement ? editing.pendingVersion : editing.version)); form.set("reason", reason); const result = await request(`${base}/${editing.id}${replacement ? "?action=replace" : ""}`, { method: "PUT", body: form }); const fresh = await load(); const saved = fresh.confirmations.find(r => r.id === editing.id); if (saved) { setEditing(saved); setDraft(structuredClone(saved.draft)); } setReplacement(false); setFile(null); setNotice(result.replacement ? "替换版本已签署生效：编号保持不变、版本已递增，历史账务已保留，未来计划已按新版本生成。" : result.activated ? "签署原件已存档，项目确认书已签署生效并生成独立对账。" : "签署原件已存档；表单字段保持不变，请核对后手动确认生效。"); } catch (e) { setError(e instanceof Error ? e.message : "上传失败"); } finally { setBusy(false); }
+  function toggleUpload(row: Row) {
+    setUploadingId(current => current === row.id ? "" : row.id);
+    setUploadFile(null);
+    setUploadReason("");
+    setError("");
   }
-  async function activate() {
-    if (unsaved) { setError("请先保存表单修改，再确认生效。"); return; }
-    if (!editing || !window.confirm("确认生效此确认书？生效后锁定本版本的计费规则，并按该确认书独立生成对账。")) return;
+  async function upload(row: Row) {
+    if (!uploadFile) return;
+    if (!uploadReason.trim()) { setError("请填写本次上传签署原件的原因。"); return; }
+    if (uploadFile.size > 20 * 1024 * 1024) { setError("签署原件不能超过20MB。"); return; }
+    const isReplacement = Boolean(row.pendingDraft);
     setBusy(true); setError(""); setNotice("");
-    try { await request(`${base}/${editing.id}?action=activate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expectedVersion: editing.version }) }); const fresh = await load(); const saved = fresh.confirmations.find(r => r.id === editing.id); if (saved) { setEditing(saved); setDraft(structuredClone(saved.draft)); } setNotice("项目确认书已生效。"); } catch (e) { setError(e instanceof Error ? e.message : "生效失败"); } finally { setBusy(false); }
+    try {
+      const form = new FormData();
+      form.set("file", uploadFile);
+      form.set("expectedVersion", String(isReplacement ? row.pendingVersion : row.version));
+      form.set("reason", uploadReason);
+      const result = await request(`${base}/${row.id}${isReplacement ? "?action=replace" : ""}`, { method: "PUT", body: form });
+      await load();
+      setUploadingId(""); setUploadFile(null); setUploadReason("");
+      setNotice(result.replacement
+        ? "替换版本已签署生效：编号保持不变、版本已递增，历史账务已保留，未来计划已按新版本生成。"
+        : "签署原件已上传，项目确认书已签署生效并生成独立对账。");
+    } catch (e) { setError(e instanceof Error ? e.message : "上传失败"); } finally { setBusy(false); }
   }
   return <div className="mx-auto max-w-7xl space-y-6 pb-10">
     <Link href={`/contracts/${contractId}`} className="text-sm text-purple-700">← 返回主合同</Link>
@@ -164,7 +180,7 @@ export function ConfirmationEditor({ contractId }: { contractId: string }) {
     {!data && !error && <div className="h-32 rounded-lg bg-slate-100" aria-label="正在加载确认书" />}
     {data && <>
       {data.contract.contractMode !== "FRAMEWORK" && <p className="rounded-lg bg-amber-50 p-4 text-sm text-amber-900">这是历史合同：可录入确认书草稿，但暂不能生效。不会转换旧合同，也不会覆盖或重复生成历史收费。</p>}
-      <section className="overflow-x-auto rounded-lg border border-purple-100 bg-white"><table className="w-full min-w-[650px] text-left text-sm"><thead className="bg-slate-50 text-slate-600"><tr>{["确认书编号", "状态", "版本", "合作周期", "操作"].map(h => <th key={h} className="px-4 py-3 font-medium">{h}</th>)}</tr></thead><tbody>{data.confirmations.map(row => <tr key={row.id} className="border-t border-slate-100"><td className="px-4 py-3"><div className="font-medium text-slate-900">{row.number}</div></td><td className="px-4 py-3">{states[row.status] || row.status}{row.pendingDraft && <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">替换草稿</span>}</td><td className="px-4 py-3">v{row.version}{row.pendingDraft && <span className="text-slate-500"> → v{row.version + 1}</span>}</td><td className="px-4 py-3">{row.draft.startDate || "未填写"} — {row.draft.endDate || "未填写"}</td><td className="px-4 py-3"><div className="flex flex-wrap gap-3"><button className="text-purple-700" disabled={busy} onClick={() => open(row)}>{data.canEdit && row.status === "DRAFT" ? "编辑草稿" : "查看"}</button>{row.pendingDraft && <button className="text-amber-700" disabled={busy} onClick={() => open(row, true, row.pendingDraft!.workflowMode)}>继续替换草稿</button>}{row.signedFileUrl && <a className="text-purple-700" href={`${base}/${row.id}?download=1`}>下载原件</a>}</div></td></tr>)}</tbody></table>{!data.confirmations.length && <p className="p-8 text-center text-sm text-slate-600">暂无确认书。点击“新建项目确认书”录入合作范围和收费规则。</p>}</section>
+      <section className="overflow-x-auto rounded-lg border border-purple-100 bg-white"><table className="w-full min-w-[760px] text-left text-sm"><thead className="bg-slate-50 text-slate-600"><tr>{["确认书编号", "状态", "版本", "合作周期", "创建方式", "操作"].map(h => <th key={h} className="px-4 py-3 font-medium">{h}</th>)}</tr></thead><tbody>{data.confirmations.map(row => <tr key={row.id} className="border-t border-slate-100 align-top"><td className="px-4 py-3"><div className="font-medium text-slate-900">{row.number}</div></td><td className="px-4 py-3">{states[row.status] || row.status}{row.pendingDraft && <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">替换草稿</span>}{row.signedFileUrl && <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-800">已上传签署原件</span>}</td><td className="px-4 py-3">v{row.version}{row.pendingDraft && <span className="text-slate-500"> → v{row.version + 1}</span>}</td><td className="px-4 py-3">{row.draft.startDate || "未填写"} — {row.draft.endDate || "未填写"}</td><td className="px-4 py-3 text-slate-600">{data.contract.uploadType === "EXISTING" ? "随上传已有合同归档" : row.draft.workflowMode === "SIGNED_UPLOAD" ? "上传已签署确认书" : "网站创建确认书"}</td><td className="px-4 py-3"><div className="flex flex-wrap gap-3"><button className="text-purple-700" disabled={busy} onClick={() => open(row)}>{data.canEdit && row.status === "DRAFT" ? "修改草稿" : "查看"}</button>{row.pendingDraft && <button className="text-amber-700" disabled={busy} onClick={() => open(row, true, row.pendingDraft!.workflowMode)}>继续修改替换草稿</button>}{data.canEdit && (row.status === "DRAFT" || row.pendingDraft) && <button className="text-purple-700" disabled={busy} onClick={() => toggleUpload(row)}>上传签署文件</button>}{row.signedFileUrl && <a className="text-purple-700" href={`${base}/${row.id}?download=1`}>下载原件</a>}</div>{uploadingId === row.id && <div className="mt-3 min-w-[280px] space-y-2 rounded-lg border border-purple-100 bg-purple-50 p-3"><input aria-label={`上传${row.number}签署原件`} type="file" accept=".pdf,.doc,.docx" disabled={busy} onChange={e => setUploadFile(e.target.files?.[0] || null)} className="block max-w-full text-xs" /><input aria-label="上传原因" className={control} value={uploadReason} onChange={e => setUploadReason(e.target.value)} placeholder="上传原因（必填）" maxLength={2000} /><div className="flex gap-2"><Button size="sm" loading={busy} disabled={!uploadFile || !uploadReason.trim()} onClick={() => upload(row)}>上传并标记签署完成</Button><Button size="sm" disabled={busy} onClick={() => toggleUpload(row)}>取消</Button></div></div>}</td></tr>)}</tbody></table>{!data.confirmations.length && <p className="p-8 text-center text-sm text-slate-600">暂无确认书。点击“新建项目确认书”录入合作范围和收费规则。</p>}</section>
     </>}
     {draft && data && <section className="rounded-xl border border-purple-100 bg-white p-4 sm:p-6">
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3"><h2 className="text-lg font-semibold">{replacement && editing ? `替换 ${editing.number} · 目标版本 v${editing.version + 1}` : editing ? `${editing.number} · ${states[editing.status] || editing.status}` : "新增项目确认书"}</h2><Button onClick={() => { if (window.confirm("关闭当前编辑区？未保存修改会丢失。")) { setDraft(null); setEditing(null); setReplacement(false); } }}>关闭编辑区</Button></div>
@@ -194,7 +210,7 @@ export function ConfirmationEditor({ contractId }: { contractId: string }) {
         {editing && <Field label="修改原因"><textarea className={control} rows={2} value={reason} onChange={e => setReason(e.target.value)} /></Field>}
         {editable && <Button variant="primary" loading={busy} onClick={save}>{replacement ? "保存替换草稿" : "保存草稿"}</Button>}
       </fieldset>
-      {editing && <div className="mt-8 space-y-4 border-t border-slate-200 pt-5"><h3 className="font-medium">签署原件与生效</h3><p className="text-sm text-slate-600">上传只存档原件，不自动识别字段。生效前请先保存表单并核对原件；生效后本版本不可直接编辑。</p>{editing.signedFileUrl && <a className="inline-block text-sm text-purple-700" href={`${base}/${editing.id}?download=1`}>下载已上传原件</a>}{editable && <div className="flex flex-wrap items-center gap-3"><input aria-label="上传签署确认书原件" type="file" accept=".pdf,.doc,.docx" disabled={busy} onChange={e => setFile(e.target.files?.[0] || null)} className="max-w-full text-sm" /><Button disabled={busy || !file} onClick={upload}>上传原件</Button></div>}{data.canManage && data.contract.contractMode === "FRAMEWORK" && data.contract.status === "COMPLETED" && editing.status === "DRAFT" && editing.signedFileUrl && <Button variant="primary" loading={busy} onClick={activate}>确认生效并生成独立对账</Button>}<p className="text-xs text-slate-600">当前版本 v{editing.version} · 历史版本 {editing.versions?.length || 0} 份</p></div>}
+      {editing && <div className="mt-8 border-t border-slate-200 pt-5 text-sm text-slate-600">保存成功后编辑区会自动折叠。请在上方对应确认书记录的“上传签署文件”入口归档原件；上传成功即标记签署完成并生成独立对账。</div>}
     </section>}
   </div>;
 }
