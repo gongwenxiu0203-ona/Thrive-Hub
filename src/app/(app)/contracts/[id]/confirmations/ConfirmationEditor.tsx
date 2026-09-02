@@ -17,6 +17,22 @@ type Data = {
 };
 const control = "w-full min-w-0 rounded-md border border-purple-200 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-slate-100";
 const states: Record<string, string> = { DRAFT: "草稿", EFFECTIVE: "已签署生效", ACTIVE: "已签署生效", TERMINATED: "已终止", VOID: "已作废" };
+async function responseBody(response: Response, fallback: string) {
+  const text = await response.text();
+  if (!text) return {} as Record<string, unknown>;
+  try { return JSON.parse(text) as Record<string, unknown>; }
+  catch {
+    if (!response.ok) {
+      const hint = response.status === 413
+        ? "上传文件过大，请选择不超过20MB的文件"
+        : response.status === 404
+          ? "上传接口暂不可用，请刷新页面后重试"
+          : `服务器返回了非预期响应（HTTP ${response.status}），请刷新页面后重试`;
+      throw new Error(hint);
+    }
+    throw new Error(fallback);
+  }
+}
 const currencies = ["USD", "CNY", "EUR", "GBP", "HKD", "JPY", "CAD", "AUD", "SGD", "CHF", "NZD", "KRW"];
 const defaults: Record<string, string[]> = {
   COUNTRY: ["美国", "英国", "德国", "法国", "意大利", "西班牙", "加拿大", "澳大利亚", "日本", "中国", "中国香港"],
@@ -71,7 +87,7 @@ export function ConfirmationEditor({ contractId, focusId, highlightMissing = fal
   const saveAreaRef = useRef<HTMLDivElement>(null);
   const reasonRef = useRef<HTMLTextAreaElement>(null);
   const base = `/api/contracts/${encodeURIComponent(contractId)}/confirmations`;
-  const load = useCallback(async () => { const res = await fetch(base, { cache: "no-store" }); const body = await res.json(); if (!res.ok) throw new Error(body.error || body.message || "确认书读取失败"); setData(body); return body as Data; }, [base]);
+  const load = useCallback(async () => { const res = await fetch(base, { cache: "no-store" }); const body = await responseBody(res, "确认书读取失败"); if (!res.ok) throw new Error(typeof body.error === "string" ? body.error : typeof body.message === "string" ? body.message : "确认书读取失败"); setData(body as unknown as Data); return body as unknown as Data; }, [base]);
   useEffect(() => { load().catch(e => setError(e.message)); }, [load]);
   function update<K extends keyof Draft>(key: K, value: Draft[K]) { setDraft(d => d ? { ...d, [key]: value } : d); }
   const opts = (key: string) => [...new Set([...(defaults[key] || []), ...(data?.options.filter(o => o.category === key).map(o => o.value) || [])])];
@@ -131,7 +147,7 @@ export function ConfirmationEditor({ contractId, focusId, highlightMissing = fal
     } else open(null, false, method);
     setChooser(false);
   }
-  async function request(url: string, init: RequestInit) { const res = await fetch(url, init); const body = await res.json(); if (!res.ok) throw new Error(typeof body.error === "string" ? body.error : body.message || "操作失败，请重试"); return body; }
+  async function request(url: string, init: RequestInit) { const res = await fetch(url, init); const body = await responseBody(res, "操作失败，请重试"); if (!res.ok) throw new Error(typeof body.error === "string" ? body.error : typeof body.message === "string" ? body.message : "操作失败，请重试"); return body; }
   async function save() {
     if (!draft) return;
     setError("");
@@ -153,7 +169,7 @@ export function ConfirmationEditor({ contractId, focusId, highlightMissing = fal
       const previouslySigned = Boolean(editing?.signedFileUrl);
       const url = editing ? `${base}/${editing.id}${replacement ? "?action=replace" : ""}` : base;
       const payload = editing ? replacement ? { draft, pendingVersion: editing.pendingVersion, reason } : { draft, expectedVersion: editing.version, reason } : { draft };
-      const body = await request(url, { method: editing ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const body = await request(url, { method: editing ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }) as { confirmation: { id: string }; activated?: boolean };
       const fresh = await load(); const saved = fresh.confirmations.find(r => r.id === body.confirmation.id);
       setReason("");
       setNotice(body.activated
@@ -182,7 +198,7 @@ export function ConfirmationEditor({ contractId, focusId, highlightMissing = fal
     setBusy(true); setError("");
     try {
       const res = await fetch(`/api/contracts/${contractId}/framework-export?selection=confirmation&confirmationId=${row.id}`);
-      if (!res.ok) { const body = await res.json(); throw new Error(body.error || "导出失败"); }
+      if (!res.ok) { const body = await responseBody(res, "导出失败"); throw new Error(typeof body.error === "string" ? body.error : "导出失败"); }
       const url = URL.createObjectURL(await res.blob()); const anchor = document.createElement("a"); anchor.href = url;
       anchor.download = `${row.number}.docx`; anchor.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
       setNotice(`已导出 ${row.number} 的 Word 确认书，请签署后在该记录上传原件。`);
@@ -198,7 +214,7 @@ export function ConfirmationEditor({ contractId, focusId, highlightMissing = fal
       const JSZip = (await import("jszip")).default; const zip = new JSZip();
       for (const row of eligible) {
         const url = kind === "WORD" ? `/api/contracts/${contractId}/framework-export?selection=confirmation&confirmationId=${row.id}` : `${base}/${row.id}?download=1`;
-        const res = await fetch(url); if (!res.ok) { const body = await res.json(); throw new Error(body.error || `${row.number} 下载失败`); }
+        const res = await fetch(url); if (!res.ok) { const body = await responseBody(res, `${row.number} 下载失败`); throw new Error(typeof body.error === "string" ? body.error : `${row.number} 下载失败`); }
         const ext = kind === "WORD" ? ".docx" : (res.headers.get("content-disposition")?.match(/filename\*=UTF-8''[^.]+(\.[a-z0-9]+)$/i)?.[1] || ".pdf");
         zip.file(`${row.number}${ext}`, await res.blob());
       }
