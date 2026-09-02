@@ -1,5 +1,6 @@
 ﻿import Link from "next/link";
 import { FilePlus } from "lucide-react";
+import { Fragment } from "react";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -51,6 +52,29 @@ function commissionConfigValue(ct: Record<string, unknown>, path: string[]): unk
     current = (current as Record<string, unknown>)[key];
   }
   return current;
+}
+
+function confirmationFieldIssues(draft: ReturnType<typeof decodeConfirmation>["draft"]): string[] {
+  try {
+    parseEffectiveConfirmation(draft);
+    return [];
+  } catch (error) {
+    const issues = (error as { issues?: Array<{ message?: string }> }).issues;
+    return issues?.map((issue) => issue.message).filter((message): message is string => Boolean(message)) ?? ["字段不完整"];
+  }
+}
+
+const confirmationStatusLabels: Record<string, string> = {
+  DRAFT: "草稿",
+  EFFECTIVE: "已签署生效",
+  TERMINATED: "已终止",
+  VOID: "已作废",
+};
+
+const contractColumnWidths = [152, 140, 180, 86, 104, 104, 90, 90, 108, 82, 120, 132, 82, 104, 112];
+
+function ContractColumnLayout() {
+  return <colgroup>{contractColumnWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>;
 }
 
 function missingContractFields(ct: Record<string, unknown>): string[] {
@@ -122,7 +146,10 @@ export default async function ContractsPage({
       orderBy: { createdAt: "desc" },
       include: {
         customer: true, owner: true, reviewer: true, createdBy: true,
-        projectConfirmations: { orderBy: [{ startDate: "desc" }, { createdAt: "desc" }] },
+        projectConfirmations: {
+          orderBy: [{ number: "asc" }, { createdAt: "asc" }],
+          include: { versions: { orderBy: { createdAt: "asc" }, select: { snapshot: true, createdAt: true } } },
+        },
         _count: { select: { receivingAccounts: true, projectConfirmations: true } },
       },
     }),
@@ -194,7 +221,8 @@ export default async function ContractsPage({
         <EmptyState title="暂无合同" description="点击右上角新建合同" />
       ) : (
         <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[1706px] table-fixed text-sm">
+            <ContractColumnLayout />
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50/60">
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">合同编号</th>
@@ -219,26 +247,46 @@ export default async function ContractsPage({
                 const framework = ct.contractMode === "FRAMEWORK";
                 const decodedConfirmations = framework
                   ? ct.projectConfirmations.flatMap((row) => {
-                      try { return [{ row, draft: decodeConfirmation(row).draft }]; }
+                      try {
+                        const draft = decodeConfirmation(row).draft;
+                        return [{ row, draft, issues: confirmationFieldIssues(draft) }];
+                      }
                       catch { return []; }
                     })
                   : [];
+                const hasMultipleConfirmations = decodedConfirmations.length > 1;
+                const primaryConfirmation = decodedConfirmations.find(({ row }) => row.number === `${ct.contractNo}-001`)
+                  ?? decodedConfirmations.find(({ row }) => !["VOID", "VOIDED"].includes(row.status));
                 const latestConfirmation = decodedConfirmations
                   .slice()
                   .sort((a, b) => (b.draft.startDate ?? "").localeCompare(a.draft.startDate ?? "") || b.row.createdAt.getTime() - a.row.createdAt.getTime())[0];
-                const confirmationIssues = decodedConfirmations.flatMap(({ row, draft }) => {
-                  try { parseEffectiveConfirmation(draft); return row.signedFileUrl ? [] : [`${row.number}：缺少签署原件`]; }
-                  catch { return [`${row.number}：字段不完整`]; }
-                });
+                const confirmationIssues = decodedConfirmations.flatMap(({ row, issues }) => [
+                  ...issues.map((issue) => `${row.number}：${issue}`),
+                  ...(row.signedFileUrl ? [] : [`${row.number}：缺少签署原件`]),
+                ]);
+                const masterMissingFields = framework ? frameworkMissingFields(ct, ct._count.receivingAccounts) : [];
                 const missingFields = framework
-                  ? [...frameworkMissingFields(ct, ct._count.receivingAccounts), ...confirmationIssues]
+                  ? [...masterMissingFields, ...(hasMultipleConfirmations ? [] : confirmationIssues)]
                   : missingContractFields(ct as unknown as Record<string, unknown>);
-                const displayStart = framework ? latestConfirmation?.draft.startDate : ct.startDate;
-                const displayEnd = framework ? latestConfirmation?.draft.endDate : ct.endDate;
+                const displayStart = framework ? hasMultipleConfirmations ? null : latestConfirmation?.draft.startDate : ct.startDate;
+                const displayEnd = framework ? hasMultipleConfirmations ? null : latestConfirmation?.draft.endDate : ct.endDate;
                 const monthlyFee = latestConfirmation?.draft.monthlyFee;
                 const commission = latestConfirmation?.draft.commission;
+                const compositeStatus = !framework || ct.status !== "COMPLETED"
+                  ? labelOf(CONTRACT_STATUS_LABELS, ct.status)
+                  : !primaryConfirmation
+                    ? "主合同已签署·待确认书"
+                    : primaryConfirmation.row.signedFileUrl && ["EFFECTIVE", "TERMINATED"].includes(primaryConfirmation.row.status)
+                      ? "合同签署完成"
+                      : primaryConfirmation.row.signedFileUrl
+                        ? "已归档·待确认书生效"
+                        : "主合同已签署·确认书待签署";
+                const compositeStatusClass = framework && ct.status === "COMPLETED" && compositeStatus !== "合同签署完成"
+                  ? "border border-amber-200 bg-amber-50 text-amber-800"
+                  : CONTRACT_STATUS_COLORS[ct.status];
                 return (
-                <tr key={ct.id} className="group hover:bg-slate-50/60 transition-colors">
+                <Fragment key={ct.id}>
+                <tr className="group hover:bg-slate-50/60 transition-colors">
                   <td className="px-4 py-3">
                     <Link
                       href={`/contracts/${ct.id}`}
@@ -274,11 +322,11 @@ export default async function ContractsPage({
                   </td>
                   <td className="px-4 py-3 text-sm text-slate-700">{ct.owner?.name ?? <span className="text-slate-300">—</span>}</td>
                   <td className="px-4 py-3 text-sm text-slate-700">{ct.reviewer?.name ?? <span className="text-slate-300">—</span>}</td>
-                  <td className="px-4 py-3 text-xs text-slate-600">{framework ? monthlyFee ? `${monthlyFee.currency} ${monthlyFee.amount}` : "0" : ct.feeAmount ?? <span className="text-slate-300">—</span>}</td>
-                  <td className="px-4 py-3 text-xs text-slate-600">{framework ? commission ? commission.mode === "PACKAGE" ? `总包 ${commission.currency} ${commission.packageValue ?? "—"}` : `${commission.serviceRatePercent ?? 0}%` : "0%" : ct.commissionRate ?? <span className="text-slate-300">—</span>}</td>
+                  <td className="px-4 py-3 text-xs text-slate-600">{framework ? hasMultipleConfirmations ? "按确认书" : monthlyFee ? `${monthlyFee.currency} ${monthlyFee.amount}` : "0" : ct.feeAmount ?? <span className="text-slate-300">—</span>}</td>
+                  <td className="px-4 py-3 text-xs text-slate-600">{framework ? hasMultipleConfirmations ? "按确认书" : commission ? commission.mode === "PACKAGE" ? `总包 ${commission.currency} ${commission.packageValue ?? "—"}` : `${commission.serviceRatePercent ?? 0}%` : "0%" : ct.commissionRate ?? <span className="text-slate-300">—</span>}</td>
                   <td className="px-4 py-3" title={missingFields.join("；")}>
-                    <Badge className={CONTRACT_STATUS_COLORS[ct.status]}>
-                      {framework && ct.status === "DRAFT" ? "草稿·待上传盖章版" : labelOf(CONTRACT_STATUS_LABELS, ct.status)}
+                    <Badge className={compositeStatusClass}>
+                      {framework && ct.status === "DRAFT" ? "草稿·待上传盖章版" : compositeStatus}
                     </Badge>
                   </td>
                   <td className="px-4 py-3">
@@ -288,7 +336,7 @@ export default async function ContractsPage({
                       </Badge>
                     ) : (
                       <Badge className="border border-emerald-200 bg-emerald-50 text-emerald-700">
-                        {framework ? decodedConfirmations.length ? "主合同及确认书完整" : ct.status === "DRAFT" ? "资料完整·待签署" : "主合同完整·待确认书" : "完整"}
+                        {framework ? hasMultipleConfirmations ? "主合同完整" : decodedConfirmations.length ? "主合同及确认书完整" : ct.status === "DRAFT" ? "资料完整·待签署" : "主合同完整·待确认书" : "完整"}
                       </Badge>
                     )}
                   </td>
@@ -301,6 +349,47 @@ export default async function ContractsPage({
                     CHANNEL_ARCHIVE: "渠道合同归档",
                   }[ct.uploadType || ""] || "历史记录"}</td>
                 </tr>
+                {framework && hasMultipleConfirmations && (
+                  <tr className="bg-slate-50/70">
+                    <td colSpan={15} className="p-0">
+                      <details className="group/confirmations">
+                        <summary className="cursor-pointer list-none px-4 py-3 text-sm font-medium text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-purple-300">
+                          <span className="inline-flex items-center gap-2">项目确认书明细 <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs text-purple-800">{decodedConfirmations.length} 份</span><span className="text-xs font-normal text-slate-500 group-open/confirmations:hidden">展开查看</span></span>
+                        </summary>
+                        <div className="overflow-hidden border-t border-slate-200 bg-white">
+                          <table className="w-full table-fixed text-xs">
+                            <ContractColumnLayout />
+                            <tbody className="divide-y divide-slate-100">
+                              {decodedConfirmations.map(({ row, draft, issues }) => {
+                                const complete = issues.length === 0;
+                                const signedVersion = row.signedFileUrl ? row.versions.find((version) => { try { return JSON.parse(version.snapshot).signedFileUrl === row.signedFileUrl; } catch { return false; } }) : null;
+                                const uploadTime = signedVersion ? formatDate(signedVersion.createdAt) : row.signedFileUrl && row.effectiveAt ? formatDate(row.effectiveAt) : null;
+                                return <tr key={row.id} className="align-top hover:bg-slate-50">
+                                  <td className="px-4 py-3"><Link className="font-medium text-purple-700 hover:underline" href={`/contracts/${ct.id}/confirmations?focus=${row.id}#confirmation-${row.id}`}>{row.number}</Link><span className="mt-1 block text-[11px] text-slate-500">项目确认书</span></td>
+                                  <td className="px-4 py-3 text-slate-300">—</td>
+                                  <td className="px-4 py-3 text-slate-300">—</td>
+                                  <td className="px-4 py-3 text-slate-600">项目确认书</td>
+                                  <td className="whitespace-nowrap px-4 py-3 text-slate-700">{draft.startDate || "—"}</td>
+                                  <td className="whitespace-nowrap px-4 py-3 text-slate-700">{draft.endDate || "—"}</td>
+                                  <td className="px-4 py-3 text-slate-300">—</td>
+                                  <td className="px-4 py-3 text-slate-300">—</td>
+                                  <td className="px-4 py-3 text-slate-700">{draft.monthlyFee ? `${draft.monthlyFee.currency} ${draft.monthlyFee.amount}` : "0"}</td>
+                                  <td className="px-4 py-3 text-slate-700">{draft.commission ? draft.commission.mode === "PACKAGE" ? `总包 ${draft.commission.currency} ${draft.commission.packageValue || "待填写"}` : `${draft.commission.serviceRatePercent ?? 0}%` : "0%"}</td>
+                                  <td className="px-4 py-3"><span className={`rounded-full px-2 py-0.5 font-medium ${row.status === "EFFECTIVE" ? "bg-emerald-50 text-emerald-700" : row.status === "DRAFT" ? "bg-amber-50 text-amber-800" : "bg-slate-100 text-slate-700"}`}>{confirmationStatusLabels[row.status] || row.status}</span>{!row.signedFileUrl && <span className="mt-1 block text-slate-500">未上传签署原件</span>}</td>
+                                  <td className="px-4 py-3">{complete ? <span className="text-emerald-700">完整</span> : <Link title={issues.join("；")} className="font-medium text-rose-700 underline decoration-rose-300 underline-offset-2" href={`/contracts/${ct.id}/confirmations?focus=${row.id}&highlight=missing#confirmation-${row.id}`}>字段不全（{issues.length}）</Link>}</td>
+                                  <td className="px-4 py-3 text-slate-300">—</td>
+                                  <td className="whitespace-nowrap px-4 py-3 text-slate-500">{formatDate(row.createdAt)}</td>
+                                  <td className="px-4 py-3 text-slate-700">{draft.workflowMode === "SIGNED_UPLOAD" ? "上传已签署确认书" : "网站创建确认书"}{uploadTime && <span className="mt-1 block whitespace-nowrap text-[11px] text-slate-500">上传 {uploadTime}</span>}</td>
+                                </tr>;
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </details>
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
                 );
               })}
             </tbody>
