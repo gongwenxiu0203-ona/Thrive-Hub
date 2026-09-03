@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ExternalLink, FileDown, Pencil } from "lucide-react";
+import { FileDown, Pencil } from "lucide-react";
 import { BackButton } from "@/components/BackButton";
 import { prisma } from "@/lib/prisma";
 import { requireSession, adminHasFeature } from "@/lib/session";
@@ -96,6 +96,8 @@ export default async function ContractDetailPage({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const c = contract as any;
   const isTransactionalContract = c.uploadType === "TRANSACTIONAL" || contract.type === "TRANSACTIONAL";
+  const isChannelArchive = c.uploadType === "CHANNEL_ARCHIVE" || contract.type === "CHANNEL";
+  const isSimpleArchive = isTransactionalContract || isChannelArchive;
 
   // 行级权限校验
   if (session.role === "BRAND" && session.brandName) {
@@ -374,7 +376,7 @@ export default async function ContractDetailPage({
             {contract.type === "BRAND" && (session.role === "ADMIN" || session.role === "USER") && (
               <Link href={`/contracts/${contract.id}/confirmations`} className="btn-secondary text-sm">项目确认书</Link>
             )}
-            {canConfigureSplitRule && contract.customerId && (
+            {!isSimpleArchive && canConfigureSplitRule && contract.customerId && (
               <ChannelSplitRuleModal
                 customerId={contract.customerId}
                 contractId={contract.id}
@@ -384,7 +386,7 @@ export default async function ContractDetailPage({
               />
             )}
             {/* V4 合同：编辑 + 下载 */}
-            {c.fillMethod && (
+            {!isSimpleArchive && c.fillMethod && (
               contract.status === "IN_PROGRESS" ||
               contract.status === "REJECTED" ||
               (contract.status === "COMPLETED" && isAdmin)
@@ -396,7 +398,7 @@ export default async function ContractDetailPage({
                 <Pencil className="h-4 w-4" /> 编辑合同信息
               </Link>
             )}
-            {c.fillMethod && (
+            {!isSimpleArchive && c.fillMethod && (
               <>
                 <a
                   href={`/api/contracts/generate-doc/${contract.id}`}
@@ -414,9 +416,14 @@ export default async function ContractDetailPage({
                 </a>
               </>
             )}
-            {contract.status === "COMPLETED" && !isAdmin && <ContactAdminModifyButton />}
+            {isSimpleArchive && contract.fileUrl && (
+              <a href={contract.fileUrl} download className="btn-primary inline-flex items-center gap-1.5 text-sm">
+                <FileDown className="h-4 w-4" /> 下载原件
+              </a>
+            )}
+            {!isSimpleArchive && contract.status === "COMPLETED" && !isAdmin && <ContactAdminModifyButton />}
             {/* 旧版合同：原有编辑弹窗 */}
-            {!c.fillMethod && (contract.status === "IN_PROGRESS" || (contract.status === "COMPLETED" && isAdmin)) && contract.customerId && contract.type && (
+            {!isSimpleArchive && !c.fillMethod && (contract.status === "IN_PROGRESS" || (contract.status === "COMPLETED" && isAdmin)) && contract.customerId && contract.type && (
               <ContractFormModal
                 users={userOptions}
                 customers={customers}
@@ -449,17 +456,17 @@ export default async function ContractDetailPage({
                 trigger="edit"
               />
             )}
-            <ContractActions
+            {!isSimpleArchive && <ContractActions
               contractId={contract.id}
               status={contract.status}
               isAdmin={isAdmin}
-            />
+            />}
           </div>
         </div>
       </div>
 
       {/* 上传已有合同：缺失字段提醒 */}
-      {!isTransactionalContract && uploadMissing.length > 0 && (
+      {!isSimpleArchive && uploadMissing.length > 0 && (
         <div className="card border-amber-200 bg-amber-50 p-4">
           <div className="flex items-start gap-3">
             <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
@@ -484,7 +491,7 @@ export default async function ContractDetailPage({
       )}
 
       {/* 状态流转 */}
-      {!isTransactionalContract && <div className="card flex items-center gap-2 overflow-x-auto p-4">
+      {!isSimpleArchive && <div className="card flex items-center gap-2 overflow-x-auto p-4">
         {CONTRACT_STATUS_ORDER.map((s, i) => {
           const reached =
             CONTRACT_STATUS_ORDER.indexOf(contract.status) >= i;
@@ -508,7 +515,7 @@ export default async function ContractDetailPage({
       </div>}
 
       {/* 合同审核：提交审核后置顶展示；上传「签署完成存档」无需审核，不展示 */}
-      {!isTransactionalContract && c.uploadArchiveMode !== "SIGNED_ARCHIVE" && (reviewRounds.length > 0 || canActReview) && (
+      {!isSimpleArchive && c.uploadArchiveMode !== "SIGNED_ARCHIVE" && (reviewRounds.length > 0 || canActReview) && (
         <ReviewerActionsPanel
           contractId={contract.id}
           contractStatus={contract.status}
@@ -524,7 +531,7 @@ export default async function ContractDetailPage({
       )}
 
       {/* 合同流程：生成 + 提交审核（双路径）+ 盖章 + 版本历史 */}
-      {!isTransactionalContract && (
+      {!isSimpleArchive && (
         <ContractWorkflowPanel
           contractId={contract.id}
           status={contract.status}
@@ -550,7 +557,7 @@ export default async function ContractDetailPage({
       )}
 
       {/* 合同基础信息 */}
-      <section className="card p-5">
+      {!isSimpleArchive && <section className="card p-5">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h2 className="font-semibold text-slate-900">合同基础信息</h2>
           {isAdmin && <ContractNumberEditor contractId={contract.id} contractNo={contract.contractNo} />}
@@ -591,9 +598,9 @@ export default async function ContractDetailPage({
             }
           />
         </dl>
-      </section>
+      </section>}
 
-      <section className="card p-5">
+      {!isSimpleArchive && <section className="card p-5">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="font-semibold text-slate-900">附加条款与补充文件</h2>
@@ -617,17 +624,17 @@ export default async function ContractDetailPage({
             ))}
           </div>
         )}
-      </section>
+      </section>}
 
       {/* 合同字段展示：与创建合同一致分为四个业务板块 */}
-      {!isTransactionalContract && reviewFieldGroups
+      {!isSimpleArchive && reviewFieldGroups
         .filter((group) => group.fields.some((field) => !field.key.startsWith("partyB")))
         .map((group) => (
         <ReviewFieldDisplaySection key={group.title} title={group.title} fields={group.fields} />
       ))}
 
       {/* 合同中的乙方详细信息 */}
-      {!isTransactionalContract && <section className="card p-5">
+      {!isSimpleArchive && <section className="card p-5">
         <h2 className="mb-4 font-semibold text-slate-900">乙方信息</h2>
         <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
           <Field label="乙方公司" value={partyBCompanyLabels[c.partyBCompany] ?? c.partyBCompany ?? "—"} />
@@ -648,7 +655,7 @@ export default async function ContractDetailPage({
       </section>}
 
       {/* 旧版合同兜底：保留原文对照 */}
-      {!isTransactionalContract && !c.fillMethod && (
+      {!isSimpleArchive && !c.fillMethod && (
         <ContractCompare
           contractText={contract.contractText ?? ""}
           fields={reviewFieldRows.map((field) => ({
@@ -661,37 +668,34 @@ export default async function ContractDetailPage({
 
       {isTransactionalContract && (
         <section className="card p-5">
-          <h2 className="mb-1 font-semibold text-slate-900">事务性合同源文件</h2>
-          <p className="mb-4 text-sm text-slate-400">源文件不参与字段识别、模板生成或审核流程</p>
-          {contract.fileUrl ? (
-            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 px-3 py-3">
-              <span className="min-w-0 flex-1 truncate text-sm text-slate-700">
-                {files.find((file) => file.fileUrl === contract.fileUrl)?.fileName ?? "事务性合同源文件"}
-              </span>
-              <a
-                href={contract.fileUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="btn-outline inline-flex items-center gap-1.5 text-sm"
-              >
-                <ExternalLink className="h-4 w-4" /> 在线查看
-              </a>
-              <a
-                href={contract.fileUrl}
-                download
-                className="btn-secondary inline-flex items-center gap-1.5 text-sm"
-              >
-                <FileDown className="h-4 w-4" /> 下载源文件
-              </a>
-            </div>
-          ) : (
-            <p className="text-sm text-slate-400">暂无源文件</p>
-          )}
+          <h2 className="mb-4 font-semibold text-slate-900">事务性合同信息</h2>
+          <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
+            <Field label="合同开始时间" value={contract.startDate ? formatDate(contract.startDate) : "—"} />
+            <Field label="合同截止时间" value={contract.endDate ? formatDate(contract.endDate) : "—"} />
+          </dl>
+        </section>
+      )}
+
+      {isChannelArchive && (
+        <section className="card p-5">
+          <div className="mb-4"><h2 className="font-semibold text-slate-900">渠道商返佣合同信息</h2><p className="mt-1 text-sm text-slate-500">已上传签署原件，合同状态为签署完成。</p></div>
+          <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
+            <Field label="甲方公司名称" value={contract.partyA ?? "—"} />
+            <Field label="甲方联系人" value={c.partyAContact ?? "—"} />
+            <Field label="甲方联系方式" value={[c.partyAPhone, c.partyAEmail].filter(Boolean).join(" · ") || "—"} />
+            <Field label="乙方公司名称" value={c.partyBCompany ?? "—"} />
+            <Field label="乙方联系人" value={c.partyBContact ?? "—"} />
+            <Field label="乙方联系方式" value={[c.partyBPhone, c.partyBEmail].filter(Boolean).join(" · ") || "—"} />
+            <Field label="合同开始时间" value={contract.startDate ? formatDate(contract.startDate) : "—"} />
+            <Field label="合同截止时间" value={contract.endDate ? formatDate(contract.endDate) : "—"} />
+            <Field label="固定月度服务费渠道合作费 · 乙方比例" value={contract.splitRule ? `${(contract.splitRule.fixedFeeRate * 100).toFixed(2).replace(/\.00$/, "")}%` : "—"} />
+          </dl>
+          <div className="mt-5 border-t border-slate-200 pt-4"><h3 className="text-sm font-semibold text-slate-800">联盟运营佣金渠道合作费</h3><p className="mt-2 text-sm text-slate-600">{contract.splitRule ? <>低于 USD {contract.splitRule.commissionThresholdAmount.toLocaleString()} 按 {(contract.splitRule.commissionBelowRate * 100).toFixed(0)}%；达到或超过该金额按 {(contract.splitRule.commissionAtOrAboveRate * 100).toFixed(0)}%。</> : "尚未设置分账规则"}</p></div>
         </section>
       )}
 
       {/* 合同文件 */}
-      <section className="card p-5">
+      {!isSimpleArchive && <section className="card p-5">
         <h2 className="mb-1 font-semibold text-slate-900">合同文件</h2>
         <p className="mb-4 text-sm text-slate-400">上传合同 PDF 等文件</p>
         {c.uploadType === "EXISTING" && contract.versions.length > 0 && (() => {
@@ -726,7 +730,7 @@ export default async function ContractDetailPage({
             uploadedBy: file.uploadedBy,
           }))}
         />
-      </section>
+      </section>}
     </div>
   );
 }

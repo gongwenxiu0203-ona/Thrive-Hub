@@ -107,8 +107,8 @@ export default async function NewContractPage({ searchParams }: { searchParams: 
   if (!mode) {
     return <div className="mx-auto max-w-3xl space-y-6"><div><h1 className="text-xl font-bold text-slate-900">新建合同</h1><p className="mt-1 text-sm text-slate-500">请选择合同类型</p></div><div className="grid gap-4 sm:grid-cols-3">
       <EntryCard href={`/contracts/new?mode=brand${customerQuery}`} icon={<Building2 className="h-6 w-6" />} title="品牌方合同" description="新建或上传已有品牌方合同" />
-      <EntryCard href={`/contracts/new?mode=channel${customerQuery}`} icon={<HandCoins className="h-6 w-6" />} title="渠道商返佣合同" description="关联客户及渠道商账户后上传归档" />
-      <EntryCard href="/contracts/new?mode=transactional" icon={<FileUp className="h-6 w-6" />} title="事务性合同" description="上传源文件并直接归档" />
+      <EntryCard href={`/contracts/new?mode=channel${customerQuery}`} icon={<HandCoins className="h-6 w-6" />} title="渠道商返佣合同" description="填写双方资料与返佣规则，上传签署原件归档" />
+      <EntryCard href="/contracts/new?mode=transactional" icon={<FileUp className="h-6 w-6" />} title="事务性合同" description="填写合同起止时间，上传签署原件归档" />
     </div></div>;
   }
 
@@ -131,8 +131,8 @@ export default async function NewContractPage({ searchParams }: { searchParams: 
     return <div className="mx-auto max-w-5xl space-y-6"><PageHeader title={frameworkFlow === "upload" ? "上传已有主格式合同" : "新建主格式合同"} description="新建与上传已有使用同一套双方资料、联系人和收款账户字段；项目合作与计费规则在确认书维护" backHref={`/contracts/new?mode=brand${customerQuery}`} backLabel="返回品牌方合同" /><FrameworkContractForm mode={frameworkFlow} presetCustomerId={customer?.id} templates={frameworkTemplates} customers={customers} users={users.filter((item) => ["ADMIN", "USER"].includes(item.role))} accounts={accounts} currentUserId={session.userId} defaultReviewerId={defaultReviewerId} partyBOptions={partyBOptions} /></div>;
   }
 
-  if (mode === "transactional") return <div className="mx-auto max-w-3xl space-y-6"><PageHeader title="事务性合同" description="填写负责人并上传源文件" backHref="/contracts/new" backLabel="返回合同类型" /><TransactionalUploadForm users={users} currentUserId={session.userId} /></div>;
-  if (mode === "channel") return <div className="mx-auto max-w-4xl space-y-6"><PageHeader title="渠道商返佣合同" description="关联客户、核对渠道商账户并上传合同原件" backHref="/contracts/new" backLabel="返回合同类型" /><div className="flex justify-end"><Link href="/contracts/templates?scope=channel" className="btn-secondary inline-flex items-center gap-1.5 text-sm"><FolderOpen className="h-4 w-4" />渠道商返佣合同模板</Link></div><ChannelUploadForm customers={customers} users={users} currentUserId={session.userId} presetCustomerId={customer?.id} /></div>;
+  if (mode === "transactional") return <div className="mx-auto max-w-3xl space-y-6"><PageHeader title="事务性合同" description="填写合同起止时间并上传已签署原件；保存后直接标记签署完成" backHref="/contracts/new" backLabel="返回合同类型" /><TransactionalUploadForm currentUserId={session.userId} /></div>;
+  if (mode === "channel") return <div className="mx-auto max-w-5xl space-y-6"><PageHeader title="渠道商返佣合同" description="填写合同专属字段与返佣规则，上传已签署原件后直接归档" backHref="/contracts/new" backLabel="返回合同类型" /><ChannelUploadForm customers={customers} users={users} currentUserId={session.userId} presetCustomerId={customer?.id} /></div>;
   return <div className="mx-auto max-w-4xl space-y-6"><PageHeader title="新建品牌方合同" description="基于合同模板创建" backHref={`/contracts/new?mode=brand${customerQuery}`} backLabel="返回品牌方合同" /><ContractV4Form customers={customers} users={users} templates={templates} presetCustomerId={customer?.id} presetCustomerName={customer?.brandName} currentUserId={session.userId} existingContract={existingContract} /></div>;
 }
 

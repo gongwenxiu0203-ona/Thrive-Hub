@@ -24,6 +24,7 @@ import {
   ensureCustomerReconciliationPlan,
 } from "@/lib/customerReconciliationPlan";
 import { parseDateOnlyUtc } from "@/lib/dateRange";
+import { PARTY_B_COMPANIES } from "@/lib/partyB";
 
 const CONTRACT_EDIT_AUDIT_SELECT = {
   id: true,
@@ -742,6 +743,8 @@ export async function uploadTransactionalContract(
   const file = fd.get("file");
   const ownerId = str(fd, "ownerId") || session.userId;
   const type = str(fd, "type") || "TRANSACTIONAL";
+  const startDate = parseDateOnlyUtc(str(fd, "startDate"));
+  const endDate = parseDateOnlyUtc(str(fd, "endDate"));
 
   if (type !== "TRANSACTIONAL") {
     return { ok: false, error: "事务性合同类型无效" };
@@ -749,6 +752,8 @@ export async function uploadTransactionalContract(
   if (!(file instanceof File)) {
     return { ok: false, error: "请上传事务性合同文件" };
   }
+  if (!startDate || !endDate) return { ok: false, error: "请填写有效的合同开始时间和截止时间" };
+  if (startDate > endDate) return { ok: false, error: "合同截止时间不能早于开始时间" };
 
   const saved = await saveUploadedFile(file);
   await requireApprovedInternalOwner(ownerId);
@@ -768,6 +773,8 @@ export async function uploadTransactionalContract(
       uploadType: "TRANSACTIONAL",
       uploadArchiveMode: "SIGNED_ARCHIVE",
       extractedBy: null,
+      startDate,
+      endDate,
     },
   });
   await prisma.attachment.create({
@@ -790,12 +797,25 @@ export async function uploadChannelContract(fd: FormData): Promise<ContractSaveR
     const session = await requireContractsPermission("EDIT");
     const customerId = str(fd, "customerId");
     const ownerId = str(fd, "ownerId") || session.userId;
+    const partyBCompany = str(fd, "partyBCompany");
+    const partyBContact = str(fd, "partyBContact");
+    const partyBPhone = str(fd, "partyBPhone");
+    const partyBEmail = str(fd, "partyBEmail");
+    const startDate = parseDateOnlyUtc(str(fd, "startDate"));
+    const endDate = parseDateOnlyUtc(str(fd, "endDate"));
+    const fixedFeePercent = Number(str(fd, "fixedFeeRate"));
     const file = fd.get("file");
     if (!customerId) return { ok: false, error: "请选择关联客户" };
     if (!(file instanceof File)) return { ok: false, error: "请上传渠道商合同文件" };
+    if (!partyBCompany || !partyBContact || !partyBPhone || !partyBEmail) return { ok: false, error: "请完整填写乙方公司、联系人、电话和邮箱" };
+    if (!startDate || !endDate) return { ok: false, error: "请填写有效的合同开始时间和截止时间" };
+    if (startDate > endDate) return { ok: false, error: "合同截止时间不能早于开始时间" };
+    if (!Number.isFinite(fixedFeePercent) || fixedFeePercent < 0 || fixedFeePercent > 100) return { ok: false, error: "固定月度服务费渠道合作费的乙方比例需在 0% 至 100% 之间" };
+    await requireFeaturePermission(session, "finance.channel_split_rules", "EDIT");
     await requireCustomerRow(customerId, session);
     await requireApprovedInternalOwner(ownerId);
     const saved = await saveUploadedFile(file);
+    const thraive = PARTY_B_COMPANIES.THRAIVE;
     let contract: { id: string } | null = null;
     for (let attempt = 0; attempt < 4 && !contract; attempt++) {
       try {
@@ -814,9 +834,40 @@ export async function uploadChannelContract(fd: FormData): Promise<ContractSaveR
               fillMethod: "CHANNEL_ARCHIVE_UPLOAD",
               uploadType: "CHANNEL_ARCHIVE",
               uploadArchiveMode: "SIGNED_ARCHIVE",
+              partyA: thraive.name,
+              partyACreditCode: thraive.creditCode,
+              partyAAddress: thraive.address,
+              partyAContact: thraive.contact,
+              partyAPhone: thraive.phone,
+              partyAEmail: thraive.email,
+              partyBCompany,
+              partyBContact,
+              partyBPhone,
+              partyBEmail,
+              startDate,
+              endDate,
+              feeCycle: "月度",
+              commissionType: "THRESHOLD",
+              commissionRate: "低于 USD 4,400：15%；达到或超过：25%",
+              thresholdAmount: "4400",
+              thresholdCurrency: "USD",
+              specialCommissionTerms: "联盟运营佣金渠道合作费：低于 USD 4,400 按 15%；达到或超过 USD 4,400 按 25%",
             },
             select: { id: true },
           });
+          await tx.channelSplitRule.create({ data: {
+            customerId,
+            contractId: created.id,
+            ruleType: "A",
+            splitEndDate: endDate,
+            fixedFeeRate: fixedFeePercent / 100,
+            commissionRate: 0.15,
+            commissionThresholdAmount: 4400,
+            commissionThresholdCurrency: "USD",
+            commissionBelowRate: 0.15,
+            commissionAtOrAboveRate: 0.25,
+            createdById: session.userId,
+          } });
           await tx.attachment.create({ data: {
             fileName: saved.fileName, fileUrl: saved.fileUrl, fileSize: saved.fileSize,
             entityType: "CONTRACT", entityId: created.id, uploadedById: session.userId,
@@ -830,7 +881,6 @@ export async function uploadChannelContract(fd: FormData): Promise<ContractSaveR
     }
     if (!contract) return { ok: false, error: "渠道商合同编号生成冲突，请重试" };
     await bumpCustomerStatus(customerId, "COOPERATING");
-    await ensureCustomerReconciliationPlan(contract.id, session.userId);
     revalidatePath("/contracts");
     revalidatePath(`/customers/${customerId}`);
     revalidatePath("/finance");

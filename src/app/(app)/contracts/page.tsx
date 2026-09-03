@@ -121,9 +121,13 @@ export default async function ContractsPage({
 }) {
   const session = await requireSession();
   const sp = await searchParams;
+  const requestedCategory = sp.category;
+  const category = requestedCategory === "channel" || requestedCategory === "transactional" || requestedCategory === "brand"
+    ? requestedCategory
+    : session.role === "CHANNEL" ? "channel" : "brand";
+  const categoryTypes = category === "channel" ? ["CHANNEL", "REBATE"] : category === "transactional" ? ["TRANSACTIONAL"] : ["BRAND"];
 
   const statusFilter = csv(sp, "status");
-  const typeFilter = csv(sp, "type");
   const customerFilter = csv(sp, "customer");
   const q = sp.q?.trim() ?? "";
 
@@ -142,10 +146,11 @@ export default async function ContractsPage({
   const [allContracts, customers, users] = await Promise.all([
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prisma.contract.findMany({
-      where: { ...contractScope(sess, view), deletedAt: null } as any,
+      where: { ...contractScope(sess, view), deletedAt: null, type: { in: categoryTypes } } as any,
       orderBy: { createdAt: "desc" },
       include: {
         customer: true, owner: true, reviewer: true, createdBy: true,
+        splitRule: true,
         projectConfirmations: {
           orderBy: [{ number: "asc" }, { createdAt: "asc" }],
           include: { versions: { orderBy: { createdAt: "asc" }, select: { snapshot: true, createdAt: true } } },
@@ -164,10 +169,6 @@ export default async function ContractsPage({
   // Client-side filtering for multi-select support
   const contracts = allContracts.filter((ct) => {
     if (statusFilter.length && !statusFilter.includes(ct.status)) return false;
-    if (typeFilter.length) {
-      const logicalType = ct.type === "REBATE" ? "CHANNEL" : ct.type;
-      if (!typeFilter.includes(logicalType)) return false;
-    }
     if (customerFilter.length && (!ct.customerId || !customerFilter.includes(ct.customerId))) return false;
     if (q) {
       const ql = q.toLowerCase();
@@ -184,11 +185,6 @@ export default async function ContractsPage({
   const userOptions = users.map((u) => ({ id: u.id, name: u.name }));
 
   const statusOptions = Object.entries(CONTRACT_STATUS_LABELS).map(([value, label]) => ({ value, label }));
-  const typeOptions = [
-    { value: "BRAND", label: "品牌方合同" },
-    { value: "CHANNEL", label: "渠道商返佣合同" },
-    { value: "TRANSACTIONAL", label: "事务性合同" },
-  ];
   const customerFilterOptions = customers.map((c) => ({ value: c.id, label: c.brandName }));
 
   return (
@@ -210,16 +206,32 @@ export default async function ContractsPage({
         }
       />
 
+      <nav className="flex flex-wrap gap-2 border-b border-slate-200" aria-label="合同分类">
+        {[
+          { value: "brand", label: "品牌方合同" },
+          { value: "channel", label: "渠道商合同" },
+          { value: "transactional", label: "事务性合同" },
+        ].map((item) => (
+          <Link
+            key={item.value}
+            href={`/contracts?category=${item.value}${view === "all" ? "&scope=all" : ""}`}
+            aria-current={category === item.value ? "page" : undefined}
+            className={`border-b-2 px-3 py-2 text-sm font-medium transition-colors ${category === item.value ? "border-brand-600 text-brand-700" : "border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700"}`}
+          >
+            {item.label}
+          </Link>
+        ))}
+      </nav>
+
       <FilterBar>
         <SearchFilter placeholder="搜索合同编号 / 客户名称" />
         <MultiSelectFilter paramKey="status" placeholder="合同状态" options={statusOptions} />
-        <MultiSelectFilter paramKey="type" placeholder="合同类型" options={typeOptions} />
         <MultiSelectFilter paramKey="customer" placeholder="关联客户" options={customerFilterOptions} />
       </FilterBar>
 
       {contracts.length === 0 ? (
         <EmptyState title="暂无合同" description="点击右上角新建合同" />
-      ) : (
+      ) : category === "brand" ? (
         <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
           <table className="w-full min-w-[1706px] table-fixed text-sm">
             <ContractColumnLayout />
@@ -393,6 +405,43 @@ export default async function ContractsPage({
                 );
               })}
             </tbody>
+          </table>
+        </div>
+      ) : category === "channel" ? (
+        <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+          <table className="w-full min-w-[1120px] text-sm">
+            <thead><tr className="border-b border-slate-200 bg-slate-50">
+              {['合同编号','关联客户','乙方公司','合同起止时间','固费乙方比例','联盟运营佣金规则','状态','原件'].map((label) => <th key={label} className="px-4 py-3 text-left text-xs font-semibold text-slate-600">{label}</th>)}
+            </tr></thead>
+            <tbody className="divide-y divide-slate-100">{contracts.map((ct) => {
+              const rule = ct.splitRule;
+              return <tr key={ct.id} className="hover:bg-slate-50">
+                <td className="px-4 py-3"><Link href={`/contracts/${ct.id}`} className="font-semibold text-brand-700 hover:underline">{ct.contractNo}</Link></td>
+                <td className="px-4 py-3 text-slate-700">{ct.customer?.brandName ?? '—'}</td>
+                <td className="px-4 py-3 text-slate-700">{ct.partyBCompany ?? '—'}</td>
+                <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-600">{ct.startDate ? formatDate(ct.startDate) : '—'} ~ {ct.endDate ? formatDate(ct.endDate) : '—'}</td>
+                <td className="px-4 py-3 text-slate-700">{rule ? `${(rule.fixedFeeRate * 100).toFixed(2).replace(/\.00$/, '')}%` : '—'}</td>
+                <td className="px-4 py-3 text-xs text-slate-600">{rule ? <>低于 USD {rule.commissionThresholdAmount.toLocaleString()}：{(rule.commissionBelowRate * 100).toFixed(0)}%；达到或超过：{(rule.commissionAtOrAboveRate * 100).toFixed(0)}%</> : '—'}</td>
+                <td className="px-4 py-3"><Badge className={CONTRACT_STATUS_COLORS[ct.status]}>{labelOf(CONTRACT_STATUS_LABELS, ct.status)}</Badge></td>
+                <td className="px-4 py-3">{ct.fileUrl ? <a href={ct.fileUrl} download className="font-medium text-brand-700 hover:underline">下载原件</a> : <span className="text-slate-400">未上传</span>}</td>
+              </tr>;
+            })}</tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+          <table className="w-full min-w-[820px] text-sm">
+            <thead><tr className="border-b border-slate-200 bg-slate-50">
+              {['合同编号','合同开始时间','合同截止时间','负责人','状态','原件'].map((label) => <th key={label} className="px-4 py-3 text-left text-xs font-semibold text-slate-600">{label}</th>)}
+            </tr></thead>
+            <tbody className="divide-y divide-slate-100">{contracts.map((ct) => <tr key={ct.id} className="hover:bg-slate-50">
+              <td className="px-4 py-3"><Link href={`/contracts/${ct.id}`} className="font-semibold text-brand-700 hover:underline">{ct.contractNo}</Link></td>
+              <td className="px-4 py-3 text-slate-700">{ct.startDate ? formatDate(ct.startDate) : '—'}</td>
+              <td className="px-4 py-3 text-slate-700">{ct.endDate ? formatDate(ct.endDate) : '—'}</td>
+              <td className="px-4 py-3 text-slate-700">{ct.owner?.name ?? '—'}</td>
+              <td className="px-4 py-3"><Badge className={CONTRACT_STATUS_COLORS[ct.status]}>{labelOf(CONTRACT_STATUS_LABELS, ct.status)}</Badge></td>
+              <td className="px-4 py-3">{ct.fileUrl ? <a href={ct.fileUrl} download className="font-medium text-brand-700 hover:underline">下载原件</a> : <span className="text-slate-400">未上传</span>}</td>
+            </tr>)}</tbody>
           </table>
         </div>
       )}

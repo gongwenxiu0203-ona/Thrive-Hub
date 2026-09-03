@@ -4,17 +4,16 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { FileUp, Upload } from "lucide-react";
 import { uploadTransactionalContract } from "@/actions/contracts";
-import { CONTRACT_TYPE_LABELS } from "@/lib/constants";
 
 export function TransactionalUploadForm({
-  users,
   currentUserId,
 }: {
-  users: { id: string; name: string }[];
   currentUserId: string;
 }) {
   const router = useRouter();
   const [ownerId, setOwnerId] = useState(currentUserId);
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -29,10 +28,14 @@ export function TransactionalUploadForm({
       setError("请选择事务性合同文件");
       return;
     }
+    if (!startDate || !endDate) return setError("请填写合同开始时间和截止时间");
+    if (startDate > endDate) return setError("合同截止时间不能早于开始时间");
     startTransition(async () => {
       const fd = new FormData();
       fd.append("type", "TRANSACTIONAL");
       fd.append("ownerId", ownerId);
+      fd.append("startDate", startDate);
+      fd.append("endDate", endDate);
       fd.append("file", file);
       const result = await uploadTransactionalContract(fd);
       if (!result.ok || !result.contractId) {
@@ -47,19 +50,12 @@ export function TransactionalUploadForm({
     <div className="card space-y-5 p-6">
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
-          <label className="mb-1 block text-xs font-medium text-slate-500">合同类型</label>
-          <select className="input" value="TRANSACTIONAL" disabled>
-            <option value="TRANSACTIONAL">{CONTRACT_TYPE_LABELS.TRANSACTIONAL}</option>
-          </select>
+          <label className="mb-1 block text-xs font-medium text-slate-500">合同开始时间 *</label>
+          <input className="input" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
         </div>
         <div>
-          <label className="mb-1 block text-xs font-medium text-slate-500">合同负责人</label>
-          <select className="input" value={ownerId} onChange={(e) => setOwnerId(e.target.value)}>
-            <option value="">请选择</option>
-            {users.map((user) => (
-              <option key={user.id} value={user.id}>{user.name}</option>
-            ))}
-          </select>
+          <label className="mb-1 block text-xs font-medium text-slate-500">合同截止时间 *</label>
+          <input className="input" type="date" min={startDate || undefined} value={endDate} onChange={(e) => setEndDate(e.target.value)} />
         </div>
       </div>
 
