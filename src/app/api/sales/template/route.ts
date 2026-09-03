@@ -31,6 +31,8 @@ export async function GET(req: Request) {
       "联盟商佣金": "",
       "联盟商佣金比例": "",
       "地区": "",
+      "链接标签": "",
+      "父ASIN": "",
     };
     const buffer = buildSheet([universalHeaders], "通用上传模板");
     return new NextResponse(new Uint8Array(buffer), {

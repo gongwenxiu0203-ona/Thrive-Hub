@@ -153,20 +153,18 @@ export const SALES_FIELDS: SalesField[] = [
     formula: "联盟商佣金 / 点击量",
   },
 
-  // 自动匹配
+  // 可上传；为空时仍可通过 ASIN 映射表自动补足
   {
     key: "parentAsin",
-    label: "Parent Asin",
+    label: "父ASIN",
     type: "string",
-    source: "auto",
-    formula: "通过 ASIN 映射表匹配（品牌+店铺+地区+ASIN）",
+    source: "upload",
   },
   {
     key: "storeProductLabel",
-    label: "链接标签 Store-Product Label",
+    label: "链接标签",
     type: "string",
-    source: "auto",
-    formula: "通过 ASIN 映射表匹配",
+    source: "upload",
   },
   {
     key: "createdAt",

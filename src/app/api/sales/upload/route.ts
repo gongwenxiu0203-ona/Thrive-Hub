@@ -259,8 +259,8 @@ export async function POST(req: Request) {
             .join("||");
           const asinMapping = asinMap.get(asinKey);
           if (asinMapping) {
-            record.parentAsin = asinMapping.parentAsin;
-            record.storeProductLabel = asinMapping.storeProductLabel;
+            if (!record.parentAsin) record.parentAsin = asinMapping.parentAsin;
+            if (!record.storeProductLabel) record.storeProductLabel = asinMapping.storeProductLabel;
           }
 
           pendingRecords.push({ ...record, batchId });

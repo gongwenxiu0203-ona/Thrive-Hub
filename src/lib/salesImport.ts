@@ -191,6 +191,10 @@ export function convertRow(
     campaignBudget: toNumber(pick(row, mapping.campaignBudget)),
     promotionLink:
       (pick(row, mapping.promotionLink) as string | undefined) || null,
+    storeProductLabel:
+      ((pick(row, mapping.storeProductLabel) as string | undefined) || "").toString().trim() || null,
+    parentAsin:
+      ((pick(row, mapping.parentAsin) as string | undefined) || "").toString().trim() || null,
     customerId,
   };
 
