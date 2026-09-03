@@ -1,16 +1,21 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ClipboardEvent, type ReactNode } from "react";
 import { PARTY_B_COMPANIES } from "@/lib/partyB";
 import {
   ArrowLeft,
   Building2,
   FileText,
+  Link2,
+  Paperclip,
   Plus,
   Receipt,
   Trash2,
+  Upload,
   WalletCards,
+  X,
 } from "lucide-react";
+import { readApiError } from "@/lib/clientError";
 import {
   createExpenseClaim,
   createSupplierAndPaymentRequest,
@@ -807,6 +812,53 @@ function BillingForm({ data, disabled, onSubmit }: FormProps) {
   );
 }
 
+function AttachmentInput({ label, scope, value, onChange, disabled }: { label: string; scope: "PAYMENT" | "EXPENSE"; value: string; onChange: (value: string) => void; disabled?: boolean }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState("");
+  const urls = splitUrls(value);
+  const setUrls = (next: string[]) => onChange([...new Set(next)].join("\n"));
+  async function uploadFiles(files: File[]) {
+    if (!files.length || disabled) return;
+    setUploading(true); setError("");
+    const uploaded: string[] = [];
+    const failures: string[] = [];
+    for (const file of files) {
+      try {
+        const form = new FormData(); form.set("file", file); form.set("scope", scope);
+        const response = await fetch("/api/finance/attachments/stage", { method: "POST", body: form });
+        if (!response.ok) throw new Error(await readApiError(response, `${file.name} 上传失败`));
+        const body = await response.json() as { fileUrl?: string };
+        if (!body.fileUrl) throw new Error(`${file.name} 上传失败`);
+        uploaded.push(body.fileUrl);
+      } catch (uploadError) {
+        failures.push(uploadError instanceof Error ? uploadError.message : `${file.name} 上传失败`);
+      }
+    }
+    if (uploaded.length) setUrls([...urls, ...uploaded]);
+    if (failures.length) setError(failures.join("；"));
+    setUploading(false);
+    if (inputRef.current) inputRef.current.value = "";
+  }
+  function pasteFiles(event: ClipboardEvent<HTMLDivElement>) {
+    const files = Array.from(event.clipboardData.items).filter(item => item.kind === "file").map(item => item.getAsFile()).filter((file): file is File => Boolean(file));
+    if (files.length) { event.preventDefault(); void uploadFiles(files); }
+  }
+  return <Field label={label} wide>
+    <div onPaste={pasteFiles} tabIndex={0} className="rounded-lg border border-dashed border-[#dcd4e7] bg-[#faf8ff] p-3 outline-none transition focus-visible:border-brand-500 focus-visible:ring-2 focus-visible:ring-brand-100">
+      <input ref={inputRef} hidden type="file" multiple disabled={disabled || uploading} onChange={event => void uploadFiles(Array.from(event.target.files || []))} />
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" className="btn-secondary btn-sm" disabled={disabled || uploading} onClick={() => inputRef.current?.click()}><Upload className="h-3.5 w-3.5" />{uploading ? "上传中…" : "选择本地文件（可多选）"}</button>
+        <span className="inline-flex items-center gap-1 text-xs text-slate-600"><Paperclip className="h-3.5 w-3.5" />也可复制文件后直接粘贴到此区域</span>
+      </div>
+      <div className="mt-3 flex items-start gap-2"><Link2 className="mt-2.5 h-4 w-4 shrink-0 text-slate-500" /><textarea aria-label={`${label}外部链接`} className="input min-h-16" value={urls.filter(url => !url.startsWith("/uploads/")).join("\n")} onChange={event => setUrls([...urls.filter(url => url.startsWith("/uploads/")), ...splitUrls(event.target.value)])} placeholder="也可填写附件 URL，每行一条或用逗号分隔" /></div>
+      {urls.length > 0 && <ul className="mt-3 space-y-1.5" aria-label={`${label}清单`}>{urls.map((url, index) => <li key={`${url}-${index}`} className="flex min-w-0 items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-2 text-xs"><FileText className="h-4 w-4 shrink-0 text-slate-400" /><a href={url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate text-brand-700 hover:underline">{url.startsWith("/uploads/") ? decodeURIComponent(url.split("/").pop() || `本地附件 ${index + 1}`) : url}</a><button type="button" aria-label={`移除附件 ${index + 1}`} disabled={disabled || uploading} className="rounded p-1 text-slate-500 hover:bg-rose-50 hover:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300" onClick={() => setUrls(urls.filter((_, itemIndex) => itemIndex !== index))}><X className="h-3.5 w-3.5" /></button></li>)}</ul>}
+      {error && <p role="alert" className="mt-2 text-xs text-rose-700">{error}</p>}
+      <p className="mt-2 text-xs text-slate-500">单个本地文件不超过 20MB；支持 PDF、图片、Office、CSV、TXT 和 ZIP。</p>
+    </div>
+  </Field>;
+}
+
 function PaymentForm({ data, disabled, onSubmit }: FormProps) {
   const [form, setForm] = useState({
     category: "SUPPLIER",
@@ -898,11 +950,7 @@ function PaymentForm({ data, disabled, onSubmit }: FormProps) {
         setValue={(v) => patch("receiptId", v)}
         options={data.receipts}
       />
-      <TextField
-        label="附件 URL（多条用逗号分隔）"
-        value={form.attachmentUrls}
-        setValue={(v) => patch("attachmentUrls", v)}
-      />
+      <AttachmentInput label="付款附件" scope="PAYMENT" value={form.attachmentUrls} onChange={(v) => patch("attachmentUrls", v)} disabled={disabled} />
       <Field label="备注" wide>
         <textarea
           className="input min-h-20"
@@ -1039,11 +1087,7 @@ function ExpenseForm({ data, disabled, onSubmit }: FormProps) {
         value={form.accountNumber}
         setValue={(v) => patch("accountNumber", v)}
       />
-      <TextField
-        label="发票 / 凭证附件 URL"
-        value={form.attachmentUrls}
-        setValue={(v) => patch("attachmentUrls", v)}
-      />
+      <AttachmentInput label="发票 / 凭证附件" scope="EXPENSE" value={form.attachmentUrls} onChange={(v) => patch("attachmentUrls", v)} disabled={disabled} />
       <Field label="备注" wide>
         <textarea
           className="input min-h-20"
