@@ -28,6 +28,25 @@ const MAX_UPLOAD_BYTES = 105 * 1024 * 1024;
 /** Max records per createMany call — avoids DB variable-count limits. */
 const CHUNK_SIZE = 500;
 const PARSE_CHUNK_SIZE = 1_000;
+const SQLITE_RETRY_DELAYS_MS = [150, 400, 900] as const;
+
+function isRetryableSqliteError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const code = "code" in error ? String(error.code) : "";
+  return code === "P1008" || code === "P2034";
+}
+
+async function withSqliteRetry<T>(operation: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      const delay = SQLITE_RETRY_DELAYS_MS[attempt];
+      if (!isRetryableSqliteError(error) || delay === undefined) throw error;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+}
 
 /** Validate UUID format to prevent path traversal. */
 function isSafeUUID(id: string): boolean {
@@ -187,86 +206,87 @@ export async function POST(req: Request) {
     let importedCount = 0;
     let logicalRowIndex = 0;
 
-    // Write batch + records in a single transaction for data consistency.
-    // Chunk createMany to stay within DB variable-count limits (SQLite ≤ 32766).
-    const batchId = await prisma.$transaction(
-      async (tx) => {
-        const batch = await tx.salesBatch.create({
-          data: {
-            fileName: fileName || `${platform || "未知平台"}-导入数据.xlsx`,
-            affiliatePlatform: platform || null,
+    // Keep the batch hidden while importing. Parsing and conversion deliberately
+    // happen outside a transaction so a large workbook never holds SQLite's
+    // single-writer lock for minutes at a time.
+    const stagedBatch = await withSqliteRetry(() => prisma.salesBatch.create({
+      data: {
+        fileName: fileName || `${platform || "未知平台"}-导入数据.xlsx`,
+        affiliatePlatform: platform || null,
+        customerId,
+        uploaderId: session.userId,
+        recordCount: 0,
+        deletedAt: new Date(),
+      },
+      select: { id: true },
+    }));
+    const batchId = stagedBatch.id;
+
+    try {
+      for await (const rawRows of parseSheetChunksFromFile(rawFilePath, fileName || "upload.xlsx", PARSE_CHUNK_SIZE)) {
+        const pendingRecords = [];
+        for (const rawRow of rawRows) {
+          const sourceRowNumber = logicalRowIndex + 2;
+          logicalRowIndex += 1;
+          const result = convertRow(
+            rawRow,
+            mapping,
+            platform,
             customerId,
-            uploaderId: session.userId,
-            recordCount: 0,
-          },
-        });
+            customerBrandName,
+          );
+          if (!result) {
+            skipped.push(sourceRowNumber);
+            continue;
+          }
+          const record = result.record;
 
-        for await (const rawRows of parseSheetChunksFromFile(rawFilePath, fileName || "upload.xlsx", PARSE_CHUNK_SIZE)) {
-          const pendingRecords = [];
-          for (const rawRow of rawRows) {
-            const sourceRowNumber = logicalRowIndex + 2;
-            logicalRowIndex += 1;
-            const result = convertRow(
-              rawRow,
-              mapping,
-              platform,
-              customerId,
-              customerBrandName,
-            );
-            if (!result) {
-              skipped.push(sourceRowNumber);
-              continue;
+          if (!record.brand) record.brand = customer.brandName ?? "";
+
+          const affiliateName = (record.affiliateName ?? "").trim();
+          const affKey = affiliateName.toLowerCase();
+          if (affKey) {
+            importedAffiliateNames.set(affKey, affiliateName);
+            const affiliate = affMap.get(affKey);
+            if (affiliate) {
+              record.affiliateType = affiliate.type;
+              record.internalAffiliateName = affiliate.internalName;
             }
-            const record = result.record;
-
-            if (!record.brand) record.brand = customer.brandName ?? "";
-
-            const affiliateName = (record.affiliateName ?? "").trim();
-            const affKey = affiliateName.toLowerCase();
-            if (affKey) {
-              importedAffiliateNames.set(affKey, affiliateName);
-              const affiliate = affMap.get(affKey);
-              if (affiliate) {
-                record.affiliateType = affiliate.type;
-                record.internalAffiliateName = affiliate.internalName;
-              }
-            }
-
-            const asinKey = [record.brand, record.store, record.region, record.asin]
-              .map((value) => (value ?? "").toString().trim().toLowerCase())
-              .join("||");
-            const asinMapping = asinMap.get(asinKey);
-            if (asinMapping) {
-              record.parentAsin = asinMapping.parentAsin;
-              record.storeProductLabel = asinMapping.storeProductLabel;
-            }
-
-            pendingRecords.push({ ...record, batchId: batch.id });
           }
 
-          for (let index = 0; index < pendingRecords.length; index += CHUNK_SIZE) {
-            const chunk = pendingRecords.slice(index, index + CHUNK_SIZE);
-            await tx.salesRecord.createMany({ data: chunk });
-            importedCount += chunk.length;
+          const asinKey = [record.brand, record.store, record.region, record.asin]
+            .map((value) => (value ?? "").toString().trim().toLowerCase())
+            .join("||");
+          const asinMapping = asinMap.get(asinKey);
+          if (asinMapping) {
+            record.parentAsin = asinMapping.parentAsin;
+            record.storeProductLabel = asinMapping.storeProductLabel;
           }
+
+          pendingRecords.push({ ...record, batchId });
         }
 
-        if (importedCount === 0) {
-          throw new Error("NO_VALID_SALES_ROWS");
+        for (let index = 0; index < pendingRecords.length; index += CHUNK_SIZE) {
+          const chunk = pendingRecords.slice(index, index + CHUNK_SIZE);
+          await withSqliteRetry(() => prisma.salesRecord.createMany({ data: chunk }));
+          importedCount += chunk.length;
         }
+      }
 
+      if (importedCount === 0) throw new Error("NO_VALID_SALES_ROWS");
+
+      await withSqliteRetry(() => prisma.$transaction(async (tx) => {
         await tx.salesBatch.update({
-          where: { id: batch.id },
-          data: { recordCount: importedCount },
+          where: { id: batchId },
+          data: { recordCount: importedCount, deletedAt: null },
         });
-
         await tx.adminAuditLog.create({
           data: {
             actorId: session.userId,
             action: "IMPORT",
             module: "BI",
             targetType: "SalesBatch",
-            targetId: batch.id,
+            targetId: batchId,
             targetLabel: fileName || platform || null,
             summary: `导入 BI 销售数据 ${importedCount} 条`,
             metadataJson: JSON.stringify({
@@ -277,12 +297,20 @@ export async function POST(req: Request) {
             }),
           },
         });
-
-        return batch.id;
-      },
-      // Preserve atomicity while allowing 500k+ row imports to finish.
-      { maxWait: 10_000, timeout: 9 * 60 * 1000 },
-    );
+      }));
+    } catch (error) {
+      // Compensate explicitly so a failed staged import leaves no hidden rows;
+      // do not rely on relation-level cascade behavior for recovery semantics.
+      try {
+        await withSqliteRetry(() => prisma.$transaction(async (tx) => {
+          await tx.salesRecord.deleteMany({ where: { batchId } });
+          await tx.salesBatch.delete({ where: { id: batchId } });
+        }));
+      } catch (cleanupError) {
+        console.error("[sales/upload] staged batch cleanup failed", cleanupError);
+      }
+      throw error;
+    }
 
     // Clean up temp file only after the atomic sales transaction succeeds.
     deleteTempFile(tempId);
@@ -331,6 +359,12 @@ export async function POST(req: Request) {
             "未能识别任何有效数据行。请确认「订单日期 / 联盟商名称 / 销售金额」列已正确映射且数据非空。",
         },
         { status: 400 },
+      );
+    }
+    if (isRetryableSqliteError(err)) {
+      return NextResponse.json(
+        { error: "当前有其他数据任务正在写入，请稍后重试；本次上传文件仍保留在当前会话中" },
+        { status: 503 },
       );
     }
     return errorResponse(err, "sales.upload");
