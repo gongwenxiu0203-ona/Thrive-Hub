@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -24,7 +24,6 @@ import {
   REVIEW_ACTION_LABELS,
   REVIEW_ACTION_COLORS,
   COMMISSION_TYPE_LABELS,
-  CONTRACT_REVIEW_GROUPS,
 } from "@/lib/constants";
 import { formatDate, formatDateTime } from "@/lib/utils";
 import { calcCommission } from "@/lib/commissionCalc";
@@ -32,6 +31,8 @@ import type { ReconciliationInvoiceState } from "@/lib/reconciliationInvoice";
 import { submitBillingRequest } from "@/actions/billingRequests";
 import { linkInvoiceToReconciliation } from "@/actions/invoiceArchive";
 import { readReconciliationConfirmation, confirmationSubmissionIssue } from "@/lib/reconciliationConfirmation";
+import { calculateConfirmationCommission } from "@/lib/contractConfirmationRules";
+import type { ContractConfirmationDraft } from "@/lib/contractConfirmationDraft";
 
 // ── types ──────────────────────────────────────────────────────────────────────
 
@@ -100,10 +101,20 @@ type Rec = {
 
 type Contract = {
   contractMode?: string | null;
-  projectConfirmations?: { id: string; number: string; title: string }[];
+  projectConfirmations?: {
+    id: string;
+    number: string;
+    title: string;
+    draft?: ContractConfirmationDraft | null;
+    receivingAccounts?: { id: string; label: string }[];
+  }[];
   id: string;
   contractNo: string;
   partyA: string | null;
+  partyAContact?: string | null;
+  partyAEmail?: string | null;
+  partyAPhone?: string | null;
+  receivingAccounts?: { id: string; label: string }[];
   // v3 字段
   promoPlatform: string | null;
   targetSite: string | null;
@@ -289,6 +300,10 @@ export function CustomerReconciliationDetailClient({
   const commissionReconciliations = visibleReconciliations.filter(
     (rec) => rec.reconcileType !== "FEE_ONLY",
   );
+  const selectedConfirmation = confirmationTabs.find(
+    (item) => item.id === selectedConfirmationId,
+  );
+  const selectedConfirmationDraft = selectedConfirmation?.draft ?? null;
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [showBatchSubmitModal, setShowBatchSubmitModal] = useState(false);
@@ -427,15 +442,23 @@ export function CustomerReconciliationDetailClient({
           </div>
         </section>
       )}
-      <BasicInfoSection customer={customer} contract={contract} />
+      <BasicInfoSection
+        customer={customer}
+        contract={contract}
+        confirmation={selectedConfirmationDraft}
+        receivingAccounts={selectedConfirmation?.receivingAccounts}
+      />
       {contract?.contractMode === "FRAMEWORK" && (
         <section className="rounded-lg border border-[#e7e0ef] bg-white p-4">
           <h2 className="font-semibold text-slate-800">项目确认书</h2>
           <p className="mt-1 text-sm text-slate-600">各确认书独立计费、独立对账；请切换查看。勾选记录可跨确认书统一申请开票。</p>
           <nav aria-label="选择项目确认书" className="mt-3 flex flex-wrap gap-2">
-            {confirmationTabs.map((item) => <Link key={item.id} aria-current={selectedConfirmationId === item.id ? "page" : undefined} className={selectedConfirmationId === item.id ? "btn-primary" : "btn-secondary"} href={`/finance/customers/${customer.id}?contractId=${contract.id}&confirmationId=${item.id}`}>{item.number} · {item.title}</Link>)}
+            {confirmationTabs.map((item) => <Link key={item.id} aria-current={selectedConfirmationId === item.id ? "page" : undefined} className={selectedConfirmationId === item.id ? "btn-primary" : "btn-secondary"} href={`/finance/customers/${customer.id}?contractId=${contract.id}&confirmationId=${item.id}`}>{item.title && item.title !== item.number ? `${item.number} · ${item.title}` : item.number}</Link>)}
           </nav>
           {!confirmationTabs.length && <p className="mt-3 text-sm text-slate-600">暂无生效确认书，请在主合同中新增并生效后生成对账。</p>}
+          {selectedConfirmationDraft && (
+            <ConfirmationProjectSummary confirmation={selectedConfirmationDraft} />
+          )}
         </section>
       )}
 
@@ -1020,80 +1043,26 @@ function ReconciliationStreamSection({
 function BasicInfoSection({
   customer,
   contract,
+  confirmation,
+  receivingAccounts,
 }: {
   customer: CustomerType;
   contract: Contract;
+  confirmation: ContractConfirmationDraft | null;
+  receivingAccounts?: { id: string; label: string }[];
 }) {
-  // 组装合同字段值（与合同详情页一致）
-  let tieredText = "";
-  if (contract?.tieredRules) {
-    tieredText = formatTieredRules(contract.tieredRules);
-  }
-
-  const ct = contract?.commissionType ?? "";
-
-  // 字段值映射（与 /contracts/[id] 保持一致）
-  const fieldValues: Record<string, string> = {
-    partyA: contract?.partyA ?? "",
-    contractPeriod: "", // 合同无 startDate/endDate 在 finance 端 select，此处留空
-    promoPlatform: contract?.promoPlatform ?? "",
-    targetSite: contract?.targetSite ?? "",
-    feeAmount: contract?.feeAmount
-      ? `${currencySymbol(contract.feeCurrency ?? "USD")}${contract.feeAmount}`
-      : "",
-    feeCurrency: contract?.feeCurrency ?? "",
-    paymentMethod: contract?.paymentMethod ?? "",
-    commissionType: ct ? (COMMISSION_TYPE_LABELS[ct] ?? ct) : "",
-    commissionRate: contract?.commissionRate ?? "",
-    thresholdAmount: contract?.thresholdAmount
-      ? `${currencySymbol(contract.thresholdCurrency ?? "USD")}${contract.thresholdAmount}`
-      : "",
-    thresholdCurrency: contract?.thresholdCurrency ?? "",
-    tieredRules: tieredText,
-    excessBaseMonths: contract?.excessBaseMonths
-      ? `${contract.excessBaseMonths} 个月`
-      : "",
-    excessCommissionRate: contract?.excessCommissionRate ?? "",
-    gmvSettlementCycle: contract?.gmvSettlementCycle
-      ? `${contract.gmvSettlementCycle}结算`
-      : "",
-  };
-
-  // 条件字段：只显示当前 commissionType 对应的
-  const conditionalKeys: Record<string, string[]> = {
-    FIXED: [],
-    THRESHOLD: ["thresholdAmount", "thresholdCurrency"],
-    TIERED: ["tieredRules"],
-    EXCESS: ["excessBaseMonths", "excessCommissionRate"],
-  };
-  const allConditionalKeys = new Set([
-    "thresholdAmount",
-    "thresholdCurrency",
-    "tieredRules",
-    "excessBaseMonths",
-    "excessCommissionRate",
-  ]);
-  const activeConditional = new Set(conditionalKeys[ct] ?? []);
-
-  // 与合同页一致的过滤：隐藏不相关条件字段 + 隐藏空值字段
-  function visibleInGroup(key: string) {
-    if (allConditionalKeys.has(key)) return activeConditional.has(key);
-    const v = fieldValues[key];
-    return v != null && v !== "" && v !== "—";
-  }
-
-  // 分组颜色配色（每个块视觉区分）
-  const groupAccent: Record<string, string> = {
-    基本信息: "border-l-sky-400 bg-sky-50/40",
-    推广信息: "border-l-violet-400 bg-violet-50/40",
-    月度服务费: "border-l-emerald-400 bg-emerald-50/40",
-    联盟归因GMV佣金: "border-l-amber-400 bg-amber-50/40",
-  };
+  const accountLabels = (receivingAccounts ?? contract?.receivingAccounts)?.map(
+    (account) => account.label,
+  );
+  const receivingAccountText = accountLabels?.length
+    ? accountLabels.join("、")
+    : confirmation?.receivingAccountIds.length
+      ? `已选择 ${confirmation.receivingAccountIds.length} 个乙方收款账户`
+      : "—";
+  const contact = confirmation?.partyAContact;
 
   return (
-    <section className="space-y-4">
-      {/* 头部卡片：关联客户 + 合同编号 + 客户负责人 */}
-      <div className="card p-5">
+    <section className="card p-5">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="font-semibold text-slate-900">基本信息</h2>
           {contract && (
@@ -1105,80 +1074,49 @@ function BasicInfoSection({
             </Link>
           )}
         </div>
-        <div className="grid gap-x-6 gap-y-3 sm:grid-cols-3">
-          <FieldItem label="关联客户" value={customer.brandName} />
+        <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
+          <FieldItem label="甲方名称" value={contract?.partyA || customer.brandName} />
+          <FieldItem label="乙方收款账户" value={receivingAccountText} />
+          <FieldItem label="甲方联系人" value={contract?.partyAContact || contact?.name || customer.contactName || "—"} />
           <FieldItem
-            label="合同编号"
-            value={
-              contract ? (
-                <Link
-                  href={`/contracts/${contract.id}`}
-                  className="text-brand-600 hover:underline"
-                >
-                  {contract.contractNo}
-                </Link>
-              ) : (
-                "—"
-              )
-            }
+            label="甲方联系人邮箱"
+            value={contract?.partyAEmail || contact?.email || customer.contactEmail || "—"}
           />
-          <FieldItem
-            label="客户负责人"
-            value={customer.businessOwner?.name ?? "—"}
-          />
-        </div>
-      </div>
-
-      {/* 合同关键字段：每组独立卡片，左侧色条区分 */}
-      {contract && (
-        <div className="grid gap-4 lg:grid-cols-2">
-          {CONTRACT_REVIEW_GROUPS.map((group) => {
-            const visibleFields = group.fields.filter((f) =>
-              visibleInGroup(f.key),
-            );
-            if (visibleFields.length === 0) return null;
-            const accent =
-              groupAccent[group.group] ?? "border-l-slate-300 bg-slate-50/40";
-            return (
-              <div
-                key={group.group}
-                className={`rounded-xl border border-slate-200 border-l-4 bg-white p-5 shadow-sm ${accent}`}
-              >
-                <p className="mb-4 text-sm font-semibold text-slate-700">
-                  {group.group}
-                </p>
-                <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
-                  {visibleFields.map((f) => (
-                    <div key={f.key}>
-                      <dt className="text-xs text-slate-400">{f.label}</dt>
-                      <dd className="mt-0.5 whitespace-pre-wrap break-words text-sm text-slate-700">
-                        {fieldValues[f.key] || (
-                          <span className="text-slate-300">—</span>
-                        )}
-                      </dd>
-                    </div>
-                  ))}
-                </dl>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* 联系信息卡片 */}
-      <div className="card p-5">
-        <p className="mb-4 text-sm font-semibold text-slate-700">联系信息</p>
-        <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
-          <FieldItem
-            label="联系邮箱"
-            value={
-              customer.businessOwner?.email || customer.contactEmail || "—"
-            }
-          />
-          <FieldItem label="联系电话" value={customer.contactPhone ?? "—"} />
-        </div>
-      </div>
+          <FieldItem label="甲方联系人电话" value={contract?.partyAPhone || contact?.phone || customer.contactPhone || "—"} />
+        </dl>
     </section>
+  );
+}
+
+function ConfirmationProjectSummary({
+  confirmation,
+}: {
+  confirmation: ContractConfirmationDraft;
+}) {
+  const sites = confirmation.scopes.map((scope) => scope.country);
+  const platforms = confirmation.scopes.flatMap((scope) => scope.salesPlatforms);
+  const uniqueSites = Array.from(new Set(sites));
+  const uniquePlatforms = Array.from(new Set(platforms));
+  const monthlyFee = confirmation.monthlyFee
+    ? `${confirmation.monthlyFee.currency} ${confirmation.monthlyFee.amount.toLocaleString("zh-CN")}`
+    : "未启用";
+  const commission = confirmation.commission
+    ? confirmation.commission.mode === "PACKAGE"
+      ? `总包佣金 · ${confirmation.commission.currency} ${confirmation.commission.packageValue || "待核定"}`
+      : `GMV 服务佣金 · ${confirmation.commission.serviceRatePercent ?? 0}%`
+    : "未启用";
+
+  return (
+    <dl className="mt-4 grid gap-x-6 gap-y-3 rounded-lg border border-slate-100 bg-slate-50/70 p-4 sm:grid-cols-2 lg:grid-cols-3">
+      <FieldItem
+        label="合作起止时间"
+        value={confirmation.startDate && confirmation.endDate ? `${formatDate(confirmation.startDate)} ~ ${formatDate(confirmation.endDate)}` : "—"}
+      />
+      <FieldItem label="月度服务费" value={monthlyFee} />
+      <FieldItem label="销售佣金" value={commission} />
+      <FieldItem label="合作站点" value={uniqueSites.join("、") || "—"} />
+      <FieldItem label="销售平台" value={uniquePlatforms.join("、") || "—"} />
+    </dl>
   );
 }
 
@@ -1214,6 +1152,8 @@ function MonthlyRecordRow({
 }) {
   const [expanded, setExpanded] = useState(defaultOpen);
   const [pulling, setPulling] = useState(false);
+  const [biMessage, setBiMessage] = useState("");
+  const autoPullAttempted = useRef(false);
   const [showSubmitModal, setShowSubmitModal] = useState(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [reviewAction, setReviewAction] = useState<"APPROVED" | "DISPUTED">(
@@ -1244,7 +1184,14 @@ function MonthlyRecordRow({
   const confirmationIssue = confirmationSubmissionIssue(rec);
   const [packageRate, setPackageRate] = useState(rec.confirmedCommissionRate == null ? "" : String(rec.confirmedCommissionRate * 100));
   const [savingRate, setSavingRate] = useState(false);
-  const liveCalc = rec.projectConfirmationId ? { actualCommissionRate: rec.actualCommissionRate, commissionAmount: isConfirmed ? (rec.finalCommissionAmount ?? rec.commissionAmount) : rec.commissionAmount, note: "按确认书生效版本计算" } : calcCommission({
+  const confirmationCalc = (() => {
+    if (!rec.projectConfirmationId || !confirmation?.commission || isFixedStream) return null;
+    const commission = confirmation.commission;
+    if (commission.mode === "PACKAGE" && rec.confirmedCommissionRate == null) return null;
+    try { return calculateConfirmationCommission({ mode: commission.mode, scope: commission.basis, currency: commission.currency, gmvCurrency: rec.commissionCurrency, effectiveGmv: isConfirmed ? (rec.finalSalesAmount ?? rec.actualSalesAmount) : rec.actualSalesAmount, ratePercent: commission.serviceRatePercent, thresholdAmount: commission.threshold, thresholdCurrency: commission.thresholdCurrency ?? undefined, overrideRatePercent: rec.confirmedCommissionRate == null ? undefined : rec.confirmedCommissionRate * 100, overrideRateConfirmed: rec.confirmedCommissionRate != null }); }
+    catch { return null; }
+  })();
+  const liveCalc = rec.projectConfirmationId ? { actualCommissionRate: confirmationCalc ? confirmationCalc.ratePercent / 100 : rec.actualCommissionRate, commissionAmount: isConfirmed ? (rec.finalCommissionAmount ?? rec.commissionAmount) : confirmationCalc?.commissionAmount ?? rec.commissionAmount, note: "按确认书生效版本计算" } : calcCommission({
     commissionType: rec.contract.commissionType ?? "FIXED",
     contractRate: parsedContractRate,
     thresholdAmount: rec.contract.thresholdAmount ?? null,
@@ -1256,24 +1203,41 @@ function MonthlyRecordRow({
   });
   const liveRate = liveCalc.actualCommissionRate;
   const liveAmount = liveCalc.commissionAmount;
+  const contractedRate = rec.projectConfirmationId && confirmation?.commission
+    ? confirmation.commission.mode === "PACKAGE" ? rec.confirmedCommissionRate ?? liveRate : (confirmation.commission.serviceRatePercent ?? 0) / 100
+    : rec.contract.commissionType === "THRESHOLD" ? parsedContractRate : liveRate;
+  const thresholdStatus = confirmation?.commission?.basis === "EXCESS"
+    ? rec.actualSalesAmount >= Number(confirmation.commission.threshold ?? 0) ? "已超过门槛，按超出部分计佣" : "未达到门槛，当前计佣金额为 0"
+    : rec.contract.commissionType === "THRESHOLD" && Number(String(rec.contract.thresholdAmount ?? "").replace(/[^0-9.]/g, "")) > 0
+      ? rec.actualSalesAmount >= Number(String(rec.contract.thresholdAmount).replace(/[^0-9.]/g, "")) ? "已达到门槛" : "未达到门槛，当前有效比例为 0%"
+      : "";
 
-  async function pullBiData() {
+  async function pullBiData(automatic = false) {
     if (readOnly) return;
-    setPulling(true);
+    setPulling(true); setBiMessage("");
     try {
       const res = await fetch(
         `/api/finance/reconciliations/${rec.id}/pull-bi`,
         { method: "POST" },
       );
       if (!res.ok) {
-        alert((await res.json()).error ?? "拉取失败");
+        const message = (await res.json().catch(() => ({}))).error ?? "拉取失败";
+        setBiMessage(message);
+        if (!automatic) alert(message);
         return;
       }
+      setBiMessage("已从 BI 更新本期实际销售额");
       onRefresh();
     } finally {
       setPulling(false);
     }
   }
+
+  useEffect(() => {
+    if (!expanded || readOnly || !isDraft || isFixedStream || autoPullAttempted.current) return;
+    autoPullAttempted.current = true;
+    void pullBiData(true);
+  }, [expanded, isDraft, isFixedStream, readOnly]);
 
   async function updateCurrency(
     field: "fixedFeeCurrency" | "commissionCurrency",
@@ -1424,15 +1388,35 @@ function MonthlyRecordRow({
                 value={`${formatDate(rec.periodStart)} ~ ${formatDate(rec.periodEnd)}`}
               />
               {!isFixedStream && (
-                <FieldItem
-                  label="实际销售额"
-                  value={`${commSym}${(isConfirmed ? (rec.finalSalesAmount ?? rec.actualSalesAmount) : rec.actualSalesAmount).toLocaleString("zh-CN", { minimumFractionDigits: 2 })}`}
-                />
+                <div>
+                  <dt className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                    <span>实际销售额</span>
+                    {isDraft && !readOnly && (
+                      <button
+                        type="button"
+                        onClick={() => void pullBiData(false)}
+                        disabled={pulling}
+                        className="inline-flex items-center gap-1 font-medium text-brand-700 hover:text-brand-800 disabled:opacity-50"
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" />
+                        {pulling ? "正在拉取…" : "从 BI 拉取"}
+                      </button>
+                    )}
+                  </dt>
+                  <dd className="mt-0.5 text-sm text-slate-700">
+                    {commSym}{(isConfirmed ? (rec.finalSalesAmount ?? rec.actualSalesAmount) : rec.actualSalesAmount).toLocaleString("zh-CN", { minimumFractionDigits: 2 })}
+                  </dd>
+                  {biMessage && (
+                    <span role="status" className={`mt-1 block text-xs ${biMessage.startsWith("已从") ? "text-emerald-700" : "text-amber-700"}`}>
+                      {biMessage}
+                    </span>
+                  )}
+                </div>
               )}
               {!isFixedStream && (
                 <FieldItem
                   label="销售佣金比例"
-                  value={`${(liveRate * 100).toFixed(2)}%`}
+                  value={`${(contractedRate * 100).toFixed(2)}%${thresholdStatus ? ` · ${thresholdStatus}` : ""}`}
                 />
               )}
               <div>
@@ -1634,17 +1618,6 @@ function MonthlyRecordRow({
                       onRefresh={onRefresh}
                     />
                   )}
-                  {/* 从 BI 拉取按钮（仅 DRAFT 可点） */}
-                  {isDraft && !readOnly && !isFixedStream && (
-                    <button
-                      onClick={pullBiData}
-                      disabled={pulling}
-                      className="mt-1 inline-flex items-center gap-1 text-xs text-brand-600 hover:text-brand-700 disabled:opacity-50"
-                    >
-                      <RotateCcw className="h-3 w-3" />
-                      {pulling ? "拉取中…" : "从 BI 拉取"}
-                    </button>
-                  )}
                 </div>
 
                 {/* 计算结果 — 当期抽佣比例 + 抽佣金额公式（v3 逻辑，实时计算） */}
@@ -1654,7 +1627,7 @@ function MonthlyRecordRow({
                   </p>
                   <FieldItem
                     label="当期抽佣比例"
-                    value={`${(liveRate * 100).toFixed(2)}%`}
+                    value={`${(contractedRate * 100).toFixed(2)}%${thresholdStatus ? ` · ${thresholdStatus}` : ""}`}
                   />
                   <FieldItem
                     label="抽佣金额公式"
@@ -2448,12 +2421,30 @@ function BatchSubmitModal({
                     </div>
                   </div>
                   {disputed && (
-                    <div className="mt-3 grid max-w-lg gap-3 sm:grid-cols-[minmax(0,1fr)_10rem]">
+                    <div className="mt-3 max-w-lg">
                       <label className="label">
                         {fixedFee ? "异议固费金额" : "纠正后的销售额"}{" "}
                         <span className="text-rose-600">*</span>
                       </label>
-                      <div className="relative">
+                      <div className="grid grid-cols-[8.5rem_minmax(0,1fr)] gap-2">
+                        <select
+                          aria-label="币种"
+                          className="input"
+                          value={currentCurrency}
+                          onChange={(event) =>
+                            setCorrectedCurrencies((current) => ({
+                              ...current,
+                              [record.id]: event.target.value,
+                            }))
+                          }
+                        >
+                          {RECONCILIATION_CURRENCY_OPTIONS.map((currency) => (
+                            <option key={currency.value} value={currency.value}>
+                              {currency.label}
+                            </option>
+                          ))}
+                        </select>
+                        <div className="relative">
                         <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-500">
                           {symbol}
                         </span>
@@ -2484,25 +2475,7 @@ function BatchSubmitModal({
                               : "输入核实后的销售额"
                           }
                         />
-                      </div>
-                      <div>
-                        <label className="label">币种</label>
-                        <select
-                          className="input"
-                          value={currentCurrency}
-                          onChange={(event) =>
-                            setCorrectedCurrencies((current) => ({
-                              ...current,
-                              [record.id]: event.target.value,
-                            }))
-                          }
-                        >
-                          {RECONCILIATION_CURRENCY_OPTIONS.map((currency) => (
-                            <option key={currency.value} value={currency.value}>
-                              {currency.label}
-                            </option>
-                          ))}
-                        </select>
+                        </div>
                       </div>
                     </div>
                   )}

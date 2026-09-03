@@ -7,6 +7,47 @@ import { getReconciliationAccess } from "@/lib/reconciliationAccess";
 import { hasPermissionLevel } from "@/lib/permissionGuard";
 import { getReconciliationInvoiceStateMap } from "@/lib/reconciliationInvoice";
 import { ensureCustomerPlansForCooperatingCustomer } from "@/lib/customerReconciliationPlan";
+import { confirmationDraftSchema } from "@/lib/contractConfirmationDraft";
+
+function accountLabel(snapshot: string) {
+  try {
+    const account = JSON.parse(snapshot) as {
+      name?: string;
+      accountName?: string;
+      legalEntity?: string;
+      bankName?: string;
+      accountNumber?: string;
+    };
+    const owner = account.accountName || account.legalEntity || account.name || "乙方收款账户";
+    const bank = account.bankName ? ` · ${account.bankName}` : "";
+    const tail = account.accountNumber ? ` · ${account.accountNumber.slice(-4)}` : "";
+    return `${owner}${bank}${tail}`;
+  } catch {
+    return "乙方收款账户";
+  }
+}
+
+function confirmationAccountIds(details: string) {
+  try {
+    const parsed = JSON.parse(details) as { data?: { receivingAccountIds?: unknown } };
+    return Array.isArray(parsed.data?.receivingAccountIds)
+      ? parsed.data.receivingAccountIds.filter((id): id is string => typeof id === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function confirmationDraft(details: string) {
+  try {
+    const parsed = JSON.parse(details) as { schemaVersion?: number; data?: unknown };
+    if (parsed.schemaVersion !== 1) return null;
+    const result = confirmationDraftSchema.safeParse(parsed.data);
+    return result.success ? result.data : null;
+  } catch {
+    return null;
+  }
+}
 
 export default async function CustomerReconciliationPage({
   params,
@@ -43,8 +84,19 @@ export default async function CustomerReconciliationPage({
             id: true,
             contractNo: true,
             contractMode: true,
-            projectConfirmations: { where: { status: { in: ["EFFECTIVE", "TERMINATED"] } }, select: { id: true, number: true, title: true }, orderBy: { createdAt: "asc" } },
+            projectConfirmations: {
+              where: { status: { in: ["EFFECTIVE", "TERMINATED"] } },
+              select: { id: true, number: true, title: true, details: true, startDate: true, endDate: true },
+              orderBy: { createdAt: "asc" },
+            },
+            receivingAccounts: {
+              select: { id: true, financeProfileId: true, snapshot: true },
+              orderBy: { position: "asc" },
+            },
             partyA: true,
+            partyAContact: true,
+            partyAEmail: true,
+            partyAPhone: true,
             // v3 字段
             promoPlatform: true,
             targetSite: true,
@@ -148,6 +200,31 @@ export default async function CustomerReconciliationPage({
       ? customer.contracts[0]
       : null;
 
+  const customerForClient = {
+    ...customer,
+    contracts: customer.contracts.map((item) => {
+      const accounts = item.receivingAccounts.map((account) => ({
+        id: account.financeProfileId || account.id,
+        label: accountLabel(account.snapshot),
+      }));
+      return {
+        ...item,
+        receivingAccounts: accounts,
+        projectConfirmations: item.projectConfirmations.map((confirmation) => {
+          const selectedIds = new Set(confirmationAccountIds(confirmation.details));
+          return {
+            ...confirmation,
+            draft: confirmationDraft(confirmation.details),
+            receivingAccounts: accounts.filter((account) => selectedIds.has(account.id)),
+          };
+        }),
+      };
+    }),
+  };
+  const contractForClient = contract
+    ? customerForClient.contracts.find((item) => item.id === contract.id) ?? null
+    : null;
+
   return (
     <div className="space-y-6">
       <div>
@@ -161,8 +238,8 @@ export default async function CustomerReconciliationPage({
       </div>
 
       <CustomerReconciliationDetailClient
-        customer={customer}
-        contract={contract}
+        customer={customerForClient}
+        contract={contractForClient}
         reconciliations={reconciliations}
         currentUserId={session.userId}
         users={users}
