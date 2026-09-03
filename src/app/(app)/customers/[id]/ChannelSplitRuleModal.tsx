@@ -36,13 +36,13 @@ function fromPct(s: string): number {
 export function ChannelSplitRuleModal({
   customerId,
   contractId,
-  isAdmin,
+  canDelete,
   existing,
   inheritedCustomerRule = null,
 }: {
   customerId: string;
   contractId?: string;
-  isAdmin: boolean;
+  canDelete: boolean;
   existing: ExistingRule | null;
   inheritedCustomerRule?: ExistingRule | null;
 }) {
@@ -361,7 +361,7 @@ export function ChannelSplitRuleModal({
 
             <div className="mt-6 flex items-center justify-between">
               <div>
-                {existing && isAdmin && !isInherited && (
+                {existing && canDelete && !isInherited && (
                   <button type="button" onClick={remove} disabled={pending}
                     className="text-sm text-rose-600 hover:underline disabled:opacity-50">
                     删除规则

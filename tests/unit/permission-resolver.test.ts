@@ -10,6 +10,18 @@ test("role defaults keep representative leaves available for all four roles", ()
   assert.equal(resolveEffectivePermission({ role: "CHANNEL", feature: "finance.channel_reconciliation" }), "EDIT");
 });
 
+test("channel split rule configuration is opt-in for internal staff only", () => {
+  assert.equal(resolveEffectivePermission({ role: "ADMIN", feature: "finance.channel_split_rules" }), "MANAGE");
+  assert.equal(resolveEffectivePermission({ role: "USER", feature: "finance.channel_split_rules" }), "NONE");
+  assert.equal(resolveEffectivePermission({ role: "CHANNEL", feature: "finance.channel_split_rules" }), "NONE");
+  assert.equal(resolveEffectivePermission({ role: "BRAND", feature: "finance.channel_split_rules" }), "NONE");
+  assert.equal(resolveEffectivePermission({
+    role: "USER",
+    feature: "finance.channel_split_rules",
+    userPermissions: [{ feature: "finance.channel_split_rules", level: "EDIT" }],
+  }), "EDIT");
+});
+
 test("legacy rows are inert after canonical leaf migration", () => {
   assert.equal(resolveEffectivePermission({
     role: "BRAND",

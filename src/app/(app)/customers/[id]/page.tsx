@@ -37,13 +37,16 @@ export default async function CustomerDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const session = await requireSession();
-  const [recordsPermission, followupPermission] = await Promise.all([
+  const [recordsPermission, followupPermission, splitRulePermission] = await Promise.all([
     requireFeaturePermission(session, "customers.records", "READ"),
     resolveUserPermission(session.userId, "customers.followup"),
+    resolveUserPermission(session.userId, "finance.channel_split_rules"),
   ]);
   const canEditRecords = hasPermissionLevel(recordsPermission, "EDIT");
   const canManageRecords = hasPermissionLevel(recordsPermission, "MANAGE");
   const canEditFollowup = hasPermissionLevel(followupPermission, "EDIT");
+  const canEditSplitRule = isStaff(session.role) && hasPermissionLevel(splitRulePermission, "EDIT");
+  const canDeleteSplitRule = isStaff(session.role) && hasPermissionLevel(splitRulePermission, "MANAGE");
   const { id } = await params;
 
   const [customer, channelRec, splitRule, pendingIntakeCount] = await Promise.all([
@@ -190,10 +193,10 @@ export default async function CustomerDetailPage({
               </div>
             </div>
             <div className="flex items-center gap-2">
-              {isStaff(session.role) && (
+              {canEditSplitRule && (
                 <ChannelSplitRuleModal
                   customerId={customer.id}
-                  isAdmin={session.role === "ADMIN"}
+                  canDelete={canDeleteSplitRule}
                   existing={splitRule ? {
                     id: splitRule.id,
                     ruleType: splitRule.ruleType as "A" | "B",

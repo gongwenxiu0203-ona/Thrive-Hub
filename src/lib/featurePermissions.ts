@@ -65,6 +65,7 @@ export const FEATURES: FeatureDefinition[] = [
 
   { key: "finance.customer_reconciliation", label: "客户对账", group: "财务与经营", module: "结算中心", legacyKey: "finance_customer" },
   { key: "finance.channel_reconciliation", label: "渠道分账", group: "财务与经营", module: "结算中心", legacyKey: "finance_channel" },
+  { key: "finance.channel_split_rules", label: "渠道分账规则", group: "财务与经营", module: "结算中心", description: "设置渠道分账比例、门槛和截止日期；仅授权内部员工使用" },
   { key: "finance.affiliate_reconciliation", label: "联盟商结算", group: "财务与经营", module: "结算中心", legacyKey: "finance_channel" },
   { key: "finance.billing_requests", label: "开票申请", group: "财务与经营", module: "财务工作台", legacyKey: "finance_customer" },
   { key: "finance.invoices", label: "Invoice 开具", group: "财务与经营", module: "财务工作台", legacyKey: "finance_customer" },
@@ -104,6 +105,7 @@ for (const feature of FEATURES.filter((item) => item.group === "系统管理")) 
 }
 userDefaults["intake.links"] = "READ";
 userDefaults["intake.review"] = "READ";
+userDefaults["finance.channel_split_rules"] = "NONE";
 
 const brandDefaults = allFeatures("NONE");
 brandDefaults["bi.view"] = "READ";

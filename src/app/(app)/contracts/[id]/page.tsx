@@ -41,7 +41,8 @@ import {
 } from "@/lib/constants";
 import { formatDate, formatDateTime } from "@/lib/utils";
 import { contractScope, creationReferenceCustomerScope } from "@/lib/dataScope";
-import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
+import { FeaturePermissionError, hasPermissionLevel, requireFeaturePermission } from "@/lib/permissionGuard";
+import { resolveUserPermission } from "@/lib/permissionResolver";
 
 export default async function ContractDetailPage({
   params,
@@ -148,7 +149,10 @@ export default async function ContractDetailPage({
   ]);
 
   const isAdmin = session.role === "ADMIN";
-  const canConfigureSplitRule = session.role === "ADMIN" || session.role === "USER";
+  const splitRulePermission = await resolveUserPermission(session.userId, "finance.channel_split_rules");
+  const internal = session.role === "ADMIN" || session.role === "USER";
+  const canConfigureSplitRule = internal && hasPermissionLevel(splitRulePermission, "EDIT");
+  const canDeleteSplitRule = internal && hasPermissionLevel(splitRulePermission, "MANAGE");
   const toExistingRule = (rule: typeof contract.splitRule): ExistingRule | null => rule ? ({
     id: rule.id,
     ruleType: rule.ruleType as "A" | "B",
@@ -374,7 +378,7 @@ export default async function ContractDetailPage({
               <ChannelSplitRuleModal
                 customerId={contract.customerId}
                 contractId={contract.id}
-                isAdmin={isAdmin}
+                canDelete={canDeleteSplitRule}
                 existing={toExistingRule(contract.splitRule)}
                 inheritedCustomerRule={toExistingRule(customerSplitRule)}
               />

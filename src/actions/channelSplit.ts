@@ -30,6 +30,11 @@ export interface SplitRuleInput {
 
 type Result<T = void> = { ok: true; data?: T } | { ok: false; error: string };
 
+function isDatabaseBusy(error: unknown) {
+  return typeof error === "object" && error !== null &&
+    "code" in error && ["P1008", "P2034"].includes(String(error.code));
+}
+
 function validateInput(input: SplitRuleInput): string | null {
   if (!input.customerId) return "缺少客户 id";
   if (input.ruleType !== "A" && input.ruleType !== "B") return "规则类型无效";
@@ -56,8 +61,11 @@ function validateInput(input: SplitRuleInput): string | null {
  * already-signed contract that hasn't been wired to a rule yet. */
 export async function upsertChannelSplitRule(input: SplitRuleInput): Promise<Result<{ id: string }>> {
   const session = await requireSession();
+  if (session.role !== "ADMIN" && session.role !== "USER") {
+    return { ok: false, error: "仅管理员或已授权的内部员工可以设置渠道商分账规则" };
+  }
   try {
-    await requireFeaturePermission(session, "finance.channel_reconciliation", "EDIT");
+    await requireFeaturePermission(session, "finance.channel_split_rules", "EDIT");
   } catch (error) {
     if (error instanceof FeaturePermissionError) return { ok: false, error: "无权操作" };
     throw error;
@@ -101,12 +109,20 @@ export async function upsertChannelSplitRule(input: SplitRuleInput): Promise<Res
     createdById: session.userId,
   };
 
-  const existing = input.contractId
-    ? await prisma.channelSplitRule.findUnique({ where: { contractId: input.contractId } })
-    : await prisma.channelSplitRule.findFirst({ where: { customerId: input.customerId, contractId: null } });
-  const rule = existing
-    ? await prisma.channelSplitRule.update({ where: { id: existing.id }, data })
-    : await prisma.channelSplitRule.create({ data });
+  let rule: { id: string };
+  try {
+    const existing = input.contractId
+      ? await prisma.channelSplitRule.findUnique({ where: { contractId: input.contractId } })
+      : await prisma.channelSplitRule.findFirst({ where: { customerId: input.customerId, contractId: null } });
+    rule = existing
+      ? await prisma.channelSplitRule.update({ where: { id: existing.id }, data, select: { id: true } })
+      : await prisma.channelSplitRule.create({ data, select: { id: true } });
+  } catch (error) {
+    if (isDatabaseBusy(error)) {
+      return { ok: false, error: "当前有 BI 数据正在导入，数据库繁忙，请稍后重试保存分账规则" };
+    }
+    throw error;
+  }
 
   revalidatePath(`/customers/${input.customerId}`);
   if (input.contractId) revalidatePath(`/contracts/${input.contractId}`);
@@ -116,8 +132,11 @@ export async function upsertChannelSplitRule(input: SplitRuleInput): Promise<Res
 
 export async function deleteChannelSplitRule(customerId: string, contractId?: string): Promise<Result> {
   const session = await requireSession();
+  if (session.role !== "ADMIN" && session.role !== "USER") {
+    return { ok: false, error: "仅管理员或已授权的内部员工可以删除渠道商分账规则" };
+  }
   try {
-    await requireFeaturePermission(session, "finance.channel_reconciliation", "MANAGE");
+    await requireFeaturePermission(session, "finance.channel_split_rules", "MANAGE");
   } catch (error) {
     if (error instanceof FeaturePermissionError) return { ok: false, error: "无权删除分账规则" };
     throw error;
