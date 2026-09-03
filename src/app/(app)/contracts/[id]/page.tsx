@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/Badge";
 import { FileUploader } from "@/components/FileUploader";
 import { ContractFormModal } from "../ContractFormModal";
 import { ContractActions } from "./ContractActions";
+import { ArchiveContractEditor } from "./ArchiveContractEditor";
 import { ContactAdminModifyButton } from "./ContactAdminModifyButton";
 import { ChannelSplitRuleModal, type ExistingRule } from "../../customers/[id]/ChannelSplitRuleModal";
 import { ContractCompare } from "./ContractCompare";
@@ -153,6 +154,9 @@ export default async function ContractDetailPage({
   const isAdmin = session.role === "ADMIN";
   const splitRulePermission = await resolveUserPermission(session.userId, "finance.channel_split_rules");
   const internal = session.role === "ADMIN" || session.role === "USER";
+  const archiveInternal = ["ADMIN", "USER", "LYNQ_STAFF"].includes(session.role);
+  const canEditArchive = isSimpleArchive && archiveInternal
+    && await adminHasFeature(session, "contracts.records", "EDIT");
   const canConfigureSplitRule = internal && hasPermissionLevel(splitRulePermission, "EDIT");
   const canDeleteSplitRule = internal && hasPermissionLevel(splitRulePermission, "MANAGE");
   const toExistingRule = (rule: typeof contract.splitRule): ExistingRule | null => rule ? ({
@@ -415,6 +419,21 @@ export default async function ContractDetailPage({
                   <FileDown className="h-4 w-4" /> 下载 PDF
                 </a>
               </>
+            )}
+            {canEditArchive && (
+              <ArchiveContractEditor
+                contractId={contract.id}
+                type={isChannelArchive ? "CHANNEL" : "TRANSACTIONAL"}
+                initial={{
+                  startDate: contract.startDate?.toISOString().slice(0, 10) ?? "",
+                  endDate: contract.endDate?.toISOString().slice(0, 10) ?? "",
+                  partyBCompany: c.partyBCompany ?? "",
+                  partyBContact: c.partyBContact ?? "",
+                  partyBPhone: c.partyBPhone ?? "",
+                  partyBEmail: c.partyBEmail ?? "",
+                  fixedFeeRate: contract.splitRule ? String(contract.splitRule.fixedFeeRate * 100) : "",
+                }}
+              />
             )}
             {isSimpleArchive && contract.fileUrl && (
               <a href={contract.fileUrl} download className="btn-primary inline-flex items-center gap-1.5 text-sm">

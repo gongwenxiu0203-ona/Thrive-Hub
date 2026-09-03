@@ -890,6 +890,114 @@ export async function uploadChannelContract(fd: FormData): Promise<ContractSaveR
   }
 }
 
+export async function updateArchiveContract(fd: FormData): Promise<ContractSaveResult> {
+  try {
+    const contractId = str(fd, "contractId");
+    const reason = str(fd, "reason");
+    if (!contractId) return { ok: false, error: "合同参数缺失" };
+    if (reason.length < 2) return { ok: false, error: "请填写完整的修改原因" };
+    if (reason.length > 2000) return { ok: false, error: "修改原因不能超过 2000 字" };
+
+    const session = await requireContractRow(contractId, "EDIT");
+    if (!["ADMIN", "USER", "LYNQ_STAFF"].includes(session.role)) {
+      return { ok: false, error: "仅有编辑权限的内部员工可以修改合同" };
+    }
+    const current = await prisma.contract.findUnique({
+      where: { id: contractId },
+      include: { splitRule: true },
+    });
+    if (!current || current.deletedAt) return { ok: false, error: "合同不存在" };
+    const isChannel = current.uploadType === "CHANNEL_ARCHIVE" || current.type === "CHANNEL";
+    const isTransactional = current.uploadType === "TRANSACTIONAL" || current.type === "TRANSACTIONAL";
+    if (!isChannel && !isTransactional) return { ok: false, error: "该操作仅适用于渠道商或事务性归档合同" };
+
+    const startDate = parseDateOnlyUtc(str(fd, "startDate"));
+    const endDate = parseDateOnlyUtc(str(fd, "endDate"));
+    if (!startDate || !endDate) return { ok: false, error: "请填写有效的合同开始时间和截止时间" };
+    if (startDate > endDate) return { ok: false, error: "合同截止时间不能早于开始时间" };
+
+    const file = fd.get("file");
+    const hasFile = file instanceof File && file.size > 0;
+    const contractData: Prisma.ContractUpdateInput = { startDate, endDate };
+    let fixedFeePercent: number | null = null;
+    if (isChannel) {
+      const partyBCompany = str(fd, "partyBCompany");
+      const partyBContact = str(fd, "partyBContact");
+      const partyBPhone = str(fd, "partyBPhone");
+      const partyBEmail = str(fd, "partyBEmail");
+      fixedFeePercent = Number(str(fd, "fixedFeeRate"));
+      if (!partyBCompany || !partyBContact || !partyBPhone || !partyBEmail) {
+        return { ok: false, error: "请完整填写乙方公司、联系人、电话和邮箱" };
+      }
+      if (!Number.isFinite(fixedFeePercent) || fixedFeePercent < 0 || fixedFeePercent > 100) {
+        return { ok: false, error: "固定月度服务费渠道合作费的乙方比例需在 0% 至 100% 之间" };
+      }
+      Object.assign(contractData, { partyBCompany, partyBContact, partyBPhone, partyBEmail });
+    }
+
+    const before = {
+      startDate: current.startDate?.toISOString() ?? null,
+      endDate: current.endDate?.toISOString() ?? null,
+      partyBCompany: current.partyBCompany,
+      partyBContact: current.partyBContact,
+      partyBPhone: current.partyBPhone,
+      partyBEmail: current.partyBEmail,
+      fixedFeeRate: current.splitRule?.fixedFeeRate ?? null,
+      fileUrl: current.fileUrl,
+    };
+    const after = {
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString(),
+      partyBCompany: isChannel ? str(fd, "partyBCompany") : current.partyBCompany,
+      partyBContact: isChannel ? str(fd, "partyBContact") : current.partyBContact,
+      partyBPhone: isChannel ? str(fd, "partyBPhone") : current.partyBPhone,
+      partyBEmail: isChannel ? str(fd, "partyBEmail") : current.partyBEmail,
+      fixedFeeRate: isChannel ? (fixedFeePercent as number) / 100 : current.splitRule?.fixedFeeRate ?? null,
+      fileUrl: hasFile ? "REPLACED" : current.fileUrl,
+    };
+    const changedFields = Object.keys(after).filter((key) => JSON.stringify(before[key as keyof typeof before]) !== JSON.stringify(after[key as keyof typeof after]));
+    if (changedFields.length === 0) return { ok: false, error: "未检测到需要保存的修改" };
+
+    const saved = hasFile ? await saveUploadedFile(file as File) : null;
+    if (saved) Object.assign(contractData, { fileUrl: saved.fileUrl, generatedDocUrl: saved.fileUrl });
+    await prisma.$transaction(async (tx) => {
+      await tx.contract.update({ where: { id: contractId }, data: contractData });
+      if (isChannel && fixedFeePercent !== null) {
+        if (current.splitRule) {
+          await tx.channelSplitRule.update({
+            where: { id: current.splitRule.id },
+            data: { splitEndDate: endDate, fixedFeeRate: fixedFeePercent / 100 },
+          });
+        } else if (current.customerId) {
+          await tx.channelSplitRule.create({ data: {
+            customerId: current.customerId, contractId, ruleType: "A", splitEndDate: endDate,
+            fixedFeeRate: fixedFeePercent / 100, commissionRate: 0.15,
+            commissionThresholdAmount: 4400, commissionThresholdCurrency: "USD",
+            commissionBelowRate: 0.15, commissionAtOrAboveRate: 0.25, createdById: session.userId,
+          } });
+        }
+      }
+      if (saved) await tx.attachment.create({ data: {
+        fileName: saved.fileName, fileUrl: saved.fileUrl, fileSize: saved.fileSize,
+        entityType: "CONTRACT", entityId: contractId, uploadedById: session.userId,
+      } });
+      await tx.financeAuditLog.create({ data: {
+        entityType: "CONTRACT", entityId: contractId,
+        action: saved ? "REPLACE_SIGNED_ARCHIVE" : "UPDATE_ARCHIVE_CONTRACT",
+        fromStatus: current.status, toStatus: current.status, actorId: session.userId, note: reason,
+        metadata: JSON.stringify({ changedFields, before, after: { ...after, fileUrl: saved?.fileUrl ?? current.fileUrl } }),
+      } });
+    });
+
+    revalidatePath("/contracts");
+    revalidatePath(`/contracts/${contractId}`);
+    if (current.customerId) revalidatePath(`/customers/${current.customerId}`);
+    return { ok: true, contractId };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "保存失败" };
+  }
+}
+
 export async function updateContractNumber(
   contractId: string,
   nextNumberInput: string,

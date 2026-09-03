@@ -38,7 +38,7 @@ export function FrameworkWorkflow({ contractId, status, reviewerName, canEdit, c
   const [busy, startTransition] = useTransition();
   const [error, setError] = useState("");
   const [comment, setComment] = useState("");
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
 
   function run(task: () => Promise<{ ok: true } | { ok: false; error: string }>, after?: () => void) {
     setError("");
