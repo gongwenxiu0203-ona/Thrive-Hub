@@ -131,33 +131,39 @@ export function UploadExistingForm({
   const [partyBCompany, setPartyBCompany] = useState<"THRAIVE" | "LINGYUE" | "">("THRAIVE");
   const [ownerId, setOwnerId] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const customerSelectRef = useRef<HTMLSelectElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   function submit() {
     if (submittingRef.current) return;
     setError(null);
-    if (!customerId) { setError("请选择关联客户"); return; }
-    if (!file) { setError("请选择合同 Word/PDF 文件"); return; }
-    if (file.size > CONTRACT_UPLOAD_MAX_BYTES) {
-      setError(`\u6587\u4ef6\u5927\u5c0f\u4e3a ${formatUploadSize(file.size)}\uff0c\u8d85\u8fc7 ${CONTRACT_UPLOAD_MAX_MB}MB \u4e0a\u9650\uff0c\u8bf7\u538b\u7f29\u540e\u518d\u4e0a\u4f20`);
+    const submittedCustomerId = customerSelectRef.current?.value.trim() || customerId;
+    const submittedFile = fileInputRef.current?.files?.[0] ?? file;
+    if (!submittedCustomerId) { setError("请选择关联客户"); return; }
+    if (!submittedFile) { setError("请选择合同 Word/PDF 文件"); return; }
+    if (submittedFile.size > CONTRACT_UPLOAD_MAX_BYTES) {
+      setError(`\u6587\u4ef6\u5927\u5c0f\u4e3a ${formatUploadSize(submittedFile.size)}\uff0c\u8d85\u8fc7 ${CONTRACT_UPLOAD_MAX_MB}MB \u4e0a\u9650\uff0c\u8bf7\u538b\u7f29\u540e\u518d\u4e0a\u4f20`);
       return;
     }
+    setCustomerId(submittedCustomerId);
+    setFile(submittedFile);
     submittingRef.current = true;
     startTransition(async () => {
       try {
         const fd = new FormData();
-        fd.append("customerId", customerId);
+        fd.append("customerId", submittedCustomerId);
         fd.append("contractNoPrefix", contractNoPrefix);
         fd.append("type", type);
         if (templateId) fd.append("templateId", templateId);
         if (partyBCompany) fd.append("partyBCompany", partyBCompany);
         if (ownerId) fd.append("ownerId", ownerId);
         fd.append("uploadArchiveMode", "SIGNED_ARCHIVE");
-        fd.append("file", file);
+        fd.append("file", submittedFile);
         const r = await uploadExistingContract(fd);
         if (!r.ok) { setError(r.error); return; }
         setSuccess(r.data!);
       } catch (error) {
-        setError(uploadRequestError(error, file));
+        setError(uploadRequestError(error, submittedFile));
       } finally {
         submittingRef.current = false;
       }
@@ -240,7 +246,7 @@ export function UploadExistingForm({
         <Section title="基础信息">
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="关联客户" required>
-              <select value={customerId} onChange={(e) => setCustomerId(e.target.value)} className="input">
+              <select ref={customerSelectRef} value={customerId} onChange={(e) => setCustomerId(e.target.value)} className="input">
                 <option value="">选择客户</option>
                 {customers.map((c) => (
                   <option key={c.id} value={c.id}>{c.brandName}</option>
@@ -298,6 +304,7 @@ export function UploadExistingForm({
             </span>
             <span className="text-[11px] text-slate-400">{"\u7cfb\u7edf\u4f1a\u8bc6\u522b\u7532\u65b9\u3001\u5408\u4f5c\u3001\u63a8\u5e7f\u3001\u8d39\u7528\u548c\u4f63\u91d1\u7b49\u5b57\u6bb5\uff08\u6700\u5927 100MB\uff1b\u65e0\u6587\u5b57\u5c42\u65f6\u76f4\u63a5\u624b\u52a8\u8865\u5145\uff09"}</span>
             <input
+              ref={fileInputRef}
               type="file"
               accept=".docx,.pdf"
               className="hidden"
