@@ -17,6 +17,7 @@ import {
   Trash2,
   FolderKanban,
   TrendingUp,
+  CircleHelp,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -210,6 +211,19 @@ export function Sidebar({
       </nav>
 
       <div className="space-y-1 border-t border-[#e7e0ef] px-3 py-4">
+        <Link
+          href="/guide"
+          onClick={onMobileClose}
+          className={cn(
+            "relative flex min-h-11 items-center gap-3 rounded-md border border-transparent px-3 py-2 text-sm font-medium transition-colors",
+            pathname === "/guide"
+              ? "bg-brand-50/80 text-brand-700 before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-r before:bg-brand-600"
+              : "text-slate-600 hover:bg-white hover:text-slate-900",
+          )}
+        >
+          <CircleHelp className="h-[18px] w-[18px]" />
+          网站说明
+        </Link>
         {userId && canUseIntakeLinks && <InviteButton userId={userId} />}
         {canManageRecycleBin && (
           <Link
