@@ -6,7 +6,7 @@ import { requireFeaturePermission } from "@/lib/permissionGuard";
 import { requireSession } from "@/lib/session";
 import { PARTY_B_COMPANIES } from "@/lib/partyB";
 import { isStaff } from "@/lib/permissions";
-import { createTwoStageFinanceApproval, normalizeFinanceUrls, requireShallowFinanceReviewer } from "@/lib/financeApproval";
+import { createTwoStageFinanceApproval, normalizeFinanceUrls } from "@/lib/financeApproval";
 
 const round = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 const refNo = (prefix: string) => `${prefix}-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 6).toUpperCase()}`;
@@ -40,6 +40,7 @@ export async function submitManualBillingRequest(input: {
   customerId: string;
   contractId?: string;
   documentType: "INVOICE" | "DOMESTIC";
+  reviewerId?: string;
   note?: string;
   items: ManualBillingItemInput[];
 }) {
@@ -48,6 +49,7 @@ export async function submitManualBillingRequest(input: {
     await requireFeaturePermission(session, "finance.billing_requests", "EDIT");
     if (!isStaff(session.role)) return { ok: false, error: "仅内部员工可以提交开票申请。" };
     if (!input.customerId || !["INVOICE", "DOMESTIC"].includes(input.documentType)) return { ok: false, error: "请选择客户和票据类型。" };
+    if (input.reviewerId === session.userId) return { ok: false, error: "申请人不能选择自己作为审核人。" };
     if (!input.items.length || input.items.length > 50) return { ok: false, error: "请填写 1 至 50 条开票明细。" };
     const customer = await prisma.customer.findFirst({ where: { id: input.customerId, deletedAt: null }, select: { id: true, brandName: true } });
     if (!customer) return { ok: false, error: "客户不存在。" };
@@ -80,12 +82,41 @@ export async function submitManualBillingRequest(input: {
         requestedAmount, sourceType: "MANUAL", applicantNote: input.note?.trim() || null,
         manualItems: { create: normalized.map((item) => ({ description: item.description, feeType: item.feeType, currency: item.currency, periodType: item.periodType, periodLabel: item.periodLabel.trim(), promoPlatform: item.promoPlatform?.trim() || null, targetSite: item.targetSite?.trim() || null, affiliatePlatform: item.affiliatePlatform?.trim() || null, quantity: item.quantity, unitPrice: item.unitPrice, amount: item.amount, serviceMonths: item.serviceMonths, netAmount: item.netAmount, taxRate: item.taxRate, taxAmount: item.taxAmount, grossAmount: item.grossAmount, remark: item.remark?.trim() || null, sortOrder: item.sortOrder })) }
       }, select: { id: true, requestNo: true } });
-      await createTwoStageFinanceApproval(tx, "BILLING_REQUEST", created.id);
+      await createTwoStageFinanceApproval(tx, "BILLING_REQUEST", created.id, input.reviewerId);
       return created;
     });
     revalidatePath("/finance/workbench");
     return { ok: true, request };
   } catch (error) { return { ok: false, error: error instanceof Error ? error.message : "提交开票申请失败。" }; }
+}
+
+export async function changeBillingRequestReviewer(requestId: string, reviewerId: string) {
+  try {
+    const session = await requireSession();
+    await requireFeaturePermission(session, "finance.billing_requests", "EDIT");
+    const reviewer = await prisma.user.findFirst({ where: { id: reviewerId, status: "APPROVED", role: { in: ["ADMIN", "USER"] } }, select: { id: true } });
+    if (!reviewer) return { ok: false, error: "所选审核人不存在、未启用或不是内部账号。" };
+    const request = await prisma.billingRequest.findUnique({ where: { id: requestId }, select: { applicantId: true, status: true } });
+    if (!request) return { ok: false, error: "开票申请不存在。" };
+    if (request.applicantId !== session.userId) return { ok: false, error: "只有申请发起人可以更换审核人。" };
+    if (request.status !== "SUBMITTED") return { ok: false, error: "申请已进入后续处理，不能更换审核人。" };
+    const updated = await prisma.$transaction(async (tx) => {
+      const current = await tx.financeApprovalStep.findUnique({
+        where: { entityType_entityId_stepNo: { entityType: "BILLING_REQUEST", entityId: requestId, stepNo: 1 } },
+        select: { assigneeId: true, status: true },
+      });
+      if (!current || current.status !== "PENDING") return { count: 0 };
+      const changed = await tx.financeApprovalStep.updateMany({
+        where: { entityType: "BILLING_REQUEST", entityId: requestId, stepNo: 1, status: "PENDING", assigneeId: current.assigneeId },
+        data: { assigneeId: reviewer.id },
+      });
+      if (changed.count === 1) await tx.financeAuditLog.create({ data: { entityType: "BILLING_REQUEST", entityId: requestId, action: "CHANGE_REVIEWER", actorId: session.userId, note: "申请人在初审前更换审核人", metadata: JSON.stringify({ fromReviewerId: current.assigneeId, toReviewerId: reviewer.id }) } });
+      return changed;
+    });
+    if (updated.count !== 1) return { ok: false, error: "审核人已处理该申请，不能再更换。" };
+    revalidatePath("/finance/workbench");
+    return { ok: true };
+  } catch (error) { return { ok: false, error: error instanceof Error ? error.message : "更换审核人失败。" }; }
 }
 
 export async function saveCustomerBillingProfile(input: { customerId: string; name: string; invoiceTitle: string; taxNumber?: string; registeredAddress?: string; registeredPhone?: string; bankName?: string; bankAccount?: string; deliveryEmail?: string; isDefault?: boolean }) {
@@ -193,7 +224,6 @@ export async function decideFinanceRequest(entityType: "BILLING_REQUEST" | "PAYM
     if (action === "REJECT" && !comment) return { ok: false, error: "驳回必须填写原因。" };
     const now = new Date();
     await prisma.$transaction(async (tx) => {
-      const shallow = await requireShallowFinanceReviewer(tx);
       const entity = entityType === "BILLING_REQUEST"
         ? await tx.billingRequest.findUnique({ where: { id }, select: { applicantId: true, status: true } })
         : entityType === "PAYMENT_REQUEST"
@@ -215,7 +245,12 @@ export async function decideFinanceRequest(entityType: "BILLING_REQUEST" | "PAYM
       }
       if (action === "APPROVE" || action === "REJECT") {
         if (entity.status !== "SUBMITTED") throw new Error("仅待初审申请可以审批，当前状态已变化，请刷新。");
-        if (session.userId !== shallow.id) throw new Error(`仅 ${shallow.email} 可以执行初审。`);
+        const assignedStep = await tx.financeApprovalStep.findUnique({
+          where: { entityType_entityId_stepNo: { entityType, entityId: id, stepNo: 1 } },
+          select: { assigneeId: true },
+        });
+        if (!assignedStep?.assigneeId) throw new Error("该申请尚未设置审核人。");
+        if (session.userId !== assignedStep.assigneeId) throw new Error("仅该申请指定的审核人可以执行初审。");
         const step = await tx.financeApprovalStep.updateMany({ where: { entityType, entityId: id, stepNo: 1, assigneeId: session.userId, status: "PENDING" }, data: { status: action === "REJECT" ? "REJECTED" : "APPROVED", operatorId: session.userId, comment: comment || null, actedAt: now } });
         if (step.count !== 1) throw new Error("初审步骤已被处理，请勿重复提交。");
         const expected = { id, status: "SUBMITTED" };

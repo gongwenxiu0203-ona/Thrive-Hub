@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, type ClipboardEvent, type ReactNode } from "react";
+import { Fragment, useMemo, useRef, useState, type ClipboardEvent, type ReactNode } from "react";
 import { PARTY_B_COMPANIES } from "@/lib/partyB";
 import {
   ArrowLeft,
@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { readApiError } from "@/lib/clientError";
 import {
+  changeBillingRequestReviewer,
   createExpenseClaim,
   createSupplierAndPaymentRequest,
   decideFinanceRequest,
@@ -53,6 +54,7 @@ export type FinanceObjectOption = {
 };
 export type FinanceProgressRow = {
   id: string;
+  applicantId?: string;
   requestNo: string;
   objectName: string;
   detail: string;
@@ -60,14 +62,20 @@ export type FinanceProgressRow = {
   amount: number;
   status: string;
   rejectionReason?: string | null;
+  applicant?: string;
+  submittedAt?: string;
+  note?: string | null;
+  items?: Array<{ description: string; period: string; quantity: number; unitPrice: number; amount: number; taxRate?: number | null; taxAmount?: number | null }>;
   paymentProofUrls?: string[];
   steps?: Array<{
     label: string;
     status: "PENDING" | "APPROVED" | "REJECTED";
     assignee?: string;
+    assigneeId?: string;
   }>;
 };
 export type FinanceFlowHubData = {
+  currentUserId?: string;
   customers: FinanceObjectOption[];
   contracts: FinanceObjectOption[];
   companyEntities: FinanceObjectOption[];
@@ -83,6 +91,7 @@ export type FinanceFlowHubData = {
   billingProgress?: FinanceProgressRow[];
   paymentProgress?: FinanceProgressRow[];
   expenseProgress?: FinanceProgressRow[];
+  reviewerOptions?: FinanceObjectOption[];
 };
 export type ProfileCategory =
   | "CUSTOMER_BILLING"
@@ -234,6 +243,8 @@ export function FinanceFlowHub({
           <ProgressTable
             kind="BILLING_REQUEST"
             rows={data.billingProgress ?? []}
+            currentUserId={data.currentUserId}
+            reviewerOptions={data.reviewerOptions}
           />
         </>
       )}
@@ -293,6 +304,8 @@ function BillingForm({ data, disabled, onSubmit }: FormProps) {
   const [terms, setTerms] = useState(
     "Terms & Conditions Our Account Information is as follows. Wire transfer only.",
   );
+  const defaultReviewerId = data.reviewerOptions?.find((row) => row.subtitle?.toLowerCase() === "shallow.w@thraiveagency.com")?.id ?? "";
+  const [reviewerId, setReviewerId] = useState(defaultReviewerId);
   const customerProfiles = data.financeProfiles.filter(
     (row) =>
       row.category === "CUSTOMER_BILLING" &&
@@ -309,9 +322,9 @@ function BillingForm({ data, disabled, onSubmit }: FormProps) {
     () =>
       lines.reduce((sum, row) => {
         const untaxed = Number(row.quantity || 0) * Number(row.unitPrice || 0);
-        return sum + untaxed * (1 + Number(row.taxRate || 0) / 100);
+        return sum + (type === "DOMESTIC" ? untaxed * (1 + Number(row.taxRate || 0) / 100) : untaxed);
       }, 0),
-    [lines],
+    [lines, type],
   );
   if (!type)
     return (
@@ -357,6 +370,7 @@ function BillingForm({ data, disabled, onSubmit }: FormProps) {
         </span>
       </div>
       <div className="grid gap-4 md:grid-cols-3">
+        <SelectField label="审核人" value={reviewerId} setValue={setReviewerId} options={data.reviewerOptions ?? []} />
         <SelectField
           label="客户"
           value={customerId}
@@ -708,7 +722,7 @@ function BillingForm({ data, disabled, onSubmit }: FormProps) {
                   </>
                 )}
                 <div className="rounded-md bg-slate-50 p-2 text-xs text-slate-600">
-                  <p>不含税 {untaxed.toFixed(2)}</p>
+                  <p>{type === "DOMESTIC" ? "不含税金额" : "明细金额"} {untaxed.toFixed(2)}</p>
                   {type === "DOMESTIC" && (
                     <>
                       <p>税额 {tax.toFixed(2)}</p>
@@ -740,8 +754,9 @@ function BillingForm({ data, disabled, onSubmit }: FormProps) {
           </strong>
           <button
             className="btn-primary"
-            disabled={
-              disabled ||
+              disabled={
+                disabled ||
+              !reviewerId ||
               !customerId ||
               (type === "INVOICE" && !contractId) ||
               (type === "INVOICE" && !bankAccountKey) ||
@@ -752,6 +767,7 @@ function BillingForm({ data, disabled, onSubmit }: FormProps) {
             onClick={() =>
               onSubmit({
                 documentType: type,
+                reviewerId,
                 customerId,
                 contractId: contractId || undefined,
                 note:
@@ -1660,11 +1676,16 @@ function monthOptions(): string[] {
 function ProgressTable({
   rows,
   kind,
+  currentUserId,
+  reviewerOptions = [],
 }: {
   rows: FinanceProgressRow[];
   kind: "BILLING_REQUEST" | "PAYMENT_REQUEST" | "EXPENSE_CLAIM";
+  currentUserId?: string;
+  reviewerOptions?: FinanceObjectOption[];
 }) {
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   async function decide(id: string, action: "APPROVE" | "REJECT") {
     const comment =
       action === "REJECT"
@@ -1677,11 +1698,19 @@ function ProgressTable({
     if (!result.ok) window.alert(result.error ?? "操作失败");
     else window.location.reload();
   }
+  async function changeReviewer(row: FinanceProgressRow, reviewerId: string) {
+    if (!reviewerId || reviewerId === row.steps?.[0]?.assigneeId) return;
+    setBusyId(row.id);
+    const result = await changeBillingRequestReviewer(row.id, reviewerId);
+    setBusyId(null);
+    if (!result.ok) window.alert(result.error ?? "更换审核人失败");
+    else window.location.reload();
+  }
   return (
     <section className="border-t border-slate-100 p-5">
       <h3 className="font-semibold text-slate-900">我的申请与审批进度</h3>
       <p className="mt-1 text-xs text-slate-500">
-        依次经过 Shallow 审核、财务处理和完成回传。
+        依次经过指定审核人审核、财务处理和完成回传。
       </p>
       <div className="mt-3 overflow-x-auto">
         <table className="w-full min-w-[760px] text-sm">
@@ -1696,7 +1725,8 @@ function ProgressTable({
           </thead>
           <tbody className="divide-y divide-slate-100">
             {rows.map((row) => (
-              <tr key={row.id}>
+              <Fragment key={row.id}>
+              <tr>
                 <td className="py-3 font-medium text-slate-900">
                   {row.requestNo}
                 </td>
@@ -1719,7 +1749,7 @@ function ProgressTable({
                           ? "已完成"
                           : step.status === "REJECTED"
                             ? "已驳回"
-                            : "待处理"}
+                            : "待处理"}{step.assignee ? ` · ${step.assignee}` : ""}
                       </span>
                     ))}
                   </div>
@@ -1728,20 +1758,36 @@ function ProgressTable({
                   {row.rejectionReason ? (
                     <span className="text-rose-700">{row.rejectionReason}</span>
                   ) : (
-                    row.status
+                    <span>{row.status}</span>
                   )}
+                  {kind === "BILLING_REQUEST" && <button type="button" className="ml-3 font-medium text-brand-700 hover:underline" onClick={() => setExpandedId(expandedId === row.id ? null : row.id)}>{expandedId === row.id ? "收起详情" : "查看详情"}</button>}
                 </td>
               </tr>
+              {expandedId === row.id && kind === "BILLING_REQUEST" && (
+                <tr><td colSpan={5} className="bg-slate-50/70 p-4">
+                  <div className="grid gap-3 text-xs text-slate-600 md:grid-cols-3">
+                    <p><span className="text-slate-400">申请人</span><br />{row.applicant ?? "—"}</p>
+                    <p><span className="text-slate-400">提交时间</span><br />{row.submittedAt ? new Date(row.submittedAt).toLocaleString("zh-CN") : "—"}</p>
+                    <p><span className="text-slate-400">票据类型</span><br />{row.detail}</p>
+                  </div>
+                  {row.note && <p className="mt-3 break-all text-xs text-slate-600">申请备注：{row.note}</p>}
+                  <div className="mt-3 overflow-x-auto rounded-md border border-slate-200 bg-white">
+                    <table className="w-full min-w-[620px] text-xs"><thead><tr className="border-b bg-slate-50 text-left text-slate-500"><th className="p-2">明细</th><th>期间</th><th>数量</th><th>单价</th><th>税率</th><th>税额</th><th>金额</th></tr></thead><tbody>{(row.items ?? []).map((item, index) => <tr key={index} className="border-b last:border-0"><td className="p-2">{item.description}</td><td>{item.period}</td><td>{item.quantity}</td><td>{item.unitPrice.toFixed(2)}</td><td>{item.taxRate == null ? "不适用" : `${(item.taxRate * 100).toFixed(2)}%`}</td><td>{item.taxAmount == null ? "不适用" : item.taxAmount.toFixed(2)}</td><td>{item.amount.toFixed(2)}</td></tr>)}</tbody></table>
+                  </div>
+                  {row.applicantId === currentUserId && row.steps?.[0]?.status === "PENDING" && <label className="mt-3 block max-w-sm text-xs font-medium text-slate-600">更换审核人<select className="input mt-1" value={row.steps?.[0]?.assigneeId ?? ""} disabled={busyId === row.id} onChange={(event) => void changeReviewer(row, event.target.value)}>{reviewerOptions.map((option) => <option key={option.id} value={option.id}>{option.label}{option.subtitle ? ` · ${option.subtitle}` : ""}</option>)}</select></label>}
+                </td></tr>
+              )}
+              </Fragment>
             ))}
           </tbody>
         </table>
-        {rows.some((row) => row.steps?.[0]?.status === "PENDING") && (
+        {rows.some((row) => row.steps?.[0]?.status === "PENDING" && row.steps?.[0]?.assigneeId === currentUserId) && (
           <div className="mt-4 space-y-2 border-t border-slate-100 pt-4">
             <p className="text-xs font-medium text-slate-600">
-              待 Shallow 审核
+              待我审核
             </p>
             {rows
-              .filter((row) => row.steps?.[0]?.status === "PENDING")
+              .filter((row) => row.steps?.[0]?.status === "PENDING" && row.steps?.[0]?.assigneeId === currentUserId)
               .map((row) => (
                 <div
                   key={`review-${row.id}`}

@@ -88,6 +88,9 @@ export default async function FinanceWorkbenchPage() {
             lines: {
               select: {
                 id: true,
+                requestedAmount: true,
+                feeType: true,
+                currency: true,
                 reconciliation: {
                   select: {
                     contract: { select: { contractNo: true } },
@@ -95,7 +98,7 @@ export default async function FinanceWorkbenchPage() {
                 },
               },
             },
-            manualItems: { select: { id: true } },
+            manualItems: { select: { id: true, description: true, periodLabel: true, quantity: true, unitPrice: true, amount: true, taxRate: true, taxAmount: true } },
             invoices: {
               where: { deletedAt: null },
               select: {
@@ -279,7 +282,7 @@ export default async function FinanceWorkbenchPage() {
         orderBy: { createdAt: "desc" },
         take: 100,
       }),
-      prisma.user.findMany({ select: { id: true, name: true, role: true } }),
+      prisma.user.findMany({ where: { status: "APPROVED", role: { in: ["ADMIN", "USER"] } }, select: { id: true, name: true, email: true, role: true }, orderBy: { name: "asc" } }),
       prisma.affiliate.findMany({
         where: { deletedAt: null },
         select: { id: true, platformAffiliateName: true, internalAffiliateName: true },
@@ -328,6 +331,7 @@ export default async function FinanceWorkbenchPage() {
         assignee: step.assigneeId
           ? financeUserMap.get(step.assigneeId)
           : undefined,
+        assigneeId: step.assigneeId ?? undefined,
       }));
   const accountCategory = (value: string): ProfileCategory => {
     const type = value.toUpperCase();
@@ -553,6 +557,7 @@ export default async function FinanceWorkbenchPage() {
                 hasPermissionLevel(profilePermission, "EDIT")
               }
               data={{
+                currentUserId: session.userId,
                 customers: financeCustomers.map((customer) => ({
                   id: customer.id,
                   label: customer.brandName,
@@ -681,6 +686,7 @@ export default async function FinanceWorkbenchPage() {
                   .filter((row) => visibleBillingIds.includes(row.id))
                   .map((row) => ({
                     id: row.id,
+                    applicantId: row.applicantId,
                     requestNo: row.requestNo,
                     objectName: row.customer.brandName,
                     detail:
@@ -689,8 +695,15 @@ export default async function FinanceWorkbenchPage() {
                     amount: row.requestedAmount,
                     status: row.status,
                     rejectionReason: row.rejectionReason,
+                    applicant: row.applicant.name,
+                    submittedAt: row.submittedAt.toISOString(),
+                    note: row.applicantNote,
+                    items: row.manualItems.length
+                      ? row.manualItems.map((item) => ({ description: item.description, period: item.periodLabel, quantity: item.quantity, unitPrice: item.unitPrice, amount: item.amount, taxRate: item.taxRate, taxAmount: item.taxAmount }))
+                      : row.lines.map((line) => ({ description: line.feeType === "FIXED_FEE" ? "固定费" : "销售佣金", period: line.reconciliation?.contract.contractNo ?? "对账申请", quantity: 1, unitPrice: line.requestedAmount, amount: line.requestedAmount })),
                     steps: stepsFor("BILLING_REQUEST", row.id),
                   })),
+                reviewerOptions: financeUsers.filter((user) => user.id !== session.userId).map((user) => ({ id: user.id, label: user.name, subtitle: user.email })),
                 paymentProgress: paymentRequests.map((row) => ({
                   id: row.id,
                   requestNo: row.requestNo,

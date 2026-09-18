@@ -25,12 +25,19 @@ export async function createTwoStageFinanceApproval(
   tx: Prisma.TransactionClient,
   entityType: "BILLING_REQUEST" | "PAYMENT_REQUEST" | "EXPENSE_CLAIM",
   entityId: string,
+  reviewerId?: string,
 ) {
-  const shallow = await requireShallowFinanceReviewer(tx);
+  const shallow = reviewerId
+    ? await tx.user.findFirst({
+        where: { id: reviewerId, status: "APPROVED", role: { in: ["ADMIN", "USER"] } },
+        select: { id: true, name: true, email: true },
+      })
+    : await requireShallowFinanceReviewer(tx);
+  if (!shallow) throw new Error("所选审核人不存在、未启用或不是内部账号。");
   await tx.financeApprovalStep.createMany({
     data: [
       { entityType, entityId, stepNo: 1, stepType: "SHALLOW_REVIEW", assigneeId: shallow.id, status: "PENDING" },
-      { entityType, entityId, stepNo: 2, stepType: "FINANCE_PROCESSING", status: "PENDING", comment: "等待 Shallow 初审通过" },
+      { entityType, entityId, stepNo: 2, stepType: "FINANCE_PROCESSING", status: "PENDING", comment: `等待 ${shallow.name || shallow.email} 初审通过` },
     ],
   });
   return shallow;
