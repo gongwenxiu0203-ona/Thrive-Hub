@@ -30,7 +30,7 @@ import { confirmationSubmissionIssue } from "@/lib/reconciliationConfirmation";
 const INVOICE_FEATURE = "finance.invoices";
 const INVOICE_STATUSES = ["DRAFT", "ISSUED", "VOID"] as const;
 const PERIOD_TYPES = ["MONTH", "DATE_RANGE"] as const;
-const FEE_TYPES = ["MONTHLY_FEE", "SALES_COMMISSION", "AFFILIATE_FEE"] as const;
+const FEE_TYPES = ["MONTHLY_FEE", "SALES_COMMISSION", "AFFILIATE_FEE", "SINGLE_CHANNEL_FEE"] as const;
 const MAX_INVOICE_AMOUNT = 1_000_000_000;
 const MAX_LINE_ITEMS = 100;
 

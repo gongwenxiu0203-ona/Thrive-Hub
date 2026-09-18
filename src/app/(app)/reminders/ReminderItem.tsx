@@ -21,7 +21,16 @@ const REMINDER_TYPE_HREF: Record<string, string> = {
   REVIEW:           "/tasks",
   FOLLOWUP:         "/customers",
   STATUS_CHECK:     "/customers",
+  BILLING_REVIEW:   "/finance/workbench",
 };
+
+function reminderNavigation(type: string, content?: string | null) {
+  const match = content?.match(/\[\[href:(\/[^\]\s]+)\]\]/);
+  return {
+    href: match?.[1] ?? REMINDER_TYPE_HREF[type] ?? "/tasks",
+    content: content?.replace(/\s*\[\[href:\/[^\]\s]+\]\]\s*/, "").trim(),
+  };
+}
 
 type Option = { id: string; name: string };
 
@@ -45,7 +54,8 @@ export function ReminderItem({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const dleft = daysUntil(reminder.remindDate);
-  const navHref = REMINDER_TYPE_HREF[reminder.type] ?? "/tasks";
+  const navigation = reminderNavigation(reminder.type, reminder.content);
+  const navHref = navigation.href;
 
   function toggle() {
     startTransition(async () => {
@@ -81,8 +91,8 @@ export function ReminderItem({
             <span className="h-2 w-2 rounded-full bg-brand-500" />
           )}
         </div>
-        {reminder.content && (
-          <p className="mt-1 text-sm text-slate-500">{reminder.content}</p>
+        {navigation.content && (
+          <p className="mt-1 text-sm text-slate-500">{navigation.content}</p>
         )}
         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
           <span>提醒日期：{formatDate(reminder.remindDate)}</span>

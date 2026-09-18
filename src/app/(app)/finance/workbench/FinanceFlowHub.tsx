@@ -1,6 +1,7 @@
 "use client";
 
-import { Fragment, useMemo, useRef, useState, type ClipboardEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ClipboardEvent, type ReactNode } from "react";
+import { useSearchParams } from "next/navigation";
 import { PARTY_B_COMPANIES } from "@/lib/partyB";
 import {
   ArrowLeft,
@@ -76,6 +77,7 @@ export type FinanceProgressRow = {
 };
 export type FinanceFlowHubData = {
   currentUserId?: string;
+  currentUserIsAdmin?: boolean;
   customers: FinanceObjectOption[];
   contracts: FinanceObjectOption[];
   companyEntities: FinanceObjectOption[];
@@ -132,7 +134,9 @@ export function FinanceFlowHub({
   data: FinanceFlowHubData;
   canEdit: boolean;
 }) {
-  const [module, setModule] = useState<Module>("HOME");
+  const searchParams = useSearchParams();
+  const focusedBillingRequestId = searchParams.get("focusBillingRequest");
+  const [module, setModule] = useState<Module>(focusedBillingRequestId ? "BILLING" : "HOME");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   async function submit(kind: SubmitKind, payload: Record<string, unknown>) {
@@ -245,6 +249,7 @@ export function FinanceFlowHub({
             rows={data.billingProgress ?? []}
             currentUserId={data.currentUserId}
             reviewerOptions={data.reviewerOptions}
+            focusId={focusedBillingRequestId}
           />
         </>
       )}
@@ -304,7 +309,7 @@ function BillingForm({ data, disabled, onSubmit }: FormProps) {
   const [terms, setTerms] = useState(
     "Terms & Conditions Our Account Information is as follows. Wire transfer only.",
   );
-  const defaultReviewerId = data.reviewerOptions?.find((row) => row.subtitle?.toLowerCase() === "shallow.w@thraiveagency.com")?.id ?? "";
+  const defaultReviewerId = data.reviewerOptions?.find((row) => row.subtitle?.toLowerCase() === "shallow.w@thraiveagency.com")?.id ?? data.reviewerOptions?.find((row) => `${row.label} ${row.subtitle ?? ""}`.toLowerCase().includes("shallow"))?.id ?? "";
   const [reviewerId, setReviewerId] = useState(defaultReviewerId);
   const customerProfiles = data.financeProfiles.filter(
     (row) =>
@@ -876,6 +881,7 @@ function AttachmentInput({ label, scope, value, onChange, disabled }: { label: s
 }
 
 function PaymentForm({ data, disabled, onSubmit }: FormProps) {
+  const defaultReviewerId = data.reviewerOptions?.find((row) => row.subtitle?.toLowerCase() === "shallow.w@thraiveagency.com")?.id ?? data.reviewerOptions?.find((row) => `${row.label} ${row.subtitle ?? ""}`.toLowerCase().includes("shallow"))?.id ?? "";
   const [form, setForm] = useState({
     category: "SUPPLIER",
     payerEntityId: "",
@@ -890,6 +896,7 @@ function PaymentForm({ data, disabled, onSubmit }: FormProps) {
     receiptId: "",
     attachmentUrls: "",
     note: "",
+    reviewerId: defaultReviewerId,
   });
   const patch = (key: keyof typeof form, value: string) =>
     setForm({ ...form, [key]: value });
@@ -909,6 +916,12 @@ function PaymentForm({ data, disabled, onSubmit }: FormProps) {
           <option value="OTHER">其他</option>
         </select>
       </Field>
+      <SelectField
+        label="审核人"
+        value={form.reviewerId}
+        setValue={(v) => patch("reviewerId", v)}
+        options={data.reviewerOptions ?? []}
+      />
       <SelectField
         label="付款主体"
         value={form.payerEntityId}
@@ -979,11 +992,13 @@ function PaymentForm({ data, disabled, onSubmit }: FormProps) {
           disabled ||
           !form.payerEntityId ||
           !form.payerAccountId ||
+          !form.reviewerId ||
           !form.payeeName ||
           Number(form.amount) <= 0
         }
         onClick={() =>
           onSubmit({
+            reviewerId: form.reviewerId,
             supplierName: form.payeeName,
             supplierType: form.category,
             accountName:
@@ -1017,6 +1032,7 @@ function PaymentForm({ data, disabled, onSubmit }: FormProps) {
 }
 
 function ExpenseForm({ data, disabled, onSubmit }: FormProps) {
+  const defaultReviewerId = data.reviewerOptions?.find((row) => row.subtitle?.toLowerCase() === "shallow.w@thraiveagency.com")?.id ?? data.reviewerOptions?.find((row) => `${row.label} ${row.subtitle ?? ""}`.toLowerCase().includes("shallow"))?.id ?? "";
   const [form, setForm] = useState({
     entityId: "",
     expenseType: "SOFTWARE",
@@ -1030,6 +1046,7 @@ function ExpenseForm({ data, disabled, onSubmit }: FormProps) {
     accountNumber: "",
     attachmentUrls: "",
     note: "",
+    reviewerId: defaultReviewerId,
   });
   const patch = (key: keyof typeof form, value: string) =>
     setForm({ ...form, [key]: value });
@@ -1038,6 +1055,12 @@ function ExpenseForm({ data, disabled, onSubmit }: FormProps) {
   );
   return (
     <FormGrid>
+      <SelectField
+        label="审核人"
+        value={form.reviewerId}
+        setValue={(v) => patch("reviewerId", v)}
+        options={data.reviewerOptions ?? []}
+      />
       <SelectField
         label="报销主体"
         value={form.entityId}
@@ -1115,6 +1138,7 @@ function ExpenseForm({ data, disabled, onSubmit }: FormProps) {
         disabled={
           disabled ||
           !form.entityId ||
+          !form.reviewerId ||
           !form.description ||
           Number(form.amount) <= 0 ||
           (!form.reimbursementAccountId &&
@@ -1122,6 +1146,7 @@ function ExpenseForm({ data, disabled, onSubmit }: FormProps) {
         }
         onClick={() =>
           onSubmit({
+            reviewerId: form.reviewerId,
             reimbursementEntity:
               data.companyEntities.find((row) => row.id === form.entityId)
                 ?.label ?? "",
@@ -1678,14 +1703,21 @@ function ProgressTable({
   kind,
   currentUserId,
   reviewerOptions = [],
+  focusId,
 }: {
   rows: FinanceProgressRow[];
   kind: "BILLING_REQUEST" | "PAYMENT_REQUEST" | "EXPENSE_CLAIM";
   currentUserId?: string;
   reviewerOptions?: FinanceObjectOption[];
+  focusId?: string | null;
 }) {
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(focusId ?? null);
+  useEffect(() => {
+    if (!focusId) return;
+    setExpandedId(focusId);
+    window.setTimeout(() => document.getElementById(`billing-review-${focusId}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 100);
+  }, [focusId]);
   async function decide(id: string, action: "APPROVE" | "REJECT") {
     const comment =
       action === "REJECT"
@@ -1706,6 +1738,14 @@ function ProgressTable({
     if (!result.ok) window.alert(result.error ?? "更换审核人失败");
     else window.location.reload();
   }
+  const statusText = (row: FinanceProgressRow) => {
+    if (row.status === "SUBMITTED" && row.steps?.[0]?.status === "APPROVED") return "审核通过 · 待开票";
+    if (row.status === "SUBMITTED") return "待审核";
+    if (row.status === "PROCESSING") return "待开票";
+    if (row.status === "COMPLETED") return "已开票";
+    if (row.status === "REJECTED") return "已驳回";
+    return row.status;
+  };
   return (
     <section className="border-t border-slate-100 p-5">
       <h3 className="font-semibold text-slate-900">我的申请与审批进度</h3>
@@ -1726,7 +1766,7 @@ function ProgressTable({
           <tbody className="divide-y divide-slate-100">
             {rows.map((row) => (
               <Fragment key={row.id}>
-              <tr>
+              <tr id={kind === "BILLING_REQUEST" ? `billing-review-${row.id}` : undefined} className={focusId === row.id ? "bg-cyan-50/70" : undefined}>
                 <td className="py-3 font-medium text-slate-900">
                   {row.requestNo}
                 </td>
@@ -1758,7 +1798,7 @@ function ProgressTable({
                   {row.rejectionReason ? (
                     <span className="text-rose-700">{row.rejectionReason}</span>
                   ) : (
-                    <span>{row.status}</span>
+                    <span>{statusText(row)}</span>
                   )}
                   {kind === "BILLING_REQUEST" && <button type="button" className="ml-3 font-medium text-brand-700 hover:underline" onClick={() => setExpandedId(expandedId === row.id ? null : row.id)}>{expandedId === row.id ? "收起详情" : "查看详情"}</button>}
                 </td>
@@ -1770,7 +1810,6 @@ function ProgressTable({
                     <p><span className="text-slate-400">提交时间</span><br />{row.submittedAt ? new Date(row.submittedAt).toLocaleString("zh-CN") : "—"}</p>
                     <p><span className="text-slate-400">票据类型</span><br />{row.detail}</p>
                   </div>
-                  {row.note && <p className="mt-3 break-all text-xs text-slate-600">申请备注：{row.note}</p>}
                   <div className="mt-3 overflow-x-auto rounded-md border border-slate-200 bg-white">
                     <table className="w-full min-w-[620px] text-xs"><thead><tr className="border-b bg-slate-50 text-left text-slate-500"><th className="p-2">明细</th><th>期间</th><th>数量</th><th>单价</th><th>税率</th><th>税额</th><th>金额</th></tr></thead><tbody>{(row.items ?? []).map((item, index) => <tr key={index} className="border-b last:border-0"><td className="p-2">{item.description}</td><td>{item.period}</td><td>{item.quantity}</td><td>{item.unitPrice.toFixed(2)}</td><td>{item.taxRate == null ? "不适用" : `${(item.taxRate * 100).toFixed(2)}%`}</td><td>{item.taxAmount == null ? "不适用" : item.taxAmount.toFixed(2)}</td><td>{item.amount.toFixed(2)}</td></tr>)}</tbody></table>
                   </div>

@@ -6,7 +6,7 @@ import { useState, type ReactNode } from "react";
 export function FinanceWorkspaceSections({ workbench, flows }: { workbench: ReactNode; flows: ReactNode }) {
   const search = useSearchParams();
   const [section, setSection] = useState<"WORKBENCH" | "FLOWS">(
-    search.get("action") === "new-billing" ? "FLOWS" : "WORKBENCH",
+    search.get("action") === "new-billing" || search.has("focusBillingRequest") ? "FLOWS" : "WORKBENCH",
   );
 
   return (

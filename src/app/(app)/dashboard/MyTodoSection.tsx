@@ -86,9 +86,38 @@ export async function MyTodoSection() {
     }),
   ]);
 
+  const billingReviewSteps = await prisma.financeApprovalStep.findMany({
+    where: { entityType: "BILLING_REQUEST", stepNo: 1, assigneeId: session.userId, status: "PENDING" },
+    orderBy: { createdAt: "desc" },
+    take: 5,
+    select: { id: true, entityId: true },
+  });
+  const billingReviewRequests = billingReviewSteps.length
+    ? await prisma.billingRequest.findMany({
+        where: { id: { in: billingReviewSteps.map((step) => step.entityId) }, status: "SUBMITTED" },
+        select: { id: true, requestNo: true, documentType: true, customer: { select: { brandName: true } } },
+      })
+    : [];
+  const billingReviewMap = new Map(billingReviewRequests.map((request) => [request.id, request]));
+  const billingReviews = billingReviewSteps.map((step) => billingReviewMap.get(step.entityId)).filter((request): request is NonNullable<typeof request> => Boolean(request));
+  const outgoingReviewSteps = await prisma.financeApprovalStep.findMany({
+    where: { entityType: { in: ["PAYMENT_REQUEST", "EXPENSE_CLAIM"] }, stepNo: 1, assigneeId: session.userId, status: "PENDING" },
+    orderBy: { createdAt: "desc" }, take: 5, select: { id: true, entityId: true, entityType: true },
+  });
+  const paymentIds = outgoingReviewSteps.filter((step) => step.entityType === "PAYMENT_REQUEST").map((step) => step.entityId);
+  const expenseIds = outgoingReviewSteps.filter((step) => step.entityType === "EXPENSE_CLAIM").map((step) => step.entityId);
+  const [pendingPayments, pendingExpenses] = await Promise.all([
+    prisma.paymentRequest.findMany({ where: { id: { in: paymentIds }, status: "SUBMITTED" }, select: { id: true, requestNo: true, reason: true } }),
+    prisma.expenseClaim.findMany({ where: { id: { in: expenseIds }, status: "SUBMITTED" }, select: { id: true, claimNo: true, reimbursementEntity: true } }),
+  ]);
+  const outgoingReviews = [
+    ...pendingPayments.map((row) => ({ id: row.id, label: row.requestNo, sub: row.reason })),
+    ...pendingExpenses.map((row) => ({ id: row.id, label: row.claimNo, sub: row.reimbursementEntity })),
+  ];
+
   const totalCount =
     myTasks.length + contractsToReview.length + contractsRejected.length +
-    contractsToStamp.length + reconciliationsToHandle.length + projectsToFollow.length;
+    contractsToStamp.length + reconciliationsToHandle.length + projectsToFollow.length + billingReviews.length + outgoingReviews.length;
 
   if (totalCount === 0) {
     return (
@@ -153,17 +182,25 @@ export async function MyTodoSection() {
         }))}
       />
       <TodoCard
+        title="开票申请待审核"
+        count={billingReviews.length}
+        href="/finance/workbench"
+        icon={<Receipt className="h-4 w-4" />}
+        color="text-cyan-700"
+        items={billingReviews.map((request) => ({
+          id: request.id,
+          label: request.requestNo,
+          sub: `${request.customer.brandName} · ${request.documentType === "DOMESTIC" ? "国内发票" : "Invoice"}`,
+          href: `/finance/workbench?focusBillingRequest=${request.id}`,
+        }))}
+      />
+      <TodoCard
         title="财务待处理"
-        count={reconciliationsToHandle.length}
-        href="/finance"
+        count={outgoingReviews.length + reconciliationsToHandle.length}
+        href="/finance/workbench?mainTab=PAYMENT"
         icon={<Receipt className="h-4 w-4" />}
         color="text-emerald-600"
-        items={reconciliationsToHandle.map((r) => ({
-          id: r.id,
-          label: r.customer?.brandName ?? "—",
-          sub: r.status,
-          href: `/finance/reconciliations/${r.id}`,
-        }))}
+        items={[...outgoingReviews.map((row) => ({ ...row, href: `/finance/workbench?mainTab=PAYMENT&focusRequest=${row.id}` })), ...reconciliationsToHandle.map((r) => ({ id: r.id, label: r.customer?.brandName ?? "—", sub: r.status, href: `/finance/reconciliations/${r.id}` }))].slice(0, 5)}
       />
       <TodoCard
         title="项目待跟进"

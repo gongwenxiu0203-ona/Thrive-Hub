@@ -49,7 +49,8 @@ export async function submitManualBillingRequest(input: {
     await requireFeaturePermission(session, "finance.billing_requests", "EDIT");
     if (!isStaff(session.role)) return { ok: false, error: "仅内部员工可以提交开票申请。" };
     if (!input.customerId || !["INVOICE", "DOMESTIC"].includes(input.documentType)) return { ok: false, error: "请选择客户和票据类型。" };
-    if (input.reviewerId === session.userId) return { ok: false, error: "申请人不能选择自己作为审核人。" };
+    if (!input.reviewerId) return { ok: false, error: "请选择审核人。" };
+    if (input.reviewerId === session.userId && session.role !== "ADMIN") return { ok: false, error: "非管理员申请人不能选择自己作为审核人。" };
     if (!input.items.length || input.items.length > 50) return { ok: false, error: "请填写 1 至 50 条开票明细。" };
     const customer = await prisma.customer.findFirst({ where: { id: input.customerId, deletedAt: null }, select: { id: true, brandName: true } });
     if (!customer) return { ok: false, error: "客户不存在。" };
@@ -82,7 +83,12 @@ export async function submitManualBillingRequest(input: {
         requestedAmount, sourceType: "MANUAL", applicantNote: input.note?.trim() || null,
         manualItems: { create: normalized.map((item) => ({ description: item.description, feeType: item.feeType, currency: item.currency, periodType: item.periodType, periodLabel: item.periodLabel.trim(), promoPlatform: item.promoPlatform?.trim() || null, targetSite: item.targetSite?.trim() || null, affiliatePlatform: item.affiliatePlatform?.trim() || null, quantity: item.quantity, unitPrice: item.unitPrice, amount: item.amount, serviceMonths: item.serviceMonths, netAmount: item.netAmount, taxRate: item.taxRate, taxAmount: item.taxAmount, grossAmount: item.grossAmount, remark: item.remark?.trim() || null, sortOrder: item.sortOrder })) }
       }, select: { id: true, requestNo: true } });
-      await createTwoStageFinanceApproval(tx, "BILLING_REQUEST", created.id, input.reviewerId);
+      const reviewer = await createTwoStageFinanceApproval(tx, "BILLING_REQUEST", created.id, input.reviewerId);
+      await tx.reminder.create({ data: {
+        title: `待审核开票申请：${created.requestNo}`,
+        content: `${customer.brandName}提交了${input.documentType === "DOMESTIC" ? "国内发票" : "Invoice"}申请，请查看明细并审核。\n[[href:/finance/workbench?focusBillingRequest=${created.id}]]`,
+        remindDate: new Date(), type: "BILLING_REVIEW", targetId: reviewer.id, createdById: session.userId,
+      } });
       return created;
     });
     revalidatePath("/finance/workbench");
@@ -96,7 +102,7 @@ export async function changeBillingRequestReviewer(requestId: string, reviewerId
     await requireFeaturePermission(session, "finance.billing_requests", "EDIT");
     const reviewer = await prisma.user.findFirst({ where: { id: reviewerId, status: "APPROVED", role: { in: ["ADMIN", "USER"] } }, select: { id: true } });
     if (!reviewer) return { ok: false, error: "所选审核人不存在、未启用或不是内部账号。" };
-    const request = await prisma.billingRequest.findUnique({ where: { id: requestId }, select: { applicantId: true, status: true } });
+    const request = await prisma.billingRequest.findUnique({ where: { id: requestId }, select: { requestNo: true, applicantId: true, status: true } });
     if (!request) return { ok: false, error: "开票申请不存在。" };
     if (request.applicantId !== session.userId) return { ok: false, error: "只有申请发起人可以更换审核人。" };
     if (request.status !== "SUBMITTED") return { ok: false, error: "申请已进入后续处理，不能更换审核人。" };
@@ -110,10 +116,45 @@ export async function changeBillingRequestReviewer(requestId: string, reviewerId
         where: { entityType: "BILLING_REQUEST", entityId: requestId, stepNo: 1, status: "PENDING", assigneeId: current.assigneeId },
         data: { assigneeId: reviewer.id },
       });
-      if (changed.count === 1) await tx.financeAuditLog.create({ data: { entityType: "BILLING_REQUEST", entityId: requestId, action: "CHANGE_REVIEWER", actorId: session.userId, note: "申请人在初审前更换审核人", metadata: JSON.stringify({ fromReviewerId: current.assigneeId, toReviewerId: reviewer.id }) } });
+      if (changed.count === 1) {
+        await tx.financeAuditLog.create({ data: { entityType: "BILLING_REQUEST", entityId: requestId, action: "CHANGE_REVIEWER", actorId: session.userId, note: "申请人在初审前更换审核人", metadata: JSON.stringify({ fromReviewerId: current.assigneeId, toReviewerId: reviewer.id }) } });
+        if (current.assigneeId) await tx.reminder.updateMany({ where: { targetId: current.assigneeId, type: "BILLING_REVIEW", content: { contains: `focusBillingRequest=${requestId}` }, isRead: false, deletedAt: null }, data: { deletedAt: new Date() } });
+        await tx.reminder.create({ data: { title: `待审核开票申请：${request.requestNo}`, content: `申请人已将开票申请改派给你，请查看明细并审核。\n[[href:/finance/workbench?focusBillingRequest=${requestId}]]`, remindDate: new Date(), type: "BILLING_REVIEW", targetId: reviewer.id, createdById: session.userId } });
+      }
       return changed;
     });
     if (updated.count !== 1) return { ok: false, error: "审核人已处理该申请，不能再更换。" };
+    revalidatePath("/finance/workbench");
+    return { ok: true };
+  } catch (error) { return { ok: false, error: error instanceof Error ? error.message : "更换审核人失败。" }; }
+}
+
+export async function changeFinanceRequestReviewer(entityType: "PAYMENT_REQUEST" | "EXPENSE_CLAIM", requestId: string, reviewerId: string) {
+  try {
+    const session = await requireSession();
+    await requireFeaturePermission(session, entityType === "PAYMENT_REQUEST" ? "finance.payment_requests" : "finance.expenses", "EDIT");
+    const reviewer = await prisma.user.findFirst({ where: { id: reviewerId, status: "APPROVED", role: { in: ["ADMIN", "USER"] } }, select: { id: true } });
+    if (!reviewer) return { ok: false, error: "所选审核人不存在、未启用或不是内部账号。" };
+    if (reviewerId === session.userId && session.role !== "ADMIN") return { ok: false, error: "非管理员申请人不能选择自己作为审核人。" };
+    const request = entityType === "PAYMENT_REQUEST"
+      ? await prisma.paymentRequest.findUnique({ where: { id: requestId }, select: { requestNo: true, applicantId: true, status: true } })
+      : await prisma.expenseClaim.findUnique({ where: { id: requestId }, select: { claimNo: true, employeeId: true, status: true } }).then((row) => row ? ({ requestNo: row.claimNo, applicantId: row.employeeId, status: row.status }) : null);
+    if (!request) return { ok: false, error: "申请不存在。" };
+    if (request.applicantId !== session.userId) return { ok: false, error: "只有申请发起人可以更换审核人。" };
+    if (request.status !== "SUBMITTED") return { ok: false, error: "申请已处理，不能更换审核人。" };
+    const type = entityType === "PAYMENT_REQUEST" ? "PAYMENT_REVIEW" : "EXPENSE_REVIEW";
+    const changed = await prisma.$transaction(async (tx) => {
+      const current = await tx.financeApprovalStep.findUnique({ where: { entityType_entityId_stepNo: { entityType, entityId: requestId, stepNo: 1 } }, select: { assigneeId: true, status: true } });
+      if (!current || current.status !== "PENDING") return { count: 0 };
+      const result = await tx.financeApprovalStep.updateMany({ where: { entityType, entityId: requestId, stepNo: 1, status: "PENDING", assigneeId: current.assigneeId }, data: { assigneeId: reviewer.id } });
+      if (result.count === 1) {
+        if (current.assigneeId) await tx.reminder.updateMany({ where: { targetId: current.assigneeId, type, content: { contains: requestId }, isRead: false, deletedAt: null }, data: { deletedAt: new Date() } });
+        await tx.reminder.create({ data: { title: `待审核财务申请：${request.requestNo}`, content: `申请人已将申请改派给你。\n[[href:/finance/workbench?mainTab=PAYMENT&focusRequest=${requestId}]]`, remindDate: new Date(), type, targetId: reviewer.id, createdById: session.userId } });
+        await tx.financeAuditLog.create({ data: { entityType, entityId: requestId, action: "CHANGE_REVIEWER", actorId: session.userId, note: "申请人在审核前更换审核人", metadata: JSON.stringify({ fromReviewerId: current.assigneeId, toReviewerId: reviewer.id }) } });
+      }
+      return result;
+    });
+    if (changed.count !== 1) return { ok: false, error: "审核人已处理该申请，不能再更换。" };
     revalidatePath("/finance/workbench");
     return { ok: true };
   } catch (error) { return { ok: false, error: error instanceof Error ? error.message : "更换审核人失败。" }; }
@@ -160,10 +201,12 @@ export async function saveFinanceAccountProfile(input: { id?: string; name: stri
   } catch (error) { return { ok: false, error: error instanceof Error ? error.message : "保存财务账户失败。" }; }
 }
 
-export async function createSupplierAndPaymentRequest(input: { supplierName: string; supplierType: string; country?: string; accountName: string; bankName?: string; accountNumber: string; swiftCode?: string; payerEntity?: string; payerAccountKey?: string; payerAccountProfileId?: string; reason: string; currency: string; amount: number; scheduledAt?: string; relatedInvoiceId?: string; relatedReceiptId?: string; invoiceUrls?: string | string[]; attachmentUrls?: string[]; note?: string }) {
+export async function createSupplierAndPaymentRequest(input: { reviewerId?: string; supplierName: string; supplierType: string; country?: string; accountName: string; bankName?: string; accountNumber: string; swiftCode?: string; payerEntity?: string; payerAccountKey?: string; payerAccountProfileId?: string; reason: string; currency: string; amount: number; scheduledAt?: string; relatedInvoiceId?: string; relatedReceiptId?: string; invoiceUrls?: string | string[]; attachmentUrls?: string[]; note?: string }) {
   try {
     const session = await requireSession(); await requireFeaturePermission(session, "finance.payment_requests", "EDIT");
     const amount = round(Number(input.amount)); if (!input.supplierName.trim() || !input.accountName.trim() || !input.accountNumber.trim() || !input.reason.trim() || amount <= 0) return { ok: false, error: "请完整填写供应商、收款账户、付款事由和金额。" };
+    if (!input.reviewerId) return { ok: false, error: "请选择审核人。" };
+    if (input.reviewerId === session.userId && session.role !== "ADMIN") return { ok: false, error: "非管理员申请人不能选择自己作为审核人。" };
     if (!input.payerAccountProfileId) return { ok: false, error: "付款主体和付款账户必须从统一财务账户目录选择。" };
     const result = await prisma.$transaction(async (tx) => {
       const payer = await tx.financeAccountProfile.findFirst({ where: { id: input.payerAccountProfileId, status: "ACTIVE" } });
@@ -180,7 +223,8 @@ export async function createSupplierAndPaymentRequest(input: { supplierName: str
       let supplier = await tx.supplier.findFirst({ where: { name: supplierName, type: requestType, status: "ACTIVE" }, select: { id: true } });
       if (!supplier) supplier = await tx.supplier.create({ data: { supplierNo: refNo("SUP"), name: supplierName, type: requestType, country: input.country?.trim().toUpperCase() || null, bankAccounts: { create: { accountName: cleanText(input.accountName), bankName: input.bankName ? cleanText(input.bankName) : null, accountNumber: input.accountNumber.replace(/\s+/g, ""), country: input.country?.trim().toUpperCase() || null, currency: cleanCurrency(input.currency), swiftCode: input.swiftCode?.replace(/\s+/g, "").toUpperCase() || null, isDefault: true } } }, select: { id: true } });
       const created = await tx.paymentRequest.create({ data: { requestNo: refNo("PAY"), applicantId: session.userId, supplierId: supplier.id, requestType, payerEntity: payer.legalEntity, payerAccountKey: payer.payerAccountKey ?? payer.id, payeeSnapshot: JSON.stringify({ accountName: cleanText(input.accountName), bankName: input.bankName ? cleanText(input.bankName) : null, accountNumber: input.accountNumber.replace(/\s+/g, ""), swiftCode: input.swiftCode?.replace(/\s+/g, "").toUpperCase() || null, payerProfileId: payer.id, payerAccountName: payer.accountName, payerAccountNumber: payer.accountNumber }), reason: cleanText(input.reason), currency: cleanCurrency(input.currency), amount, scheduledAt: input.scheduledAt ? new Date(`${input.scheduledAt}T00:00:00`) : null, relatedInvoiceId: input.relatedInvoiceId || null, relatedReceiptId: input.relatedReceiptId || null, note: input.note?.trim() || null, items: { create: { description: cleanText(input.reason), amount, currency: cleanCurrency(input.currency), invoiceUrls: JSON.stringify(normalizeFinanceUrls(input.invoiceUrls)) } } }, select: { id: true } });
-      await createTwoStageFinanceApproval(tx, "PAYMENT_REQUEST", created.id);
+      const reviewer = await createTwoStageFinanceApproval(tx, "PAYMENT_REQUEST", created.id, input.reviewerId);
+      await tx.reminder.create({ data: { title: `待审核付款申请：${created.id}`, content: `${supplierName}的付款申请等待你审核。\n[[href:/finance/workbench?mainTab=PAYMENT&focusRequest=${created.id}]]`, remindDate: new Date(), type: "PAYMENT_REVIEW", targetId: reviewer.id, createdById: session.userId } });
       const attachments = normalizeFinanceUrls(input.attachmentUrls);
       if (attachments.length) await tx.financeAttachment.createMany({ data: attachments.map((fileUrl, index) => ({ entityType: "PAYMENT_REQUEST", entityId: created.id, attachmentType: "SUPPORTING_DOCUMENT", fileUrl, uploadedById: session.userId, version: index + 1 })) });
       return created;
@@ -189,15 +233,18 @@ export async function createSupplierAndPaymentRequest(input: { supplierName: str
   } catch (error) { return { ok: false, error: error instanceof Error ? error.message : "提交付款申请失败。" }; }
 }
 
-export async function createExpenseClaim(input: { reimbursementEntity: string; currency: string; accountName: string; accountNumber: string; note?: string; attachmentUrls?: string[]; items: Array<{ description: string; expenseType: string; expenseDate: string; amount: number; invoiceTitle?: string; invoiceNumber?: string; invoiceUrls?: string | string[]; remark?: string }> }) {
+export async function createExpenseClaim(input: { reviewerId?: string; reimbursementEntity: string; currency: string; accountName: string; accountNumber: string; note?: string; attachmentUrls?: string[]; items: Array<{ description: string; expenseType: string; expenseDate: string; amount: number; invoiceTitle?: string; invoiceNumber?: string; invoiceUrls?: string | string[]; remark?: string }> }) {
   try {
     const session = await requireSession(); await requireFeaturePermission(session, "finance.expenses", "EDIT");
     if (!input.reimbursementEntity.trim() || !input.accountName.trim() || !input.accountNumber.trim() || !input.items.length) return { ok: false, error: "请完整填写报销主体、收款账户和费用明细。" };
+    if (!input.reviewerId) return { ok: false, error: "请选择审核人。" };
+    if (input.reviewerId === session.userId && session.role !== "ADMIN") return { ok: false, error: "非管理员申请人不能选择自己作为审核人。" };
     const items = input.items.map((item, sortOrder) => { const amount = round(Number(item.amount)); if (!item.description.trim() || !item.expenseType || !item.expenseDate || amount <= 0) throw new Error("请完整填写每条费用明细。"); return { ...item, amount, sortOrder }; });
     const totalAmount = round(items.reduce((sum, item) => sum + item.amount, 0));
     const claim = await prisma.$transaction(async (tx) => {
       const created = await tx.expenseClaim.create({ data: { claimNo: refNo("EXP"), employeeId: session.userId, reimbursementEntity: cleanText(input.reimbursementEntity), currency: cleanCurrency(input.currency), totalAmount, payeeSnapshot: JSON.stringify({ accountName: cleanText(input.accountName), accountNumber: input.accountNumber.replace(/\s+/g, "") }), note: input.note?.trim() || null, items: { create: items.map((item) => ({ description: cleanText(item.description), expenseType: item.expenseType, expenseDate: new Date(`${item.expenseDate}T00:00:00`), currency: cleanCurrency(input.currency), amount: item.amount, invoiceTitle: item.invoiceTitle ? cleanText(item.invoiceTitle) : null, invoiceNumber: item.invoiceNumber?.replace(/\s+/g, "").toUpperCase() || null, invoiceUrls: JSON.stringify(normalizeFinanceUrls(item.invoiceUrls)), remark: item.remark?.trim() || null, sortOrder: item.sortOrder })) } }, select: { id: true } });
-      await createTwoStageFinanceApproval(tx, "EXPENSE_CLAIM", created.id);
+      const reviewer = await createTwoStageFinanceApproval(tx, "EXPENSE_CLAIM", created.id, input.reviewerId);
+      await tx.reminder.create({ data: { title: `待审核费用报销：${created.id}`, content: `${cleanText(input.reimbursementEntity)}的费用报销等待你审核。\n[[href:/finance/workbench?mainTab=PAYMENT&focusRequest=${created.id}]]`, remindDate: new Date(), type: "EXPENSE_REVIEW", targetId: reviewer.id, createdById: session.userId } });
       const attachments = normalizeFinanceUrls(input.attachmentUrls);
       if (attachments.length) await tx.financeAttachment.createMany({ data: attachments.map((fileUrl, index) => ({ entityType: "EXPENSE_CLAIM", entityId: created.id, attachmentType: "SUPPORTING_DOCUMENT", fileUrl, uploadedById: session.userId, version: index + 1 })) });
       return created;
@@ -230,7 +277,7 @@ export async function decideFinanceRequest(entityType: "BILLING_REQUEST" | "PAYM
           ? await tx.paymentRequest.findUnique({ where: { id }, select: { applicantId: true, status: true } })
           : await tx.expenseClaim.findUnique({ where: { id }, select: { employeeId: true, status: true } }).then((row) => row ? ({ applicantId: row.employeeId, status: row.status }) : null);
       if (!entity) throw new Error("申请不存在。");
-      if (entity.applicantId === session.userId) throw new Error("申请人不得审核或执行自己的申请；管理员也不例外。该拒绝已由服务器审计日志记录。");
+      if (entity.applicantId === session.userId && session.role !== "ADMIN") throw new Error("非管理员申请人不得审核或执行自己的申请。");
       if (action === "REJECT" && ["APPROVED", "PROCESSING"].includes(entity.status)) {
         const returned = await tx.financeApprovalStep.updateMany({ where: { entityType, entityId: id, stepNo: 2, status: "PENDING" }, data: { status: "REJECTED", operatorId: session.userId, comment, actedAt: now } });
         if (returned.count !== 1) throw new Error("财务处理步骤已被处理，请刷新后重试。");
@@ -241,6 +288,7 @@ export async function decideFinanceRequest(entityType: "BILLING_REQUEST" | "PAYM
             ? await tx.paymentRequest.updateMany({ where: { id, status: "APPROVED" }, data: update })
             : await tx.expenseClaim.updateMany({ where: { id, status: "APPROVED" }, data: update });
         if (changed.count !== 1) throw new Error("申请状态已变化，退回未写入。");
+        await tx.reminder.create({ data: { title: "财务申请已退回", content: `你的申请已由财务退回：${comment}\n[[href:/finance/workbench?${entityType === "BILLING_REQUEST" ? `focusBillingRequest=${id}` : `mainTab=PAYMENT&focusRequest=${id}`}]]`, remindDate: now, type: "FINANCE_RESULT", targetId: entity.applicantId, createdById: session.userId } });
         return;
       }
       if (action === "APPROVE" || action === "REJECT") {
@@ -253,10 +301,13 @@ export async function decideFinanceRequest(entityType: "BILLING_REQUEST" | "PAYM
         if (session.userId !== assignedStep.assigneeId) throw new Error("仅该申请指定的审核人可以执行初审。");
         const step = await tx.financeApprovalStep.updateMany({ where: { entityType, entityId: id, stepNo: 1, assigneeId: session.userId, status: "PENDING" }, data: { status: action === "REJECT" ? "REJECTED" : "APPROVED", operatorId: session.userId, comment: comment || null, actedAt: now } });
         if (step.count !== 1) throw new Error("初审步骤已被处理，请勿重复提交。");
+        const reminderType = entityType === "BILLING_REQUEST" ? "BILLING_REVIEW" : entityType === "PAYMENT_REQUEST" ? "PAYMENT_REVIEW" : "EXPENSE_REVIEW";
+        await tx.reminder.updateMany({ where: { targetId: session.userId, type: reminderType, content: { contains: id }, deletedAt: null }, data: { isRead: true } });
         const expected = { id, status: "SUBMITTED" };
         const update = action === "REJECT" ? { status: "REJECTED", rejectionReason: comment } : entityType === "BILLING_REQUEST" ? { status: "SUBMITTED" } : { status: "APPROVED", approvedById: session.userId, approvedAt: now };
         const changed = entityType === "BILLING_REQUEST" ? await tx.billingRequest.updateMany({ where: expected, data: update }) : entityType === "PAYMENT_REQUEST" ? await tx.paymentRequest.updateMany({ where: expected, data: update }) : await tx.expenseClaim.updateMany({ where: expected, data: update });
         if (changed.count !== 1) throw new Error("申请状态已变化，审批未写入。");
+        await tx.reminder.create({ data: { title: action === "APPROVE" ? "财务申请审核通过" : "财务申请已退回", content: `${action === "APPROVE" ? "你的申请已审核通过。" : `你的申请已被退回：${comment}`}\n[[href:/finance/workbench?${entityType === "BILLING_REQUEST" ? `focusBillingRequest=${id}` : `mainTab=PAYMENT&focusRequest=${id}`}]]`, remindDate: now, type: "FINANCE_RESULT", targetId: entity.applicantId, createdById: session.userId } });
       } else {
         if (entityType === "BILLING_REQUEST") throw new Error("开票申请不能执行付款操作。");
         if (entity.status !== "APPROVED") throw new Error("仅 Shallow 初审通过的申请可以付款。");
@@ -270,8 +321,49 @@ export async function decideFinanceRequest(entityType: "BILLING_REQUEST" | "PAYM
         const expected = { id, status: "APPROVED" };
         const changed = entityType === "PAYMENT_REQUEST" ? await tx.paymentRequest.updateMany({ where: expected, data: { status: "PAID", paidById: session.userId, paidAt, transactionNo, paymentProofUrls: JSON.stringify(proofUrls) } }) : await tx.expenseClaim.updateMany({ where: expected, data: { status: "PAID", paidAt, paymentProofUrls: JSON.stringify(proofUrls) } });
         if (changed.count !== 1) throw new Error("申请状态已变化，付款未写入。");
+        await tx.reminder.create({ data: { title: "付款已完成", content: `你的${entityType === "PAYMENT_REQUEST" ? "付款申请" : "费用报销"}已付款，可在财务工作台下载付款凭证。\n[[href:/finance/workbench?mainTab=PAYMENT&focusRequest=${id}]]`, remindDate: now, type: "FINANCE_RESULT", targetId: entity.applicantId, createdById: session.userId } });
       }
     });
     revalidatePath("/finance/workbench"); return { ok: true };
   } catch (error) { return { ok: false, error: error instanceof Error ? error.message : "操作失败。" }; }
+}
+
+export async function batchDecideFinanceRequests(input: { entityType: "BILLING_REQUEST" | "PAYMENT_REQUEST" | "EXPENSE_CLAIM"; ids: string[]; action: "APPROVE" | "REJECT"; comment?: string }) {
+  const ids = [...new Set(input.ids.map((id) => id.trim()).filter(Boolean))];
+  if (!ids.length) return { ok: false, error: "请先选择申请记录。" };
+  if (ids.length > 100) return { ok: false, error: "单次最多处理 100 条申请。" };
+  if (input.action === "REJECT" && !input.comment?.trim()) return { ok: false, error: "批量退回必须填写原因。" };
+  for (const id of ids) {
+    const result = await decideFinanceRequest(input.entityType, id, input.action, input.comment);
+    if (!result.ok) return { ok: false, error: `处理到第 ${ids.indexOf(id) + 1} 条时失败：${result.error}` };
+  }
+  return { ok: true, count: ids.length };
+}
+
+export async function cancelFinanceRequests(input: { records: Array<{ id: string; entityType: "PAYMENT_REQUEST" | "EXPENSE_CLAIM" }>; reason: string }) {
+  try {
+    const session = await requireSession();
+    if (session.role !== "ADMIN") return { ok: false, error: "仅管理员可以删除申请。" };
+    const records = input.records.filter((row) => row.id);
+    const reason = input.reason.trim();
+    if (!records.length) return { ok: false, error: "请先选择申请记录。" };
+    if (reason.length < 2) return { ok: false, error: "请填写删除原因。" };
+    await prisma.$transaction(async (tx) => {
+      for (const record of records) {
+        const row = record.entityType === "PAYMENT_REQUEST"
+          ? await tx.paymentRequest.findUnique({ where: { id: record.id }, select: { status: true, applicantId: true, paymentProofUrls: true } })
+          : await tx.expenseClaim.findUnique({ where: { id: record.id }, select: { status: true, employeeId: true, paymentProofUrls: true } }).then((item) => item ? ({ status: item.status, applicantId: item.employeeId, paymentProofUrls: item.paymentProofUrls }) : null);
+        if (!row) throw new Error("申请不存在。");
+        if (!["SUBMITTED", "REJECTED"].includes(row.status)) throw new Error("只有待审核或已退回且未产生付款事实的申请可以删除。");
+        if (normalizeFinanceUrls(row.paymentProofUrls).length) throw new Error("已有付款凭证的申请不能删除。");
+        if (record.entityType === "PAYMENT_REQUEST") await tx.paymentRequest.update({ where: { id: record.id }, data: { status: "CANCELLED", rejectionReason: reason } });
+        else await tx.expenseClaim.update({ where: { id: record.id }, data: { status: "CANCELLED", rejectionReason: reason } });
+        await tx.financeApprovalStep.updateMany({ where: { entityType: record.entityType, entityId: record.id, status: "PENDING" }, data: { status: "SKIPPED", operatorId: session.userId, comment: reason, actedAt: new Date() } });
+        await tx.financeAuditLog.create({ data: { entityType: record.entityType, entityId: record.id, action: "ADMIN_DELETE", fromStatus: row.status, toStatus: "CANCELLED", actorId: session.userId, note: reason } });
+        await tx.reminder.create({ data: { title: "财务申请已删除", content: `你的申请已由管理员删除：${reason}\n[[href:/finance/workbench?mainTab=PAYMENT&focusRequest=${record.id}]]`, remindDate: new Date(), type: "FINANCE_RESULT", targetId: row.applicantId, createdById: session.userId } });
+      }
+    });
+    revalidatePath("/finance/workbench");
+    return { ok: true, count: records.length };
+  } catch (error) { return { ok: false, error: error instanceof Error ? error.message : "删除申请失败。" }; }
 }

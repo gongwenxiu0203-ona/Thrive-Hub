@@ -49,6 +49,7 @@ const FEE_TYPE_LABELS: Record<string, string> = {
   MONTHLY_FEE: "月度服务费",
   SALES_COMMISSION: "销售佣金",
   AFFILIATE_FEE: "联盟商费用",
+  SINGLE_CHANNEL_FEE: "单渠道费用",
 };
 
 const PROMO_PLATFORM_OPTIONS = [
@@ -609,7 +610,7 @@ export function InvoiceEditor({
     }
     if (
       items.some(
-        (item) => !["MONTHLY_FEE", "SALES_COMMISSION", "AFFILIATE_FEE"].includes(item.feeType),
+        (item) => !["MONTHLY_FEE", "SALES_COMMISSION", "AFFILIATE_FEE", "SINGLE_CHANNEL_FEE"].includes(item.feeType),
       )
     ) {
       return "请为每个项目选择费用类型。";
@@ -965,6 +966,7 @@ export function InvoiceEditor({
                         <option value="MONTHLY_FEE">月度服务费</option>
                         <option value="SALES_COMMISSION">销售佣金</option>
                         <option value="AFFILIATE_FEE">联盟商费用</option>
+                        <option value="SINGLE_CHANNEL_FEE">单渠道费用</option>
                       </select>
                     </Field>
                     <Field label="币种" required>

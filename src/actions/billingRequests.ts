@@ -67,6 +67,7 @@ export async function submitBillingRequest(input: SubmitBillingRequestInput) {
       },
       include: {
         contract: { select: { id: true, partyA: true } },
+        customer: { select: { brandName: true } },
         billingRequestLines: {
           where: { request: { status: { in: REQUEST_STATUSES } } },
         },
@@ -160,7 +161,12 @@ export async function submitBillingRequest(input: SubmitBillingRequestInput) {
           },
           select: { id: true, requestNo: true },
         });
-        await createTwoStageFinanceApproval(tx, "BILLING_REQUEST", request.id);
+        const reviewer = await createTwoStageFinanceApproval(tx, "BILLING_REQUEST", request.id);
+        await tx.reminder.create({ data: {
+          title: `待审核开票申请：${request.requestNo}`,
+          content: `${group[0].customer.brandName}提交了${input.documentType === "DOMESTIC" ? "国内发票" : "Invoice"}申请，请查看明细并审核。\n[[href:/finance/workbench?focusBillingRequest=${request.id}]]`,
+          remindDate: new Date(), type: "BILLING_REVIEW", targetId: reviewer.id, createdById: session.userId,
+        } });
         results.push(request);
       }
       return results;
@@ -188,8 +194,6 @@ export async function acceptBillingRequest(id: string) {
         select: { applicantId: true, status: true },
       });
       if (!request || request.status !== "SUBMITTED") return { count: 0 };
-      if (request.applicantId === session.userId)
-        throw new Error("申请人不得受理自己的开票申请。");
       const approved = await tx.financeApprovalStep.findUnique({
         where: {
           entityType_entityId_stepNo: {
@@ -343,19 +347,10 @@ export async function deleteBillingRequest(id: string, reason?: string) {
     const cleanReason = String(reason ?? "").trim();
     if (confirmed && cleanReason.length < 2)
       return { ok: false, error: "受理或确认后的记录必须填写删除原因。" };
-    const now = new Date();
     const invoiceIds = billing.invoices.map((invoice) => invoice.id);
+    if (invoiceIds.length || billing.invoices.some((invoice) => invoice.receiptAllocations.length > 0))
+      return { ok: false, error: "该申请已产生发票、应收或收款记录，不能删除；请改用作废流程。" };
     await prisma.$transaction(async (tx) => {
-      if (invoiceIds.length) {
-        await tx.domesticInvoiceDocument.updateMany({
-          where: { invoiceId: { in: invoiceIds } },
-          data: { voidedAt: now },
-        });
-        await tx.invoice.updateMany({
-          where: { id: { in: invoiceIds } },
-          data: { status: "VOID", deletedAt: now },
-        });
-      }
       await tx.billingRequest.update({
         where: { id },
         data: {

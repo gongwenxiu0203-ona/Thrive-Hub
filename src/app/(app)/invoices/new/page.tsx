@@ -158,7 +158,7 @@ export default async function NewInvoicePage({
         items: manualItems.map((item) => ({
           ...item,
           feeType: item.feeType as
-            "MONTHLY_FEE" | "SALES_COMMISSION" | "AFFILIATE_FEE",
+            "MONTHLY_FEE" | "SALES_COMMISSION" | "AFFILIATE_FEE" | "SINGLE_CHANNEL_FEE",
           periodType: item.periodType as "MONTH" | "DATE_RANGE",
         })),
         reconciliationIds: [],

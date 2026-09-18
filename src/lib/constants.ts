@@ -288,6 +288,10 @@ export const REMINDER_TYPE_LABELS: Record<string, string> = {
   STATUS_CHECK: "状态确认",
   RECONCILIATION_REVIEW: "对账审核",
   SETTLEMENT_DUE: "结算提醒",
+  BILLING_REVIEW: "开票审核",
+  PAYMENT_REVIEW: "付款审核",
+  EXPENSE_REVIEW: "报销审核",
+  FINANCE_RESULT: "财务结果",
 };
 
 export const REMINDER_TYPE_COLORS: Record<string, string> = {
@@ -299,6 +303,10 @@ export const REMINDER_TYPE_COLORS: Record<string, string> = {
   STATUS_CHECK: "bg-orange-100 text-orange-700",
   RECONCILIATION_REVIEW: "bg-violet-100 text-violet-700",
   SETTLEMENT_DUE: "bg-rose-100 text-rose-700",
+  BILLING_REVIEW: "bg-cyan-100 text-cyan-700",
+  PAYMENT_REVIEW: "bg-indigo-100 text-indigo-700",
+  EXPENSE_REVIEW: "bg-amber-100 text-amber-700",
+  FINANCE_RESULT: "bg-emerald-100 text-emerald-700",
 };
 
 // ---- Finance: Reconciliation -----------------------------------------------

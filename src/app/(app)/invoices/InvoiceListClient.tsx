@@ -23,6 +23,7 @@ const STATUS_LABELS: Record<string, string> = {
   ISSUED: "已开具",
   VOID: "已作废",
 };
+const feeTypeLabel = (value: string) => ({ MONTHLY_FEE: "月度服务费", SALES_COMMISSION: "销售佣金", AFFILIATE_FEE: "联盟商费用", SINGLE_CHANNEL_FEE: "单渠道费用", MIXED: "混合费用" })[value] ?? value;
 
 export function InvoiceListClient({
   invoices,
@@ -125,7 +126,7 @@ export function InvoiceListClient({
         <MultiSelectFilter paramKey="invoiceNo" placeholder="Invoice 编号" options={option(invoices.map((row) => row.invoiceNo))} />
         <MultiSelectFilter paramKey="customer" placeholder="客户" options={option(invoices.map((row) => row.customerName))} />
         <MultiSelectFilter paramKey="contract" placeholder="合同编号" options={option(invoices.map((row) => row.contractNo ?? ""))} />
-        <MultiSelectFilter paramKey="feeType" placeholder="费用类型" options={option(invoices.map((row) => row.feeType), (value) => value === "SALES_COMMISSION" ? "销售佣金" : value === "MIXED" ? "混合费用" : "月度服务费")} />
+        <MultiSelectFilter paramKey="feeType" placeholder="费用类型" options={option(invoices.map((row) => row.feeType), feeTypeLabel)} />
         <MultiSelectFilter paramKey="invoiceDate" placeholder="Invoice 日期" options={option(invoices.map((row) => row.invoiceDate.slice(0, 10)))} />
         <MultiSelectFilter paramKey="status" placeholder="状态" options={option(invoices.map((row) => row.status), (value) => STATUS_LABELS[value] ?? value)} />
       </FilterBar>
@@ -172,11 +173,7 @@ export function InvoiceListClient({
                   <td>{invoice.contractNo}</td>
                   <td>{invoice.periodLabel}</td>
                   <td>
-                    {invoice.feeType === "SALES_COMMISSION"
-                      ? "销售佣金"
-                      : invoice.feeType === "MIXED"
-                        ? "混合费用"
-                        : "月度服务费"}
+                    {feeTypeLabel(invoice.feeType)}
                   </td>
                   <td>{formatDate(invoice.invoiceDate)}</td>
                   <td>{formatDate(invoice.dueDate)}</td>

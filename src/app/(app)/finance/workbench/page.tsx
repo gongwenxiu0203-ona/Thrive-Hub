@@ -81,7 +81,7 @@ export default async function FinanceWorkbenchPage() {
   ] = await Promise.all([
     canViewBilling
       ? prisma.billingRequest.findMany({
-          where: { status: { not: "CANCELLED" } },
+          where: {},
           include: {
             customer: { select: { brandName: true } },
             applicant: { select: { id: true, name: true } },
@@ -348,6 +348,7 @@ export default async function FinanceWorkbenchPage() {
       <FinanceWorkspaceSections
         workbench={
           <FinanceWorkbenchClient
+            currentUserId={session.userId}
             canViewBilling={canViewBilling}
             canViewPayment={canViewChannel}
             canEditBilling={hasPermissionLevel(invoicePermission, "EDIT")}
@@ -390,6 +391,15 @@ export default async function FinanceWorkbenchPage() {
                   row.status === "PROCESSING" && issuedAmount > 0
                     ? "PARTIAL"
                     : row.status,
+                approvalStatus: (approvalSteps.find((step) => step.entityType === "BILLING_REQUEST" && step.entityId === row.id && step.stepNo === 1)?.status as "PENDING" | "APPROVED" | "REJECTED" | null) ?? null,
+                reviewerName: (() => {
+                  const reviewerId = approvalSteps.find((step) => step.entityType === "BILLING_REQUEST" && step.entityId === row.id && step.stepNo === 1)?.assigneeId;
+                  return reviewerId ? financeUserMap.get(reviewerId) ?? null : null;
+                })(),
+                reviewerId: approvalSteps.find((step) => step.entityType === "BILLING_REQUEST" && step.entityId === row.id && step.stepNo === 1)?.assigneeId ?? null,
+                items: row.manualItems.length
+                  ? row.manualItems.map((item) => ({ description: item.description, period: item.periodLabel, quantity: item.quantity, unitPrice: item.unitPrice, amount: item.amount, taxRate: item.taxRate, taxAmount: item.taxAmount }))
+                  : row.lines.map((line) => ({ description: line.feeType === "FIXED_FEE" ? "固定费" : "销售佣金", period: line.reconciliation.contract.contractNo, quantity: 1, unitPrice: line.requestedAmount, amount: line.requestedAmount })),
                 currency: row.currency,
                 requestedAmount: row.requestedAmount,
                 issuedAmount,
@@ -527,6 +537,13 @@ export default async function FinanceWorkbenchPage() {
                 currency: row.currency,
                 amount: row.amount,
                 status: row.status,
+                applicantId: row.applicantId,
+                applicantName: financeUserMap.get(row.applicantId) ?? "—",
+                detail: row.reason,
+                reviewerId: approvalSteps.find((step) => step.entityType === "PAYMENT_REQUEST" && step.entityId === row.id && step.stepNo === 1)?.assigneeId ?? null,
+                reviewerName: (() => { const id = approvalSteps.find((step) => step.entityType === "PAYMENT_REQUEST" && step.entityId === row.id && step.stepNo === 1)?.assigneeId; return id ? financeUserMap.get(id) ?? null : null; })(),
+                approvalStatus: approvalSteps.find((step) => step.entityType === "PAYMENT_REQUEST" && step.entityId === row.id && step.stepNo === 1)?.status ?? null,
+                paymentProofUrls: parseStringList(row.paymentProofUrls),
                 createdAt: row.createdAt.toISOString(),
                 kind: "PAYMENT" as const,
               })),
@@ -539,10 +556,20 @@ export default async function FinanceWorkbenchPage() {
                 currency: row.currency,
                 amount: row.totalAmount,
                 status: row.status,
+                applicantId: row.employeeId,
+                applicantName: financeUserMap.get(row.employeeId) ?? "—",
+                detail: row.reimbursementEntity,
+                reviewerId: approvalSteps.find((step) => step.entityType === "EXPENSE_CLAIM" && step.entityId === row.id && step.stepNo === 1)?.assigneeId ?? null,
+                reviewerName: (() => { const id = approvalSteps.find((step) => step.entityType === "EXPENSE_CLAIM" && step.entityId === row.id && step.stepNo === 1)?.assigneeId; return id ? financeUserMap.get(id) ?? null : null; })(),
+                approvalStatus: approvalSteps.find((step) => step.entityType === "EXPENSE_CLAIM" && step.entityId === row.id && step.stepNo === 1)?.status ?? null,
+                paymentProofUrls: parseStringList(row.paymentProofUrls),
                 createdAt: row.createdAt.toISOString(),
                 kind: "EXPENSE" as const,
               })),
             ]}
+            reviewerOptions={financeUsers
+              .filter((user) => session.role === "ADMIN" || user.id !== session.userId)
+              .map((user) => ({ id: user.id, label: user.name, email: user.email }))}
           />
         }
         flows={
@@ -558,6 +585,7 @@ export default async function FinanceWorkbenchPage() {
               }
               data={{
                 currentUserId: session.userId,
+                currentUserIsAdmin: session.role === "ADMIN",
                 customers: financeCustomers.map((customer) => ({
                   id: customer.id,
                   label: customer.brandName,
@@ -703,7 +731,9 @@ export default async function FinanceWorkbenchPage() {
                       : row.lines.map((line) => ({ description: line.feeType === "FIXED_FEE" ? "固定费" : "销售佣金", period: line.reconciliation?.contract.contractNo ?? "对账申请", quantity: 1, unitPrice: line.requestedAmount, amount: line.requestedAmount })),
                     steps: stepsFor("BILLING_REQUEST", row.id),
                   })),
-                reviewerOptions: financeUsers.filter((user) => user.id !== session.userId).map((user) => ({ id: user.id, label: user.name, subtitle: user.email })),
+                reviewerOptions: financeUsers
+                  .filter((user) => session.role === "ADMIN" || user.id !== session.userId)
+                  .map((user) => ({ id: user.id, label: user.name, subtitle: user.email })),
                 paymentProgress: paymentRequests.map((row) => ({
                   id: row.id,
                   requestNo: row.requestNo,
