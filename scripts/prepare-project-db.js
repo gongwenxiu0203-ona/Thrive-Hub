@@ -1,6 +1,11 @@
 const { spawnSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
+const {
+  createVerifiedSqliteBackup,
+  pruneBackupsExcept,
+  resolveSqlitePath,
+} = require("./sqlite-backup-utils");
 
 const root = path.resolve(__dirname, "..");
 require("@next/env").loadEnvConfig(root);
@@ -12,9 +17,7 @@ const databaseUrl = process.env.PROJECT_DATA_DATABASE_URL || "file:./data/projec
 const env = { ...process.env, PROJECT_DATA_DATABASE_URL: databaseUrl };
 
 function databasePath() {
-  if (!databaseUrl.startsWith("file:")) return null;
-  const value = decodeURIComponent(databaseUrl.slice(5).split("?")[0]);
-  return path.isAbsolute(value) ? value : path.resolve(schemaDir, value);
+  return resolveSqlitePath(databaseUrl, schemaDir);
 }
 
 function ensureAdditiveMigrations() {
@@ -53,7 +56,17 @@ function backup() {
   }
   fs.mkdirSync(backupDir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  fs.copyFileSync(source, path.join(backupDir, `projects_pre_deploy_${stamp}.db`));
+  const destName = `projects_pre_deploy_${stamp}.db`;
+  const destPath = path.join(backupDir, destName);
+  createVerifiedSqliteBackup(source, destPath);
+  const cleanup = pruneBackupsExcept(
+    backupDir,
+    /^projects_pre_deploy_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.db$/,
+    destPath,
+  );
+  console.log(`Project database backup created: ${destPath}`);
+  console.log(`Removed ${cleanup.removedCount} older project pre-deploy backup(s); kept the latest one.`);
+  for (const failure of cleanup.failures) console.warn(`Failed to remove old project backup: ${failure}`);
 }
 
 function prisma(args) {

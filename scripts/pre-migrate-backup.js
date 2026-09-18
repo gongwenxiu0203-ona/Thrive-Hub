@@ -11,14 +11,22 @@
 
 const fs   = require("fs");
 const path = require("path");
+const root = path.resolve(__dirname, "..");
+require("@next/env").loadEnvConfig(root);
+const {
+  createVerifiedSqliteBackup,
+  pruneBackupsExcept,
+  resolveSqlitePath,
+} = require("./sqlite-backup-utils");
 
 // ─── 配置 ──────────────────────────────────────────────────────────────────
-const DB_PATH      = path.resolve(__dirname, "../prisma/dev.db");
+const DATABASE_URL = process.env.DATABASE_URL ?? "file:./dev.db";
+const DB_PATH      = resolveSqlitePath(DATABASE_URL, path.join(root, "prisma"));
 const BACKUP_DIR   = path.resolve(__dirname, "../backups");
 const MIGRATE_DIR  = path.resolve(__dirname, "../prisma/migrations");
 
 // SQLite 不存在时跳过（本地无数据库的 CI 环境）
-const IS_SQLITE = (process.env.DATABASE_URL ?? "file:./dev.db").startsWith("file:");
+const IS_SQLITE = DATABASE_URL.startsWith("file:");
 
 // 破坏性 SQL 关键词（大小写不敏感）
 const DANGEROUS_PATTERNS = [
@@ -37,7 +45,8 @@ function pad(n) { return String(n).padStart(2, "0"); }
 
 function dateTag() {
   const d = new Date();
-  return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+  const milliseconds = String(d.getMilliseconds()).padStart(3, "0");
+  return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}_${milliseconds}`;
 }
 
 // ─── 1. 检测破坏性迁移 ────────────────────────────────────────────────────
@@ -72,7 +81,7 @@ function backupDatabase() {
     return null;
   }
 
-  if (!fs.existsSync(DB_PATH)) {
+  if (!DB_PATH || !fs.existsSync(DB_PATH)) {
     console.log("ℹ️  [备份] 数据库文件不存在，跳过备份（首次部署）");
     return null;
   }
@@ -84,10 +93,15 @@ function backupDatabase() {
   const destName = `dev_pre_deploy_${dateTag()}.db`;
   const destPath = path.join(BACKUP_DIR, destName);
 
-  fs.copyFileSync(DB_PATH, destPath);
+  const destSize = createVerifiedSqliteBackup(DB_PATH, destPath);
+  const cleanup = pruneBackupsExcept(
+    BACKUP_DIR,
+    /^dev_pre_deploy_\d{8}_\d{6}(?:_\d{3})?\.db$/,
+    destPath,
+  );
 
-  const sizeMB = (fs.statSync(destPath).size / 1024).toFixed(0);
-  return { destPath, destName, sizeMB };
+  const sizeMB = (destSize / 1024).toFixed(0);
+  return { destPath, destName, sizeMB, ...cleanup };
 }
 
 // ─── 主流程 ───────────────────────────────────────────────────────────────
@@ -117,6 +131,8 @@ function main() {
   if (backup) {
     console.log(`✅ 数据库已备份：${backup.destName}（${backup.sizeMB} KB）`);
     console.log(`   路径：${backup.destPath}`);
+    console.log(`   已清理旧部署前备份：${backup.removedCount} 份；当前仅保留最新 1 份`);
+    for (const failure of backup.failures) console.warn(`⚠️  旧部署前备份清理失败：${failure}`);
   }
 
   console.log("\n🚀 安全检查完成，继续执行 prisma migrate deploy ...\n");

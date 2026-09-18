@@ -1,5 +1,11 @@
 # Thrive Hub Handover
 
+## 2026-09-18 备份保留策略收紧（本地完成，待提交/部署）
+
+- 新增受版本控制的 `scripts/backup_db.sh`：保留原每日 03:00 SQLite 在线完整备份、非空检查、`integrity_check=ok`、600 权限及日志流程，仅将每日备份清理阈值从超过 30 日改为超过 5 日（`-mtime +5`）。生产 cron 目前仍指向未纳入 Git 的 `/root/www/backup_db.sh`，部署时需改为 `/root/www/scripts/backup_db.sh` 或同步替换。
+- 主库与独立项目库的每次部署前备份改为仅保留最新 1 份；先解析真实 SQLite URL，写唯一临时文件，完成 SQLite `integrity_check` 后原子改名，最后才严格按各自文件名前缀清理旧备份。新备份失败时不清理历史备份，manual/daily/WAL/SHM/日志等其他文件不匹配、不删除。
+- 无 Schema、Migration 或业务数据修改。Node 语法检查、临时 SQLite 成功清理测试、损坏备份拒绝且旧备份保留测试、`git diff --check`通过。生产磁盘仍为 100%，本轮尚未删除生产备份、commit、push或部署。
+
 ## 2026-09-04 网站说明与维护交接文档（本地完成，待提交）
 
 - 新增登录后 `/guide` 网站说明页，并在侧边栏底部增加所有角色可见的“网站说明”入口；内容按快速开始、核心业务流程、模块说明、角色权限与常见问题组织，复用现有 Clear Operations Console 设计语言。
