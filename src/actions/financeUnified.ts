@@ -52,6 +52,9 @@ export async function submitManualBillingRequest(input: {
     if (!input.reviewerId) return { ok: false, error: "请选择审核人。" };
     if (input.reviewerId === session.userId && session.role !== "ADMIN") return { ok: false, error: "非管理员申请人不能选择自己作为审核人。" };
     if (!input.items.length || input.items.length > 50) return { ok: false, error: "请填写 1 至 50 条开票明细。" };
+    if (input.items.some((item) => (item.remark?.trim().length ?? 0) > 2000)) {
+      return { ok: false, error: "每条备注最多 2000 字。" };
+    }
     const customer = await prisma.customer.findFirst({ where: { id: input.customerId, deletedAt: null }, select: { id: true, brandName: true } });
     if (!customer) return { ok: false, error: "客户不存在。" };
     if (input.contractId) {

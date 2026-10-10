@@ -259,20 +259,49 @@ async function ensureAccountsReceivableForIssuedInvoice(
   return ar.id;
 }
 
-async function refreshBillingRequestStatus(tx: Prisma.TransactionClient, billingRequestId: string | null) {
+async function refreshBillingRequestStatus(
+  tx: Prisma.TransactionClient,
+  billingRequestId: string | null,
+  actorId: string,
+  issuedInvoice?: { id: string; invoiceNo: string } | null,
+) {
   if (!billingRequestId) return;
   const request = await tx.billingRequest.findUnique({
     where: { id: billingRequestId },
-    select: { requestedAmount: true, invoices: { where: { deletedAt: null, status: "ISSUED" }, select: { totalAmount: true } } },
+    select: {
+      applicantId: true,
+      requestNo: true,
+      requestedAmount: true,
+      status: true,
+      invoices: {
+        where: { deletedAt: null, status: "ISSUED" },
+        select: { id: true, invoiceNo: true, totalAmount: true },
+      },
+    },
   });
   if (!request) return;
   const issuedAmount = roundMoney(request.invoices.reduce((sum, invoice) => sum + invoice.totalAmount, 0));
+  const completed = issuedAmount + 0.01 >= request.requestedAmount;
   await tx.billingRequest.update({
     where: { id: billingRequestId },
-    data: issuedAmount + 0.01 >= request.requestedAmount
+    data: completed
       ? { status: "COMPLETED", completedAt: new Date() }
       : { status: "PROCESSING", completedAt: null },
   });
+  if (completed && request.status !== "COMPLETED") {
+    const invoice =
+      issuedInvoice ?? request.invoices[request.invoices.length - 1] ?? null;
+    await tx.reminder.create({
+      data: {
+        title: `Invoice 已开具：${invoice?.invoiceNo ?? request.requestNo}`,
+        content: `你的开票申请 ${request.requestNo} 已完成。请在开票申请记录中查看并下载对应 Invoice。\n[[href:/finance/workbench?focusBillingRequest=${billingRequestId}]]`,
+        remindDate: new Date(),
+        type: "FINANCE_RESULT",
+        targetId: request.applicantId,
+        createdById: actorId,
+      },
+    });
+  }
 }
 
 function parseStringList(value: string | null | undefined): string[] {
@@ -1337,7 +1366,12 @@ export async function createInvoice(
           });
           if (invoice.status === "ISSUED") {
             await ensureAccountsReceivableForIssuedInvoice(tx, invoice);
-            await refreshBillingRequestStatus(tx, invoice.billingRequestId);
+            await refreshBillingRequestStatus(
+              tx,
+              invoice.billingRequestId,
+              session.userId,
+              { id: invoice.id, invoiceNo: invoice.invoiceNo },
+            );
           }
           return invoice;
         });
@@ -1545,9 +1579,18 @@ export async function setInvoiceStatus(
           select: { id: true, invoiceNo: true, customerId: true, invoiceDate: true, dueDate: true, totalAmount: true, currency: true, accountsReceivableId: true, billingRequestId: true },
         });
         await ensureAccountsReceivableForIssuedInvoice(tx, issuedInvoice);
-        await refreshBillingRequestStatus(tx, issuedInvoice.billingRequestId);
+        await refreshBillingRequestStatus(
+          tx,
+          issuedInvoice.billingRequestId,
+          session.userId,
+          { id: issuedInvoice.id, invoiceNo: issuedInvoice.invoiceNo },
+        );
       } else {
-        await refreshBillingRequestStatus(tx, existing.billingRequestId);
+        await refreshBillingRequestStatus(
+          tx,
+          existing.billingRequestId,
+          session.userId,
+        );
       }
       return result;
     });

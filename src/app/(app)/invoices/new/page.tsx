@@ -53,6 +53,7 @@ export default async function NewInvoicePage({
         clientName: string | null;
         clientAddress: string | null;
         terms: string | null;
+        applicantNote?: string | null;
         items: Array<{
           id: string;
           description: string;

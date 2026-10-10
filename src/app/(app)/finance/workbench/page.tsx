@@ -98,7 +98,7 @@ export default async function FinanceWorkbenchPage() {
                 },
               },
             },
-            manualItems: { select: { id: true, description: true, periodLabel: true, quantity: true, unitPrice: true, amount: true, taxRate: true, taxAmount: true } },
+            manualItems: { select: { id: true, description: true, periodLabel: true, quantity: true, unitPrice: true, amount: true, remark: true, taxRate: true, taxAmount: true } },
             invoices: {
               where: { deletedAt: null },
               select: {
@@ -398,7 +398,7 @@ export default async function FinanceWorkbenchPage() {
                 })(),
                 reviewerId: approvalSteps.find((step) => step.entityType === "BILLING_REQUEST" && step.entityId === row.id && step.stepNo === 1)?.assigneeId ?? null,
                 items: row.manualItems.length
-                  ? row.manualItems.map((item) => ({ description: item.description, period: item.periodLabel, quantity: item.quantity, unitPrice: item.unitPrice, amount: item.amount, taxRate: item.taxRate, taxAmount: item.taxAmount }))
+                  ? row.manualItems.map((item) => ({ description: item.description, period: item.periodLabel, quantity: item.quantity, unitPrice: item.unitPrice, amount: item.amount, remark: item.remark, taxRate: item.taxRate, taxAmount: item.taxAmount }))
                   : row.lines.map((line) => ({ description: line.feeType === "FIXED_FEE" ? "固定费" : "销售佣金", period: line.reconciliation.contract.contractNo, quantity: 1, unitPrice: line.requestedAmount, amount: line.requestedAmount })),
                 currency: row.currency,
                 requestedAmount: row.requestedAmount,
@@ -726,8 +726,26 @@ export default async function FinanceWorkbenchPage() {
                     applicant: row.applicant.name,
                     submittedAt: row.submittedAt.toISOString(),
                     note: row.applicantNote,
+                    documents: row.invoices
+                      .filter(
+                        (invoice) =>
+                          invoice.status === "ISSUED" &&
+                          (row.documentType !== "DOMESTIC" ||
+                            Boolean(invoice.domesticDocument?.originalFileUrl)),
+                      )
+                      .map((invoice, index, issuedInvoices) => ({
+                        id: invoice.id,
+                        label:
+                          row.documentType === "DOMESTIC"
+                            ? `下载国内发票${issuedInvoices.length > 1 ? ` ${index + 1}` : ""}`
+                            : `下载 Invoice${issuedInvoices.length > 1 ? ` ${index + 1}` : ""}`,
+                        downloadUrl:
+                          row.documentType === "DOMESTIC"
+                            ? `/api/finance/domestic-invoices/${invoice.id}/original`
+                            : `/api/invoices/${invoice.id}/pdf`,
+                      })),
                     items: row.manualItems.length
-                      ? row.manualItems.map((item) => ({ description: item.description, period: item.periodLabel, quantity: item.quantity, unitPrice: item.unitPrice, amount: item.amount, taxRate: item.taxRate, taxAmount: item.taxAmount }))
+                      ? row.manualItems.map((item) => ({ description: item.description, period: item.periodLabel, quantity: item.quantity, unitPrice: item.unitPrice, amount: item.amount, remark: item.remark, taxRate: item.taxRate, taxAmount: item.taxAmount }))
                       : row.lines.map((line) => ({ description: line.feeType === "FIXED_FEE" ? "固定费" : "销售佣金", period: line.reconciliation?.contract.contractNo ?? "对账申请", quantity: 1, unitPrice: line.requestedAmount, amount: line.requestedAmount })),
                     steps: stepsFor("BILLING_REQUEST", row.id),
                   })),

@@ -25,7 +25,7 @@ type BillingRow = {
   approvalStatus: "PENDING" | "APPROVED" | "REJECTED" | null;
   reviewerName: string | null;
   reviewerId: string | null;
-  items: Array<{ description: string; period: string; quantity: number; unitPrice: number; amount: number; taxRate?: number | null; taxAmount?: number | null }>;
+  items: Array<{ description: string; period: string; quantity: number; unitPrice: number; amount: number; remark?: string | null; taxRate?: number | null; taxAmount?: number | null }>;
   currency: string;
   requestedAmount: number;
   issuedAmount: number;
@@ -120,6 +120,20 @@ const billingLabels: Record<string, string> = {
   REJECTED: "已驳回",
   CANCELLED: "已取消",
 };
+
+function visibleApplicantNote(value: string | null | undefined) {
+  const note = value?.trim();
+  if (!note) return "";
+  const prefix = "INVOICE_META:";
+  if (!note.startsWith(prefix)) return note;
+  try {
+    const meta = JSON.parse(note.slice(prefix.length)) as Record<string, unknown>;
+    const applicantNote = meta.applicantNote ?? meta.note ?? meta.remark;
+    return typeof applicantNote === "string" ? applicantNote.trim() : "";
+  } catch {
+    return "";
+  }
+}
 
 export function FinanceWorkbenchClient({
   currentUserId,
@@ -590,7 +604,7 @@ export function FinanceWorkbenchClient({
                         ))}
                       </td>
                     </tr>
-                    {expandedBilling === row.id && <tr><td colSpan={7} className="bg-[#faf8ff] px-5 py-4"><div className="grid gap-3 text-sm md:grid-cols-4"><p><span className="text-xs text-slate-500">申请单</span><br />{row.requestNo}</p><p><span className="text-xs text-slate-500">客户 / 申请人</span><br />{row.customerName} · {row.applicantName}</p><p><span className="text-xs text-slate-500">审核人</span><br />{row.reviewerName ?? "—"}</p><p><span className="text-xs text-slate-500">申请金额</span><br />{money(row.requestedAmount, row.currency)}</p><p><span className="text-xs text-slate-500">票据方式</span><br />{row.documentType === "DOMESTIC" ? "国内发票" : "Invoice"}</p><p><span className="text-xs text-slate-500">明细数量</span><br />{row.lineCount} 条</p><p><span className="text-xs text-slate-500">关联合同</span><br />{row.contractNos.join("、") || "—"}</p><p><span className="text-xs text-slate-500">当前状态</span><br />{displayBillingStatus(row)}</p></div><BillingItemsTable row={row} /></td></tr>}
+                    {expandedBilling === row.id && <tr><td colSpan={7} className="bg-[#faf8ff] px-5 py-4"><div className="grid gap-3 text-sm md:grid-cols-4"><p><span className="text-xs text-slate-500">申请单</span><br />{row.requestNo}</p><p><span className="text-xs text-slate-500">客户 / 申请人</span><br />{row.customerName} · {row.applicantName}</p><p><span className="text-xs text-slate-500">审核人</span><br />{row.reviewerName ?? "—"}</p><p><span className="text-xs text-slate-500">申请金额</span><br />{money(row.requestedAmount, row.currency)}</p><p><span className="text-xs text-slate-500">票据方式</span><br />{row.documentType === "DOMESTIC" ? "国内发票" : "Invoice"}</p><p><span className="text-xs text-slate-500">明细数量</span><br />{row.lineCount} 条</p><p><span className="text-xs text-slate-500">关联合同</span><br />{row.contractNos.join("、") || "—"}</p><p><span className="text-xs text-slate-500">当前状态</span><br />{displayBillingStatus(row)}</p>{visibleApplicantNote(row.applicantNote) && <p className="md:col-span-4"><span className="text-xs text-slate-500">申请备注</span><br /><span className="whitespace-pre-wrap break-words">{visibleApplicantNote(row.applicantNote)}</span></p>}</div><BillingItemsTable row={row} /></td></tr>}
                     </Fragment>
                   ))}
                 </tbody>
@@ -1091,7 +1105,7 @@ export function FinanceWorkbenchClient({
       )}
       {reviewingBilling && (
         <Modal open onClose={() => !pending && setReviewingBilling(null)} title="审核开票申请" size="md">
-          <div className="space-y-4"><div className="grid gap-3 rounded-lg bg-[#faf8ff] p-4 text-sm sm:grid-cols-2"><p><span className="text-xs text-slate-500">申请单</span><br />{reviewingBilling.requestNo}</p><p><span className="text-xs text-slate-500">客户 / 申请人</span><br />{reviewingBilling.customerName} · {reviewingBilling.applicantName}</p><p><span className="text-xs text-slate-500">票据方式</span><br />{reviewingBilling.documentType === "DOMESTIC" ? "国内发票" : "Invoice"} · {reviewingBilling.lineCount} 条</p><p><span className="text-xs text-slate-500">申请金额</span><br />{money(reviewingBilling.requestedAmount, reviewingBilling.currency)}</p><p className="sm:col-span-2"><span className="text-xs text-slate-500">关联合同</span><br />{reviewingBilling.contractNos.join("、") || "—"}</p></div><BillingItemsTable row={reviewingBilling} /><label className="block text-sm"><span className="label">退回原因（选择退回时必填）</span><textarea className="input min-h-24" value={reviewReason} onChange={(event) => setReviewReason(event.target.value)} placeholder="请说明需要申请人补充或修改的内容" /></label><div className="flex justify-end gap-2"><button type="button" className="btn-secondary" disabled={pending} onClick={() => setReviewingBilling(null)}>取消</button><button type="button" className="btn-secondary text-rose-700" disabled={pending || reviewReason.trim().length < 2} onClick={() => startTransition(async () => { const result = await decideFinanceRequest("BILLING_REQUEST", reviewingBilling.id, "REJECT", reviewReason); if (!result.ok) setError(result.error ?? "退回失败"); else { setReviewingBilling(null); router.refresh(); } })}>退回申请</button><button type="button" className="btn-primary" disabled={pending} onClick={() => startTransition(async () => { const result = await decideFinanceRequest("BILLING_REQUEST", reviewingBilling.id, "APPROVE"); if (!result.ok) setError(result.error ?? "审核失败"); else { setReviewingBilling(null); router.refresh(); } })}>审核通过</button></div></div>
+          <div className="space-y-4"><div className="grid gap-3 rounded-lg bg-[#faf8ff] p-4 text-sm sm:grid-cols-2"><p><span className="text-xs text-slate-500">申请单</span><br />{reviewingBilling.requestNo}</p><p><span className="text-xs text-slate-500">客户 / 申请人</span><br />{reviewingBilling.customerName} · {reviewingBilling.applicantName}</p><p><span className="text-xs text-slate-500">票据方式</span><br />{reviewingBilling.documentType === "DOMESTIC" ? "国内发票" : "Invoice"} · {reviewingBilling.lineCount} 条</p><p><span className="text-xs text-slate-500">申请金额</span><br />{money(reviewingBilling.requestedAmount, reviewingBilling.currency)}</p><p className="sm:col-span-2"><span className="text-xs text-slate-500">关联合同</span><br />{reviewingBilling.contractNos.join("、") || "—"}</p>{visibleApplicantNote(reviewingBilling.applicantNote) && <p className="sm:col-span-2"><span className="text-xs text-slate-500">申请备注</span><br /><span className="whitespace-pre-wrap break-words">{visibleApplicantNote(reviewingBilling.applicantNote)}</span></p>}</div><BillingItemsTable row={reviewingBilling} /><label className="block text-sm"><span className="label">退回原因（选择退回时必填）</span><textarea className="input min-h-24" value={reviewReason} onChange={(event) => setReviewReason(event.target.value)} placeholder="请说明需要申请人补充或修改的内容" /></label><div className="flex justify-end gap-2"><button type="button" className="btn-secondary" disabled={pending} onClick={() => setReviewingBilling(null)}>取消</button><button type="button" className="btn-secondary text-rose-700" disabled={pending || reviewReason.trim().length < 2} onClick={() => startTransition(async () => { const result = await decideFinanceRequest("BILLING_REQUEST", reviewingBilling.id, "REJECT", reviewReason); if (!result.ok) setError(result.error ?? "退回失败"); else { setReviewingBilling(null); router.refresh(); } })}>退回申请</button><button type="button" className="btn-primary" disabled={pending} onClick={() => startTransition(async () => { const result = await decideFinanceRequest("BILLING_REQUEST", reviewingBilling.id, "APPROVE"); if (!result.ok) setError(result.error ?? "审核失败"); else { setReviewingBilling(null); router.refresh(); } })}>审核通过</button></div></div>
         </Modal>
       )}
       {reviewingOutgoing && (
@@ -1176,7 +1190,7 @@ function BillingItemsTable({ row }: { row: BillingRow }) {
     <div className="mt-4 overflow-x-auto rounded-lg border border-[#e7e0ef] bg-white">
       <table className="w-full min-w-[680px] text-sm">
         <thead><tr className="border-b bg-[#faf8ff] text-left text-xs text-slate-500"><th className="px-3 py-2">开票明细</th><th>费用期间</th><th className="text-right">数量</th><th className="text-right">单价</th><th className="text-right">税率</th><th className="px-3 text-right">金额</th></tr></thead>
-        <tbody className="divide-y divide-slate-100">{row.items.map((item, index) => <tr key={`${item.description}-${index}`}><td className="px-3 py-2 font-medium text-slate-800">{item.description}</td><td>{item.period || "—"}</td><td className="text-right">{item.quantity}</td><td className="text-right">{money(item.unitPrice, row.currency)}</td><td className="text-right">{item.taxRate == null ? "不适用" : `${(item.taxRate * 100).toFixed(2)}%`}</td><td className="px-3 text-right font-medium">{money(item.amount, row.currency)}</td></tr>)}</tbody>
+        <tbody className="divide-y divide-slate-100">{row.items.map((item, index) => <tr key={`${item.description}-${index}`}><td className="px-3 py-2"><span className="font-medium text-slate-800">{item.description}</span>{item.remark?.trim() && <span className="mt-1 block whitespace-pre-wrap break-words text-xs text-slate-500">备注：{item.remark}</span>}</td><td>{item.period || "—"}</td><td className="text-right">{item.quantity}</td><td className="text-right">{money(item.unitPrice, row.currency)}</td><td className="text-right">{item.taxRate == null ? "不适用" : `${(item.taxRate * 100).toFixed(2)}%`}</td><td className="px-3 text-right font-medium">{money(item.amount, row.currency)}</td></tr>)}</tbody>
       </table>
       {!row.items.length && <p className="p-4 text-center text-sm text-slate-500">暂无开票明细。</p>}
     </div>

@@ -50,22 +50,9 @@ export async function GET(
     );
   }
 
-  try {
-    await requireFeaturePermission(session, "finance.invoices", "READ");
-  } catch (error) {
-    if (error instanceof FeaturePermissionError) {
-      return NextResponse.json(
-        { error: "无权访问 Invoice" },
-        { status: 403 },
-      );
-    }
-    return errorResponse(error, "invoices.pdf.authorization");
-  }
-
   const { id } = await params;
   let invoice;
   try {
-    // 读操作（PDF 下载）：上方已确保仅内部员工可访问，此处 staff 全量可见
     invoice = await prisma.invoice.findFirst({
       where: {
         id,
@@ -73,6 +60,7 @@ export async function GET(
       },
       include: {
         items: { orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] },
+        billingRequest: { select: { applicantId: true } },
       },
     });
   } catch (error) {
@@ -80,6 +68,25 @@ export async function GET(
   }
   if (!invoice) {
     return NextResponse.json({ error: "Invoice 不存在" }, { status: 404 });
+  }
+
+  // The applicant can download the document produced from their own request
+  // even when their role does not grant general Invoice browsing. Every other
+  // internal user still needs the normal Invoice read permission.
+  const isRequestApplicant =
+    invoice.billingRequest?.applicantId === session.userId;
+  if (!isRequestApplicant) {
+    try {
+      await requireFeaturePermission(session, "finance.invoices", "READ");
+    } catch (error) {
+      if (error instanceof FeaturePermissionError) {
+        return NextResponse.json(
+          { error: "无权访问 Invoice" },
+          { status: 403 },
+        );
+      }
+      return errorResponse(error, "invoices.pdf.authorization");
+    }
   }
 
   const pdfInvoice: InvoicePdfData = {

@@ -267,6 +267,7 @@ export async function getBillingRequestInvoiceIds(id: string) {
           quantity: true,
           unitPrice: true,
           amount: true,
+          remark: true,
           sortOrder: true,
         },
       },
@@ -298,6 +299,9 @@ export async function getBillingRequestInvoiceIds(id: string) {
   })();
   const metaString = (key: string) =>
     typeof invoiceMeta[key] === "string" ? (invoiceMeta[key] as string) : null;
+  const applicantNote = request.applicantNote?.startsWith("INVOICE_META:")
+    ? metaString("applicantNote")?.trim() || null
+    : request.applicantNote?.trim() || null;
   return {
     ok: true as const,
     reconciliationIds: request.lines.map((line) => line.reconciliationId),
@@ -314,7 +318,14 @@ export async function getBillingRequestInvoiceIds(id: string) {
             clientName: metaString("clientName"),
             clientAddress: metaString("clientAddress"),
             terms: metaString("terms"),
-            items: request.manualItems,
+            applicantNote,
+            items: request.manualItems.map((item) => ({
+              ...item,
+              // The application-level note is the applicant's requested
+              // project wording. Carry it into the Invoice editor instead of
+              // silently replacing it with the generic fee-type label.
+              description: item.remark?.trim() || applicantNote || item.description,
+            })),
           }
         : null,
   };

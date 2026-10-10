@@ -66,8 +66,13 @@ export type FinanceProgressRow = {
   applicant?: string;
   submittedAt?: string;
   note?: string | null;
-  items?: Array<{ description: string; period: string; quantity: number; unitPrice: number; amount: number; taxRate?: number | null; taxAmount?: number | null }>;
+  items?: Array<{ description: string; period: string; quantity: number; unitPrice: number; amount: number; remark?: string | null; taxRate?: number | null; taxAmount?: number | null }>;
   paymentProofUrls?: string[];
+  documents?: Array<{
+    id: string;
+    label: string;
+    downloadUrl: string;
+  }>;
   steps?: Array<{
     label: string;
     status: "PENDING" | "APPROVED" | "REJECTED";
@@ -785,6 +790,10 @@ function BillingForm({ data, disabled, onSubmit }: FormProps) {
                         clientName,
                         clientAddress,
                         terms,
+                        applicantNote: lines
+                          .map((row) => row.remark.trim())
+                          .filter(Boolean)
+                          .join("\n"),
                       })}`,
                 items: lines.map((row) => ({
                   description:
@@ -1690,6 +1699,20 @@ function splitUrls(value: string) {
     .filter(Boolean);
 }
 
+function visibleBillingNote(value: string | null | undefined) {
+  const note = value?.trim();
+  if (!note) return "";
+  const prefix = "INVOICE_META:";
+  if (!note.startsWith(prefix)) return note;
+  try {
+    const meta = JSON.parse(note.slice(prefix.length)) as Record<string, unknown>;
+    const applicantNote = meta.applicantNote ?? meta.note ?? meta.remark;
+    return typeof applicantNote === "string" ? applicantNote.trim() : "";
+  } catch {
+    return "";
+  }
+}
+
 function monthOptions(): string[] {
   const now = new Date();
   return Array.from({ length: 36 }, (_, index) => {
@@ -1809,10 +1832,21 @@ function ProgressTable({
                     <p><span className="text-slate-400">申请人</span><br />{row.applicant ?? "—"}</p>
                     <p><span className="text-slate-400">提交时间</span><br />{row.submittedAt ? new Date(row.submittedAt).toLocaleString("zh-CN") : "—"}</p>
                     <p><span className="text-slate-400">票据类型</span><br />{row.detail}</p>
+                    {visibleBillingNote(row.note) && <p className="md:col-span-3"><span className="text-slate-400">申请备注</span><br /><span className="whitespace-pre-wrap break-words text-slate-700">{visibleBillingNote(row.note)}</span></p>}
                   </div>
                   <div className="mt-3 overflow-x-auto rounded-md border border-slate-200 bg-white">
-                    <table className="w-full min-w-[620px] text-xs"><thead><tr className="border-b bg-slate-50 text-left text-slate-500"><th className="p-2">明细</th><th>期间</th><th>数量</th><th>单价</th><th>税率</th><th>税额</th><th>金额</th></tr></thead><tbody>{(row.items ?? []).map((item, index) => <tr key={index} className="border-b last:border-0"><td className="p-2">{item.description}</td><td>{item.period}</td><td>{item.quantity}</td><td>{item.unitPrice.toFixed(2)}</td><td>{item.taxRate == null ? "不适用" : `${(item.taxRate * 100).toFixed(2)}%`}</td><td>{item.taxAmount == null ? "不适用" : item.taxAmount.toFixed(2)}</td><td>{item.amount.toFixed(2)}</td></tr>)}</tbody></table>
+                    <table className="w-full min-w-[620px] text-xs"><thead><tr className="border-b bg-slate-50 text-left text-slate-500"><th className="p-2">明细</th><th>期间</th><th>数量</th><th>单价</th><th>税率</th><th>税额</th><th>金额</th></tr></thead><tbody>{(row.items ?? []).map((item, index) => <tr key={index} className="border-b last:border-0"><td className="p-2"><span>{item.description}</span>{item.remark?.trim() && <span className="mt-1 block whitespace-pre-wrap break-words text-slate-500">备注：{item.remark}</span>}</td><td>{item.period}</td><td>{item.quantity}</td><td>{item.unitPrice.toFixed(2)}</td><td>{item.taxRate == null ? "不适用" : `${(item.taxRate * 100).toFixed(2)}%`}</td><td>{item.taxAmount == null ? "不适用" : item.taxAmount.toFixed(2)}</td><td>{item.amount.toFixed(2)}</td></tr>)}</tbody></table>
                   </div>
+                  {row.applicantId === currentUserId && (row.documents?.length ?? 0) > 0 && (
+                    <div className="mt-3 flex flex-wrap items-center gap-3 rounded-md border border-emerald-100 bg-emerald-50/70 px-3 py-2 text-xs">
+                      <span className="font-medium text-emerald-800">已开具，可下载：</span>
+                      {row.documents?.map((document) => (
+                        <a key={document.id} href={document.downloadUrl} target="_blank" rel="noreferrer" download className="font-medium text-brand-700 hover:underline">
+                          {document.label}
+                        </a>
+                      ))}
+                    </div>
+                  )}
                   {row.applicantId === currentUserId && row.steps?.[0]?.status === "PENDING" && <label className="mt-3 block max-w-sm text-xs font-medium text-slate-600">更换审核人<select className="input mt-1" value={row.steps?.[0]?.assigneeId ?? ""} disabled={busyId === row.id} onChange={(event) => void changeReviewer(row, event.target.value)}>{reviewerOptions.map((option) => <option key={option.id} value={option.id}>{option.label}{option.subtitle ? ` · ${option.subtitle}` : ""}</option>)}</select></label>}
                 </td></tr>
               )}

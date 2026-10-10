@@ -338,11 +338,14 @@ export function InvoiceEditor({
             item.periodLabel ??
             initialInvoice.periodLabel ??
             today.slice(0, 7);
+          const requestedDescription = initialInvoice.billingRequestId
+            ? item.description?.trim()
+            : "";
 
           return {
             feeType,
             description: isNewInvoice
-              ? composeDescription({
+              ? requestedDescription || composeDescription({
                   customerName: initialDescriptionCustomerName,
                   promoPlatform,
                   targetSite,
@@ -361,7 +364,7 @@ export function InvoiceEditor({
             periodLabel,
             sortOrder: item.sortOrder ?? index,
             localId: item.id ?? `saved-${index}`,
-            autoDescription: isNewInvoice,
+            autoDescription: isNewInvoice && !requestedDescription,
           };
         })
       : [newItem()],
