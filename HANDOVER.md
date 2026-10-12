@@ -1,5 +1,12 @@
 # Thrive Hub Handover
 
+## 2026-10-12 用户移交接收角色改为建议（本地完成，待发布）
+
+- 管理员移除用户时，前端候选开放为所有已通过审核且非待移除用户的账户；后端移除渠道关联数据只能移交给 CHANNEL 的限制，保留管理权限、有效接收账户、自身移除及最后管理员保护。
+- 预览字段改为 `hasChannelAssociations`；按渠道关联或原账户角色推荐接收角色，选择其他角色仍可提交。弹窗说明品牌绑定、渠道客户访问及角色专属流程的影响。
+- 接收账户现有权限及下游渠道业务角色校验保持不变；跨角色移交可能影响渠道对账、付款或部分记录的可见性，页面已明确提示。
+- 修改文件：`src/app/(app)/admin/AdminClient.tsx`、`src/app/api/admin/users/[id]/route.ts`。无 Schema 或 Migration 变更；TypeScript、`git diff --check`、完整 `npm run build`（82/82 页面，项目库使用临时副本）及独立只读审查通过。未对真实账户执行移除。用户已授权提交、推送和直接部署；发布前确认生产 75 个主库迁移与 3 个项目库迁移均已应用，每日备份日志最新为 2026-10-12 03:01:22、integrity=ok。
+
 ## 2026-10-12 管理员移除用户时外键移交失败（本地完成，待发布）
 
 - 两个 `CLIENT-*` 报错均定位到管理员“移除用户并移交数据”。生产只读核对确认：梁钰涓仍关联 5 条 `BillingRequest.applicantId` 和 6 条 `FinanceAuditLog.actorId`；吴晓蓉仍关联 163 条 `FinanceAuditLog.actorId`。现有事务遗漏这些必填外键，最终删除用户时触发 SQLite 外键约束。

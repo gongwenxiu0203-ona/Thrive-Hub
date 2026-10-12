@@ -50,7 +50,7 @@ type TransferPreview = {
   user: Pick<UserRecord, "id" | "name" | "email" | "role" | "status">;
   impacts: TransferImpact[];
   total: number;
-  requiresChannelRecipient: boolean;
+  hasChannelAssociations: boolean;
 };
 
 function InviteButton() {
@@ -332,8 +332,12 @@ export function AdminClient({
   }
 
   const transferCandidates = removalUser
-    ? users.filter((user) => user.id !== removalUser.id && user.status === "APPROVED" && (!removalPreview?.requiresChannelRecipient || user.role === "CHANNEL"))
+    ? users.filter((user) => user.id !== removalUser.id && user.status === "APPROVED")
     : [];
+  const recommendedTransferRoles = removalPreview?.hasChannelAssociations || removalPreview?.user.role === "CHANNEL"
+    ? ["CHANNEL"]
+    : removalPreview?.user.role === "BRAND" ? ["BRAND"] : ["ADMIN", "USER"];
+  const selectedTransferUser = transferCandidates.find((user) => user.id === transferToUserId);
 
   function createAdmin() {
     startTransition(async () => {
@@ -504,15 +508,22 @@ export function AdminClient({
               </div>
             )}
 
-            {removalPreview.requiresChannelRecipient && (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                该账户关联渠道商数据，接收账户必须选择“渠道商”角色。
-              </div>
-            )}
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              <p>原账户角色：{ROLE_LABELS[removalPreview.user.role] ?? removalPreview.user.role}。建议接收角色：{recommendedTransferRoles.map((role) => ROLE_LABELS[role] ?? role).join("或")}。</p>
+              <p className="mt-1">
+                {removalPreview.hasChannelAssociations || removalPreview.user.role === "CHANNEL"
+                  ? "该账户涉及渠道商关联；跨角色接收可能影响渠道对账、付款及数据查看。"
+                  : removalPreview.user.role === "BRAND"
+                    ? "建议由相同品牌的账户接收；品牌方的数据可见范围仍按其绑定品牌确定。"
+                    : "内部业务记录建议由管理员或内部员工接收；外部账户可能无法查看或处理部分记录。"}
+                所有已通过审核的其他账户均可选择，建议不限制移交。
+              </p>
+            </div>
 
             <div>
-              <label className="label">接收关联数据的账户</label>
+              <label className="label" htmlFor="transfer-recipient">接收关联数据的账户</label>
               <select
+                id="transfer-recipient"
                 className="input"
                 value={transferToUserId}
                 onChange={(event) => setTransferToUserId(event.target.value)}
@@ -525,9 +536,15 @@ export function AdminClient({
                   </option>
                 ))}
               </select>
+              {selectedTransferUser && (
+                <p className="mt-1.5 text-xs text-slate-600" role="status">
+                  已选“{ROLE_LABELS[selectedTransferUser.role] ?? selectedTransferUser.role}”账户，{recommendedTransferRoles.includes(selectedTransferUser.role) ? "角色符合建议。" : "角色与建议不同，仍可继续移交。"}
+                  移交后按接收账户现有角色和权限查看、处理数据；渠道商会获得移交客户的关联访问权限。
+                </p>
+              )}
               {transferCandidates.length === 0 && (
                 <p className="mt-1.5 text-xs text-rose-600">
-                  没有可用的接收账户。请先创建并审核通过一个符合条件的账户。
+                  没有其他已通过审核的可用账户。请先创建并审核通过一个账户。
                 </p>
               )}
             </div>

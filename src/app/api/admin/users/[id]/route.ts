@@ -150,7 +150,7 @@ async function getTransferImpacts(userId: string) {
   return {
     impacts,
     total: impacts.reduce((sum, impact) => sum + impact.count, 0),
-    requiresChannelRecipient: linkedChannelUsers > 0 || channelReconciliations > 0 || await prisma.customer.count({ where: { channelUserId: userId } }) > 0,
+    hasChannelAssociations: linkedChannelUsers > 0 || channelReconciliations > 0 || await prisma.customer.count({ where: { channelUserId: userId } }) > 0,
   };
 }
 
@@ -314,9 +314,6 @@ async function deleteUserAndTransfer(
   }
   if (!recipient || recipient.status !== "APPROVED") {
     return NextResponse.json({ error: "请选择一个已通过审核的接收账户" }, { status: 400 });
-  }
-  if (impact.requiresChannelRecipient && recipient.role !== "CHANNEL") {
-    return NextResponse.json({ error: "该账户关联渠道商数据，请选择渠道商角色的接收账户" }, { status: 400 });
   }
 
   await prisma.$transaction(async (tx) => {
