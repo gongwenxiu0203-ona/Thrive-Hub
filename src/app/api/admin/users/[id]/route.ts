@@ -5,6 +5,7 @@ import { hashPassword } from "@/lib/password";
 import { writeAdminAudit, writeApiAccessLog } from "@/lib/adminObservability";
 import { resolveUserPermission } from "@/lib/permissionResolver";
 import { hasPermissionLevel } from "@/lib/permissionGuard";
+import { errorResponse } from "@/lib/appError";
 
 const ALLOWED_ROLES = new Set(["ADMIN", "USER", "BRAND", "CHANNEL"]);
 
@@ -75,6 +76,15 @@ async function getTransferImpacts(userId: string) {
     contractTemplates,
     contractVersions,
     bulkOperationLogs,
+    reconciliationPeriodAudits,
+    billingRequests,
+    customerReceipts,
+    customerReceiptAllocations,
+    channelBusinessDocuments,
+    channelPayments,
+    financeAuditLogs,
+    contractAddenda,
+    financeAccountProfiles,
   ] = await Promise.all([
     prisma.user.count({ where: { invitedById: userId } }),
     prisma.user.count({ where: { channelUserId: userId, NOT: { id: userId } } }),
@@ -105,6 +115,15 @@ async function getTransferImpacts(userId: string) {
     prisma.contractTemplate.count({ where: { uploadedById: userId } }),
     prisma.contractVersion.count({ where: { createdById: userId } }),
     prisma.bulkOperationLog.count({ where: { OR: [{ operatorId: userId }, { revertedById: userId }] } }),
+    prisma.reconciliationPeriodAudit.count({ where: { actorId: userId } }),
+    prisma.billingRequest.count({ where: { applicantId: userId } }),
+    prisma.customerReceipt.count({ where: { createdById: userId } }),
+    prisma.customerReceiptAllocation.count({ where: { createdById: userId } }),
+    prisma.channelBusinessDocument.count({ where: { uploadedById: userId } }),
+    prisma.channelPayment.count({ where: { createdById: userId } }),
+    prisma.financeAuditLog.count({ where: { actorId: userId } }),
+    prisma.contractAddendum.count({ where: { uploadedById: userId } }),
+    prisma.financeAccountProfile.count({ where: { createdById: userId } }),
   ]);
 
   const impacts: TransferImpact[] = [
@@ -112,11 +131,18 @@ async function getTransferImpacts(userId: string) {
     { key: "contracts", label: "合同及审核", count: contracts + contractFieldReviews + contractReviews },
     { key: "tasks", label: "任务与提醒", count: tasks + reminders },
     { key: "projects", label: "项目、目标与工作日志", count: projects + projectGmvTargets + projectChannelTargets + projectEntries + workLogs },
-    { key: "finance", label: "财务对账与结算", count: reconciliations + reconciliationReviews + settlements + channelReconciliations + affiliateReconciliations },
+    {
+      key: "finance",
+      label: "财务对账与结算",
+      count: reconciliations + reconciliationReviews + reconciliationPeriodAudits + settlements
+        + channelReconciliations + affiliateReconciliations + billingRequests + customerReceipts
+        + customerReceiptAllocations + channelBusinessDocuments + channelPayments + financeAuditLogs
+        + financeAccountProfiles,
+    },
     { key: "bi", label: "推广数据上传批次", count: salesBatches + affiliateBatches },
     { key: "affiliates", label: "联盟商负责人", count: affiliates },
     { key: "operations", label: "经营管理数据", count: revenueSnapshots + accountsReceivable + salesPipelines },
-    { key: "files", label: "附件与合同版本", count: attachments + contractTemplates + contractVersions + customerAuthorizations },
+    { key: "files", label: "附件与合同版本", count: attachments + contractTemplates + contractVersions + contractAddenda + customerAuthorizations },
     { key: "history", label: "批量操作记录", count: bulkOperationLogs },
     { key: "users", label: "邀请和渠道关联用户", count: invitedUsers + linkedChannelUsers },
   ].filter((impact) => impact.count > 0);
@@ -248,7 +274,7 @@ export async function PATCH(
   return NextResponse.json({ user });
 }
 
-export async function DELETE(
+async function deleteUserAndTransfer(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
@@ -294,7 +320,10 @@ export async function DELETE(
   }
 
   await prisma.$transaction(async (tx) => {
-    await tx.user.updateMany({ where: { invitedById: id }, data: { invitedById: recipient.id } });
+    await tx.user.updateMany({
+      where: { invitedById: id, NOT: { id: recipient.id } },
+      data: { invitedById: recipient.id },
+    });
     await tx.user.updateMany({ where: { channelUserId: id, NOT: { id } }, data: { channelUserId: recipient.id } });
 
     await tx.customer.updateMany({ where: { businessOwnerId: id }, data: { businessOwnerId: recipient.id } });
@@ -335,16 +364,26 @@ export async function DELETE(
     await tx.customerReconciliation.updateMany({ where: { createdById: id }, data: { createdById: recipient.id } });
     await tx.customerReconciliation.updateMany({ where: { submittedById: id }, data: { submittedById: recipient.id } });
     await tx.customerReconciliation.updateMany({ where: { submittedToUserId: id }, data: { submittedToUserId: recipient.id } });
+    await tx.reconciliationPeriodAudit.updateMany({ where: { actorId: id }, data: { actorId: recipient.id } });
     await tx.reconciliationReview.updateMany({ where: { reviewerId: id }, data: { reviewerId: recipient.id } });
     await tx.settlement.updateMany({ where: { createdById: id }, data: { createdById: recipient.id } });
     await tx.channelReconciliation.updateMany({ where: { channelUserId: id }, data: { channelUserId: recipient.id } });
     await tx.channelReconciliation.updateMany({ where: { createdById: id }, data: { createdById: recipient.id } });
     await tx.affiliateReconciliation.updateMany({ where: { submitterId: id }, data: { submitterId: recipient.id } });
 
+    await tx.billingRequest.updateMany({ where: { applicantId: id }, data: { applicantId: recipient.id } });
+    await tx.customerReceipt.updateMany({ where: { createdById: id }, data: { createdById: recipient.id } });
+    await tx.customerReceiptAllocation.updateMany({ where: { createdById: id }, data: { createdById: recipient.id } });
+    await tx.channelBusinessDocument.updateMany({ where: { uploadedById: id }, data: { uploadedById: recipient.id } });
+    await tx.channelPayment.updateMany({ where: { createdById: id }, data: { createdById: recipient.id } });
+    await tx.financeAuditLog.updateMany({ where: { actorId: id }, data: { actorId: recipient.id } });
+    await tx.financeAccountProfile.updateMany({ where: { createdById: id }, data: { createdById: recipient.id } });
+
     await tx.clientRevenueSnapshot.updateMany({ where: { amOwnerId: id }, data: { amOwnerId: recipient.id } });
     await tx.clientRevenueSnapshot.updateMany({ where: { bdOwnerId: id }, data: { bdOwnerId: recipient.id } });
     await tx.accountsReceivable.updateMany({ where: { followOwnerId: id }, data: { followOwnerId: recipient.id } });
     await tx.salesPipeline.updateMany({ where: { bdOwnerId: id }, data: { bdOwnerId: recipient.id } });
+    await tx.contractAddendum.updateMany({ where: { uploadedById: id }, data: { uploadedById: recipient.id } });
 
     await tx.user.delete({ where: { id } });
   });
@@ -370,4 +409,15 @@ export async function DELETE(
   });
 
   return NextResponse.json({ ok: true, transferredTo: recipient.name });
+}
+
+export async function DELETE(
+  req: NextRequest,
+  context: { params: Promise<{ id: string }> },
+) {
+  try {
+    return await deleteUserAndTransfer(req, context);
+  } catch (error) {
+    return errorResponse(error, "admin.users.delete");
+  }
 }
