@@ -49,6 +49,12 @@ assert.equal(multipleProtected.blocked.length, 3);
 
 const noFee = planCleanup([row("no-fee", { contract: { contractNo: "TEST-001", feeCycle: "无", feeAmount: "0" } })]);
 assert.deepEqual(noFee.candidates.map((value) => value.id), ["no-fee"]);
+const duplicateNoFee = planCleanup([
+  row("old-no-fee", { contract: { contractNo: "TEST-001", feeCycle: "无", feeAmount: "0" } }),
+  row("new-no-fee", { contract: { contractNo: "TEST-001", feeCycle: "无", feeAmount: "0" }, updatedAt: stamp("2026-09-02") }),
+]);
+assert.deepEqual(duplicateNoFee.candidates.map((value) => value.id), ["new-no-fee", "old-no-fee"]);
+assert.equal(duplicateNoFee.keepers.length, 0);
 const noFeeProtected = planCleanup([row("no-fee-audited", {
   contract: { contractNo: "TEST-001", feeCycle: "无", feeAmount: "0" },
   _count: { ...row("x")._count, periodAudits: 1 },
@@ -67,4 +73,4 @@ assert.equal(missingSnapshotGroup.candidates.length, 0);
 assert.equal(missingSnapshotGroup.blocked.length, 2);
 
 assert.notEqual(duplicate.digest, protectedPlan.digest);
-console.log("cleanup-invalid-reconciliation-plans: 8 rule cases passed");
+console.log("cleanup-invalid-reconciliation-plans: 9 rule cases passed");

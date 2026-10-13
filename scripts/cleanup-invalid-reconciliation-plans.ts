@@ -84,7 +84,7 @@ export function planCleanup(rows: Row[]) {
     }
   }
   for (const row of rows) {
-    if (row.reconcileType !== "FEE_ONLY" || reasons.has(row.id)) continue;
+    if (row.reconcileType !== "FEE_ONLY") continue;
     if (blockedGroups.has(keyOf(row))) continue;
     const issue = noFixedFeeIssue(row);
     if (!issue) continue;
@@ -97,8 +97,9 @@ export function planCleanup(rows: Row[]) {
     id: row.id, contractNo: row.contract?.contractNo ?? "?", key: keyOf(row),
     reason: reasons.get(row.id)!, updatedAt: row.updatedAt.toISOString(),
   })).sort((a, b) => a.id.localeCompare(b.id));
-  const digest = createHash("sha256").update(JSON.stringify({ candidates, keepers, blocked })).digest("hex");
-  return { candidates, keepers, blocked, digest };
+  const retainedKeepers = keepers.filter((keeper) => !reasons.has(keeper.id));
+  const digest = createHash("sha256").update(JSON.stringify({ candidates, keepers: retainedKeepers, blocked })).digest("hex");
+  return { candidates, keepers: retainedKeepers, blocked, digest };
 }
 
 async function loadRows(db: typeof prisma) {
