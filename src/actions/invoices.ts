@@ -26,6 +26,7 @@ import { requireSession } from "@/lib/session";
 import { actionError } from "@/lib/appError";
 import { writeAdminAudit } from "@/lib/adminObservability";
 import { confirmationSubmissionIssue } from "@/lib/reconciliationConfirmation";
+import { billingRequestLinkIssue } from "@/lib/billingRequestInvoiceRules";
 
 const INVOICE_FEATURE = "finance.invoices";
 const INVOICE_STATUSES = ["DRAFT", "ISSUED", "VOID"] as const;
@@ -454,6 +455,9 @@ function errorMessage(error: unknown): string {
       /费用期间/,
       /正式开具前/,
       /客户名称不能为空/,
+      /开票申请/,
+      /Invoice 明细/,
+      /所选合同/,
       /对账记录/,
       /Invoice 状态已变更/,
     ].some((pattern) => pattern.test(message));
@@ -1281,12 +1285,22 @@ export async function createInvoice(
           );
           const billingRequestId = input.billingRequestId?.trim() || null;
           let billingRequestLines: Array<{ id: string; reconciliationId: string; projectConfirmationId: string | null; requestedAmount: number; feeType: string; currency: string }> | null = null;
+          let manualRequestItems: Array<{ projectConfirmationId: string | null; feeType: string; currency: string; amount: number }> | null = null;
           if (billingRequestId) {
             const request = await tx.billingRequest.findFirst({
               where: { id: billingRequestId, status: "PROCESSING", documentType: "INVOICE", customerId: draft.customerId },
               select: {
                 id: true,
+                sourceType: true,
+                contractId: true,
+                requestedAmount: true,
+                currency: true,
+                manualItems: {
+                  orderBy: { sortOrder: "asc" },
+                  select: { projectConfirmationId: true, feeType: true, currency: true, amount: true },
+                },
                 lines: {
+                  orderBy: { sortOrder: "asc" },
                   select: {
                     id: true,
                     reconciliationId: true,
@@ -1299,39 +1313,49 @@ export async function createInvoice(
                 },
               },
             });
-            const requestReconciliationIds = request?.lines.map((line) => line.reconciliationId) ?? [];
-            const requestContractIds = Array.from(
-              new Set(request?.lines.map((line) => line.reconciliation.contractId) ?? []),
-            );
-            const selectedContractIds = draft.contractLinks.map((line) => line.contractId);
-            const sameReconciliations =
-              requestReconciliationIds.length === reconciliationIds.length &&
-              requestReconciliationIds.every((id) => reconciliationIds.includes(id));
-            const sameContracts =
-              requestContractIds.length === selectedContractIds.length &&
-              requestContractIds.every((id) => selectedContractIds.includes(id));
-            if (!request || !sameReconciliations || !sameContracts) {
-              throw new Error("开票申请不存在、尚未受理，或与所选对账记录及合同不一致。");
+            if (!request) throw new Error("开票申请不存在或尚未受理。");
+            const linkIssue = billingRequestLinkIssue({
+              sourceType: request.sourceType,
+              contractId: request.contractId,
+              lines: request.lines.map((line) => ({ reconciliationId: line.reconciliationId, contractId: line.reconciliation.contractId })),
+              manualItemCount: request.manualItems.length,
+              selectedContractIds: draft.contractLinks.map((line) => line.contractId),
+              selectedReconciliationIds: reconciliationIds,
+            });
+            if (linkIssue) throw new Error(linkIssue);
+            if (request.sourceType === "MANUAL") {
+              manualRequestItems = request.manualItems;
+            } else if (request.sourceType === "RECONCILIATION") {
+              billingRequestLines = request.lines.map((line) => ({
+                id: line.id,
+                reconciliationId: line.reconciliationId,
+                projectConfirmationId: line.projectConfirmationId,
+                requestedAmount: line.requestedAmount,
+                feeType: line.feeType,
+                currency: line.currency,
+              }));
             }
-            billingRequestLines = request.lines.map((line) => ({
-              id: line.id,
-              reconciliationId: line.reconciliationId,
-              projectConfirmationId: line.projectConfirmationId,
-              requestedAmount: line.requestedAmount,
-              feeType: line.feeType,
-              currency: line.currency,
-            }));
+            if (draft.currency !== request.currency || draft.totalAmount <= 0 || draft.totalAmount > request.requestedAmount + 0.01) {
+              throw new Error("Invoice 币种或金额与开票申请不一致。");
+            }
           }
           const { items, contractLinks, ...invoiceData } = draft;
-          const sourcedItems = billingRequestLines
-            ? items.map((item, index) => ({
-                ...item,
-                projectConfirmationId:
-                  billingRequestLines[index]?.projectConfirmationId ?? null,
-              }))
+          const sourcedItems = manualRequestItems
+            ? items.map((item, index) => ({ ...item, projectConfirmationId: manualRequestItems[index]?.projectConfirmationId ?? null }))
             : items;
-          if (billingRequestLines && sourcedItems.length !== billingRequestLines.length) {
-            throw new Error("Invoice 明细行必须与开票申请行逐一对应，不能新增或遗漏。");
+          if (manualRequestItems && (sourcedItems.length !== manualRequestItems.length || sourcedItems.some((item, index) =>
+            item.feeType !== manualRequestItems[index].feeType ||
+            item.currency !== manualRequestItems[index].currency ||
+            item.amount > manualRequestItems[index].amount + 0.01
+          ))) {
+            throw new Error("Invoice 明细必须与申请的费用类型、币种及金额一致，不能新增、遗漏或超额。");
+          }
+          if (billingRequestLines && sourcedItems.some((item) => !billingRequestLines.some((line) =>
+            line.currency === item.currency &&
+            line.feeType === (item.feeType === "MONTHLY_FEE" ? "FIXED_FEE" : "COMMISSION") &&
+            (!item.projectConfirmationId || item.projectConfirmationId === line.projectConfirmationId)
+          ))) {
+            throw new Error("Invoice 明细的费用类型、币种或项目确认书与开票申请不一致。");
           }
           const billingRequestedTotal = billingRequestLines?.reduce((sum, line) => sum + line.requestedAmount, 0) ?? 0;
           if (billingRequestLines && (invoiceData.totalAmount <= 0 || invoiceData.totalAmount > billingRequestedTotal + 0.01)) {

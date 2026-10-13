@@ -389,6 +389,7 @@ function BillingForm({ data, disabled, onSubmit }: FormProps) {
             setClientName(data.customers.find((row) => row.id === v)?.label ?? "");
             setClientAddress("");
             setContractId("");
+            setBankAccountKey("");
             setBillingProfileId("");
           }}
           options={data.customers}

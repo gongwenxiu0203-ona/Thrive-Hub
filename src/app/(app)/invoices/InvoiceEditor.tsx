@@ -266,7 +266,7 @@ export function InvoiceEditor({
     initialInvoice?.clientName ||
     "";
   const initialPrimaryBank = populateNewInvoiceFromContracts
-    ? initialContracts[0]?.bankAccounts?.[0]
+    ? options.bankAccounts.find((account) => account.key === initialInvoice?.bankAccountKey) ?? initialContracts[0]?.bankAccounts?.[0]
     : null;
   const initialPromoPlatforms = joinMultiValues(
     matchContractValues(
