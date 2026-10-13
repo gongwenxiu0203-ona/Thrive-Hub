@@ -94,6 +94,19 @@ export async function activateContractConfirmation(
     for (const period of periods) {
       const start = parseDateOnlyUtc(period.startDate)!;
       const end = parseDateOnlyUtc(period.endDate)!;
+      const duplicate = await tx.customerReconciliation.findFirst({
+        where: {
+          contractId: contract.id,
+          projectConfirmationId: sow.id,
+          reconcileType: period.kind === "FIXED_FEE" ? "FEE_ONLY" : "COMMISSION_ONLY",
+          deletedAt: null,
+          planStatus: { not: "CANCELLED" },
+          periodStart: { lte: end },
+          periodEnd: { gte: start },
+        },
+        select: { id: true },
+      });
+      if (duplicate) throw new AppError("该项目确认书的同类计费周期已有对账记录，请先核对历史记录，避免重复生成", 409);
       await tx.customerReconciliation.create({ data: {
         customerId: contract.customerId, contractId: contract.id, projectConfirmationId: sow.id, ruleSnapshot,
         source: "AUTO", automationKey: period.automationKey, periodIndex: period.index,

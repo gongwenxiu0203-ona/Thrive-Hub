@@ -14,7 +14,16 @@ export async function purgeExpiredTrashedReconciliations(): Promise<number> {
     where: {
       deletedAt: { lt: threshold },
       status: { not: "CONFIRMED" },
-      settlements: { none: { status: "SETTLED" } },
+      // Never purge a reconciliation with any audit or downstream financial history.
+      reviews: { none: {} },
+      settlements: { none: {} },
+      channelReconciliations: { none: {} },
+      invoiceLinks: { none: {} },
+      periodAudits: { none: {} },
+      billingRequestLines: { none: {} },
+      billingAllocations: { none: {} },
+      receiptAllocations: { none: {} },
+      channelPayableSources: { none: {} },
     },
   });
   return result.count;
