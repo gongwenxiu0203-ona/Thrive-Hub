@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { ensureEffectiveConfirmationPlans } from "@/lib/contractConfirmationPlan";
+import { hasBillableFixedFee, reconciliationOverlapWhere } from "./reconciliationGenerationRules";
 
 function reconciliationCurrency(value: string | null | undefined) {
   const normalized = String(value ?? "").trim().toUpperCase();
@@ -145,7 +146,7 @@ export async function ensureCustomerReconciliationPlan(contractId: string, actor
   if (contract?.contractMode === "FRAMEWORK") {
     return ensureEffectiveConfirmationPlans(contract.id);
   }
-  if (!contract || contract.status !== "COMPLETED" || !contract.customerId || !contract.startDate || !contract.endDate) {
+  if (!contract || contract.deletedAt || contract.type !== "BRAND" || contract.status !== "COMPLETED" || !contract.customerId || !contract.startDate || !contract.endDate) {
     return { created: 0, skipped: true };
   }
   if (contract.customer?.status !== "COOPERATING") {
@@ -157,7 +158,9 @@ export async function ensureCustomerReconciliationPlan(contractId: string, actor
 
   const now = new Date();
   const today = utcDate(now);
-  const periods = buildCustomerReconciliationPlan(contract.startDate, contract.endDate);
+  const customerId = contract.customerId;
+  const periods = buildCustomerReconciliationPlan(contract.startDate, contract.endDate)
+    .filter((period) => period.type !== "FEE_ONLY" || hasBillableFixedFee(contract));
   const keys = periods.map((period) => automationKey(contract.id, period));
   const existingKeys = new Set(
     (
@@ -177,9 +180,14 @@ export async function ensureCustomerReconciliationPlan(contractId: string, actor
     const planStatus = period.start <= today ? "OPEN" : "PLANNED";
     const openedAt = planStatus === "OPEN" ? now : null;
     try {
-      await prisma.customerReconciliation.create({
+      const inserted = await prisma.$transaction(async (tx) => {
+        const overlap = await tx.customerReconciliation.findFirst({
+          where: reconciliationOverlapWhere(contract.id, period), select: { id: true },
+        });
+        if (overlap) return false;
+        await tx.customerReconciliation.create({
         data: {
-          customerId: contract.customerId,
+          customerId,
           contractId: contract.id,
           source: "AUTO",
           planStatus,
@@ -203,8 +211,10 @@ export async function ensureCustomerReconciliationPlan(contractId: string, actor
           createdById: actorId,
           updatedAt: now,
         },
+        });
+        return true;
       });
-      created += 1;
+      if (inserted) created += 1;
     } catch (error) {
       // 并发完成入口可能同时触发；唯一幂等键冲突视为已创建。
       if ((error as { code?: string }).code !== "P2002") throw error;

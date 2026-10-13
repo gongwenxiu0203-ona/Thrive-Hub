@@ -8,6 +8,7 @@ import {
 import { FeaturePermissionError } from "@/lib/permissionGuard";
 import { recalcReconciliation, assertConfirmationReadyForSubmission } from "@/lib/reconciliationCalc";
 import { errorResponse } from "@/lib/appError";
+import { allocateBiCommission, applyBiAdjustments, writeBiSnapshot } from "@/lib/reconciliationBiDetails";
 
 const SUPPORTED_RECONCILIATION_CURRENCIES = new Set([
   "USD", "CNY", "EUR", "GBP", "HKD", "JPY", "CAD", "AUD", "SGD",
@@ -53,6 +54,7 @@ export async function POST(
       salesAmountCurrency,
       correctedCurrency,
       note,
+      correctedDetails,
     } = body;
     const correctedSales = correctedSalesAmount ?? disputedSalesAmount;
     const correctedFee = correctedFeeAmount ?? disputedFeeAmount;
@@ -115,6 +117,24 @@ export async function POST(
         { error: "提出异议时必须选择有效币种" },
         { status: 400 },
       );
+    }
+
+    const adjustedBiSnapshot = action === "DISPUTED" && rec.reconcileType !== "FEE_ONLY" && correctedDetails !== undefined
+      ? Array.isArray(correctedDetails) && correctedDetails.every((item: unknown) => {
+          const candidate = item as { key?: unknown; amount?: unknown } | null;
+          return candidate && typeof candidate.key === "string" && typeof candidate.amount === "number" && Number.isFinite(candidate.amount) && candidate.amount >= 0;
+        })
+        ? applyBiAdjustments(rec.ruleSnapshot, correctedDetails)
+        : null
+      : undefined;
+    if (correctedDetails !== undefined && !adjustedBiSnapshot) {
+      return NextResponse.json({ error: "BI 明细已变化或纠正金额无效，请刷新页面后重试" }, { status: 409 });
+    }
+    if (adjustedBiSnapshot) {
+      const detailTotal = adjustedBiSnapshot.details.reduce((sum, item) => sum + item.adjustedSalesAmount, 0);
+      if (Math.abs(detailTotal - Number(correctedSales)) > 0.01) {
+        return NextResponse.json({ error: "明细合计与纠正后销售额不一致" }, { status: 400 });
+      }
     }
 
     await prisma.$transaction(async (tx) => {
@@ -205,6 +225,7 @@ export async function POST(
         if (rec.reconcileType !== "FEE_ONLY") {
           const actualSalesAmount = Number(correctedSales);
           const calc = await recalcReconciliation(id, { actualSalesAmount });
+          if (adjustedBiSnapshot) updateData.ruleSnapshot = writeBiSnapshot(rec.ruleSnapshot, allocateBiCommission(adjustedBiSnapshot, calc.commissionAmount));
           Object.assign(updateData, { actualSalesAmount, ...calc });
         }
         if (rec.reconcileType === "FEE_ONLY") {

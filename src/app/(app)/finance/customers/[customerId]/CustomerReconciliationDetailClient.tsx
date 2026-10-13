@@ -33,6 +33,7 @@ import { linkInvoiceToReconciliation } from "@/actions/invoiceArchive";
 import { readReconciliationConfirmation, confirmationSubmissionIssue } from "@/lib/reconciliationConfirmation";
 import { calculateConfirmationCommission } from "@/lib/contractConfirmationRules";
 import type { ContractConfirmationDraft } from "@/lib/contractConfirmationDraft";
+import { readBiSnapshot, type ReconciliationBiDetail } from "@/lib/reconciliationBiDetails";
 
 // ── types ──────────────────────────────────────────────────────────────────────
 
@@ -1152,6 +1153,7 @@ function MonthlyRecordRow({
 }) {
   const [expanded, setExpanded] = useState(defaultOpen);
   const [pulling, setPulling] = useState(false);
+  const [pullingDetailKey, setPullingDetailKey] = useState<string | null>(null);
   const [biMessage, setBiMessage] = useState("");
   const autoPullAttempted = useRef(false);
   const [showSubmitModal, setShowSubmitModal] = useState(false);
@@ -1181,6 +1183,7 @@ function MonthlyRecordRow({
   // 不依赖 DB 快照的 actualCommissionRate / commissionAmount，避免历史数据陈旧
   const parsedContractRate = parseRatePct(rec.contract.commissionRate);
   const confirmation = readReconciliationConfirmation(rec);
+  const biSnapshot = readBiSnapshot(rec.ruleSnapshot);
   const confirmationIssue = confirmationSubmissionIssue(rec);
   const [packageRate, setPackageRate] = useState(rec.confirmedCommissionRate == null ? "" : String(rec.confirmedCommissionRate * 100));
   const [savingRate, setSavingRate] = useState(false);
@@ -1212,13 +1215,13 @@ function MonthlyRecordRow({
       ? rec.actualSalesAmount >= Number(String(rec.contract.thresholdAmount).replace(/[^0-9.]/g, "")) ? "已达到门槛" : "未达到门槛，当前有效比例为 0%"
       : "";
 
-  async function pullBiData(automatic = false) {
+  async function pullBiData(automatic = false, detailKey?: string) {
     if (readOnly) return;
-    setPulling(true); setBiMessage("");
+    setPulling(true); setPullingDetailKey(detailKey ?? null); setBiMessage("");
     try {
       const res = await fetch(
         `/api/finance/reconciliations/${rec.id}/pull-bi`,
-        { method: "POST" },
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(detailKey ? { detailKey } : {}) },
       );
       if (!res.ok) {
         const message = (await res.json().catch(() => ({}))).error ?? "拉取失败";
@@ -1226,10 +1229,10 @@ function MonthlyRecordRow({
         if (!automatic) alert(message);
         return;
       }
-      setBiMessage("已从 BI 更新本期实际销售额");
+      setBiMessage(detailKey ? "已从 BI 更新该项金额" : "已从 BI 更新本期各项金额");
       onRefresh();
     } finally {
-      setPulling(false);
+      setPulling(false); setPullingDetailKey(null);
     }
   }
 
@@ -1459,6 +1462,28 @@ function MonthlyRecordRow({
               </div>
             </dl>
           </div>
+          {!isFixedStream && biSnapshot && (
+            <section className="border-t border-slate-100 pt-4">
+              <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-800">BI 销售额明细</h3>
+                  <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-600">
+                    过滤顺序：品牌 → 地区 Region → 联盟平台；周期为 {biSnapshot.filters.period}。仅统计未删除批次中符合确认书推广范围的记录，多个平台取并集，不使用该客户的 BI 总额。
+                  </p>
+                </div>
+                <span className="text-xs text-slate-500">更新于 {formatDateTime(biSnapshot.pulledAt)}</span>
+              </div>
+              <div className="overflow-x-auto rounded-lg border border-[#e7e0ef]">
+                <table className="w-full min-w-[720px] text-left text-sm">
+                  <thead className="bg-slate-50 text-xs text-slate-600"><tr><th className="px-3 py-2">品牌</th><th className="px-3 py-2">地区</th><th className="px-3 py-2">联盟平台</th><th className="px-3 py-2 text-right">订单</th><th className="px-3 py-2 text-right">BI 销售额</th><th className="px-3 py-2 text-right">当前采用金额</th><th className="px-3 py-2 text-right">操作</th></tr></thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {biSnapshot.details.map((detail) => <tr key={detail.key}><td className="px-3 py-2">{detail.brand}</td><td className="px-3 py-2">{detail.region}</td><td className="px-3 py-2">{detail.affiliatePlatform}</td><td className="px-3 py-2 text-right tabular-nums">{detail.orders.toLocaleString()}</td><td className="px-3 py-2 text-right tabular-nums">{commSym}{detail.salesAmount.toLocaleString("zh-CN", { minimumFractionDigits: 2 })}</td><td className="px-3 py-2 text-right font-medium tabular-nums">{commSym}{detail.adjustedSalesAmount.toLocaleString("zh-CN", { minimumFractionDigits: 2 })}</td><td className="px-3 py-2 text-right"><button type="button" className="text-xs font-medium text-brand-700 hover:text-brand-800 disabled:opacity-50" disabled={pulling || !isDraft || readOnly} onClick={() => void pullBiData(false, detail.key)}>{pullingDetailKey === detail.key ? "刷新中…" : "刷新金额"}</button></td></tr>)}
+                    {biSnapshot.details.length === 0 && <tr><td colSpan={7} className="px-3 py-6 text-center text-sm text-slate-500">当前过滤范围内没有匹配的 BI 数据。请核对品牌、地区和联盟平台映射。</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
           {/* ── 计算过程 ── */}
           {rec.projectConfirmationId && (
             <section className="rounded-md bg-slate-50 p-4 text-sm text-slate-700 space-y-2">
@@ -1871,6 +1896,7 @@ function MonthlyRecordRow({
               ? rec.fixedFeeCurrency
               : rec.commissionCurrency) || "USD"
           }
+          biDetails={biSnapshot?.details ?? []}
           onClose={() => setShowReviewModal(false)}
           onDone={() => {
             setShowReviewModal(false);
@@ -2527,6 +2553,7 @@ function ReviewModal({
   action,
   isFixed,
   defaultCurrency,
+  biDetails,
   onClose,
   onDone,
 }: {
@@ -2534,10 +2561,14 @@ function ReviewModal({
   action: "APPROVED" | "DISPUTED";
   isFixed: boolean;
   defaultCurrency: string;
+  biDetails: ReconciliationBiDetail[];
   onClose: () => void;
   onDone: () => void;
 }) {
   const [correctedAmount, setCorrectedAmount] = useState("");
+  const [detailAmounts, setDetailAmounts] = useState<Record<string, string>>(() => Object.fromEntries(
+    biDetails.map((detail) => [detail.key, String(detail.adjustedSalesAmount)]),
+  ));
   const [correctedCurrency, setCorrectedCurrency] = useState(() =>
     currencyCode(defaultCurrency),
   );
@@ -2548,13 +2579,23 @@ function ReviewModal({
     setLoading(true);
     const body: Record<string, unknown> = { action, note };
     if (action === "DISPUTED") {
-      if (!correctedAmount.trim()) {
+      const usesDetails = !isFixed && biDetails.length > 0;
+      const correctedDetails = usesDetails ? biDetails.map((detail) => ({ key: detail.key, amount: Number(detailAmounts[detail.key]) })) : [];
+      if (usesDetails && correctedDetails.some((detail) => !Number.isFinite(detail.amount) || detail.amount < 0)) {
+        alert("请为每项明细填写有效的纠正后金额");
+        setLoading(false);
+        return;
+      }
+      if (!usesDetails && !correctedAmount.trim()) {
         alert(isFixed ? "请填写异议固费金额" : "请填写纠正后的销售额");
         setLoading(false);
         return;
       }
       if (isFixed) body.correctedFeeAmount = Number(correctedAmount);
-      else body.correctedSalesAmount = Number(correctedAmount);
+      else {
+        body.correctedSalesAmount = usesDetails ? correctedDetails.reduce((sum, detail) => sum + detail.amount, 0) : Number(correctedAmount);
+        if (usesDetails) body.correctedDetails = correctedDetails;
+      }
       body.correctedCurrency = correctedCurrency;
     }
     const res = await fetch(`/api/finance/reconciliations/${recId}/review`, {
@@ -2582,7 +2623,7 @@ function ReviewModal({
             : "销售数据如有差异，请填写核实后应采用的销售额。"
           : undefined
       }
-      size="sm"
+      size={action === "DISPUTED" && !isFixed && biDetails.length > 0 ? "lg" : "sm"}
       closeOnBackdrop={!loading}
       closeOnEscape={!loading}
     >
@@ -2590,10 +2631,23 @@ function ReviewModal({
         {action === "DISPUTED" && (
           <div>
             <label className="label">
-              {isFixed ? "异议固费金额" : "纠正后的销售额"}{" "}
+              {isFixed ? "异议固费金额" : biDetails.length ? "按 BI 明细填写纠正后金额" : "纠正后的销售额"}{" "}
               <span className="text-rose-600">*</span>
             </label>
-            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem]">
+            {!isFixed && biDetails.length > 0 ? (
+              <div className="space-y-2 rounded-lg border border-[#e7e0ef] p-3">
+                {biDetails.map((detail) => (
+                  <label key={detail.key} className="grid items-center gap-2 text-sm sm:grid-cols-[minmax(0,1fr)_9rem]">
+                    <span className="text-slate-700">{detail.brand} · {detail.region} · {detail.affiliatePlatform}</span>
+                    <input type="number" className="input text-right" min={0} step="0.01" value={detailAmounts[detail.key] ?? ""} onChange={(event) => setDetailAmounts((current) => ({ ...current, [detail.key]: event.target.value }))} aria-label={`${detail.brand} ${detail.region} ${detail.affiliatePlatform} 纠正后金额`} />
+                  </label>
+                ))}
+                <div className="border-t border-slate-100 pt-2 text-right text-sm font-semibold text-slate-800">合计 {currencySymbol(correctedCurrency)}{biDetails.reduce((sum, detail) => sum + (Number(detailAmounts[detail.key]) || 0), 0).toLocaleString("zh-CN", { minimumFractionDigits: 2 })}</div>
+                <select className="input" value={correctedCurrency} onChange={(event) => setCorrectedCurrency(event.target.value)} aria-label="异议金额币种">
+                  {RECONCILIATION_CURRENCY_OPTIONS.map((currency) => <option key={currency.value} value={currency.value}>{currency.label}</option>)}
+                </select>
+              </div>
+            ) : <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem]">
               <div className="relative">
                 <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-500">
                   {currencySymbol(correctedCurrency)}
@@ -2624,7 +2678,7 @@ function ReviewModal({
                   </option>
                 ))}
               </select>
-            </div>
+            </div>}
             <p className="mt-1 text-xs text-slate-500">
               默认沿用当前对账记录币种；如在此修改，以本次保存的币种为准。
             </p>

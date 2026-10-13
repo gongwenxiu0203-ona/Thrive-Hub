@@ -26,6 +26,7 @@ import { requireSession } from "@/lib/session";
 import { actionError } from "@/lib/appError";
 import { writeAdminAudit } from "@/lib/adminObservability";
 import { confirmationSubmissionIssue } from "@/lib/reconciliationConfirmation";
+import { invoiceBiLineAllocations, readBiSnapshot } from "@/lib/reconciliationBiDetails";
 import { billingRequestLinkIssue } from "@/lib/billingRequestInvoiceRules";
 
 const INVOICE_FEATURE = "finance.invoices";
@@ -967,7 +968,8 @@ export async function getInvoiceReconciliationPrefill(
       ),
     );
 
-    const items = rows.map((row, index) => {
+    type PrefillItem = InvoiceItemInput & { id: string; amount: number };
+    const items = rows.flatMap<PrefillItem>((row, index) => {
       const period = reconciliationPeriod(row.periodStart, row.periodEnd);
       const currency = currencies[index];
       const isFixedFee = row.reconcileType === "FEE_ONLY";
@@ -979,8 +981,7 @@ export async function getInvoiceReconciliationPrefill(
           `${isFixedFee ? "月度服务费" : "销售佣金"}（${period.periodLabel}）的待支付金额必须大于 0，暂不能开具 Invoice`,
         );
       }
-      return {
-        id: `reconciliation-${row.id}`,
+      const base = {
         projectConfirmationId: row.projectConfirmationId,
         feeType: isFixedFee
           ? ("MONTHLY_FEE" as const)
@@ -989,15 +990,28 @@ export async function getInvoiceReconciliationPrefill(
         periodType: period.periodType,
         periodLabel: period.periodLabel,
         description: isFixedFee ? "月度服务费" : "销售佣金",
-        promoPlatform: null,
-        targetSite: null,
-        affiliatePlatform: null,
         quantity: 1,
-        unitPrice: amount,
-        amount,
-        sortOrder: index,
       };
-    });
+      const details = isFixedFee ? null : readBiSnapshot(row.ruleSnapshot)?.details;
+      if (!details?.length) return [{
+        ...base, id: `reconciliation-${row.id}`, promoPlatform: null, targetSite: null, affiliatePlatform: null,
+        unitPrice: amount, amount,
+      }];
+      const allocations = invoiceBiLineAllocations(details, amount);
+      return details.map<PrefillItem>((detail, detailIndex) => {
+        const detailAmount = allocations[detailIndex];
+        return {
+          ...base,
+          id: `reconciliation-${row.id}-${detail.key}`,
+          description: `销售佣金 · ${detail.brand} · ${detail.region} · ${detail.affiliatePlatform}`,
+          promoPlatform: detail.affiliatePlatform,
+          targetSite: detail.region,
+          affiliatePlatform: detail.affiliatePlatform,
+          unitPrice: detailAmount,
+          amount: detailAmount,
+        };
+      }).filter((item) => item.amount > 0);
+    }).map((item, sortOrder) => ({ ...item, sortOrder }));
 
     const contractIds = Array.from(new Set(rows.map((row) => row.contractId)));
     const start = rows.reduce(

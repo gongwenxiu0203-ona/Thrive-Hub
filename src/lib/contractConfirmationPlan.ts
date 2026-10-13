@@ -65,7 +65,7 @@ export async function activateContractConfirmation(
     const periods = buildConfirmationPeriods({
       confirmationId: sow.id, automationNamespace: options.automationNamespace,
       startDate: draft.startDate!, endDate: draft.endDate!,
-      fixedFeeEnabled: draft.monthlyFee !== null, commissionEnabled: draft.commission !== null,
+      fixedFeeEnabled: draft.monthlyFee !== null && draft.monthlyFee.amount > 0, commissionEnabled: draft.commission !== null,
     }).filter((period) => !options.fromDateExclusive || period.startDate > options.fromDateExclusive);
     const version = sow.version + 1;
     const now = new Date();

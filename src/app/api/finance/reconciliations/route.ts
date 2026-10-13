@@ -7,6 +7,7 @@ import { parseDateOnlyUtc } from "@/lib/dateRange";
 import { errorResponse } from "@/lib/appError";
 import { financeReferenceCustomerScope } from "@/lib/dataScope";
 import { buildManualReconciliationContractPlans } from "@/lib/customerReconciliationPlan";
+import { hasBillableFixedFee, reconciliationOverlapWhere } from "@/lib/reconciliationGenerationRules";
 
 function reconciliationCurrency(value: string | null | undefined) {
   const normalized = String(value ?? "").trim().toUpperCase();
@@ -124,6 +125,13 @@ export async function POST(req: Request) {
     if (incompleteContract) {
       return NextResponse.json({ error: `合同 ${incompleteContract.contractNo} 尚未签署完成，不能创建对账` }, { status: 400 });
     }
+    if (contracts.some((contract) => contract.type !== "BRAND")) {
+      return NextResponse.json({ error: "仅品牌方合同可以创建客户对账" }, { status: 400 });
+    }
+    const noFixedFee = normalizedTypes.includes("FEE_ONLY") && contracts.find((contract) => !hasBillableFixedFee(contract));
+    if (noFixedFee) {
+      return NextResponse.json({ error: `合同 ${noFixedFee.contractNo} 未约定有效固费，不能创建固费对账` }, { status: 400 });
+    }
     const missingDatesContract = contracts.find((contract) => !contract.startDate || !contract.endDate);
     if (missingDatesContract) {
       return NextResponse.json({ error: `合同 ${missingDatesContract.contractNo} 缺少有效开始或结束日期` }, { status: 400 });
@@ -175,13 +183,7 @@ export async function POST(req: Request) {
         const contract = contractById.get(plan.contractId)!;
         for (const period of plan.periods) {
           const overlap = await tx.customerReconciliation.findFirst({
-            where: {
-              contractId: plan.contractId,
-              deletedAt: null,
-              reconcileType: { in: [period.type, "BOTH"] },
-              periodStart: { lte: period.end },
-              periodEnd: { gte: period.start },
-            },
+            where: reconciliationOverlapWhere(plan.contractId, period),
             select: { periodStart: true, periodEnd: true },
           });
           if (overlap) {

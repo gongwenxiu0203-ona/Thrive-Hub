@@ -12,6 +12,7 @@ import {
 } from "@/lib/reconciliationStatementPdf";
 import { reconciliationSalesRecordWhere } from "@/lib/activeSalesScope";
 import { errorResponse } from "@/lib/appError";
+import { matchesBiDetail, matchesBiProduct, readBiSnapshot } from "@/lib/reconciliationBiDetails";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -88,12 +89,15 @@ export async function POST(request: Request) {
           }),
           select: {
             id: true,
+            brand: true,
+            region: true,
             orderDate: true,
             affiliatePlatform: true,
             affiliateName: true,
             internalAffiliateName: true,
             asin: true,
             parentAsin: true,
+            promotionLink: true,
             storeProductLabel: true,
             orders: true,
             unitsSold: true,
@@ -106,7 +110,11 @@ export async function POST(request: Request) {
             { id: "asc" },
           ],
         });
-        const currentBiSalesAmount = details.reduce((sum, detail) => sum + detail.revenue, 0);
+        const snapshot = readBiSnapshot(record.ruleSnapshot);
+        const scopedDetails = snapshot
+          ? details.filter((row) => matchesBiProduct(snapshot, row) && snapshot.details.some((detail) => matchesBiDetail(detail, row)))
+          : details;
+        const currentBiSalesAmount = scopedDetails.reduce((sum, detail) => sum + detail.revenue, 0);
         const lockedSalesAmount = record.finalSalesAmount ?? record.actualSalesAmount;
         return {
           reconciliationId: record.id,
@@ -116,10 +124,10 @@ export async function POST(request: Request) {
           lockedSalesAmount,
           currentBiSalesAmount,
           difference: currentBiSalesAmount - lockedSalesAmount,
-          recordCount: details.length,
-          orderCount: details.reduce((sum, detail) => sum + detail.orders, 0),
-          unitsSold: details.reduce((sum, detail) => sum + detail.unitsSold, 0),
-          details,
+          recordCount: scopedDetails.length,
+          orderCount: scopedDetails.reduce((sum, detail) => sum + detail.orders, 0),
+          unitsSold: scopedDetails.reduce((sum, detail) => sum + detail.unitsSold, 0),
+          details: scopedDetails,
         };
       }),
     );

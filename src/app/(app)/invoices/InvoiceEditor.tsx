@@ -343,6 +343,7 @@ export function InvoiceEditor({
             : "";
 
           return {
+            projectConfirmationId: item.projectConfirmationId ?? null,
             feeType,
             description: isNewInvoice
               ? requestedDescription || composeDescription({
@@ -655,6 +656,7 @@ export function InvoiceEditor({
       reconciliationIds: initialInvoice?.reconciliationIds ?? [],
       billingRequestId: initialInvoice?.billingRequestId ?? null,
       items: items.map((item, index) => ({
+        projectConfirmationId: item.projectConfirmationId ?? null,
         feeType: item.feeType,
         description: item.description.trim(),
         promoPlatform: item.promoPlatform?.trim() || null,

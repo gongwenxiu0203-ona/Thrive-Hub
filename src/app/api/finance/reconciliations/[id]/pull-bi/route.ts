@@ -7,38 +7,18 @@ import { calcBetAndCommission, recalcReconciliation } from "@/lib/reconciliation
 import { reconciliationSalesRecordWhere } from "@/lib/activeSalesScope";
 import { errorResponse } from "@/lib/appError";
 import { readReconciliationConfirmation } from "@/lib/reconciliationConfirmation";
+import type { ContractConfirmationDraft } from "@/lib/contractConfirmationDraft";
+import { buildBiSnapshot, canonicalRegion, readBiSnapshot, writeBiSnapshot } from "@/lib/reconciliationBiDetails";
 
-const REGION_ALIASES: Array<{ matches: string[]; regions: string[] }> = [
-  { matches: ["美国", "美國", "us", "usa", "united states", "united states of america"], regions: ["US", "USA", "United States", "United States of America", "美国", "美國"] },
-  { matches: ["加拿大", "ca", "canada"], regions: ["CA", "Canada", "加拿大"] },
-  { matches: ["英国", "英國", "uk", "gb", "great britain", "united kingdom"], regions: ["UK", "GB", "Great Britain", "United Kingdom", "英国", "英國"] },
-  { matches: ["德国", "德國", "de", "germany"], regions: ["DE", "Germany", "德国", "德國"] },
-  { matches: ["法国", "法國", "fr", "france"], regions: ["FR", "France", "法国", "法國"] },
-  { matches: ["意大利", "义大利", "義大利", "it", "italy"], regions: ["IT", "Italy", "意大利", "义大利", "義大利"] },
-  { matches: ["西班牙", "es", "spain"], regions: ["ES", "Spain", "西班牙"] },
-  { matches: ["澳大利亚", "澳大利亞", "澳洲", "au", "australia"], regions: ["AU", "Australia", "澳大利亚", "澳大利亞", "澳洲"] },
-  { matches: ["日本", "jp", "japan"], regions: ["JP", "Japan", "日本"] },
-  { matches: ["中国香港", "中國香港", "香港", "hk", "hong kong"], regions: ["HK", "Hong Kong", "香港", "中国香港", "中國香港"] },
-  { matches: ["中国", "中國", "cn", "china"], regions: ["CN", "China", "中国", "中國"] },
-];
-
-function salesRegionsForCountries(countries: string[]) {
-  const regions = new Set<string>();
-  for (const country of countries) {
-    const value = country.trim();
-    if (!value) continue;
-    const normalized = value.toLocaleLowerCase("en-US");
-    const mapped = REGION_ALIASES.find(({ matches }) => matches.some(match => {
-      if (normalized === match) return true;
-      if (match.length <= 2 && /^[a-z]+$/.test(match)) {
-        return new RegExp(`(^|[^a-z])${match}([^a-z]|$)`, "i").test(normalized);
-      }
-      return normalized.includes(match);
-    }));
-    if (mapped) mapped.regions.forEach(region => regions.add(region));
-    else regions.add(value);
-  }
-  return [...regions];
+function legacyDraft(rec: { customer: { brandName: string }; contract: { targetSite: string | null; promoPlatform: string | null } }): ContractConfirmationDraft {
+  const countries = String(rec.contract.targetSite ?? "").split(/[、,，;/]/).map((value) => value.trim()).filter(Boolean);
+  const platforms = String(rec.contract.promoPlatform ?? "").split(/[、,，;/]/).map((value) => value.trim()).filter(Boolean);
+  return {
+    brand: rec.customer.brandName,
+    scopes: countries.map((country) => ({ country, salesPlatforms: [], programs: platforms, thirdPartyPlatforms: [] })),
+    productScope: "ALL",
+    products: [],
+  } as unknown as ContractConfirmationDraft;
 }
 
 // POST /api/finance/reconciliations/[id]/pull-bi
@@ -52,7 +32,13 @@ export async function POST(
     const access = await getReconciliationAccess(session, "EDIT", req);
     const { id } = await params;
 
-    const rec = await prisma.customerReconciliation.findFirst({ where: scopedReconciliationWhere(id, access.scope) });
+    const rec = await prisma.customerReconciliation.findFirst({
+      where: scopedReconciliationWhere(id, access.scope),
+      include: {
+        customer: { select: { brandName: true } },
+        contract: { select: { targetSite: true, promoPlatform: true } },
+      },
+    });
     if (!rec) return NextResponse.json({ error: "对账记录不存在或您无权访问" }, { status: 404 });
     if (rec.status !== "DRAFT") {
       return NextResponse.json({ error: "只有草稿状态可以重新拉取 BI 数据" }, { status: 400 });
@@ -61,6 +47,8 @@ export async function POST(
       return NextResponse.json({ error: "固费对账不关联销售数据，无需拉取 BI；请在销售佣金对账中执行此操作" }, { status: 400 });
     }
     const confirmation = readReconciliationConfirmation(rec);
+    const body = await req.json().catch(() => ({})) as { detailKey?: unknown };
+    const detailKey = typeof body.detailKey === "string" && body.detailKey.trim() ? body.detailKey.trim() : null;
     if (rec.projectConfirmationId) {
       if (!confirmation?.commission) return NextResponse.json({ error: "项目确认书佣金快照无效" }, { status: 400 });
       if (["CAMPAIGN", "PUBLISHER"].includes(confirmation.commission.basis)) {
@@ -71,36 +59,36 @@ export async function POST(
         projectConfirmationId: { not: null }, reconcileType: { in: ["COMMISSION_ONLY", "BOTH"] },
         planStatus: { not: "CANCELLED" }, periodStart: { lte: rec.periodEnd }, periodEnd: { gte: rec.periodStart },
       }, select: { ruleSnapshot: true, projectConfirmationId: true } });
-      const currentRegions = new Set(salesRegionsForCountries(confirmation.scopes.map(scope => scope.country)));
+      const currentRegions = new Set(confirmation.scopes.map(scope => canonicalRegion(scope.country)));
       const hasAmbiguousOverlap = overlapping.some((other) => {
         const otherConfirmation = readReconciliationConfirmation(other);
         if (!otherConfirmation) return true;
-        const otherRegions = salesRegionsForCountries(otherConfirmation.scopes.map(scope => scope.country));
+        const otherRegions = otherConfirmation.scopes.map(scope => canonicalRegion(scope.country));
         if (!currentRegions.size || !otherRegions.length) return true;
         return otherRegions.some(region => currentRegions.has(region));
       });
       if (hasAmbiguousOverlap) return NextResponse.json({ error: "同一客户本期的多份计佣确认书包含重复或无法识别的站点，请先完成订单唯一归属后再核定销售额" }, { status: 409 });
     }
 
-    // 聚合该客户在对账周期内的销售数据
-    const salesRegions = salesRegionsForCountries(confirmation?.scopes.map(scope => scope.country) ?? []);
+    // 先限定客户和自然日周期，再严格按确认书的品牌、地区、联盟平台和商品范围筛选。
     const salesRecordWhere = reconciliationSalesRecordWhere({
         customerId: rec.customerId,
         periodStart: rec.periodStart,
         periodEnd: rec.periodEnd,
       });
-    const agg = await prisma.salesRecord.aggregate({
-      where: salesRegions.length > 0
-        ? { AND: [salesRecordWhere, { region: { in: salesRegions } }] }
-        : salesRecordWhere,
-      _sum: {
-        orders: true,
-        revenue: true,
-      },
+    const salesRows = await prisma.salesRecord.findMany({
+      where: salesRecordWhere,
+      select: { brand: true, region: true, affiliatePlatform: true, asin: true, parentAsin: true, promotionLink: true, orders: true, revenue: true },
     });
-
-    const actualOrders = agg._sum.orders ?? 0;
-    const actualSalesAmount = agg._sum.revenue ?? 0;
+    const draft = confirmation ?? legacyDraft(rec);
+    if (!draft.brand.trim() || draft.scopes.length === 0) {
+      return NextResponse.json({ error: "合同缺少品牌或地区推广范围，无法安全拉取 BI 数据，请先补全合同范围" }, { status: 400 });
+    }
+    const periodLabel = `${rec.periodStart.toISOString().slice(0, 10)} ~ ${rec.periodEnd.toISOString().slice(0, 10)}`;
+    const previous = readBiSnapshot(rec.ruleSnapshot);
+    const provisional = buildBiSnapshot({ rows: salesRows, draft, periodLabel, previous, detailKey, commissionAmount: 0 });
+    const actualOrders = provisional.details.reduce((sum, line) => sum + line.orders, 0);
+    const actualSalesAmount = provisional.details.reduce((sum, line) => sum + line.adjustedSalesAmount, 0);
 
     const calc = rec.projectConfirmationId
       ? confirmation?.commission?.mode === "PACKAGE" && rec.confirmedCommissionRate == null
@@ -115,24 +103,21 @@ export async function POST(
           commissionRate: rec.commissionRate,
         });
 
+    const snapshot = buildBiSnapshot({ rows: salesRows, draft, periodLabel, previous, detailKey, commissionAmount: calc.commissionAmount });
     const updated = await prisma.customerReconciliation.update({
       where: { id },
       data: {
         actualOrders,
         actualSalesAmount,
         ...calc,
+        ruleSnapshot: writeBiSnapshot(rec.ruleSnapshot, snapshot),
         updatedAt: new Date(),
       },
     });
 
     return NextResponse.json({
       ...updated,
-      biScope: salesRegions.length > 0
-        ? {
-            countries: [...new Set(confirmation?.scopes.map(scope => scope.country.trim()).filter(Boolean) ?? [])],
-            regions: salesRegions,
-          }
-        : null,
+      biDetails: snapshot,
     });
   } catch (e) {
     if (e instanceof FeaturePermissionError) return NextResponse.json({ error: "无权限" }, { status: 403 });
