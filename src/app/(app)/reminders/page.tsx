@@ -48,7 +48,8 @@ export default async function RemindersPage({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prisma.reminder.findMany({
       where: baseWhere as any,
-      orderBy: [{ isRead: "asc" }, { remindDate: "asc" }],
+      // Message chronology is based on when it was created, not its scheduled reminder date or read state.
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       include: { target: true, createdBy: true },
     }),
     canEdit
