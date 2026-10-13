@@ -215,6 +215,16 @@ export async function POST(
         where: { id: billing.id },
         data: { status: "COMPLETED", completedAt: new Date() },
       });
+      await tx.reminder.create({
+        data: {
+          title: `国内发票已开具：${invoiceNumber}`,
+          content: `你的开票申请 ${billing.requestNo} 已完成。请在申请详情中下载发票原件。\n[[href:/finance/workbench?focusBillingRequest=${billing.id}]]`,
+          remindDate: new Date(),
+          type: "FINANCE_RESULT",
+          targetId: billing.applicantId,
+          createdById: session.userId,
+        },
+      });
       return created;
     });
     return NextResponse.json({ invoiceId: invoice.id }, { status: 201 });

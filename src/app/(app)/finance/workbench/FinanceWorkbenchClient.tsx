@@ -169,11 +169,12 @@ export function FinanceWorkbenchClient({
   const router = useRouter();
   const searchParams = useSearchParams();
   const focusedRequestId = searchParams.get("focusRequest");
+  const focusedBillingRequestId = searchParams.get("focusBillingRequest");
   const [mainTab, setMainTab] = useState<"BILLING" | "PAYMENT">(
     searchParams.get("mainTab") === "PAYMENT" || !canViewBilling ? "PAYMENT" : "BILLING",
   );
   const [billingFilter, setBillingFilter] =
-    useState<BillingFilter>("SUBMITTED");
+    useState<BillingFilter>(focusedBillingRequestId ? "ALL" : "SUBMITTED");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [embeddedUrl, setEmbeddedUrl] = useState<string | null>(null);
@@ -181,7 +182,7 @@ export function FinanceWorkbenchClient({
   const [error, setError] = useState("");
   const [deleting, setDeleting] = useState<BillingRow | null>(null);
   const [selectedBilling, setSelectedBilling] = useState<string[]>([]);
-  const [expandedBilling, setExpandedBilling] = useState<string | null>(null);
+  const [expandedBilling, setExpandedBilling] = useState<string | null>(focusedBillingRequestId);
   const [billingBatchDialog, setBillingBatchDialog] = useState<"REJECT" | "DELETE" | null>(null);
   const [billingBatchReason, setBillingBatchReason] = useState("");
   const [reviewingBilling, setReviewingBilling] = useState<BillingRow | null>(null);
@@ -542,6 +543,11 @@ export function FinanceWorkbenchClient({
                       <td className="px-5 text-right">
                         {row.status === "SUBMITTED" && row.approvalStatus === "PENDING" && row.reviewerId === currentUserId && <button type="button" className="mr-3 text-xs font-medium text-brand-700 hover:underline" disabled={pending} onClick={() => { setReviewingBilling(row); setReviewReason(""); }}>审核</button>}
                         {isAdmin && <button type="button" className="mr-3 text-xs font-medium text-rose-700 hover:underline" onClick={() => { setDeleting(row); setDeleteReason(""); }}>删除</button>}
+                        {row.documents.map((document, index) => (
+                          <a key={document.id} href={row.documentType === "DOMESTIC" ? `/api/finance/domestic-invoices/${document.id}/original` : `/api/invoices/${document.id}/pdf`} className="mr-3 inline-flex text-xs font-medium text-brand-700 hover:underline" target="_blank" rel="noreferrer" download>
+                            {row.documentType === "DOMESTIC" ? `下载国内发票${row.documents.length > 1 ? ` ${index + 1}` : ""}` : `下载 Invoice${row.documents.length > 1 ? ` ${index + 1}` : ""}`}
+                          </a>
+                        ))}
                         <button type="button" className="mr-3 text-xs font-medium text-brand-700 hover:underline" onClick={() => setExpandedBilling(expandedBilling === row.id ? null : row.id)}>{expandedBilling === row.id ? "收起详情" : "详情"}</button>
                         {row.status === "SUBMITTED" && row.approvalStatus === "APPROVED" && canEditBilling ? (
                           <button
@@ -584,24 +590,6 @@ export function FinanceWorkbenchClient({
                         ) : (
                           <span className="text-slate-400">—</span>
                         )}
-                        {row.documents.map((document, index) => (
-                          <a
-                            key={document.id}
-                            href={
-                              row.documentType === "DOMESTIC"
-                                ? `/api/finance/domestic-invoices/${document.id}/original`
-                                : `/api/invoices/${document.id}/pdf`
-                            }
-                            className="ml-3 inline-flex text-xs font-medium text-brand-700 hover:underline"
-                            target="_blank"
-                            rel="noreferrer"
-                            download
-                          >
-                            {row.documentType === "DOMESTIC"
-                              ? `下载国内发票${row.documents.length > 1 ? ` ${index + 1}` : ""}`
-                              : `下载 Invoice${row.documents.length > 1 ? ` ${index + 1}` : ""}`}
-                          </a>
-                        ))}
                       </td>
                     </tr>
                     {expandedBilling === row.id && <tr><td colSpan={7} className="bg-[#faf8ff] px-5 py-4"><div className="grid gap-3 text-sm md:grid-cols-4"><p><span className="text-xs text-slate-500">申请单</span><br />{row.requestNo}</p><p><span className="text-xs text-slate-500">客户 / 申请人</span><br />{row.customerName} · {row.applicantName}</p><p><span className="text-xs text-slate-500">审核人</span><br />{row.reviewerName ?? "—"}</p><p><span className="text-xs text-slate-500">申请金额</span><br />{money(row.requestedAmount, row.currency)}</p><p><span className="text-xs text-slate-500">票据方式</span><br />{row.documentType === "DOMESTIC" ? "国内发票" : "Invoice"}</p><p><span className="text-xs text-slate-500">明细数量</span><br />{row.lineCount} 条</p><p><span className="text-xs text-slate-500">关联合同</span><br />{row.contractNos.join("、") || "—"}</p><p><span className="text-xs text-slate-500">当前状态</span><br />{displayBillingStatus(row)}</p>{visibleApplicantNote(row.applicantNote) && <p className="md:col-span-4"><span className="text-xs text-slate-500">申请备注</span><br /><span className="whitespace-pre-wrap break-words">{visibleApplicantNote(row.applicantNote)}</span></p>}</div><BillingItemsTable row={row} /></td></tr>}

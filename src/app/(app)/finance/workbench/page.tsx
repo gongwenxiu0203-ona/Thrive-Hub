@@ -54,8 +54,13 @@ function contractInvoiceAccounts(value: string | null | undefined) {
   return linked.length ? linked : Object.values(INVOICE_BANK_ACCOUNTS);
 }
 
-export default async function FinanceWorkbenchPage() {
+export default async function FinanceWorkbenchPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ focusBillingRequest?: string }>;
+}) {
   const session = await requireSession();
+  const focusedBillingRequestId = (await searchParams).focusBillingRequest;
   if (!isStaff(session.role)) redirect("/finance");
   const [invoicePermission, receivablePermission, channelPermission, paymentPermission, expensePermission, profilePermission] =
     await Promise.all([
@@ -81,7 +86,7 @@ export default async function FinanceWorkbenchPage() {
   ] = await Promise.all([
     canViewBilling
       ? prisma.billingRequest.findMany({
-          where: {},
+          where: focusedBillingRequestId ? { id: focusedBillingRequestId } : {},
           include: {
             customer: { select: { brandName: true } },
             applicant: { select: { id: true, name: true } },
@@ -711,7 +716,15 @@ export default async function FinanceWorkbenchPage() {
                   })),
                 ],
                 billingProgress: billingRequests
-                  .filter((row) => visibleBillingIds.includes(row.id))
+                  .filter((row) =>
+                    session.role === "ADMIN" ||
+                    row.applicantId === session.userId ||
+                    approvalSteps.some((step) =>
+                      step.entityType === "BILLING_REQUEST" &&
+                      step.entityId === row.id &&
+                      step.assigneeId === session.userId,
+                    ),
+                  )
                   .map((row) => ({
                     id: row.id,
                     applicantId: row.applicantId,
