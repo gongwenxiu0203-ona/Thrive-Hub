@@ -10,7 +10,7 @@ type Data = {
   contract: { id: string; contractNo: string; type: string; status: string; contractMode: string; uploadType: string | null; partyA: string | null; partyAContact: string | null; partyAEmail: string | null; partyAPhone: string | null; partyBContact: string | null; partyBEmail: string | null; partyBPhone: string | null; customer: { id: string; brandName: string } | null };
   users: { id: string; name: string; email: string; phone: string | null }[];
   canRenumber: boolean;
-  canEdit: boolean; canManage: boolean;
+  canCreate: boolean; canEdit: boolean; canEditMaster: boolean; canManage: boolean;
   bankAccounts: { id: string; name: string; accountName: string; accountNumber: string; bankName: string }[];
   confirmationTemplates: { id: string; name: string }[];
   options: { category: string; value: string }[]; confirmations: Row[];
@@ -83,6 +83,7 @@ export function ConfirmationEditor({ contractId, focusId, highlightMissing = fal
   const [recordAction, setRecordAction] = useState<{ id: string; type: "DELETE" | "TERMINATE" } | null>(null);
   const [deleteReason, setDeleteReason] = useState("");
   const [terminationDate, setTerminationDate] = useState("");
+  const [terminationReason, setTerminationReason] = useState("");
   const focusApplied = useRef(false);
   const saveAreaRef = useRef<HTMLDivElement>(null);
   const reasonRef = useRef<HTMLTextAreaElement>(null);
@@ -91,7 +92,12 @@ export function ConfirmationEditor({ contractId, focusId, highlightMissing = fal
   useEffect(() => { load().catch(e => setError(e.message)); }, [load]);
   function update<K extends keyof Draft>(key: K, value: Draft[K]) { setDraft(d => d ? { ...d, [key]: value } : d); }
   const opts = (key: string) => [...new Set([...(defaults[key] || []), ...(data?.options.filter(o => o.category === key).map(o => o.value) || [])])];
-  const editable = !!data?.canEdit && (!editing || editing.status === "DRAFT" || replacement);
+  const editable = !!data && (editing ? data.canEdit && (editing.status === "DRAFT" || replacement) : data.canCreate);
+  const replaceUnavailableReason = !data || !data.confirmations.some(row => row.status === "EFFECTIVE")
+    ? "暂无已签署生效的确认书，不能替换；请先新增确认书。"
+    : !data.canEdit
+      ? "当前账户没有替换现有确认书的权限；仍可新增独立编号的确认书。"
+      : "";
   const unsaved = !!editing && !!draft && JSON.stringify(replacement ? editing.pendingDraft : editing.draft) !== JSON.stringify(draft);
   const highlightedIssues = (() => {
     if (!highlightMissing || !draft) return [];
@@ -135,12 +141,12 @@ export function ConfirmationEditor({ contractId, focusId, highlightMissing = fal
   }, [data, focusId]);
   function beginCreate() {
     if (!data) return;
-    if (!data.confirmations.length) { open(null, false, "FORM"); return; }
-    setOperation("ADD"); setMethod("FORM"); setTargetId(data.confirmations.find(row => row.status === "EFFECTIVE")?.id || data.confirmations[0]?.id || ""); setChooser(true);
+    setOperation("ADD"); setMethod("FORM"); setTargetId(data.confirmations.find(row => row.status === "EFFECTIVE")?.id || ""); setChooser(true);
   }
   function confirmCreateChoice() {
     if (!data) return;
     if (operation === "REPLACE") {
+      if (replaceUnavailableReason) { setError(replaceUnavailableReason); return; }
       const row = data.confirmations.find(item => item.id === targetId);
       if (!row || row.status !== "EFFECTIVE") { setError("请选择一份已签署生效的确认书进行替换"); return; }
       open(row, true, method);
@@ -248,7 +254,7 @@ export function ConfirmationEditor({ contractId, focusId, highlightMissing = fal
     } catch (e) { setError(e instanceof Error ? e.message : "上传失败"); } finally { setBusy(false); }
   }
   function beginRecordAction(row: Row, type: "DELETE" | "TERMINATE") {
-    setRecordAction({ id: row.id, type }); setDeleteReason(""); setTerminationDate(""); setError(""); setNotice("");
+    setRecordAction({ id: row.id, type }); setDeleteReason(""); setTerminationDate(""); setTerminationReason(""); setError(""); setNotice("");
   }
   async function submitRecordAction(row: Row) {
     if (!recordAction) return;
@@ -260,7 +266,8 @@ export function ConfirmationEditor({ contractId, focusId, highlightMissing = fal
         setNotice(`草稿 ${row.number} 已删除，编号已释放。`);
       } else {
         if (!terminationDate) throw new Error("请选择终止日期");
-        await request(`${base}/${row.id}?action=terminate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ terminationDate }) });
+        if (!terminationReason.trim()) throw new Error("请填写终止原因");
+        await request(`${base}/${row.id}?action=terminate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ terminationDate, reason: terminationReason.trim(), expectedVersion: row.version }) });
         setNotice(`项目确认书 ${row.number} 已于 ${terminationDate} 终止，未来对账已停止。`);
       }
       setRecordAction(null); await load();
@@ -268,9 +275,9 @@ export function ConfirmationEditor({ contractId, focusId, highlightMissing = fal
   }
   return <div className="mx-auto max-w-7xl space-y-6 pb-10">
     <Link href={`/contracts/${contractId}`} className="text-sm text-purple-700">← 返回主合同</Link>
-    {data?.canEdit && data.contract.contractMode === "FRAMEWORK" && <Link href={`/contracts/new?contractId=${contractId}`} className="ml-4 text-sm text-purple-700">编辑主合同资料</Link>}
-    <header className="flex flex-wrap items-start justify-between gap-3"><div><h1 className="text-2xl font-semibold text-slate-900">项目确认书</h1><p className="mt-2 text-sm text-slate-600">{data?.contract.contractNo} · {data?.contract.customer?.brandName} · 同一主合同下，每份生效确认书独立计费、独立对账。</p></div>{data?.canEdit && <Button variant="primary" disabled={busy} onClick={beginCreate}>新建项目确认书</Button>}</header>
-    {chooser && data && <section className="space-y-5 rounded-xl border border-purple-200 bg-white p-5 shadow-sm"><div className="flex items-center justify-between gap-3"><div><h2 className="font-semibold text-slate-900">选择项目确认书处理方式</h2><p className="mt-1 text-sm text-slate-600">替换保留原编号并递增版本；新增会生成下一个确认书编号。</p></div><button className="text-sm text-slate-600" onClick={() => setChooser(false)}>关闭</button></div><div className="grid gap-3 sm:grid-cols-2"><button className={`rounded-lg border p-4 text-left ${operation === "ADD" ? "border-purple-500 bg-purple-50" : "border-slate-200"}`} onClick={() => setOperation("ADD")}><strong>新增项目确认书</strong><span className="mt-1 block text-sm text-slate-600">独立编号、从 v1 开始，独立计费和对账。</span></button><button className={`rounded-lg border p-4 text-left ${operation === "REPLACE" ? "border-purple-500 bg-purple-50" : "border-slate-200"}`} onClick={() => setOperation("REPLACE")}><strong>替换当前项目确认书</strong><span className="mt-1 block text-sm text-slate-600">编号不变；签署前旧版本继续有效，签署后版本递增。</span></button></div>{operation === "REPLACE" && <Field label="需要替换的已生效项目确认书"><select className={control} value={targetId} onChange={e => setTargetId(e.target.value)}><option value="">请选择</option>{data.confirmations.filter(row => row.status === "EFFECTIVE").map(row => <option key={row.id} value={row.id}>{row.number} · v{row.businessVersion}</option>)}</select></Field>}<div className="grid gap-3 sm:grid-cols-2"><button className={`rounded-lg border p-4 text-left ${method === "FORM" ? "border-purple-500 bg-purple-50" : "border-slate-200"}`} onClick={() => setMethod("FORM")}><strong>在线新建项目确认书</strong><span className="mt-1 block text-sm text-slate-600">选择模板、填写字段并导出；签署后上传原件。</span></button><button className={`rounded-lg border p-4 text-left ${method === "SIGNED_UPLOAD" ? "border-purple-500 bg-purple-50" : "border-slate-200"}`} onClick={() => setMethod("SIGNED_UPLOAD")}><strong>上传已签署确认书</strong><span className="mt-1 block text-sm text-slate-600">先补齐字段再上传签署原件，上传后直接生效。</span></button></div><div className="flex justify-end"><Button variant="primary" disabled={operation === "REPLACE" && !targetId} onClick={confirmCreateChoice}>继续填写</Button></div></section>}
+    {data?.canEditMaster && data.contract.contractMode === "FRAMEWORK" && <Link href={`/contracts/new?contractId=${contractId}`} className="ml-4 text-sm text-purple-700">编辑主合同资料</Link>}
+    <header className="flex flex-wrap items-start justify-between gap-3"><div><h1 className="text-2xl font-semibold text-slate-900">项目确认书</h1><p className="mt-2 text-sm text-slate-600">{data?.contract.contractNo} · {data?.contract.customer?.brandName} · 同一主合同下，每份生效确认书独立计费、独立对账。</p></div>{data?.canCreate && <Button variant="primary" disabled={busy} onClick={beginCreate}>新建项目确认书</Button>}</header>
+    {chooser && data && <section className="space-y-5 rounded-xl border border-purple-200 bg-white p-5 shadow-sm"><div className="flex items-center justify-between gap-3"><div><h2 className="font-semibold text-slate-900">选择项目确认书处理方式</h2><p className="mt-1 text-sm text-slate-600">替换保留原编号并递增版本；新增会生成下一个确认书编号。</p></div><button className="text-sm text-slate-600" onClick={() => setChooser(false)}>关闭</button></div><div className="grid gap-3 sm:grid-cols-2"><button className={`rounded-lg border p-4 text-left ${operation === "ADD" ? "border-purple-500 bg-purple-50" : "border-slate-200"}`} onClick={() => setOperation("ADD")}><strong>新增项目确认书</strong><span className="mt-1 block text-sm text-slate-600">独立编号、从 v1 开始，独立计费和对账。</span></button><button disabled={!!replaceUnavailableReason} aria-describedby={replaceUnavailableReason ? "confirmation-replace-unavailable" : undefined} className={`rounded-lg border p-4 text-left ${replaceUnavailableReason ? "cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400" : operation === "REPLACE" ? "border-purple-500 bg-purple-50" : "border-slate-200"}`} onClick={() => setOperation("REPLACE")}><strong>替换当前项目确认书</strong><span className={`mt-1 block text-sm ${replaceUnavailableReason ? "text-slate-400" : "text-slate-600"}`}>编号不变；签署前旧版本继续有效，签署后版本递增。</span></button></div>{replaceUnavailableReason && <p id="confirmation-replace-unavailable" className="text-sm text-amber-800">{replaceUnavailableReason}</p>}{operation === "REPLACE" && <Field label="需要替换的已生效项目确认书"><select className={control} value={targetId} onChange={e => setTargetId(e.target.value)}><option value="">请选择</option>{data.confirmations.filter(row => row.status === "EFFECTIVE").map(row => <option key={row.id} value={row.id}>{row.number} · v{row.businessVersion}</option>)}</select></Field>}<div className="grid gap-3 sm:grid-cols-2"><button className={`rounded-lg border p-4 text-left ${method === "FORM" ? "border-purple-500 bg-purple-50" : "border-slate-200"}`} onClick={() => setMethod("FORM")}><strong>在线新建项目确认书</strong><span className="mt-1 block text-sm text-slate-600">选择模板、填写字段并导出；签署后上传原件。</span></button><button className={`rounded-lg border p-4 text-left ${method === "SIGNED_UPLOAD" ? "border-purple-500 bg-purple-50" : "border-slate-200"}`} onClick={() => setMethod("SIGNED_UPLOAD")}><strong>上传已签署确认书</strong><span className="mt-1 block text-sm text-slate-600">先补齐字段再上传签署原件，上传后直接生效。</span></button></div><div className="flex justify-end"><Button variant="primary" disabled={operation === "REPLACE" && (!!replaceUnavailableReason || !targetId)} onClick={confirmCreateChoice}>继续填写</Button></div></section>}
     {error && <div role="alert" className="break-words rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">{error}</div>}
     {notice && <div role="status" className="rounded-lg bg-green-50 p-4 text-sm text-green-800">{notice}</div>}
     {!data && !error && <div className="h-32 rounded-lg bg-slate-100" aria-label="正在加载确认书" />}
@@ -298,15 +305,15 @@ export function ConfirmationEditor({ contractId, focusId, highlightMissing = fal
               <td className="px-4 py-3 text-slate-600">{row.draft.workflowMode === "SIGNED_UPLOAD" ? "上传已签署确认书" : "网站创建确认书"}</td>
               <td className="px-4 py-3"><div className="flex flex-wrap gap-3">
                 <button className="text-purple-700" disabled={busy} onClick={() => open(row)}>{data.canEdit && row.status === "DRAFT" ? "修改草稿" : "查看"}</button>
-                {row.pendingDraft && <button className="text-amber-700" disabled={busy} onClick={() => open(row, true, row.pendingDraft!.workflowMode)}>继续修改替换草稿</button>}
+                {data.canEdit && row.pendingDraft && <button className="text-amber-700" disabled={busy} onClick={() => open(row, true, row.pendingDraft!.workflowMode)}>继续修改替换草稿</button>}
                 {!row.signedFileUrl && row.draft.workflowMode === "FORM" && ["SIGNING", "COMPLETED"].includes(data.contract.status) && <button className="text-purple-700" disabled={busy} onClick={() => downloadConfirmation(row)}>导出 Word</button>}
-                {data.canEdit && !row.signedFileUrl && (row.status === "DRAFT" || row.pendingDraft) && <button className="text-purple-700" disabled={busy} onClick={() => toggleUpload(row)}>上传签署文件</button>}
+                {data.canEdit && ((row.status === "DRAFT" && !row.signedFileUrl) || (row.status === "EFFECTIVE" && row.pendingDraft && !row.pendingSignedFileUrl)) && <button className="text-purple-700" disabled={busy} onClick={() => toggleUpload(row)}>{row.pendingDraft ? "上传新版本签署文件" : "上传签署文件"}</button>}
                 {row.signedFileUrl && <a className="text-purple-700" href={`${base}/${row.id}?download=1`}>下载原件</a>}
                 {data.canManage && row.status === "DRAFT" && <button className="text-red-700" disabled={busy} onClick={() => beginRecordAction(row, "DELETE")}>删除</button>}
-                {data.canManage && row.status === "EFFECTIVE" && <button className="text-amber-700" disabled={busy} onClick={() => beginRecordAction(row, "TERMINATE")}>终止</button>}
+                {data.canEdit && row.status === "EFFECTIVE" && <button className="text-amber-700" disabled={busy} onClick={() => beginRecordAction(row, "TERMINATE")}>终止</button>}
               </div>
               {uploadingId === row.id && <div className="mt-3 min-w-[280px] space-y-2 rounded-lg border border-purple-100 bg-purple-50 p-3"><input aria-label={`上传${row.number}签署原件`} type="file" accept=".pdf,.doc,.docx" disabled={busy} onChange={e => setUploadFile(e.target.files?.[0] || null)} className="block max-w-full text-xs" /><input aria-label="上传原因" className={control} value={uploadReason} onChange={e => setUploadReason(e.target.value)} placeholder="上传原因（必填）" maxLength={2000} /><div className="flex gap-2"><Button size="sm" loading={busy} disabled={!uploadFile || !uploadReason.trim()} onClick={() => upload(row)}>上传并标记签署完成</Button><Button size="sm" disabled={busy} onClick={() => toggleUpload(row)}>取消</Button></div></div>}
-              {recordAction?.id === row.id && <div className={`mt-3 min-w-[280px] space-y-3 rounded-lg border p-3 ${recordAction.type === "DELETE" ? "border-red-200 bg-red-50" : "border-amber-200 bg-amber-50"}`}>{recordAction.type === "DELETE" ? <Field label="删除原因（必填）"><textarea className={control} rows={2} maxLength={2000} value={deleteReason} onChange={e => setDeleteReason(e.target.value)} /></Field> : <Field label="终止日期（必填）"><input type="date" className={control} min={row.draft.startDate || undefined} value={terminationDate} onChange={e => setTerminationDate(e.target.value)} /></Field>}<div className="flex gap-2"><Button size="sm" loading={busy} disabled={recordAction.type === "DELETE" ? !deleteReason.trim() : !terminationDate} onClick={() => submitRecordAction(row)}>{recordAction.type === "DELETE" ? "确认删除" : "确认终止"}</Button><Button size="sm" disabled={busy} onClick={() => setRecordAction(null)}>取消</Button></div></div>}
+              {recordAction?.id === row.id && <div className={`mt-3 min-w-[280px] space-y-3 rounded-lg border p-3 ${recordAction.type === "DELETE" ? "border-red-200 bg-red-50" : "border-amber-200 bg-amber-50"}`}>{recordAction.type === "DELETE" ? <Field label="删除原因（必填）"><textarea className={control} rows={2} maxLength={2000} value={deleteReason} onChange={e => setDeleteReason(e.target.value)} /></Field> : <><Field label="终止日期（必填）"><input type="date" className={control} min={row.draft.startDate || undefined} value={terminationDate} onChange={e => setTerminationDate(e.target.value)} /></Field><Field label="终止原因（必填）"><textarea className={control} rows={2} maxLength={2000} value={terminationReason} onChange={e => setTerminationReason(e.target.value)} placeholder="说明终止原因，最多 2000 字" /></Field></>}<div className="flex gap-2"><Button size="sm" loading={busy} disabled={recordAction.type === "DELETE" ? !deleteReason.trim() : !terminationDate || !terminationReason.trim()} onClick={() => submitRecordAction(row)}>{recordAction.type === "DELETE" ? "确认删除" : "确认终止"}</Button><Button size="sm" disabled={busy} onClick={() => setRecordAction(null)}>取消</Button></div></div>}
               </td>
             </tr>)}</tbody>
           </table>

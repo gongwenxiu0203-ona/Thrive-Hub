@@ -117,7 +117,8 @@ export default async function ContractDetailPage({
 
   if (contract.contractMode === "FRAMEWORK") {
     const internal = session.role === "ADMIN" || session.role === "USER";
-    const canEdit = (contract.status !== "COMPLETED" || session.role === "ADMIN") && internal && await adminHasFeature(session, "contracts.records", "EDIT") && await adminHasFeature(session, "contracts.create_upload", "EDIT");
+    const canCreateConfirmation = internal && await adminHasFeature(session, "contracts.records", "EDIT");
+    const canEdit = (contract.status !== "COMPLETED" || session.role === "ADMIN") && canCreateConfirmation && await adminHasFeature(session, "contracts.create_upload", "EDIT");
     const confirmationIds = contract.projectConfirmations.map((row) => row.id);
     const auditRows = await prisma.financeAuditLog.findMany({
       where: { OR: [{ entityType: "CONTRACT", entityId: contract.id }, { entityType: "CONTRACT_CONFIRMATION", entityId: { in: confirmationIds.length ? confirmationIds : ["__none__"] } }] },
@@ -131,7 +132,7 @@ export default async function ContractDetailPage({
     for (const review of contract.reviews) if (!timeline.some((row) => row.action === "SUBMIT_REVIEW" && row.createdAt === review.createdAt.toISOString())) timeline.push({ id: `review-${review.id}`, action: "REVIEW_ROUND", actor: review.reviewer?.name ?? "—", note: `第 ${review.round} 轮审核 · ${review.status === "PENDING" ? "审核中" : review.status === "APPROVED" ? "已通过" : "已退回"}`, fromStatus: null, toStatus: review.status === "PENDING" ? "REVIEWING" : review.status === "APPROVED" ? "SIGNING" : "REJECTED", createdAt: review.updatedAt.toISOString() });
     timeline.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     const canReview = contract.status === "REVIEWING" && (session.role === "ADMIN" || contract.reviewerId === session.userId);
-    return <FrameworkContractDetail contract={contract} isAdmin={session.role === "ADMIN"} canEdit={canEdit} canReview={canReview} internal={internal} selectedId={(await searchParams).confirmation} timeline={timeline} />;
+    return <FrameworkContractDetail contract={contract} isAdmin={session.role === "ADMIN"} canEdit={canEdit} canCreateConfirmation={canCreateConfirmation} canReview={canReview} internal={internal} selectedId={(await searchParams).confirmation} timeline={timeline} />;
   }
 
   const [users, files, customers] = await Promise.all([

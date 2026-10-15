@@ -145,8 +145,11 @@ export async function activateConfirmationReplacement(
   return prisma.$transaction(async (tx) => {
     const future = await tx.customerReconciliation.findMany({
       where: { projectConfirmationId: confirmationId, deletedAt: null, planStatus: "PLANNED", periodStart: { gt: new Date(`${today}T23:59:59.999Z`) } },
-      select: { id: true, automationKey: true },
+      include: { settlements: { select: { status: true } }, billingRequestLines: { select: { id: true }, take: 1 }, receiptAllocations: { where: { status: "ACTIVE" }, select: { id: true }, take: 1 } },
     });
+    if (future.some(row => row.status === "CONFIRMED" || row.settlements.some(item => item.status === "SETTLED") || row.billingRequestLines.length > 0 || row.receiptAllocations.length > 0)) {
+      throw new AppError("替换确认书涉及已确认、已开票或已收款的未来对账记录，请先核对财务记录后重试", 409);
+    }
     for (const row of future) {
       await tx.customerReconciliation.update({ where: { id: row.id }, data: {
         planStatus: "CANCELLED", adjustmentReason: `项目确认书 ${current.number} 替换版本 v${current.version + 1} 生效`,

@@ -32,8 +32,7 @@ export async function PATCH(request: NextRequest, context: Context) {
     const { id, confirmationId } = await context.params;
     const renumber = request.nextUrl.searchParams.get("action") === "renumber";
     const replacement = request.nextUrl.searchParams.get("action") === "replace";
-    const { session, contract } = await authorizeConfirmation(id, renumber ? "MANAGE" : "EDIT");
-    if (contract.status === "COMPLETED" && session.role !== "ADMIN") throw new AppError("合同签署完成后仅管理员可以修改项目确认书", 403);
+    const { session } = await authorizeConfirmation(id, renumber ? "MANAGE" : "EDIT");
     const body = await request.json();
     if (!body || typeof body !== "object" || Array.isArray(body)) throw new AppError("请求格式错误", 400);
     if (renumber) {
@@ -71,30 +70,36 @@ export async function PATCH(request: NextRequest, context: Context) {
 export async function POST(request: NextRequest, context: Context) {
   try {
     const { id, confirmationId } = await context.params;
-    const { session, contract } = await authorizeConfirmation(id, "MANAGE");
-    if (contract.status === "COMPLETED" && session.role !== "ADMIN") throw new AppError("合同签署完成后仅管理员可以变更项目确认书状态", 403);
     const action = request.nextUrl.searchParams.get("action");
+    const { session, contract } = await authorizeConfirmation(id, action === "terminate" ? "EDIT" : "MANAGE");
+    if (action !== "terminate" && contract.status === "COMPLETED" && session.role !== "ADMIN") throw new AppError("合同签署完成后仅管理员可以变更项目确认书状态", 403);
     const body = await request.json();
     if (!body || typeof body !== "object" || Array.isArray(body)) throw new AppError("请求格式错误", 400);
     const row = await prisma.contractProjectConfirmation.findFirst({ where: { id: confirmationId, contractId: id } });
     if (!row) throw new AppError("确认书不存在", 404);
     if (action === "terminate") {
       if (row.status !== "EFFECTIVE") throw new AppError("只有已签署生效的确认书可以终止", 409);
+      if (row.version !== expectedVersion(body.expectedVersion)) throw new AppError("确认书版本已变更，请刷新后重试", 409);
       const terminationDate = typeof body.terminationDate === "string" ? body.terminationDate.trim() : "";
       if (!/^\d{4}-\d{2}-\d{2}$/.test(terminationDate)) throw new AppError("请填写有效的终止日期", 400);
       const terminatedAt = new Date(`${terminationDate}T00:00:00.000Z`);
       if (Number.isNaN(terminatedAt.getTime()) || (row.startDate && terminatedAt < row.startDate)) throw new AppError("终止日期不能早于合作开始日期", 400);
+      const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+      if (!reason || reason.length > 2000) throw new AppError("请填写终止原因（最多2000字）", 400);
       const records = await prisma.customerReconciliation.findMany({ where: { projectConfirmationId: confirmationId, deletedAt: null, planStatus: { not: "CANCELLED" } }, include: { settlements: { select: { status: true } }, billingRequestLines: { select: { id: true }, take: 1 }, receiptAllocations: { where: { status: "ACTIVE" }, select: { id: true }, take: 1 } } });
-      const reason = `项目确认书 ${row.number} 于 ${terminationDate} 终止`;
+      if (records.some(record => record.periodEnd > terminatedAt && (record.status === "CONFIRMED" || record.settlements.some(item => item.status === "SETTLED") || record.billingRequestLines.length > 0 || record.receiptAllocations.length > 0))) {
+        throw new AppError("终止日期涉及已确认、已开票或已收款的对账记录，请先核对财务记录后重试", 409);
+      }
+      const adjustmentReason = `项目确认书 ${row.number} 于 ${terminationDate} 终止：${reason}`;
       await prisma.$transaction(async tx => {
         const updated = await tx.contractProjectConfirmation.updateMany({ where: { id: confirmationId, contractId: id, status: "EFFECTIVE", version: row.version }, data: { status: "TERMINATED", terminatedAt, endDate: row.endDate && row.endDate < terminatedAt ? row.endDate : terminatedAt, version: { increment: 1 } } });
         if (updated.count !== 1) throw new AppError("确认书状态已变更，请刷新后重试", 409);
         for (const record of records) {
           const hasFinancialHistory = record.status === "CONFIRMED" || record.settlements.some(item => item.status === "SETTLED") || record.billingRequestLines.length > 0 || record.receiptAllocations.length > 0;
-          if (record.periodStart > terminatedAt) await tx.customerReconciliation.update({ where: { id: record.id }, data: { planStatus: "CANCELLED", adjustmentReason: reason } });
-          else if (record.periodEnd > terminatedAt && !hasFinancialHistory) await tx.customerReconciliation.update({ where: { id: record.id }, data: { periodEnd: terminatedAt, periodAdjusted: true, adjustmentReason: reason } });
+          if (record.periodStart > terminatedAt) await tx.customerReconciliation.update({ where: { id: record.id }, data: { planStatus: "CANCELLED", adjustmentReason } });
+          else if (record.periodEnd > terminatedAt && !hasFinancialHistory) await tx.customerReconciliation.update({ where: { id: record.id }, data: { periodEnd: terminatedAt, periodAdjusted: true, adjustmentReason } });
         }
-        await tx.financeAuditLog.create({ data: { entityType: "CONTRACT_CONFIRMATION", entityId: confirmationId, action: "TERMINATE", actorId: session.userId, fromStatus: "EFFECTIVE", toStatus: "TERMINATED", note: reason, metadata: JSON.stringify({ contractId: id, terminationDate }) } });
+        await tx.financeAuditLog.create({ data: { entityType: "CONTRACT_CONFIRMATION", entityId: confirmationId, action: "TERMINATE", actorId: session.userId, fromStatus: "EFFECTIVE", toStatus: "TERMINATED", note: reason, metadata: JSON.stringify({ contractId: id, terminationDate, reason }) } });
       });
       return NextResponse.json({ ok: true });
     }
@@ -127,8 +132,7 @@ export async function PUT(request: NextRequest, context: Context) {
   let persisted = false;
   try {
     const { id, confirmationId } = await context.params;
-    const { session, contract } = await authorizeConfirmation(id, "EDIT");
-    if (contract.status === "COMPLETED" && session.role !== "ADMIN") throw new AppError("合同签署完成后仅管理员可以上传或替换项目确认书", 403);
+    const { session } = await authorizeConfirmation(id, "EDIT");
     const replacement = request.nextUrl.searchParams.get("action") === "replace";
     if (Number(request.headers.get("content-length")) > 21 * 1024 * 1024) throw new AppError("文件超过20MB限制", 400);
     const form = await request.formData();
