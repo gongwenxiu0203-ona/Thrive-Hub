@@ -8,7 +8,7 @@ import {
   isAttachmentEntityType,
   requireAttachmentEntityAccess,
 } from "@/lib/attachmentAccess";
-import { FeaturePermissionError } from "@/lib/permissionGuard";
+import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
 
 const MIME: Record<string, string> = {
   ".pdf": "application/pdf",
@@ -48,17 +48,24 @@ export async function GET(
     where: { fileUrl: `/uploads/${safeName}` },
     select: { entityType: true, entityId: true },
   });
-  if (!attachment || !isAttachmentEntityType(attachment.entityType)) {
-    return NextResponse.json({ error: "文件不存在" }, { status: 404 });
-  }
+  const financeAttachment = !attachment ? await prisma.financeAttachment.findFirst({
+    where: { fileUrl: `/uploads/${safeName}`, entityType: { in: ["PAYMENT_REQUEST", "EXPENSE_CLAIM"] } },
+    select: { entityType: true, entityId: true },
+  }) : null;
+  if ((!attachment || !isAttachmentEntityType(attachment.entityType)) && !financeAttachment) return NextResponse.json({ error: "文件不存在" }, { status: 404 });
 
   try {
-    await requireAttachmentEntityAccess(
-      session,
-      attachment.entityType,
-      attachment.entityId,
-      "READ",
-    );
+    if (financeAttachment) {
+      const isPayment = financeAttachment.entityType === "PAYMENT_REQUEST";
+      const record = isPayment
+        ? await prisma.paymentRequest.findUnique({ where: { id: financeAttachment.entityId }, select: { applicantId: true } })
+        : await prisma.expenseClaim.findUnique({ where: { id: financeAttachment.entityId }, select: { employeeId: true } });
+      const ownerId = record && ("applicantId" in record ? record.applicantId : record.employeeId);
+      if (!ownerId) return NextResponse.json({ error: "文件不存在" }, { status: 404 });
+      if (session.userId !== ownerId) await requireFeaturePermission(session, isPayment ? "finance.payment_requests" : "finance.expenses", "READ");
+    } else if (attachment && isAttachmentEntityType(attachment.entityType)) {
+      await requireAttachmentEntityAccess(session, attachment.entityType, attachment.entityId, "READ");
+    }
   } catch (error) {
     if (
       error instanceof FeaturePermissionError ||

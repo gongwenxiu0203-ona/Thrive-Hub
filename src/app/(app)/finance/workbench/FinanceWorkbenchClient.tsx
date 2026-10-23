@@ -102,6 +102,10 @@ type OutgoingRow = {
   applicantId: string;
   applicantName: string;
   detail: string;
+  note?: string | null;
+  attachmentUrls?: string[];
+  details?: Array<{ label: string; value: string }>;
+  items?: Array<{ description: string; amount: number; expenseDate?: string; expenseType?: string; invoiceTitle?: string | null; invoiceNumber?: string | null; remark?: string | null; invoiceUrls?: string[] }>;
   reviewerId: string | null;
   reviewerName: string | null;
   approvalStatus: string | null;
@@ -109,6 +113,28 @@ type OutgoingRow = {
 };
 type BillingFilter =
   "ALL" | "SUBMITTED" | "PROCESSING" | "PARTIAL" | "COMPLETED" | "REJECTED";
+
+function OutgoingDetails({ row }: { row: OutgoingRow }) {
+  return <div className="space-y-3 text-sm">
+    <div className="grid gap-3 rounded-lg bg-[#faf8ff] p-4 sm:grid-cols-2">
+      <p><span className="text-xs text-slate-500">申请单</span><br />{row.requestNo}</p>
+      <p><span className="text-xs text-slate-500">申请人 / 审核人</span><br />{row.applicantName} / {row.reviewerName ?? "—"}</p>
+      <p><span className="text-xs text-slate-500">收款对象 / 报销人</span><br />{row.objectName}</p>
+      <p><span className="text-xs text-slate-500">金额</span><br />{money(row.amount, row.currency)}</p>
+      <p className="sm:col-span-2"><span className="text-xs text-slate-500">申请事项</span><br />{row.detail}</p>
+      {(row.details ?? []).map((field, index) => <p key={`${field.label}-${index}`}><span className="text-xs text-slate-500">{field.label}</span><br /><span className="whitespace-pre-wrap break-all">{field.value || "—"}</span></p>)}
+      <p className="sm:col-span-2"><span className="text-xs text-slate-500">备注</span><br /><span className="whitespace-pre-wrap break-words">{row.note?.trim() || "—"}</span></p>
+    </div>
+    {(row.items ?? []).length > 0 && <div className="rounded-lg border border-slate-200 p-3"><p className="mb-2 font-medium">{row.kind === "PAYMENT" ? "付款明细" : "报销明细"}</p>{row.items?.map((item, index) => <div key={index} className="border-t border-slate-100 py-2 first:border-0"><p>{item.description} · {money(item.amount, row.currency)}</p><p className="text-xs text-slate-500">{[item.expenseType, item.expenseDate, item.invoiceTitle, item.invoiceNumber].filter(Boolean).join(" · ")}</p>{item.remark && <p className="whitespace-pre-wrap text-xs">备注：{item.remark}</p>}<AttachmentLinks urls={item.invoiceUrls ?? []} label={`明细 ${index + 1} 附件`} /></div>)}</div>}
+    <AttachmentLinks urls={row.attachmentUrls ?? []} label={row.kind === "PAYMENT" ? "付款附件" : "报销附件"} />
+  </div>;
+}
+
+function AttachmentLinks({ urls, label }: { urls: string[]; label: string }) {
+  const safeUrls = urls.filter((url) => /^\/uploads\/[^/]/.test(url) || /^https?:\/\//i.test(url));
+  if (!safeUrls.length) return <p className="text-xs text-slate-500">{label}：无</p>;
+  return <div className="space-y-1 text-xs"><p className="font-medium text-slate-600">{label}</p>{safeUrls.map((url, index) => <a key={`${url}-${index}`} href={url} target="_blank" rel="noopener noreferrer" className="block break-all text-brand-700 underline hover:text-brand-900">{url.startsWith("/uploads/") ? decodeURIComponent(url.split("/").pop() || `附件 ${index + 1}`) : url}</a>)}</div>;
+}
 
 const money = (amount: number, currency: string) =>
   `${currency} ${amount.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -955,7 +981,7 @@ export function FinanceWorkbenchClient({
                       </td>
                       <td className="px-3 text-right"><div className="flex flex-wrap justify-end gap-x-3 gap-y-1">{row.approvalStatus === "PENDING" && row.reviewerId === currentUserId && <button type="button" className="font-medium text-brand-700 hover:underline" disabled={pending} onClick={() => { setReviewingOutgoing(row); setReviewReason(""); }}>审核</button>}{isAdmin && ["SUBMITTED", "REJECTED"].includes(row.status) && <button type="button" className="font-medium text-rose-700 hover:underline" onClick={() => { setSelectedOutgoing([row.id]); setBatchReason(""); setBatchDialog("DELETE"); }}>删除</button>}<button type="button" className="text-brand-700 hover:underline" onClick={() => setExpandedOutgoing(expandedOutgoing === row.id ? null : row.id)}>{expandedOutgoing === row.id ? "收起详情" : "详情"}</button>{row.status === "APPROVED" && canEditPayment && <button type="button" className="font-medium text-brand-700 hover:underline" onClick={() => { setPaying(row); setPaymentForm({ paidAt: new Date().toISOString().slice(0, 10), transactionNo: "", proofUrls: "", comment: "" }); }}>核销</button>}{row.paymentProofUrls.map((url, index) => <a key={url} href={url} target="_blank" rel="noreferrer" download className="font-medium text-brand-700 hover:underline">下载凭证{row.paymentProofUrls.length > 1 ? index + 1 : ""}</a>)}</div></td>
                     </tr>
-                    {expandedOutgoing === row.id && <tr><td colSpan={7} className="bg-[#faf8ff] px-5 py-4"><div className="grid gap-3 text-sm md:grid-cols-4"><p><span className="text-xs text-slate-500">申请人</span><br />{row.applicantName}</p><p><span className="text-xs text-slate-500">审核人</span><br />{row.reviewerName ?? "—"}</p><p><span className="text-xs text-slate-500">申请事项</span><br />{row.detail}</p><p><span className="text-xs text-slate-500">审批状态</span><br />{row.approvalStatus ?? row.status}</p></div>{row.applicantId === currentUserId && row.approvalStatus === "PENDING" && <label className="mt-3 block max-w-md text-xs font-medium text-slate-600">更换审核人<select className="input mt-1" value={row.reviewerId ?? ""} disabled={pending} onChange={(event) => changeOutgoingReviewer(row, event.target.value)}>{reviewerOptions.map((option) => <option key={option.id} value={option.id}>{option.label} · {option.email}</option>)}</select></label>}</td></tr>}
+                    {expandedOutgoing === row.id && <tr><td colSpan={7} className="bg-[#faf8ff] px-5 py-4"><OutgoingDetails row={row} />{row.applicantId === currentUserId && row.approvalStatus === "PENDING" && <label className="mt-3 block max-w-md text-xs font-medium text-slate-600">更换审核人<select className="input mt-1" value={row.reviewerId ?? ""} disabled={pending} onChange={(event) => changeOutgoingReviewer(row, event.target.value)}>{reviewerOptions.map((option) => <option key={option.id} value={option.id}>{option.label} · {option.email}</option>)}</select></label>}</td></tr>}
                     </Fragment>
                   ))}
                 </tbody>
@@ -1098,7 +1124,7 @@ export function FinanceWorkbenchClient({
       )}
       {reviewingOutgoing && (
         <Modal open onClose={() => !pending && setReviewingOutgoing(null)} title={reviewingOutgoing.kind === "PAYMENT" ? "审核付款申请" : "审核费用报销"} size="md">
-          <div className="space-y-4"><div className="grid gap-3 rounded-lg bg-[#faf8ff] p-4 text-sm sm:grid-cols-2"><p><span className="text-xs text-slate-500">申请单</span><br />{reviewingOutgoing.requestNo}</p><p><span className="text-xs text-slate-500">申请人</span><br />{reviewingOutgoing.applicantName}</p><p><span className="text-xs text-slate-500">对象</span><br />{reviewingOutgoing.objectName}</p><p><span className="text-xs text-slate-500">金额</span><br />{money(reviewingOutgoing.amount, reviewingOutgoing.currency)}</p><p className="sm:col-span-2"><span className="text-xs text-slate-500">申请事项</span><br />{reviewingOutgoing.detail}</p></div><label className="block text-sm"><span className="label">退回原因（选择退回时必填）</span><textarea className="input min-h-24" value={reviewReason} onChange={(event) => setReviewReason(event.target.value)} placeholder="请说明需要申请人补充或修改的内容" /></label><div className="flex justify-end gap-2"><button type="button" className="btn-secondary" disabled={pending} onClick={() => setReviewingOutgoing(null)}>取消</button><button type="button" className="btn-secondary text-rose-700" disabled={pending || reviewReason.trim().length < 2} onClick={() => startTransition(async () => { const result = await decideFinanceRequest(reviewingOutgoing.kind === "PAYMENT" ? "PAYMENT_REQUEST" : "EXPENSE_CLAIM", reviewingOutgoing.id, "REJECT", reviewReason); if (!result.ok) setError(result.error ?? "退回失败"); else { setReviewingOutgoing(null); router.refresh(); } })}>退回申请</button><button type="button" className="btn-primary" disabled={pending} onClick={() => startTransition(async () => { const result = await decideFinanceRequest(reviewingOutgoing.kind === "PAYMENT" ? "PAYMENT_REQUEST" : "EXPENSE_CLAIM", reviewingOutgoing.id, "APPROVE"); if (!result.ok) setError(result.error ?? "审核失败"); else { setReviewingOutgoing(null); router.refresh(); } })}>审核通过</button></div></div>
+          <div className="space-y-4"><OutgoingDetails row={reviewingOutgoing} /><label className="block text-sm"><span className="label">退回原因（选择退回时必填）</span><textarea className="input min-h-24" value={reviewReason} onChange={(event) => setReviewReason(event.target.value)} placeholder="请说明需要申请人补充或修改的内容" /></label><div className="flex justify-end gap-2"><button type="button" className="btn-secondary" disabled={pending} onClick={() => setReviewingOutgoing(null)}>取消</button><button type="button" className="btn-secondary text-rose-700" disabled={pending || reviewReason.trim().length < 2} onClick={() => startTransition(async () => { const result = await decideFinanceRequest(reviewingOutgoing.kind === "PAYMENT" ? "PAYMENT_REQUEST" : "EXPENSE_CLAIM", reviewingOutgoing.id, "REJECT", reviewReason); if (!result.ok) setError(result.error ?? "退回失败"); else { setReviewingOutgoing(null); router.refresh(); } })}>退回申请</button><button type="button" className="btn-primary" disabled={pending} onClick={() => startTransition(async () => { const result = await decideFinanceRequest(reviewingOutgoing.kind === "PAYMENT" ? "PAYMENT_REQUEST" : "EXPENSE_CLAIM", reviewingOutgoing.id, "APPROVE"); if (!result.ok) setError(result.error ?? "审核失败"); else { setReviewingOutgoing(null); router.refresh(); } })}>审核通过</button></div></div>
         </Modal>
       )}
       {paying && (

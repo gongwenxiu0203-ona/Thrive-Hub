@@ -278,12 +278,13 @@ export default async function FinanceWorkbenchPage({
       }),
       prisma.paymentRequest.findMany({
         where: {},
-        include: { supplier: { select: { name: true } } },
+        include: { supplier: { select: { name: true } }, items: { orderBy: { createdAt: "asc" } } },
         orderBy: { createdAt: "desc" },
         take: 100,
       }),
       prisma.expenseClaim.findMany({
         where: {},
+        include: { items: { orderBy: { sortOrder: "asc" } } },
         orderBy: { createdAt: "desc" },
         take: 100,
       }),
@@ -299,7 +300,7 @@ export default async function FinanceWorkbenchPage({
   const visibleBillingIds = billingRequests.map((row) => row.id);
   const visiblePaymentIds = paymentRequests.map((row) => row.id);
   const visibleExpenseIds = expenseClaims.map((row) => row.id);
-  const [financeAccounts, approvalSteps] = await Promise.all([
+  const [financeAccounts, approvalSteps, requestAttachments] = await Promise.all([
     prisma.financeAccountProfile.findMany({
       where: { status: "ACTIVE" },
       orderBy: [
@@ -323,6 +324,14 @@ export default async function FinanceWorkbenchPage({
         ],
       },
       orderBy: { stepNo: "asc" },
+    }),
+    prisma.financeAttachment.findMany({
+      where: { OR: [
+        { entityType: "PAYMENT_REQUEST", entityId: { in: visiblePaymentIds } },
+        { entityType: "EXPENSE_CLAIM", entityId: { in: visibleExpenseIds } },
+      ] },
+      select: { entityType: true, entityId: true, fileUrl: true },
+      orderBy: { createdAt: "asc" },
     }),
   ]);
   const stepsFor = (entityType: string, entityId: string) =>
@@ -545,6 +554,24 @@ export default async function FinanceWorkbenchPage({
                 applicantId: row.applicantId,
                 applicantName: financeUserMap.get(row.applicantId) ?? "—",
                 detail: row.reason,
+                note: row.note,
+                requestType: row.requestType,
+                payerEntity: row.payerEntity,
+                payeeSnapshot: row.payeeSnapshot,
+                scheduledAt: row.scheduledAt?.toISOString() ?? null,
+                relatedInvoiceId: row.relatedInvoiceId,
+                relatedReceiptId: row.relatedReceiptId,
+                items: row.items.map((item) => ({ description: item.description, amount: item.amount, currency: item.currency, invoiceUrls: parseStringList(item.invoiceUrls) })),
+                attachmentUrls: requestAttachments.filter((file) => file.entityType === "PAYMENT_REQUEST" && file.entityId === row.id).map((file) => file.fileUrl),
+                details: [
+                  { label: "付款类型", value: row.requestType },
+                  { label: "付款主体", value: row.payerEntity },
+                  { label: "付款账户", value: (() => { try { const account = JSON.parse(row.payeeSnapshot || "{}"); return `${account.payerAccountName ?? "—"} · ${account.payerAccountNumber ?? "—"}`; } catch { return "—"; } })() },
+                  { label: "收款账户", value: (() => { try { const account = JSON.parse(row.payeeSnapshot || "{}"); return `${account.accountName ?? "—"} · ${account.bankName ?? "—"} · ${account.accountNumber ?? "—"}`; } catch { return "—"; } })() },
+                  { label: "计划付款日期", value: row.scheduledAt?.toISOString().slice(0, 10) ?? "—" },
+                  { label: "关联票据", value: row.relatedInvoiceId ?? "—" },
+                  { label: "关联到账", value: row.relatedReceiptId ?? "—" },
+                ],
                 reviewerId: approvalSteps.find((step) => step.entityType === "PAYMENT_REQUEST" && step.entityId === row.id && step.stepNo === 1)?.assigneeId ?? null,
                 reviewerName: (() => { const id = approvalSteps.find((step) => step.entityType === "PAYMENT_REQUEST" && step.entityId === row.id && step.stepNo === 1)?.assigneeId; return id ? financeUserMap.get(id) ?? null : null; })(),
                 approvalStatus: approvalSteps.find((step) => step.entityType === "PAYMENT_REQUEST" && step.entityId === row.id && step.stepNo === 1)?.status ?? null,
@@ -564,6 +591,14 @@ export default async function FinanceWorkbenchPage({
                 applicantId: row.employeeId,
                 applicantName: financeUserMap.get(row.employeeId) ?? "—",
                 detail: row.reimbursementEntity,
+                note: row.note,
+                payeeSnapshot: row.payeeSnapshot,
+                items: row.items.map((item) => ({ description: item.description, expenseType: item.expenseType, expenseDate: item.expenseDate.toISOString(), amount: item.amount, invoiceTitle: item.invoiceTitle, invoiceNumber: item.invoiceNumber, invoiceUrls: parseStringList(item.invoiceUrls), remark: item.remark })),
+                attachmentUrls: requestAttachments.filter((file) => file.entityType === "EXPENSE_CLAIM" && file.entityId === row.id).map((file) => file.fileUrl),
+                details: [
+                  { label: "报销主体", value: row.reimbursementEntity },
+                  { label: "收款账户", value: (() => { try { const account = JSON.parse(row.payeeSnapshot || "{}"); return `${account.accountName ?? "—"} · ${account.accountNumber ?? "—"}`; } catch { return "—"; } })() },
+                ],
                 reviewerId: approvalSteps.find((step) => step.entityType === "EXPENSE_CLAIM" && step.entityId === row.id && step.stepNo === 1)?.assigneeId ?? null,
                 reviewerName: (() => { const id = approvalSteps.find((step) => step.entityType === "EXPENSE_CLAIM" && step.entityId === row.id && step.stepNo === 1)?.assigneeId; return id ? financeUserMap.get(id) ?? null : null; })(),
                 approvalStatus: approvalSteps.find((step) => step.entityType === "EXPENSE_CLAIM" && step.entityId === row.id && step.stepNo === 1)?.status ?? null,
