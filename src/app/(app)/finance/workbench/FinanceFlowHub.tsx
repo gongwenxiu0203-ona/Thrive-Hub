@@ -891,6 +891,8 @@ function AttachmentInput({ label, scope, value, onChange, disabled }: { label: s
 }
 
 function PaymentForm({ data, disabled, onSubmit }: FormProps) {
+  const currencies = ["CNY", "USD", "HKD", "EUR", "GBP", "JPY", "CAD", "AUD", "SGD", "CHF", "AED", "INR", "KRW", "THB", "MYR", "PHP", "IDR", "TWD"];
+  const currencySymbol: Record<string, string> = { CNY: "¥", USD: "$", HKD: "HK$", EUR: "€", GBP: "£", JPY: "¥", CAD: "C$", AUD: "A$", SGD: "S$", CHF: "CHF", AED: "د.إ", INR: "₹", KRW: "₩", THB: "฿", MYR: "RM", PHP: "₱", IDR: "Rp", TWD: "NT$" };
   const defaultReviewerId = data.reviewerOptions?.find((row) => row.subtitle?.toLowerCase() === "shallow.w@thraiveagency.com")?.id ?? data.reviewerOptions?.find((row) => `${row.label} ${row.subtitle ?? ""}`.toLowerCase().includes("shallow"))?.id ?? "";
   const [form, setForm] = useState({
     category: "SUPPLIER",
@@ -908,8 +910,15 @@ function PaymentForm({ data, disabled, onSubmit }: FormProps) {
     note: "",
     reviewerId: defaultReviewerId,
   });
-  const patch = (key: keyof typeof form, value: string) =>
-    setForm({ ...form, [key]: value });
+  const [showErrors, setShowErrors] = useState(false);
+  const payerAccounts = data.payerAccounts.filter((row) => !form.payerEntityId || (form.payerEntityId === "THRAIVE_HK" ? /thraive|香港|hong kong/i.test(`${row.subtitle ?? ""} ${row.legalEntityKey ?? ""}`) : /佛山|灵跃|foshan|lingyue/i.test(`${row.subtitle ?? ""} ${row.legalEntityKey ?? ""}`)));
+  const errors = [!form.payerEntityId && "请选择付款主体", !form.payerAccountId && "请选择付款账户", !form.reviewerId && "请选择审核人", !form.payeeName.trim() && "请填写收款对象", (!Number.isFinite(Number(form.amount)) || Number(form.amount) <= 0) && "请填写大于 0 的金额"].filter(Boolean) as string[];
+  const patch = (key: keyof typeof form, value: string) => setForm((current) => ({ ...current, [key]: value }));
+  const chooseEntity = (entityId: string) => {
+    const matching = data.payerAccounts.filter((row) => entityId === "THRAIVE_HK" ? /thraive|香港|hong kong/i.test(`${row.subtitle ?? ""} ${row.legalEntityKey ?? ""}`) : /佛山|灵跃|foshan|lingyue/i.test(`${row.subtitle ?? ""} ${row.legalEntityKey ?? ""}`));
+    const preferred = entityId === "THRAIVE_HK" ? matching.find((row) => /payoneer|payneer/i.test(`${row.label} ${row.bankName ?? ""}`)) : matching[0];
+    setForm((current) => ({ ...current, payerEntityId: entityId, payerAccountId: preferred?.id ?? matching[0]?.id ?? "" }));
+  };
   return (
     <FormGrid>
       <Field label="付款分类">
@@ -935,20 +944,20 @@ function PaymentForm({ data, disabled, onSubmit }: FormProps) {
       <SelectField
         label="付款主体"
         value={form.payerEntityId}
-        setValue={(v) => patch("payerEntityId", v)}
+        setValue={chooseEntity}
         options={data.companyEntities}
       />
       <SelectField
         label="付款账户"
         value={form.payerAccountId}
         setValue={(v) => patch("payerAccountId", v)}
-        options={data.payerAccounts}
+        options={payerAccounts}
       />
       <SelectField
         label="系统已有收款账户"
         value={form.payeeAccountId}
-        setValue={(v) => patch("payeeAccountId", v)}
-        options={data.payeeAccounts}
+        setValue={(v) => setForm((current) => ({ ...current, payeeAccountId: v, payeeName: data.payeeAccounts.find((row) => row.id === v)?.accountName ?? current.payeeName }))}
+        options={[{ id: "", label: "无收款账户（手动填写户名）" }, ...data.payeeAccounts]}
       />
       <TextField
         label="收款对象 / 户名"
@@ -960,11 +969,8 @@ function PaymentForm({ data, disabled, onSubmit }: FormProps) {
         value={form.reason}
         setValue={(v) => patch("reason", v)}
       />
-      <TextField
-        label="币种"
-        value={form.currency}
-        setValue={(v) => patch("currency", v.toUpperCase())}
-      />
+      <Field label="币种"><select className="input" value={form.currency} onChange={(e) => patch("currency", e.target.value)}>{currencies.map((code) => <option key={code} value={code}>{code} · {currencySymbol[code]}</option>)}</select></Field>
+      <p className="self-end pb-2 text-sm font-medium text-slate-700">金额符号：{currencySymbol[form.currency] ?? form.currency}</p>
       <TextField
         label="金额"
         type="number"
@@ -998,15 +1004,10 @@ function PaymentForm({ data, disabled, onSubmit }: FormProps) {
         />
       </Field>
       <Submit
-        disabled={
-          disabled ||
-          !form.payerEntityId ||
-          !form.payerAccountId ||
-          !form.reviewerId ||
-          !form.payeeName ||
-          Number(form.amount) <= 0
-        }
-        onClick={() =>
+        disabled={disabled}
+        onClick={() => {
+          setShowErrors(true);
+          if (errors.length) return;
           onSubmit({
             reviewerId: form.reviewerId,
             supplierName: form.payeeName,
@@ -1024,6 +1025,7 @@ function PaymentForm({ data, disabled, onSubmit }: FormProps) {
               (row) => row.id === form.payerEntityId,
             )?.label,
             payerAccountProfileId: form.payerAccountId,
+            payeeAccountProfileId: form.payeeAccountId || undefined,
             reason: form.reason,
             currency: form.currency,
             amount: Number(form.amount),
@@ -1032,11 +1034,12 @@ function PaymentForm({ data, disabled, onSubmit }: FormProps) {
             relatedReceiptId: form.receiptId || undefined,
             attachmentUrls: splitUrls(form.attachmentUrls),
             note: form.note,
-          })
-        }
+          });
+        }}
       >
         提交付款申请
       </Submit>
+      {showErrors && errors.length > 0 && <div role="alert" className="rounded-lg border border-rose-300 bg-rose-50 p-3 text-sm font-medium text-rose-800 md:col-span-2 xl:col-span-3">无法提交：{errors.join("；")}</div>}
     </FormGrid>
   );
 }

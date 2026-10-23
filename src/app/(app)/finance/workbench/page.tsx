@@ -644,6 +644,7 @@ export default async function FinanceWorkbenchPage({
                     label: account.name,
                     subtitle: `${account.legalEntity} · ${account.currency}`,
                     accountName: account.accountName,
+                    legalEntityKey: account.legalEntityKey ?? undefined,
                     accountNumber: account.accountNumber,
                     bankName: account.bankName ?? undefined,
                     currency: account.currency,
