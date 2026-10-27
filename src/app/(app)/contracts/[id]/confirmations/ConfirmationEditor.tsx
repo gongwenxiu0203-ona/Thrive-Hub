@@ -16,7 +16,7 @@ type Data = {
   options: { category: string; value: string }[]; confirmations: Row[];
 };
 const control = "w-full min-w-0 rounded-md border border-purple-200 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-slate-100";
-const states: Record<string, string> = { DRAFT: "草稿", EFFECTIVE: "已签署生效", ACTIVE: "已签署生效", TERMINATED: "已终止", VOID: "已作废" };
+const states: Record<string, string> = { DRAFT: "草稿", EFFECTIVE: "已签署生效", ACTIVE: "已签署生效", TERMINATED: "已终止", VOID: "已作废", VOIDED: "已作废" };
 async function responseBody(response: Response, fallback: string) {
   const text = await response.text();
   if (!text) return {} as Record<string, unknown>;
@@ -125,7 +125,9 @@ export function ConfirmationEditor({ contractId, focusId, highlightMissing = fal
       next.partyAContact = { name: data.contract.partyAContact || "", email: data.contract.partyAEmail || "", phone: data.contract.partyAPhone || "" };
       next.partyBContact = { name: data.contract.partyBContact || "", email: data.contract.partyBEmail || "", phone: data.contract.partyBPhone || "" };
       next.brand = data.contract.customer?.brandName || "";
-      next.receivingAccountIds = data.bankAccounts.map(account => account.id);
+      // A legacy confirmation selects its own account independently; never
+      // preselect every company account returned by the catalogue.
+      next.receivingAccountIds = data.contract.contractMode === "FRAMEWORK" ? data.bankAccounts.map(account => account.id) : [];
     }
     setReplacement(asReplacement); setEditing(row); setDraft(next); setReason(""); setError(""); setFormError(""); setFormIssues([]); setNotice(""); setNewNumber(row?.number || ""); setNumberReason("");
   }
@@ -253,6 +255,18 @@ export function ConfirmationEditor({ contractId, focusId, highlightMissing = fal
         : "签署原件已上传，项目确认书已签署生效并生成独立对账。");
     } catch (e) { setError(e instanceof Error ? e.message : "上传失败"); } finally { setBusy(false); }
   }
+  async function retryActivation(row: Row) {
+    setBusy(true); setError(""); setNotice("");
+    try {
+      await request(`${base}/${row.id}?action=activate`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expectedVersion: row.version }),
+      });
+      await load();
+      setNotice(`项目确认书 ${row.number} 已签署生效，并生成独立对账。`);
+    } catch (e) { setError(e instanceof Error ? e.message : "生效失败，请检查确认书字段与签署文件"); }
+    finally { setBusy(false); }
+  }
   function beginRecordAction(row: Row, type: "DELETE" | "TERMINATE") {
     setRecordAction({ id: row.id, type }); setDeleteReason(""); setTerminationDate(""); setTerminationReason(""); setError(""); setNotice("");
   }
@@ -282,7 +296,7 @@ export function ConfirmationEditor({ contractId, focusId, highlightMissing = fal
     {notice && <div role="status" className="rounded-lg bg-green-50 p-4 text-sm text-green-800">{notice}</div>}
     {!data && !error && <div className="h-32 rounded-lg bg-slate-100" aria-label="正在加载确认书" />}
     {data && <>
-      {data.contract.contractMode !== "FRAMEWORK" && <p className="rounded-lg bg-amber-50 p-4 text-sm text-amber-900">这是历史合同：可录入确认书草稿，但暂不能生效。不会转换旧合同，也不会覆盖或重复生成历史收费。</p>}
+      {data.contract.contractMode !== "FRAMEWORK" && <section className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950"><p>历史合同原有条款继续对账；新增项目确认书生效后独立计费。每份确认书可从启用中的公司账户独立选择乙方收款账户，生效时冻结所选账户信息，不改原合同签署文件或历史账单。</p><p>请核对账户确实属于该确认书约定的乙方；若签约主体或收款账户发生变更，应保留相应补充协议。</p></section>}
       <section className="overflow-hidden rounded-lg border border-purple-100 bg-white">
         {selectedIds.length > 0 && <div className="flex flex-wrap items-center gap-3 border-b border-purple-100 bg-purple-50 px-4 py-3 text-sm">
           <span className="font-medium text-purple-900">已选择 {selectedIds.length} 份确认书</span>
@@ -299,7 +313,7 @@ export function ConfirmationEditor({ contractId, focusId, highlightMissing = fal
             <tbody>{data.confirmations.map(row => <tr id={`confirmation-${row.id}`} key={row.id} className={`scroll-mt-24 border-t align-top ${focusId === row.id ? "border-purple-300 bg-purple-50/60" : "border-slate-100"}`}>
               <td className="px-4 py-3"><input aria-label={`选择${row.number}`} type="checkbox" className="accent-purple-600" checked={selectedIds.includes(row.id)} onChange={e => setSelectedIds(current => e.target.checked ? [...new Set([...current, row.id])] : current.filter(id => id !== row.id))} /></td>
               <td className="px-4 py-3"><div className="font-medium text-slate-900">{row.number}</div></td>
-              <td className="px-4 py-3">{states[row.status] || row.status}{row.pendingDraft && <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">替换草稿</span>}{row.signedFileUrl && <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-800">已上传签署原件</span>}</td>
+              <td className="px-4 py-3">{states[row.status] || row.status}{row.pendingDraft && <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">替换草稿</span>}{row.signedFileUrl && <span className={`ml-2 rounded-full px-2 py-0.5 text-xs ${row.status === "DRAFT" ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"}`}>{row.status === "DRAFT" ? "已上传原件，待生效" : "已上传签署原件"}</span>}</td>
               <td className="px-4 py-3">v{row.businessVersion}{row.pendingDraft && <span className="text-slate-500"> → v{row.businessVersion + 1}</span>}</td>
               <td className="px-4 py-3">{row.draft.startDate || "未填写"} — {row.draft.endDate || "未填写"}</td>
               <td className="px-4 py-3 text-slate-600">{row.draft.workflowMode === "SIGNED_UPLOAD" ? "上传已签署确认书" : "网站创建确认书"}</td>
@@ -307,7 +321,8 @@ export function ConfirmationEditor({ contractId, focusId, highlightMissing = fal
                 <button className="text-purple-700" disabled={busy} onClick={() => open(row)}>{data.canEdit && row.status === "DRAFT" ? "修改草稿" : "查看"}</button>
                 {data.canEdit && row.pendingDraft && <button className="text-amber-700" disabled={busy} onClick={() => open(row, true, row.pendingDraft!.workflowMode)}>继续修改替换草稿</button>}
                 {!row.signedFileUrl && row.draft.workflowMode === "FORM" && ["SIGNING", "COMPLETED"].includes(data.contract.status) && <button className="text-purple-700" disabled={busy} onClick={() => downloadConfirmation(row)}>导出 Word</button>}
-                {data.canEdit && ((row.status === "DRAFT" && !row.signedFileUrl) || (row.status === "EFFECTIVE" && row.pendingDraft && !row.pendingSignedFileUrl)) && <button className="text-purple-700" disabled={busy} onClick={() => toggleUpload(row)}>{row.pendingDraft ? "上传新版本签署文件" : "上传签署文件"}</button>}
+                {data.canEdit && ((row.status === "DRAFT") || (row.status === "EFFECTIVE" && row.pendingDraft && !row.pendingSignedFileUrl)) && <button className="text-purple-700" disabled={busy} onClick={() => toggleUpload(row)}>{row.pendingDraft ? "上传新版本签署文件" : row.signedFileUrl ? "重新上传签署文件" : "上传签署文件"}</button>}
+                {data.canEdit && row.status === "DRAFT" && row.signedFileUrl && <button className="font-medium text-amber-700" disabled={busy} onClick={() => retryActivation(row)}>重试生效并生成对账</button>}
                 {row.signedFileUrl && <a className="text-purple-700" href={`${base}/${row.id}?download=1`}>下载原件</a>}
                 {data.canManage && row.status === "DRAFT" && <button className="text-red-700" disabled={busy} onClick={() => beginRecordAction(row, "DELETE")}>删除</button>}
                 {data.canEdit && row.status === "EFFECTIVE" && <button className="text-amber-700" disabled={busy} onClick={() => beginRecordAction(row, "TERMINATE")}>终止</button>}
@@ -337,7 +352,7 @@ export function ConfirmationEditor({ contractId, focusId, highlightMissing = fal
         </div>
         <p className="text-sm text-slate-600">甲方：{data.contract.partyA || "主合同未填写"} · 联系人默认带自主合同，可按本项目约定修改。</p>
         {(["partyAContact", "partyBContact"] as const).map((key, i) => <div key={key}><h3 className="mb-3 font-medium">{i ? "乙方" : "甲方"}指定对接人</h3>{i === 1 && <label className="mb-3 block text-sm">从系统人员选择<select className={control} defaultValue="" onChange={e => { const user = data.users.find(u => u.id === e.target.value); update(key, user ? { name: user.name, email: user.email, phone: user.phone || "" } : { name: "", email: "", phone: "" }); }}><option value="">手动填写 / 修改</option>{data.users.map(user => <option key={user.id} value={user.id}>{user.name}</option>)}</select></label>}<div className="grid gap-4 sm:grid-cols-3">{(["name", "email", "phone"] as const).map((k, index) => <Field key={k} label={["姓名（可修改）", "电子邮箱", "电话"][index]}><input type={k === "email" ? "email" : "text"} className={control} value={draft[key][k]} onChange={e => update(key, { ...draft[key], [k]: e.target.value })} /></Field>)}</div></div>)}
-        <div><h3 className="mb-3 font-medium">乙方收款账户（可多选）</h3><div className="grid gap-2 sm:grid-cols-2">{data.bankAccounts.map(a => <label key={a.id} className="flex items-start gap-2 rounded-md border border-slate-200 p-3 text-sm"><input type="checkbox" className="mt-1 accent-purple-600" checked={draft.receivingAccountIds.includes(a.id)} onChange={e => update("receivingAccountIds", e.target.checked ? [...draft.receivingAccountIds, a.id] : draft.receivingAccountIds.filter(id => id !== a.id))} /><span className="min-w-0 break-words">{a.name} · {a.accountName}<span className="mt-1 block text-slate-600">{a.bankName} · {a.accountNumber}</span></span></label>)}</div>{!data.bankAccounts.length && <p className="text-sm text-amber-800">没有可用收款账户，请先在财务资料中维护对应乙方账户。</p>}</div>
+        <div><h3 className="mb-3 font-medium">乙方收款账户（可多选）</h3><p className="mb-2 text-xs text-slate-600">{data.contract.contractMode === "FRAMEWORK" ? "仅显示主合同约定的有效账户。" : "显示所有启用的公司收款账户；本确认书独立选择并冻结快照。"}</p><div className="grid gap-2 sm:grid-cols-2">{data.bankAccounts.map(a => <label key={a.id} className="flex items-start gap-2 rounded-md border border-slate-200 p-3 text-sm"><input type="checkbox" className="mt-1 accent-purple-600" checked={draft.receivingAccountIds.includes(a.id)} onChange={e => update("receivingAccountIds", e.target.checked ? [...draft.receivingAccountIds, a.id] : draft.receivingAccountIds.filter(id => id !== a.id))} /><span className="min-w-0 break-words">{a.name} · {a.accountName}<span className="mt-1 block text-slate-600">{a.bankName} · {a.accountNumber}</span></span></label>)}</div>{!data.bankAccounts.length && <p className="text-sm text-amber-800">暂无可用公司收款账户，请先在财务资料中维护并启用。</p>}</div>
         <div><h3 className="font-medium">推广范围</h3><p className="mb-3 mt-1 text-sm text-slate-600">一个国家（站点）一行；平台、Program、第三方平台可多选或手动新增。</p><div className="divide-y divide-slate-100">{draft.scopes.map((scope, i) => <div key={i} className="grid min-w-0 gap-3 py-4 sm:grid-cols-2 xl:grid-cols-4">{(["country", "salesPlatforms", "programs", "thirdPartyPlatforms"] as const).map((key, j) => <Choices key={key} label={["国家（站点）", "销售平台", "使用 Program", "第三方平台"][j]} values={key === "country" ? scope.country ? [scope.country] : [] : scope[key]} options={opts(["COUNTRY", "SALES_PLATFORM", "PROGRAM", "THIRD_PARTY_PLATFORM"][j])} multiple={key !== "country"} onChange={values => update("scopes", draft.scopes.map((s, idx) => idx === i ? { ...s, [key]: key === "country" ? values[0] || "" : values } : s))} />)}<button type="button" className="justify-self-start text-sm text-red-700" onClick={() => update("scopes", draft.scopes.filter((_, idx) => idx !== i))}>移除此行</button></div>)}</div><Button onClick={() => update("scopes", [...draft.scopes, { country: "", salesPlatforms: [], programs: [], thirdPartyPlatforms: ["无"] }])}>＋ 添加国家 / 站点</Button></div>
         <div className="space-y-3"><Field label="推广商品范围"><select className={control} value={draft.productScope} onChange={e => update("productScope", e.target.value as Draft["productScope"])}><option value="ALL">全店商品</option><option value="SPECIFIED">指定推广商品</option></select></Field>{draft.productScope === "SPECIFIED" && <>{draft.products.map((product, i) => <div key={i} className="grid gap-3 border-t border-slate-100 py-3 sm:grid-cols-2 lg:grid-cols-4">{(["name", "asinOrUrl", "country", "note"] as const).map((key, j) => key === "country" ? <Choices key={key} label="商品站点" multiple={false} values={product.country ? [product.country] : []} options={opts("COUNTRY")} onChange={v => update("products", draft.products.map((p, idx) => idx === i ? { ...p, country: v[0] || "" } : p))} /> : <Field key={key} label={["商品名称", "ASIN / 商品链接", "站点", "备注"][j]}><input className={control} value={product[key]} onChange={e => update("products", draft.products.map((p, idx) => idx === i ? { ...p, [key]: e.target.value } : p))} /></Field>)}<button type="button" className="justify-self-start text-sm text-red-700" onClick={() => update("products", draft.products.filter((_, idx) => idx !== i))}>移除商品</button></div>)}<Button onClick={() => update("products", [...draft.products, { name: "", asinOrUrl: "", country: "", note: "" }])}>＋ 添加商品</Button></>}</div>
         <Field label="服务范围说明"><textarea className={control} rows={3} value={draft.serviceDescription} onChange={e => update("serviceDescription", e.target.value)} /></Field>

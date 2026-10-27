@@ -8,11 +8,19 @@ import { reconciliationSalesRecordWhere } from "@/lib/activeSalesScope";
 import { errorResponse } from "@/lib/appError";
 import { readReconciliationConfirmation } from "@/lib/reconciliationConfirmation";
 import type { ContractConfirmationDraft } from "@/lib/contractConfirmationDraft";
-import { buildBiSnapshot, canonicalRegion, readBiSnapshot, writeBiSnapshot } from "@/lib/reconciliationBiDetails";
+import { buildBiSnapshot, readBiSnapshot, writeBiSnapshot } from "@/lib/reconciliationBiDetails";
+import { findAmbiguousCommissionOverlap } from "@/lib/reconciliationCommissionOverlap";
 
-function legacyDraft(rec: { customer: { brandName: string }; contract: { targetSite: string | null; promoPlatform: string | null } }): ContractConfirmationDraft {
-  const countries = String(rec.contract.targetSite ?? "").split(/[、,，;/]/).map((value) => value.trim()).filter(Boolean);
-  const platforms = String(rec.contract.promoPlatform ?? "").split(/[、,，;/]/).map((value) => value.trim()).filter(Boolean);
+function legacyDraft(rec: { customer: { brandName: string }; contract: { targetSite: string | null; promoPlatform: string | null }; legacyBillingUnit?: { scopeSnapshot: string } | null }): ContractConfirmationDraft {
+  let source = rec.contract;
+  if (rec.legacyBillingUnit) {
+    try {
+      const snapshot = JSON.parse(rec.legacyBillingUnit.scopeSnapshot) as { targetSite?: string | null; promoPlatform?: string | null };
+      source = { targetSite: snapshot.targetSite ?? null, promoPlatform: snapshot.promoPlatform ?? null };
+    } catch { source = { targetSite: null, promoPlatform: null }; }
+  }
+  const countries = String(source.targetSite ?? "").split(/[、,，;/]/).map((value) => value.trim()).filter(Boolean);
+  const platforms = String(source.promoPlatform ?? "").split(/[、,，;/]/).map((value) => value.trim()).filter(Boolean);
   return {
     brand: rec.customer.brandName,
     scopes: countries.map((country) => ({ country, salesPlatforms: [], programs: platforms, thirdPartyPlatforms: [] })),
@@ -37,6 +45,7 @@ export async function POST(
       include: {
         customer: { select: { brandName: true } },
         contract: { select: { targetSite: true, promoPlatform: true } },
+        legacyBillingUnit: { select: { scopeSnapshot: true } },
       },
     });
     if (!rec) return NextResponse.json({ error: "对账记录不存在或您无权访问" }, { status: 404 });
@@ -54,21 +63,9 @@ export async function POST(
       if (["CAMPAIGN", "PUBLISHER"].includes(confirmation.commission.basis)) {
         return NextResponse.json({ error: "该确认书按 Campaign 或联盟伙伴计佣，必须先核定订单归属，不能直接使用客户 BI 总额" }, { status: 400 });
       }
-      const overlapping = await prisma.customerReconciliation.findMany({ where: {
-        id: { not: rec.id }, customerId: rec.customerId, deletedAt: null,
-        projectConfirmationId: { not: null }, reconcileType: { in: ["COMMISSION_ONLY", "BOTH"] },
-        planStatus: { not: "CANCELLED" }, periodStart: { lte: rec.periodEnd }, periodEnd: { gte: rec.periodStart },
-      }, select: { ruleSnapshot: true, projectConfirmationId: true } });
-      const currentRegions = new Set(confirmation.scopes.map(scope => canonicalRegion(scope.country)));
-      const hasAmbiguousOverlap = overlapping.some((other) => {
-        const otherConfirmation = readReconciliationConfirmation(other);
-        if (!otherConfirmation) return true;
-        const otherRegions = otherConfirmation.scopes.map(scope => canonicalRegion(scope.country));
-        if (!currentRegions.size || !otherRegions.length) return true;
-        return otherRegions.some(region => currentRegions.has(region));
-      });
-      if (hasAmbiguousOverlap) return NextResponse.json({ error: "同一客户本期的多份计佣确认书包含重复或无法识别的站点，请先完成订单唯一归属后再核定销售额" }, { status: 409 });
     }
+    const overlap = await findAmbiguousCommissionOverlap(rec);
+    if (overlap) return NextResponse.json({ error: "同一客户本期的旧合同计费项目或项目确认书存在重叠计佣范围，请先核定订单唯一归属，不能对两项费用重复拉取同一销售额" }, { status: 409 });
 
     // 先限定客户和自然日周期，再严格按确认书的品牌、地区、联盟平台和商品范围筛选。
     const salesRecordWhere = reconciliationSalesRecordWhere({

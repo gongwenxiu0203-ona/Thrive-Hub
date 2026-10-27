@@ -871,6 +871,8 @@ export async function getInvoiceReconciliationPrefill(
         finalCommissionAmount: true,
         finalFeeAmount: true,
         projectConfirmationId: true,
+        projectConfirmation: { select: { number: true } },
+        legacyBillingUnit: { select: { title: true } },
         ruleSnapshot: true,
         confirmedCommissionRate: true,
         invoiceLinks: {
@@ -981,6 +983,9 @@ export async function getInvoiceReconciliationPrefill(
           `${isFixedFee ? "月度服务费" : "销售佣金"}（${period.periodLabel}）的待支付金额必须大于 0，暂不能开具 Invoice`,
         );
       }
+      const sourceLabel = row.projectConfirmation?.number
+        ? `项目确认书 ${row.projectConfirmation.number}`
+        : row.legacyBillingUnit?.title ?? "原合同条款";
       const base = {
         projectConfirmationId: row.projectConfirmationId,
         feeType: isFixedFee
@@ -989,7 +994,7 @@ export async function getInvoiceReconciliationPrefill(
         currency,
         periodType: period.periodType,
         periodLabel: period.periodLabel,
-        description: isFixedFee ? "月度服务费" : "销售佣金",
+        description: `${sourceLabel} · ${isFixedFee ? "月度服务费" : "销售佣金"}`,
         quantity: 1,
       };
       const details = isFixedFee ? null : readBiSnapshot(row.ruleSnapshot)?.details;
@@ -1003,7 +1008,7 @@ export async function getInvoiceReconciliationPrefill(
         return {
           ...base,
           id: `reconciliation-${row.id}-${detail.key}`,
-          description: `销售佣金 · ${detail.brand} · ${detail.region} · ${detail.affiliatePlatform}`,
+          description: `${sourceLabel} · 销售佣金 · ${detail.brand} · ${detail.region} · ${detail.affiliatePlatform}`,
           promoPlatform: detail.affiliatePlatform,
           targetSite: detail.region,
           affiliatePlatform: detail.affiliatePlatform,

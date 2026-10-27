@@ -129,6 +129,8 @@ export default async function CustomerReconciliationPage({
     prisma.customerReconciliation.findMany({
       where: { AND: [{ customerId, deletedAt: null, planStatus: { not: "CANCELLED" } }, access.scope] },
       include: {
+        legacyBillingUnit: { select: { id: true, title: true } },
+        projectConfirmation: { select: { id: true, number: true } },
         contract: {
           select: {
             id: true,

@@ -34,13 +34,19 @@ export async function activateContractConfirmation(
     });
     if (!sow || sow.contract.deletedAt || sow.contract.type !== "BRAND") throw new AppError("确认书或所属品牌方合同不存在", 404);
     const contract = sow.contract;
-    if (contract.contractMode !== "FRAMEWORK") throw new AppError("旧合同不能直接转为独立确认书计费，请新建主格式合同；历史账单不会自动转换", 400);
-    if (contract.status !== "COMPLETED") throw new AppError("主格式合同签署完成后才能生效确认书", 400);
-    if (!contract.fileUrl) throw new AppError("主格式合同缺少签署原件，请先上传盖章版", 400);
-    await assertSignedOriginalExists(contract.fileUrl);
+    if (contract.status !== "COMPLETED") throw new AppError("合同签署完成后才能生效确认书", 400);
+    // Legacy contracts can be completed without a separately archived master
+    // original. A newly added confirmation has its own signed original below;
+    // only a framework master must supply the master signed document as well.
+    if (contract.contractMode === "FRAMEWORK") {
+      if (!contract.fileUrl) throw new AppError("主格式合同缺少签署原件，请先归档签署原件", 400);
+      await assertSignedOriginalExists(contract.fileUrl);
+    }
     const masterAccountCount = await tx.contractReceivingAccount.count({ where: { contractId: contract.id } });
-    const masterMissing = frameworkMissingFields(contract, masterAccountCount);
-    if (masterMissing.length) throw new AppError(`主格式合同资料不完整：${masterMissing.join("、")}`, 400);
+    if (contract.contractMode === "FRAMEWORK") {
+      const masterMissing = frameworkMissingFields(contract, masterAccountCount);
+      if (masterMissing.length) throw new AppError(`主格式合同资料不完整：${masterMissing.join("、")}`, 400);
+    }
     if (!contract.customerId || contract.customer?.deletedAt || contract.customer?.status !== "COOPERATING") {
       throw new AppError("客户必须处于合作中状态", 400);
     }
@@ -59,9 +65,12 @@ export async function activateContractConfirmation(
       where: { id: { in: draft.receivingAccountIds }, status: "ACTIVE", accountType: { in: ["COMPANY_PAYER", "COMPANY_BANK"] } },
     });
     if (accounts.length !== draft.receivingAccountIds.length) throw new AppError("部分乙方收款账户已停用或不属于公司账户，请重新选择", 400);
-    const contractedAccounts = await tx.contractReceivingAccount.findMany({ where: { contractId: contract.id } });
-    const allowed = new Set(contractedAccounts.map((account) => account.financeProfileId));
-    if (draft.receivingAccountIds.some((id) => !allowed.has(id))) throw new AppError("确认书收款账户必须选自主格式合同约定的账户", 400);
+    const contractedAccounts = contract.contractMode === "FRAMEWORK"
+      ? await tx.contractReceivingAccount.findMany({ where: { contractId: contract.id } }) : [];
+    if (contract.contractMode === "FRAMEWORK") {
+      const allowed = new Set(contractedAccounts.map((account) => account.financeProfileId));
+      if (draft.receivingAccountIds.some((id) => !allowed.has(id))) throw new AppError("主格式合同的确认书只能选择主合同约定的收款账户", 400);
+    }
     const periods = buildConfirmationPeriods({
       confirmationId: sow.id, automationNamespace: options.automationNamespace,
       startDate: draft.startDate!, endDate: draft.endDate!,
@@ -73,8 +82,18 @@ export async function activateContractConfirmation(
     const ruleSnapshot = JSON.stringify({
       schemaVersion: 1, data: draft, confirmationId: sow.id, confirmationNumber: sow.number, confirmationVersion: version,
       accountSnapshots: draft.receivingAccountIds.map((id) => {
-        const account = contractedAccounts.find((item) => item.financeProfileId === id)!;
-        return { profileId: id, snapshot: JSON.parse(account.snapshot) };
+        const bound = contractedAccounts.find((item) => item.financeProfileId === id);
+        if (bound) return { profileId: id, snapshot: JSON.parse(bound.snapshot) };
+        const account = accounts.find((item) => item.id === id)!;
+        return { profileId: id, snapshot: {
+          schemaVersion: 1, profileId: account.id, id: account.id,
+          name: account.name, legalEntity: account.legalEntity,
+          accountName: account.accountName, accountNumber: account.accountNumber,
+          bankName: account.bankName, swiftCode: account.swiftCode,
+          bankAddress: account.bankAddress, routingNumber: account.routingNumber,
+          bankAccountType: account.bankAccountType, payeeAddress: account.payeeAddress,
+          currency: account.currency,
+        } };
       }),
     });
     const updated = await tx.contractProjectConfirmation.updateMany({
@@ -187,10 +206,13 @@ export async function finalizeExistingUploadedConfirmation(
 ) {
   const row = await prisma.contractProjectConfirmation.findFirst({
     where: { id: confirmationId, contractId },
-    include: { contract: { select: { id: true, uploadType: true, status: true, fileUrl: true } } },
+    include: { contract: { select: { id: true, contractMode: true, uploadType: true, status: true, fileUrl: true } } },
   });
   if (!row) throw new AppError("确认书不存在", 404);
-  if (row.contract.uploadType !== "EXISTING") return { confirmation: row, activated: false };
+  // Only a new-format master explicitly uploaded together with its confirmation
+  // may share the combined signed original. A legacy original is not proof that
+  // a subsequently added confirmation was signed.
+  if (row.contract.contractMode !== "FRAMEWORK" || row.contract.uploadType !== "EXISTING") return { confirmation: row, activated: false };
   if (row.status === "EFFECTIVE") return { confirmation: row, activated: true };
   if (row.status !== "DRAFT" || row.version !== expectedVersion) throw new AppError("确认书状态或版本已变更，请刷新后重试", 409);
   if (row.contract.status !== "COMPLETED" || !row.contract.fileUrl) throw new AppError("上传已有合同缺少已签署原件，请返回主合同补充", 400);

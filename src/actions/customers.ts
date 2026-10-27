@@ -12,7 +12,7 @@ import { customerScope } from "@/lib/dataScope";
 import { requireFeaturePermission } from "@/lib/permissionGuard";
 import { parseDateOnlyUtc } from "@/lib/dateRange";
 import {
-  closeContractReconciliationPlans,
+  closeCustomerReconciliationPlans,
   ensureCustomerPlansForCooperatingCustomer,
 } from "@/lib/customerReconciliationPlan";
 
@@ -491,18 +491,63 @@ export async function updateCustomerStatus(id: string, status: string, cooperati
   if (status === "COOPERATION_DONE" && !parsedEndDate) {
     throw new Error("结束合作时必须填写有效的合作结束日期");
   }
-  const linkedContracts = status === "COOPERATION_DONE"
-    ? await prisma.contract.findMany({
-        where: {
-          customerId: customer.id,
-          deletedAt: null,
-          status: { not: "TERMINATED" },
-        },
-        select: { id: true, contractNo: true, status: true, endDate: true },
-      })
-    : [];
-  const onlyContract = linkedContracts.length === 1 ? linkedContracts[0] : null;
-  await prisma.$transaction(async (tx) => {
+  const terminatedContractIds = await prisma.$transaction(async (tx) => {
+    const linkedContracts = status === "COOPERATION_DONE"
+      ? await tx.contract.findMany({ where: { customerId: customer.id, deletedAt: null }, select: { id: true, contractNo: true, status: true, startDate: true, endDate: true } })
+      : [];
+    if (status === "COOPERATION_DONE" && parsedEndDate) {
+      // Financially committed periods must be resolved before any contract or customer status changes.
+      await closeCustomerReconciliationPlans(customer.id, parsedEndDate, session.userId, tx);
+      for (const contract of linkedContracts) {
+        const auditReason = `客户结束合作，合同 ${contract.contractNo} 于 ${parsedEndDate.toISOString().slice(0, 10)} 终止`;
+        const confirmations = await tx.contractProjectConfirmation.findMany({
+          where: { contractId: contract.id, status: { in: ["EFFECTIVE", "DRAFT"] } },
+          select: { id: true, status: true, startDate: true, endDate: true },
+        });
+        for (const confirmation of confirmations) {
+          const nextStatus = confirmation.status === "EFFECTIVE" ? "TERMINATED" : "VOIDED";
+          await tx.contractProjectConfirmation.update({ where: { id: confirmation.id }, data: {
+            status: nextStatus,
+            ...(nextStatus === "TERMINATED" ? {
+              terminatedAt: parsedEndDate,
+              endDate: confirmation.startDate && parsedEndDate < confirmation.startDate
+                ? confirmation.endDate
+                : confirmation.endDate && confirmation.endDate < parsedEndDate ? confirmation.endDate : parsedEndDate,
+            } : {}),
+            version: { increment: 1 },
+          } });
+          await tx.financeAuditLog.create({ data: {
+            entityType: "CONTRACT_CONFIRMATION", entityId: confirmation.id, action: "TERMINATE_WITH_CUSTOMER",
+            actorId: session.userId, fromStatus: confirmation.status, toStatus: nextStatus, note: auditReason,
+            metadata: JSON.stringify({ contractId: contract.id, customerId: customer.id }),
+          } });
+        }
+        const units = await tx.contractLegacyBillingUnit.findMany({ where: { contractId: contract.id, status: "ACTIVE" }, select: { id: true, startDate: true, endDate: true } });
+        for (const unit of units) {
+          await tx.contractLegacyBillingUnit.update({ where: { id: unit.id }, data: {
+            status: "TERMINATED", terminatedAt: parsedEndDate, terminationReason: auditReason,
+            endDate: parsedEndDate < unit.startDate ? unit.endDate : unit.endDate < parsedEndDate ? unit.endDate : parsedEndDate,
+            version: { increment: 1 },
+          } });
+          await tx.financeAuditLog.create({ data: {
+            entityType: "CONTRACT_LEGACY_BILLING_UNIT", entityId: unit.id, action: "TERMINATE_WITH_CUSTOMER",
+            actorId: session.userId, fromStatus: "ACTIVE", toStatus: "TERMINATED", note: auditReason,
+            metadata: JSON.stringify({ contractId: contract.id, customerId: customer.id }),
+          } });
+        }
+        if (contract.status !== "TERMINATED") {
+          const revisedEndDate = contract.startDate && parsedEndDate < contract.startDate ? contract.endDate : parsedEndDate;
+          await tx.contract.update({ where: { id: contract.id }, data: { status: "TERMINATED", endDate: revisedEndDate } });
+          await tx.task.updateMany({ where: { contractId: contract.id, deletedAt: null, status: { notIn: ["DONE", "CANCELLED"] } }, data: { status: "CANCELLED", returnReason: auditReason } });
+          await tx.adminAuditLog.create({ data: {
+            actorId: session.userId, action: "AUTO_TERMINATE_CUSTOMER_CONTRACT", module: "contracts",
+            targetType: "Contract", targetId: contract.id, summary: auditReason,
+            beforeJson: JSON.stringify({ status: contract.status, endDate: contract.endDate }),
+            afterJson: JSON.stringify({ status: "TERMINATED", endDate: revisedEndDate, terminatedAt: parsedEndDate }),
+          } });
+        }
+      }
+    }
     await tx.customer.update({
       where: { id: customer.id },
       data: {
@@ -526,39 +571,15 @@ export async function updateCustomerStatus(id: string, status: string, cooperati
         afterJson: JSON.stringify({ status, cooperationEndDate: parsedEndDate }),
       },
     });
-    if (status === "COOPERATION_DONE" && parsedEndDate && onlyContract) {
-      await tx.contract.update({
-        where: { id: onlyContract.id },
-        data: { status: "TERMINATED", endDate: parsedEndDate, updatedAt: new Date() },
-      });
-      await tx.adminAuditLog.create({
-        data: {
-          actorId: session.userId,
-          action: "AUTO_TERMINATE_SINGLE_CUSTOMER_CONTRACT",
-          module: "contracts",
-          targetType: "Contract",
-          targetId: onlyContract.id,
-          summary: `客户结束合作，自动终止唯一关联合同 ${onlyContract.contractNo}`,
-          beforeJson: JSON.stringify({ status: onlyContract.status, endDate: onlyContract.endDate }),
-          afterJson: JSON.stringify({ status: "TERMINATED", endDate: parsedEndDate }),
-        },
-      });
-    }
-  });
-  if (status === "COOPERATION_DONE" && parsedEndDate && onlyContract) {
-    await closeContractReconciliationPlans(
-      onlyContract.id,
-      parsedEndDate,
-      session.userId,
-      `客户结束合作，自动终止唯一关联合同 ${onlyContract.contractNo}`,
-    );
-  } else if (status === "COOPERATING") {
+    return linkedContracts.map((contract) => contract.id);
+  }, { timeout: 60000 });
+  if (status === "COOPERATING") {
     await ensureCustomerPlansForCooperatingCustomer(customer.id, session.userId);
   }
   revalidatePath("/customers");
   revalidatePath(`/customers/${id}`);
   revalidatePath("/finance");
-  if (onlyContract) revalidatePath(`/contracts/${onlyContract.id}`);
+  for (const contractId of terminatedContractIds) revalidatePath(`/contracts/${contractId}`);
 }
 
 /**

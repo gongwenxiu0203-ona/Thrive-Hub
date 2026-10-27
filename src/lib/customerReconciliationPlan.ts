@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { ensureEffectiveConfirmationPlans } from "@/lib/contractConfirmationPlan";
 import { hasBillableFixedFee, reconciliationOverlapWhere } from "./reconciliationGenerationRules";
@@ -134,6 +135,34 @@ function automationKey(contractId: string, period: ReconciliationPlanPeriod): st
   return `contract:${contractId}:${period.type}:${period.index}`;
 }
 
+/** Explicit, idempotent setup for the original fee terms of a signed legacy contract. */
+export async function ensureLegacyBillingUnits(contractId: string, actorId: string) {
+  const contract = await prisma.contract.findUnique({ where: { id: contractId } });
+  if (!contract || contract.deletedAt || contract.type !== "BRAND" || contract.contractMode === "FRAMEWORK" || contract.status !== "COMPLETED" || !contract.startDate || !contract.endDate) {
+    return [];
+  }
+  const kinds: ReconciliationPlanPeriod["type"][] = hasBillableFixedFee(contract)
+    ? ["FEE_ONLY", "COMMISSION_ONLY"] : ["COMMISSION_ONLY"];
+  await Promise.all(kinds.map((kind) => prisma.contractLegacyBillingUnit.upsert({
+    where: { contractId_key: { contractId, key: kind === "FEE_ONLY" ? "ORIGINAL_FIXED_FEE" : "ORIGINAL_COMMISSION" } },
+    create: {
+      contractId,
+      key: kind === "FEE_ONLY" ? "ORIGINAL_FIXED_FEE" : "ORIGINAL_COMMISSION",
+      title: kind === "FEE_ONLY" ? "原合同固定服务费" : "原合同销售佣金",
+      kind,
+      startDate: contract.startDate!, endDate: contract.endDate!,
+      scopeSnapshot: JSON.stringify({ targetSite: contract.targetSite, promoPlatform: contract.promoPlatform, coopChannels: contract.coopChannels }),
+      termsSnapshot: JSON.stringify({ feeCycle: contract.feeCycle, feeAmount: contract.feeAmount, feeCurrency: contract.feeCurrency, commissionType: contract.commissionType, commissionRate: contract.commissionRate, commissionConfig: contract.commissionConfig, affiliateRule: contract.affiliateRule }),
+      createdById: actorId,
+    },
+    update: {},
+  })));
+  return prisma.contractLegacyBillingUnit.findMany({
+    where: { contractId, key: { in: ["ORIGINAL_FIXED_FEE", "ORIGINAL_COMMISSION"] } },
+    orderBy: { createdAt: "asc" },
+  });
+}
+
 /**
  * 为签署完成的合同补齐对账计划。automationKey 保证所有合同完成入口重复调用也不会重复生成。
  * 缺少客户或有效合同日期时安全跳过，由业务人员补齐后可再次触发。
@@ -156,11 +185,40 @@ export async function ensureCustomerReconciliationPlan(contractId: string, actor
     return { created: 0, skipped: true };
   }
 
+  // A pre-existing signed contract may embed multiple projects that the old
+  // scalar fields cannot distinguish. Never classify its old plans merely
+  // because someone opened the finance page; require explicit review first.
+  const [unitCount, oldPlanCount] = await Promise.all([
+    prisma.contractLegacyBillingUnit.count({ where: { contractId: contract.id } }),
+    prisma.customerReconciliation.count({ where: { contractId: contract.id, projectConfirmationId: null, deletedAt: null } }),
+  ]);
+  if (unitCount === 0 && oldPlanCount > 0) {
+    return { created: 0, skipped: true, reason: "LEGACY_BILLING_REVIEW_REQUIRED" };
+  }
+
   const now = new Date();
   const today = utcDate(now);
   const customerId = contract.customerId;
-  const periods = buildCustomerReconciliationPlan(contract.startDate, contract.endDate)
-    .filter((period) => period.type !== "FEE_ONLY" || hasBillableFixedFee(contract));
+  // Legacy signed documents may contain several independently terminable fee terms.
+  // Preserve their original contract fields and create stable billing identities;
+  // existing historical reconciliation rows are never recalculated from live terms.
+  const units = await ensureLegacyBillingUnits(contract.id, actorId);
+  const periods = units.flatMap((unit) => unit.kind === "FEE_ONLY"
+    ? buildFixedFeePeriods(unit.startDate, unit.endDate)
+    : buildCommissionPeriods(unit.startDate, unit.endDate));
+  const unitKinds = [...new Set(periods.map((period) => period.type))];
+  const unitByKind = new Map(units.map((unit) => [unit.kind, unit]));
+  // Only attach old draft rows whose type is unambiguous and that have no
+  // financial history. Confirmed or mixed-type rows stay as historical facts.
+  const unassigned = await prisma.customerReconciliation.findMany({
+    where: { contractId: contract.id, projectConfirmationId: null, legacyBillingUnitId: null, reconcileType: { in: unitKinds }, status: "DRAFT", periodEnd: { gte: today }, deletedAt: null },
+    include: { settlements: { select: { id: true }, take: 1 }, billingRequestLines: { select: { id: true }, take: 1 }, receiptAllocations: { select: { id: true }, take: 1 } },
+  });
+  for (const record of unassigned) {
+    if (record.settlements.length || record.billingRequestLines.length || record.receiptAllocations.length) continue;
+    const unit = unitByKind.get(record.reconcileType);
+    if (unit) await prisma.customerReconciliation.update({ where: { id: record.id }, data: { legacyBillingUnitId: unit.id } });
+  }
   const keys = periods.map((period) => automationKey(contract.id, period));
   const existingKeys = new Set(
     (
@@ -175,6 +233,11 @@ export async function ensureCustomerReconciliationPlan(contractId: string, actor
   let created = 0;
 
   for (const period of periods) {
+    const unit = unitByKind.get(period.type);
+    if (!unit) continue;
+    const terms = JSON.parse(unit.termsSnapshot) as { feeCycle?: string | null; feeAmount?: string | null; feeCurrency?: string | null; commissionRate?: string | null; affiliateRule?: string | null };
+    const effectiveEnd = unit.terminatedAt && unit.terminatedAt < unit.endDate ? unit.terminatedAt : unit.endDate;
+    if (period.start > effectiveEnd) continue;
     const key = automationKey(contract.id, period);
     if (existingKeys.has(key)) continue;
     const planStatus = period.start <= today ? "OPEN" : "PLANNED";
@@ -189,6 +252,7 @@ export async function ensureCustomerReconciliationPlan(contractId: string, actor
         data: {
           customerId,
           contractId: contract.id,
+          legacyBillingUnitId: unit.id,
           source: "AUTO",
           planStatus,
           periodIndex: period.index,
@@ -197,15 +261,15 @@ export async function ensureCustomerReconciliationPlan(contractId: string, actor
           originalPeriodEnd: period.end,
           openedAt,
           periodStart: period.start,
-          periodEnd: period.end,
+          periodEnd: period.end > effectiveEnd ? effectiveEnd : period.end,
           partyA: contract.partyA,
           accountingPeriod: contract.accountingPeriod,
-          feeCycle: contract.feeCycle,
-          feeAmount: money(contract.feeAmount),
-          commissionRate: rate(contract.commissionRate),
-          affiliateRule: contract.affiliateRule,
+          feeCycle: terms.feeCycle ?? contract.feeCycle,
+          feeAmount: money(terms.feeAmount ?? contract.feeAmount),
+          commissionRate: rate(terms.commissionRate ?? contract.commissionRate),
+          affiliateRule: terms.affiliateRule ?? contract.affiliateRule,
           paymentCycle: contract.paymentCycle,
-          fixedFeeCurrency: reconciliationCurrency(contract.feeCurrency),
+          fixedFeeCurrency: reconciliationCurrency(terms.feeCurrency ?? contract.feeCurrency),
           commissionCurrency: "USD",
           reconcileType: period.type,
           createdById: actorId,
@@ -241,154 +305,96 @@ export async function closeCustomerReconciliationPlans(
   customerId: string,
   cooperationEndDate: Date,
   actorId: string,
+  tx?: Prisma.TransactionClient,
 ) {
-  const endDate = utcDate(cooperationEndDate);
-  const records = await prisma.customerReconciliation.findMany({
-    where: { customerId, deletedAt: null, planStatus: { not: "CANCELLED" } },
-    include: {
-      settlements: { select: { status: true } },
-      billingRequestLines: { select: { id: true }, take: 1 },
-      receiptAllocations: { where: { status: "ACTIVE" }, select: { id: true }, take: 1 },
-    },
-  });
-  const reason = `客户结束合作，合作结束日期调整为 ${endDate.toISOString().slice(0, 10)}`;
-  let cancelled = 0;
-  let shortened = 0;
-  let preserved = 0;
-
-  await prisma.$transaction(async (tx) => {
-    for (const record of records) {
-      const hasFinancialHistory = record.status === "CONFIRMED"
-        || record.settlements.some((item) => item.status === "SETTLED")
-        || record.billingRequestLines.length > 0
-        || record.receiptAllocations.length > 0;
-      if (record.periodStart > endDate) {
-        await tx.customerReconciliation.update({
-          where: { id: record.id },
-          data: { planStatus: "CANCELLED", adjustmentReason: reason, updatedAt: new Date() },
-        });
-        await tx.financeAuditLog.create({
-          data: {
-            entityType: "CUSTOMER_RECONCILIATION",
-            entityId: record.id,
-            action: "CANCEL_AFTER_COOPERATION_END",
-            actorId,
-            fromStatus: record.planStatus,
-            toStatus: "CANCELLED",
-            note: reason,
-            metadata: JSON.stringify({ hasFinancialHistory, periodStart: record.periodStart, periodEnd: record.periodEnd }),
-          },
-        });
-        cancelled += 1;
-      } else if (record.periodEnd > endDate && !hasFinancialHistory) {
-        await tx.customerReconciliation.update({
-          where: { id: record.id },
-          data: {
-            periodEnd: endDate,
-            periodAdjusted: true,
-            adjustmentReason: reason,
-            updatedAt: new Date(),
-          },
-        });
-        await tx.reconciliationPeriodAudit.create({
-          data: {
-            reconciliationId: record.id,
-            actorId,
-            beforeStart: record.periodStart,
-            beforeEnd: record.periodEnd,
-            afterStart: record.periodStart,
-            afterEnd: endDate,
-            reason,
-          },
-        });
-        shortened += 1;
-      } else if (record.periodEnd > endDate) {
-        await tx.financeAuditLog.create({
-          data: {
-            entityType: "CUSTOMER_RECONCILIATION",
-            entityId: record.id,
-            action: "COOPERATION_END_PRESERVE_FINANCIAL_HISTORY",
-            actorId,
-            fromStatus: record.status,
-            toStatus: record.status,
-            note: `${reason}；该记录已有财务历史，保留原周期`,
-          },
-        });
-        preserved += 1;
-      }
-    }
-  });
-  return { cancelled, shortened, preserved };
+  const date = utcDate(cooperationEndDate);
+  const reason = `客户结束合作，合作结束日期调整为 ${date.toISOString().slice(0, 10)}`;
+  const close = (client: Prisma.TransactionClient) => closePlans(client, { customerId }, date, actorId, reason, "COOPERATION_END");
+  return tx ? close(tx) : prisma.$transaction(close);
 }
 
-// Contract-specific closure is intentionally kept separate from customer-wide closure.
-// This local helper is not part of the reconciliation-only release being staged.
 export async function closeContractReconciliationPlans(
   contractId: string,
   terminationDate: Date,
   actorId: string,
   reasonText?: string,
+  tx?: Prisma.TransactionClient,
 ) {
-  const endDate = utcDate(terminationDate);
-  const records = await prisma.customerReconciliation.findMany({
-    where: { contractId, deletedAt: null, planStatus: { not: "CANCELLED" } },
+  const date = utcDate(terminationDate);
+  const reason = reasonText?.trim() || `合同终止，终止日期调整为 ${date.toISOString().slice(0, 10)}`;
+  const close = (client: Prisma.TransactionClient) => closePlans(client, { contractId }, date, actorId, reason, "CONTRACT_TERMINATION");
+  return tx ? close(tx) : prisma.$transaction(close);
+}
+
+export async function closeLegacyBillingUnitReconciliationPlans(
+  legacyBillingUnitId: string,
+  terminationDate: Date,
+  actorId: string,
+  reason: string,
+  tx: Prisma.TransactionClient,
+) {
+  return closePlans(tx, { legacyBillingUnitId }, utcDate(terminationDate), actorId, reason, "LEGACY_BILLING_UNIT_TERMINATION");
+}
+
+async function closePlans(
+  tx: Prisma.TransactionClient,
+  scope: { customerId: string } | { contractId: string } | { legacyBillingUnitId: string },
+  endDate: Date,
+  actorId: string,
+  reason: string,
+  action: "COOPERATION_END" | "CONTRACT_TERMINATION" | "LEGACY_BILLING_UNIT_TERMINATION",
+) {
+  const records = await tx.customerReconciliation.findMany({
+    where: { ...scope, deletedAt: null, planStatus: { not: "CANCELLED" } },
     include: {
       settlements: { select: { status: true } },
       billingRequestLines: { select: { id: true }, take: 1 },
+      billingAllocations: { select: { id: true }, take: 1 },
+      invoiceLinks: { select: { id: true }, take: 1 },
       receiptAllocations: { where: { status: "ACTIVE" }, select: { id: true }, take: 1 },
     },
   });
-  const reason = reasonText?.trim() || `合同终止，终止日期调整为 ${endDate.toISOString().slice(0, 10)}`;
+  const hasFinancialHistory = (record: (typeof records)[number]) => record.status === "CONFIRMED"
+    || record.settlements.some((item) => item.status === "SETTLED")
+    || record.billingRequestLines.length > 0
+    || record.billingAllocations.length > 0
+    || record.invoiceLinks.length > 0
+    || record.receiptAllocations.length > 0;
+  if (action === "LEGACY_BILLING_UNIT_TERMINATION" && records.some((record) => record.periodEnd > endDate && hasFinancialHistory(record))) {
+    throw new Error("终止日期涉及已确认、已开票、已结算或已收款的对账记录，请先核对财务记录后重试");
+  }
   let cancelled = 0;
   let shortened = 0;
   let preserved = 0;
-
-  await prisma.$transaction(async (tx) => {
-    for (const record of records) {
-      const hasFinancialHistory = record.status === "CONFIRMED"
-        || record.settlements.some((item) => item.status === "SETTLED")
-        || record.billingRequestLines.length > 0
-        || record.receiptAllocations.length > 0;
-      if (record.periodStart > endDate) {
-        await tx.customerReconciliation.update({
-          where: { id: record.id },
-          data: { planStatus: "CANCELLED", adjustmentReason: reason, updatedAt: new Date() },
-        });
-        await tx.financeAuditLog.create({
-          data: {
-            entityType: "CUSTOMER_RECONCILIATION", entityId: record.id,
-            action: "CANCEL_AFTER_CONTRACT_TERMINATION", actorId,
-            fromStatus: record.planStatus, toStatus: "CANCELLED", note: reason,
-            metadata: JSON.stringify({ contractId, hasFinancialHistory, periodStart: record.periodStart, periodEnd: record.periodEnd }),
-          },
-        });
-        cancelled += 1;
-      } else if (record.periodEnd > endDate && !hasFinancialHistory) {
-        await tx.customerReconciliation.update({
-          where: { id: record.id },
-          data: { periodEnd: endDate, periodAdjusted: true, adjustmentReason: reason, updatedAt: new Date() },
-        });
-        await tx.reconciliationPeriodAudit.create({
-          data: {
-            reconciliationId: record.id, actorId,
-            beforeStart: record.periodStart, beforeEnd: record.periodEnd,
-            afterStart: record.periodStart, afterEnd: endDate, reason,
-          },
-        });
-        shortened += 1;
-      } else if (record.periodEnd > endDate) {
-        await tx.financeAuditLog.create({
-          data: {
-            entityType: "CUSTOMER_RECONCILIATION", entityId: record.id,
-            action: "CONTRACT_TERMINATION_PRESERVE_FINANCIAL_HISTORY", actorId,
-            fromStatus: record.status, toStatus: record.status,
-            note: `${reason}；该记录已有财务历史，保留原周期`,
-            metadata: JSON.stringify({ contractId }),
-          },
-        });
-        preserved += 1;
-      }
+  for (const record of records) {
+    if (record.periodEnd > endDate && hasFinancialHistory(record) && action !== "LEGACY_BILLING_UNIT_TERMINATION") {
+      await tx.financeAuditLog.create({ data: {
+        entityType: "CUSTOMER_RECONCILIATION", entityId: record.id,
+        action: `${action}_PRESERVE_FINANCIAL_HISTORY`, actorId,
+        fromStatus: record.status, toStatus: record.status,
+        note: `${reason}；该记录已有财务历史，保留原周期与状态`,
+        metadata: JSON.stringify({ ...scope, periodStart: record.periodStart, periodEnd: record.periodEnd }),
+      } });
+      preserved += 1;
+      continue;
     }
-  });
+    if (record.periodStart > endDate) {
+      await tx.customerReconciliation.update({ where: { id: record.id }, data: { planStatus: "CANCELLED", adjustmentReason: reason } });
+      await tx.financeAuditLog.create({ data: {
+        entityType: "CUSTOMER_RECONCILIATION", entityId: record.id,
+        action: `CANCEL_AFTER_${action}`, actorId, fromStatus: record.planStatus,
+        toStatus: "CANCELLED", note: reason,
+        metadata: JSON.stringify({ ...scope, periodStart: record.periodStart, periodEnd: record.periodEnd }),
+      } });
+      cancelled += 1;
+    } else if (record.periodEnd > endDate) {
+      await tx.customerReconciliation.update({ where: { id: record.id }, data: { periodEnd: endDate, periodAdjusted: true, adjustmentReason: reason } });
+      await tx.reconciliationPeriodAudit.create({ data: {
+        reconciliationId: record.id, actorId, beforeStart: record.periodStart, beforeEnd: record.periodEnd,
+        afterStart: record.periodStart, afterEnd: endDate, reason,
+      } });
+      shortened += 1;
+    }
+  }
   return { cancelled, shortened, preserved };
 }

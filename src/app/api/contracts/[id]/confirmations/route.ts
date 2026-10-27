@@ -19,7 +19,7 @@ export async function GET(_request: NextRequest, context: Context) {
       .filter((value): value is string => Boolean(value));
     const rows = await prisma.contractProjectConfirmation.findMany({ where: { contractId: id }, orderBy: { createdAt: "asc" }, include: { versions: { orderBy: { version: "desc" }, select: { version: true, actorId: true, reason: true, createdAt: true } } } });
     const [bankAccounts, options, canCreate, hasManagePermission, canEditMasterPermission, users, confirmationTemplates, replacementAudits] = await Promise.all([
-      prisma.financeAccountProfile.findMany({ where: { id: { in: accountIds }, accountType: { in: ["COMPANY_PAYER", "COMPANY_BANK"] }, status: "ACTIVE" }, select: { id: true, name: true, accountName: true, accountNumber: true, legalEntity: true, bankName: true, swiftCode: true, bankAddress: true, currency: true }, orderBy: { name: "asc" } }),
+      prisma.financeAccountProfile.findMany({ where: { ...(contract.contractMode === "FRAMEWORK" ? { id: { in: accountIds } } : {}), accountType: { in: ["COMPANY_PAYER", "COMPANY_BANK"] }, status: "ACTIVE" }, select: { id: true, name: true, accountName: true, accountNumber: true, legalEntity: true, bankName: true, swiftCode: true, bankAddress: true, currency: true }, orderBy: { name: "asc" } }),
       prisma.contractCustomOption.findMany({ select: { category: true, value: true }, orderBy: { value: "asc" } }),
       adminHasFeature(session, "contracts.records", "EDIT"), adminHasFeature(session, "contracts.records", "MANAGE"), adminHasFeature(session, "contracts.create_upload", "EDIT"),
       prisma.user.findMany({ where: { role: { in: ["ADMIN", "USER"] }, status: "APPROVED" }, select: { id: true, name: true, email: true, phone: true }, orderBy: { name: "asc" } }),

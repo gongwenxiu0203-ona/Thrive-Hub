@@ -21,7 +21,9 @@ import { requireFeaturePermission } from "@/lib/permissionGuard";
 import { writeAdminAudit } from "@/lib/adminObservability";
 import {
   closeContractReconciliationPlans,
+  closeLegacyBillingUnitReconciliationPlans,
   ensureCustomerReconciliationPlan,
+  ensureLegacyBillingUnits,
 } from "@/lib/customerReconciliationPlan";
 import { parseDateOnlyUtc } from "@/lib/dateRange";
 import { PARTY_B_COMPANIES } from "@/lib/partyB";
@@ -427,7 +429,46 @@ export async function terminateContract(
 
   const auditReason = `合同 ${contract.contractNo} 于 ${terminationDate} 终止：${reason}`;
   const now = new Date();
-  await prisma.$transaction(async (tx) => {
+  const reconciliationResult = await prisma.$transaction(async (tx) => {
+    const result = await closeContractReconciliationPlans(id, parsedDate, session.userId, auditReason, tx);
+    const confirmations = await tx.contractProjectConfirmation.findMany({
+      where: { contractId: id, status: { in: ["EFFECTIVE", "DRAFT"] } },
+      select: { id: true, status: true, number: true, startDate: true, endDate: true },
+    });
+    for (const confirmation of confirmations) {
+      const nextStatus = confirmation.status === "EFFECTIVE" ? "TERMINATED" : "VOIDED";
+      await tx.contractProjectConfirmation.update({ where: { id: confirmation.id }, data: {
+        status: nextStatus,
+        ...(nextStatus === "TERMINATED" ? {
+          terminatedAt: parsedDate,
+          endDate: confirmation.startDate && parsedDate < confirmation.startDate
+            ? confirmation.endDate
+            : confirmation.endDate && confirmation.endDate < parsedDate ? confirmation.endDate : parsedDate,
+        } : {}),
+        version: { increment: 1 },
+      } });
+      await tx.financeAuditLog.create({ data: {
+        entityType: "CONTRACT_CONFIRMATION", entityId: confirmation.id,
+        action: "TERMINATE_WITH_CONTRACT", actorId: session.userId,
+        fromStatus: confirmation.status, toStatus: nextStatus,
+        note: auditReason, metadata: JSON.stringify({ contractId: id, terminationDate, number: confirmation.number }),
+      } });
+    }
+    const legacyUnits = await tx.contractLegacyBillingUnit.findMany({
+      where: { contractId: id, status: "ACTIVE" }, select: { id: true, startDate: true, endDate: true, version: true },
+    });
+    for (const unit of legacyUnits) {
+      await tx.contractLegacyBillingUnit.update({ where: { id: unit.id }, data: {
+        status: "TERMINATED", terminatedAt: parsedDate, terminationReason: auditReason,
+        endDate: parsedDate < unit.startDate ? unit.endDate : unit.endDate < parsedDate ? unit.endDate : parsedDate,
+        version: { increment: 1 },
+      } });
+      await tx.financeAuditLog.create({ data: {
+        entityType: "CONTRACT_LEGACY_BILLING_UNIT", entityId: unit.id, action: "TERMINATE_WITH_CONTRACT",
+        actorId: session.userId, fromStatus: "ACTIVE", toStatus: "TERMINATED", note: auditReason,
+        metadata: JSON.stringify({ contractId: id, terminationDate }),
+      } });
+    }
     await tx.contract.update({
       where: { id },
       data: { status: "TERMINATED", endDate: parsedDate, updatedAt: now },
@@ -440,14 +481,8 @@ export async function terminateContract(
       },
       data: { status: "CANCELLED", returnReason: auditReason, updatedAt: now },
     });
-  });
-
-  const reconciliationResult = await closeContractReconciliationPlans(
-    id,
-    parsedDate,
-    session.userId,
-    auditReason,
-  );
+    return { ...result, confirmations: confirmations.length, legacyUnits: legacyUnits.length };
+  }, { timeout: 30000 });
   await writeAdminAudit({
     actorId: session.userId,
     action: "TERMINATE_CONTRACT",
@@ -468,6 +503,154 @@ export async function terminateContract(
     revalidatePath(`/customers/${contract.customerId}`);
     revalidatePath(`/finance/customers/${contract.customerId}`);
   }
+}
+
+/** Stop selected legacy fee streams without terminating their signed parent contract. */
+export async function terminateLegacyBillingUnits(
+  contractId: string,
+  unitIds: string[],
+  terminationDate: string,
+  terminationReason: string,
+  expectedVersions: Record<string, number>,
+  evidenceAddendumId?: string,
+) {
+  return terminateContractParts(contractId, unitIds, [], terminationDate, terminationReason, expectedVersions, {}, evidenceAddendumId);
+}
+
+/** Terminate selected billing streams and confirmations in one transaction. */
+export async function terminateContractParts(
+  contractId: string,
+  unitIds: string[],
+  confirmationIds: string[],
+  terminationDate: string,
+  terminationReason: string,
+  expectedUnitVersions: Record<string, number>,
+  expectedConfirmationVersions: Record<string, number>,
+  evidenceAddendumId?: string,
+) {
+  const session = await requireContractRow(contractId, "EDIT");
+  if (!["ADMIN", "USER"].includes(session.role)) throw new Error("仅内部员工可以终止计费项目或项目确认书");
+  const parsedDate = parseDateOnlyUtc(terminationDate);
+  const reason = typeof terminationReason === "string" ? terminationReason.trim() : "";
+  if (!Array.isArray(unitIds) || unitIds.some((id) => typeof id !== "string" || !id)) throw new Error("请选择有效的计费项目");
+  if (!Array.isArray(confirmationIds) || confirmationIds.some((id) => typeof id !== "string" || !id)) throw new Error("请选择有效的项目确认书");
+  const ids = [...new Set(unitIds)];
+  const sowIds = [...new Set(confirmationIds)];
+  if (!parsedDate) throw new Error("请填写有效的终止日期");
+  if (!reason || reason.length > 2000) throw new Error("请填写终止原因（最多2000字）");
+  if (!ids.length && !sowIds.length) throw new Error("请选择至少一个要终止的计费项目或项目确认书");
+  if (ids.length !== unitIds.length || sowIds.length !== confirmationIds.length) throw new Error("终止范围不能重复选择");
+  if (evidenceAddendumId && typeof evidenceAddendumId !== "string") throw new Error("终止依据文件无效");
+  const contract = await prisma.contract.findUnique({ where: { id: contractId }, select: { contractNo: true, contractMode: true, type: true, status: true, customerId: true } });
+  if (!contract || contract.type !== "BRAND" || contract.status !== "COMPLETED") {
+    throw new Error("只有签署完成的品牌方合同可以单独终止计费项目或项目确认书");
+  }
+  if (ids.length && contract.contractMode === "FRAMEWORK") throw new Error("新格式主合同没有原合同计费项目");
+
+  const result = await prisma.$transaction(async (tx) => {
+    if (evidenceAddendumId) {
+      const evidence = await tx.contractAddendum.findFirst({ where: { id: evidenceAddendumId, contractId, fileUrl: { not: null } }, select: { id: true, fileUrl: true } });
+      if (!evidence?.fileUrl) throw new Error("所选终止依据文件不存在或不属于该合同");
+    }
+    const units = await tx.contractLegacyBillingUnit.findMany({ where: { contractId, id: { in: ids } } });
+    if (units.length !== ids.length) throw new Error("部分计费项目不存在，请刷新后重试");
+    const confirmations = await tx.contractProjectConfirmation.findMany({ where: { contractId, id: { in: sowIds } } });
+    if (confirmations.length !== sowIds.length) throw new Error("部分项目确认书不存在，请刷新后重试");
+    let cancelled = 0;
+    let shortened = 0;
+    for (const unit of units) {
+      if (unit.status !== "ACTIVE" || unit.version !== expectedUnitVersions?.[unit.id]) throw new Error("计费项目已变更，请刷新后重试");
+      if (parsedDate < unit.startDate) throw new Error("终止日期不能早于计费项目开始日期");
+      const unassigned = await tx.customerReconciliation.findFirst({ where: {
+        contractId, legacyBillingUnitId: null, projectConfirmationId: null, deletedAt: null,
+        planStatus: { not: "CANCELLED" }, reconcileType: { in: [unit.kind, "BOTH"] }, periodEnd: { gt: parsedDate },
+      }, select: { id: true } });
+      if (unassigned) throw new Error("仍有未归属计费项目的旧对账记录，请先人工核对其来源，暂不能单独终止");
+      const adjustmentReason = `旧合同 ${contract.contractNo} 计费项目 ${unit.title} 于 ${terminationDate} 终止：${reason}`;
+      const closed = await closeLegacyBillingUnitReconciliationPlans(unit.id, parsedDate, session.userId, adjustmentReason, tx);
+      cancelled += closed.cancelled;
+      shortened += closed.shortened;
+      const updated = await tx.contractLegacyBillingUnit.updateMany({ where: { id: unit.id, contractId, status: "ACTIVE", version: unit.version }, data: {
+        status: "TERMINATED", terminatedAt: parsedDate, terminationReason: reason,
+        endDate: unit.endDate < parsedDate ? unit.endDate : parsedDate, version: { increment: 1 },
+      } });
+      if (updated.count !== 1) throw new Error("计费项目状态已变化，请刷新后重试");
+      await tx.financeAuditLog.create({ data: {
+        entityType: "CONTRACT_LEGACY_BILLING_UNIT", entityId: unit.id, action: "TERMINATE",
+        actorId: session.userId, fromStatus: "ACTIVE", toStatus: "TERMINATED", note: reason,
+        metadata: JSON.stringify({ contractId, terminationDate, evidenceAddendumId: evidenceAddendumId || null, cancelled: closed.cancelled, shortened: closed.shortened }),
+      } });
+    }
+    for (const confirmation of confirmations) {
+      if (confirmation.status !== "EFFECTIVE" || confirmation.version !== expectedConfirmationVersions?.[confirmation.id]) throw new Error("项目确认书已变更，请刷新后重试");
+      if (confirmation.startDate && parsedDate < confirmation.startDate) throw new Error("终止日期不能早于项目确认书合作开始日期");
+      const records = await tx.customerReconciliation.findMany({ where: {
+        projectConfirmationId: confirmation.id, deletedAt: null, planStatus: { not: "CANCELLED" },
+      }, include: {
+        settlements: { select: { status: true } }, billingRequestLines: { select: { id: true }, take: 1 },
+        billingAllocations: { select: { id: true }, take: 1 }, invoiceLinks: { select: { id: true }, take: 1 },
+        receiptAllocations: { where: { status: "ACTIVE" }, select: { id: true }, take: 1 },
+      } });
+      if (records.some((record) => record.periodEnd > parsedDate && (record.status === "CONFIRMED"
+        || record.settlements.some((item) => item.status === "SETTLED") || record.billingRequestLines.length > 0
+        || record.billingAllocations.length > 0 || record.invoiceLinks.length > 0 || record.receiptAllocations.length > 0))) {
+        throw new Error("终止日期涉及已确认、已开票、已结算或已收款的对账记录，请先核对财务记录后重试");
+      }
+      const updated = await tx.contractProjectConfirmation.updateMany({ where: {
+        id: confirmation.id, contractId, status: "EFFECTIVE", version: confirmation.version,
+      }, data: {
+        status: "TERMINATED", terminatedAt: parsedDate,
+        endDate: confirmation.endDate && confirmation.endDate < parsedDate ? confirmation.endDate : parsedDate,
+        version: { increment: 1 },
+      } });
+      if (updated.count !== 1) throw new Error("项目确认书状态已变化，请刷新后重试");
+      const adjustmentReason = `项目确认书 ${confirmation.number} 于 ${terminationDate} 终止：${reason}`;
+      let confirmationCancelled = 0;
+      let confirmationShortened = 0;
+      for (const record of records) {
+        if (record.periodStart > parsedDate) {
+          await tx.customerReconciliation.update({ where: { id: record.id }, data: { planStatus: "CANCELLED", adjustmentReason } });
+          cancelled += 1;
+          confirmationCancelled += 1;
+        } else if (record.periodEnd > parsedDate) {
+          await tx.customerReconciliation.update({ where: { id: record.id }, data: { periodEnd: parsedDate, periodAdjusted: true, adjustmentReason } });
+          await tx.reconciliationPeriodAudit.create({ data: {
+            reconciliationId: record.id, actorId: session.userId,
+            beforeStart: record.periodStart, beforeEnd: record.periodEnd,
+            afterStart: record.periodStart, afterEnd: parsedDate, reason: adjustmentReason,
+          } });
+          shortened += 1;
+          confirmationShortened += 1;
+        }
+      }
+      await tx.financeAuditLog.create({ data: {
+        entityType: "CONTRACT_CONFIRMATION", entityId: confirmation.id, action: "TERMINATE",
+        actorId: session.userId, fromStatus: "EFFECTIVE", toStatus: "TERMINATED", note: reason,
+        metadata: JSON.stringify({ contractId, terminationDate, evidenceAddendumId: evidenceAddendumId || null, cancelled: confirmationCancelled, shortened: confirmationShortened }),
+      } });
+    }
+    return { units: units.length, confirmations: confirmations.length, cancelled, shortened };
+  }, { timeout: 30000 });
+  revalidatePath(`/contracts/${contractId}`);
+  revalidatePath(`/contracts/${contractId}/confirmations`);
+  revalidatePath("/finance");
+  if (contract.customerId) revalidatePath(`/finance/customers/${contract.customerId}`);
+  return result;
+}
+
+/** Explicit, idempotent setup for pre-framework contracts; read-only page rendering never writes plans. */
+export async function initializeLegacyBillingUnits(contractId: string) {
+  const session = await requireContractRow(contractId, "EDIT");
+  if (!["ADMIN", "USER"].includes(session.role)) throw new Error("仅内部员工可以初始化旧合同计费项目");
+  const contract = await prisma.contract.findUnique({ where: { id: contractId }, select: { type: true, status: true, contractMode: true } });
+  if (!contract || contract.type !== "BRAND" || contract.contractMode === "FRAMEWORK" || contract.status !== "COMPLETED") {
+    throw new Error("只有签署完成的旧品牌方合同可以初始化计费项目");
+  }
+  await ensureLegacyBillingUnits(contractId, session.userId);
+  const result = await ensureCustomerReconciliationPlan(contractId, session.userId);
+  revalidatePath(`/contracts/${contractId}`);
+  revalidatePath("/finance");
+  return result;
 }
 
 /** 合同推进中 → 合同审核中. Seeds the per-field review rows + notifies reviewer. */

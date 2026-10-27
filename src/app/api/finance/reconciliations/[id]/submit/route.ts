@@ -5,6 +5,7 @@ import { getReconciliationAccess, scopedReconciliationWhere } from "@/lib/reconc
 import { FeaturePermissionError } from "@/lib/permissionGuard";
 import { errorResponse } from "@/lib/appError";
 import { assertConfirmationReadyForSubmission } from "@/lib/reconciliationCalc";
+import { findAmbiguousCommissionOverlap } from "@/lib/reconciliationCommissionOverlap";
 
 // POST /api/finance/reconciliations/[id]/submit
 // 提交对账，状态变为 PENDING_REVIEW，通知指定审核人（或客户负责人）
@@ -25,12 +26,17 @@ export async function POST(
       where: scopedReconciliationWhere(id, access.scope),
       include: {
         customer: { select: { id: true, brandName: true, businessOwnerId: true } },
+        contract: { select: { targetSite: true, promoPlatform: true } },
+        legacyBillingUnit: { select: { scopeSnapshot: true } },
       },
     });
     if (!rec) return NextResponse.json({ error: "客户对账记录不存在、已删除或无权访问" }, { status: 404 });
     assertConfirmationReadyForSubmission(rec);
     if (rec.status !== "DRAFT" && rec.status !== "DISPUTED") {
       return NextResponse.json({ error: "只有草稿或争议状态可以提交对账" }, { status: 400 });
+    }
+    if (rec.reconcileType !== "FEE_ONLY" && await findAmbiguousCommissionOverlap(rec)) {
+      return NextResponse.json({ error: "本期存在计佣范围重叠的旧合同条款或项目确认书，请先核定订单唯一归属，避免重复提交销售佣金" }, { status: 409 });
     }
 
     await prisma.$transaction(async (tx) => {

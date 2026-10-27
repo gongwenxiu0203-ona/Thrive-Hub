@@ -398,6 +398,34 @@ model Contract {
   billingRequests        BillingRequest[]
   projectConfirmations   ContractProjectConfirmation[]
   receivingAccounts      ContractReceivingAccount[]
+  legacyBillingUnits     ContractLegacyBillingUnit[]
+}
+
+// Independently terminable billing terms embedded in a signed legacy contract.
+// The original document and historical reconciliation rows remain unchanged.
+model ContractLegacyBillingUnit {
+  id                String    @id @default(cuid())
+  contractId        String
+  key               String
+  title             String
+  kind              String    // FEE_ONLY | COMMISSION_ONLY
+  status            String    @default("ACTIVE") // ACTIVE | TERMINATED
+  startDate         DateTime
+  endDate           DateTime
+  scopeSnapshot     String    @default("{}")
+  termsSnapshot     String    @default("{}")
+  terminatedAt      DateTime?
+  terminationReason String?
+  version           Int       @default(1)
+  createdById       String
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  contract        Contract                 @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  reconciliations CustomerReconciliation[]
+
+  @@unique([contractId, key])
+  @@index([contractId, status])
 }
 
 // Independent, versioned commercial terms under one framework contract.
@@ -1077,9 +1105,11 @@ model CustomerReconciliation {
   customerId String
   contractId String
   projectConfirmationId String?
+  legacyBillingUnitId String?
   ruleSnapshot String? // Effective confirmation version/rules; null retains legacy calculation
   confirmedCommissionRate Float? // Explicitly confirmed decimal rate; distinct from computed actualCommissionRate
   projectConfirmation ContractProjectConfirmation? @relation(fields: [projectConfirmationId], references: [id], onDelete: Restrict)
+  legacyBillingUnit ContractLegacyBillingUnit? @relation(fields: [legacyBillingUnitId], references: [id], onDelete: Restrict)
 
   source              String    @default("MANUAL") // AUTO | MANUAL | ADJUSTMENT
   planStatus          String    @default("OPEN") // PLANNED | OPEN | CANCELLED
@@ -1171,6 +1201,7 @@ model CustomerReconciliation {
   @@index([deletedAt])
   @@index([contractId, reconcileType, periodStart])
   @@index([projectConfirmationId, reconcileType, periodStart])
+  @@index([legacyBillingUnitId, reconcileType, periodStart])
   @@index([planStatus, periodStart])
 }
 

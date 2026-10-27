@@ -49,6 +49,8 @@ type Review = {
 
 type Rec = {
   projectConfirmationId?: string | null;
+  projectConfirmation?: { id: string; number: string } | null;
+  legacyBillingUnit?: { id: string; title: string } | null;
   ruleSnapshot?: string | null;
   confirmedCommissionRate?: number | null;
   id: string;
@@ -288,12 +290,14 @@ export function CustomerReconciliationDetailClient({
   const scopeAll = searchParams.get("scope") === "all";
   const [, startTransition] = useTransition();
   const confirmationTabs = contract?.projectConfirmations ?? [];
-  const selectedConfirmationId = searchParams.get("confirmationId") || confirmationTabs[0]?.id;
+  const selectedConfirmationId = searchParams.get("confirmationId") || (contract?.contractMode === "FRAMEWORK" ? confirmationTabs[0]?.id : "legacy");
   const contractRecords = contract
     ? reconciliations.filter((rec) => rec.contract.id === contract.id)
     : reconciliations;
-  const visibleReconciliations = contract?.contractMode === "FRAMEWORK"
-    ? contractRecords.filter((rec) => rec.projectConfirmationId === selectedConfirmationId)
+  const visibleReconciliations = contract
+    ? contractRecords.filter((rec) => selectedConfirmationId === "legacy"
+      ? !rec.projectConfirmationId
+      : rec.projectConfirmationId === selectedConfirmationId)
     : contractRecords;
   const fixedReconciliations = visibleReconciliations.filter(
     (rec) => rec.reconcileType !== "COMMISSION_ONLY",
@@ -449,14 +453,15 @@ export function CustomerReconciliationDetailClient({
         confirmation={selectedConfirmationDraft}
         receivingAccounts={selectedConfirmation?.receivingAccounts}
       />
-      {contract?.contractMode === "FRAMEWORK" && (
+      {contract && (contract.contractMode === "FRAMEWORK" || confirmationTabs.length > 0) && (
         <section className="rounded-lg border border-[#e7e0ef] bg-white p-4">
-          <h2 className="font-semibold text-slate-800">项目确认书</h2>
-          <p className="mt-1 text-sm text-slate-600">各确认书独立计费、独立对账；请切换查看。勾选记录可跨确认书统一申请开票。</p>
+          <h2 className="font-semibold text-slate-800">计费来源</h2>
+          <p className="mt-1 text-sm text-slate-600">原合同条款与各项目确认书并行对账；切换来源查看，勾选记录可统一申请开票。</p>
           <nav aria-label="选择项目确认书" className="mt-3 flex flex-wrap gap-2">
+            {contract.contractMode !== "FRAMEWORK" && <Link aria-current={selectedConfirmationId === "legacy" ? "page" : undefined} className={selectedConfirmationId === "legacy" ? "btn-primary" : "btn-secondary"} href={`/finance/customers/${customer.id}?contractId=${contract.id}&confirmationId=legacy`}>原合同条款</Link>}
             {confirmationTabs.map((item) => <Link key={item.id} aria-current={selectedConfirmationId === item.id ? "page" : undefined} className={selectedConfirmationId === item.id ? "btn-primary" : "btn-secondary"} href={`/finance/customers/${customer.id}?contractId=${contract.id}&confirmationId=${item.id}`}>{item.title && item.title !== item.number ? `${item.number} · ${item.title}` : item.number}</Link>)}
           </nav>
-          {!confirmationTabs.length && <p className="mt-3 text-sm text-slate-600">暂无生效确认书，请在主合同中新增并生效后生成对账。</p>}
+          {!confirmationTabs.length && contract.contractMode === "FRAMEWORK" && <p className="mt-3 text-sm text-slate-600">暂无生效确认书，请在主合同中新增并生效后生成对账。</p>}
           {selectedConfirmationDraft && (
             <ConfirmationProjectSummary confirmation={selectedConfirmationDraft} />
           )}
@@ -469,7 +474,7 @@ export function CustomerReconciliationDetailClient({
           description="按固费服务周期独立确认和结算"
           records={fixedReconciliations}
           streamKind="fixed"
-          canCreate={Boolean(contract) && contract?.contractMode !== "FRAMEWORK" && !readOnly}
+          canCreate={Boolean(contract) && contract?.contractMode !== "FRAMEWORK" && selectedConfirmationId === "legacy" && !readOnly}
           onCreate={() => setNewStream("FEE_ONLY")}
           currentUserId={currentUserId}
           users={users}
@@ -487,7 +492,7 @@ export function CustomerReconciliationDetailClient({
           description="按销售归属周期拉取 BI 数据并计算佣金"
           records={commissionReconciliations}
           streamKind="commission"
-          canCreate={Boolean(contract) && contract?.contractMode !== "FRAMEWORK" && !readOnly}
+          canCreate={Boolean(contract) && contract?.contractMode !== "FRAMEWORK" && selectedConfirmationId === "legacy" && !readOnly}
           onCreate={() => setNewStream("COMMISSION_ONLY")}
           currentUserId={currentUserId}
           users={users}
@@ -1324,6 +1329,8 @@ function MonthlyRecordRow({
           <span className="rounded bg-violet-50 px-2 py-1 text-xs font-medium text-violet-700">
             {rec.contract.contractNo}
           </span>
+          {!rec.projectConfirmationId && <span className="rounded bg-slate-100 px-2 py-1 text-xs text-slate-700">{rec.legacyBillingUnit?.title ?? "原合同条款"}</span>}
+          {rec.projectConfirmationId && <span className="rounded bg-purple-50 px-2 py-1 text-xs text-purple-700">确认书 {rec.projectConfirmation?.number ?? rec.projectConfirmationId}</span>}
           <Badge className={RECONCILIATION_STATUS_COLORS[rec.status]}>
             {RECONCILIATION_STATUS_LABELS[rec.status] ?? rec.status}
           </Badge>

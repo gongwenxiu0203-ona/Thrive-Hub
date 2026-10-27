@@ -363,6 +363,12 @@ export default async function ContractDetailPage({
     : contract.generatedDocUrl
       ? `/api/contracts/generate-doc/${contract.id}`
       : null;
+  const showLegacyBillingUnits = contract.type === "BRAND" && contract.status === "COMPLETED" && !isSimpleArchive;
+  const legacyBillingUnits = showLegacyBillingUnits ? await prisma.contractLegacyBillingUnit.findMany({
+    where: { contractId: contract.id }, orderBy: { createdAt: "asc" },
+    include: { _count: { select: { reconciliations: true } } },
+  }) : [];
+  const canEditLegacyBillingUnits = showLegacyBillingUnits && internal && await adminHasFeature(session, "contracts.records", "EDIT");
 
   return (
     <div className="space-y-6">
@@ -480,6 +486,18 @@ export default async function ContractDetailPage({
               contractId={contract.id}
               status={contract.status}
               isAdmin={isAdmin}
+              canTerminatePartial={canEditLegacyBillingUnits}
+              canInitializeLegacy={contract.type === "BRAND" && contract.contractMode !== "FRAMEWORK"}
+              legacyUnits={legacyBillingUnits.map(unit => ({
+                id: unit.id, title: unit.title, kind: unit.kind, status: unit.status, version: unit.version,
+                startDate: unit.startDate.toISOString().slice(0, 10), endDate: unit.endDate.toISOString().slice(0, 10),
+                terminatedAt: unit.terminatedAt?.toISOString().slice(0, 10) ?? null,
+                reconciliationCount: unit._count.reconciliations,
+              }))}
+              evidenceOptions={contract.addenda.filter(item => Boolean(item.fileUrl)).map(item => ({ id: item.id, title: item.title }))}
+              confirmations={contract.projectConfirmations.filter(item => item.status === "EFFECTIVE").map(item => ({
+                id: item.id, number: item.number, version: item.version,
+              }))}
             />}
           </div>
         </div>
@@ -620,7 +638,7 @@ export default async function ContractDetailPage({
         </dl>
       </section>}
 
-      {!isSimpleArchive && <section className="card p-5">
+      {!isSimpleArchive && <section id="contract-addenda" className="card scroll-mt-20 p-5">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="font-semibold text-slate-900">附加条款与补充文件</h2>

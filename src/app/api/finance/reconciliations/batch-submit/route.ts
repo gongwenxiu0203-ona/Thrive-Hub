@@ -6,6 +6,7 @@ import { FeaturePermissionError } from "@/lib/permissionGuard";
 import { recalcReconciliation, assertConfirmationReadyForSubmission } from "@/lib/reconciliationCalc";
 import { errorResponse } from "@/lib/appError";
 import { resolveSubmissionAmounts } from "@/lib/reconciliationSubmissionAmounts";
+import { findAmbiguousCommissionOverlap } from "@/lib/reconciliationCommissionOverlap";
 
 const MAX_BATCH_SIZE = 100;
 type SubmitMode = "CUSTOMER_REVIEW" | "SKIP_CUSTOMER";
@@ -103,7 +104,7 @@ export async function POST(request: Request) {
 
     const records = await prisma.customerReconciliation.findMany({
       where: { AND: [{ id: { in: ids }, deletedAt: null }, access.scope] },
-      include: { customer: { select: { brandName: true } } },
+      include: { customer: { select: { brandName: true } }, contract: { select: { targetSite: true, promoPlatform: true } }, legacyBillingUnit: { select: { scopeSnapshot: true } } },
       orderBy: { periodStart: "asc" },
     });
     if (records.length !== ids.length)
@@ -132,6 +133,11 @@ export async function POST(request: Request) {
 
     const decisionMap = new Map<string, Decision>();
     for (const record of records) assertConfirmationReadyForSubmission(record);
+    for (const record of records) {
+      if (record.reconcileType !== "FEE_ONLY" && await findAmbiguousCommissionOverlap(record)) {
+        return NextResponse.json({ error: `${record.customer.brandName} 的销售佣金存在旧合同条款或项目确认书计佣范围重叠，请先核定订单唯一归属` }, { status: 409 });
+      }
+    }
     const calcMap = new Map<
       string,
       Awaited<ReturnType<typeof recalcReconciliation>>

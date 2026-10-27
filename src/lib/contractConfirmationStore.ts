@@ -38,13 +38,17 @@ export function expectedVersion(value: unknown): number {
 }
 
 async function validateAccounts(tx: Prisma.TransactionClient, contractId: string, draft: ContractConfirmationDraft) {
-  const contracted = await tx.contractReceivingAccount.findMany({
-    where: { contractId, financeProfileId: { in: draft.receivingAccountIds } },
-    select: { financeProfileId: true },
-  });
-  const allowed = new Set(contracted.map((row) => row.financeProfileId).filter(Boolean));
-  if (draft.receivingAccountIds.some((id) => !allowed.has(id))) {
-    throw new AppError("乙方收款账户必须选自主格式合同已约定的账户", 400);
+  const contract = await tx.contract.findUnique({ where: { id: contractId }, select: { contractMode: true } });
+  if (!contract) throw new AppError("合同不存在", 404);
+  if (contract.contractMode === "FRAMEWORK") {
+    const contracted = await tx.contractReceivingAccount.findMany({
+      where: { contractId, financeProfileId: { in: draft.receivingAccountIds } },
+      select: { financeProfileId: true },
+    });
+    const allowed = new Set(contracted.map((row) => row.financeProfileId).filter(Boolean));
+    if (draft.receivingAccountIds.some((id) => !allowed.has(id))) {
+      throw new AppError("主格式合同的确认书只能选择主合同约定的收款账户", 400);
+    }
   }
   const count = await tx.financeAccountProfile.count({ where: { id: { in: draft.receivingAccountIds }, accountType: { in: ["COMPANY_PAYER", "COMPANY_BANK"] }, status: "ACTIVE" } });
   if (count !== draft.receivingAccountIds.length) throw new AppError("乙方收款账户已停用或不存在，请重新选择", 400);

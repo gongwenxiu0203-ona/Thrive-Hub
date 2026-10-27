@@ -71,13 +71,16 @@ export async function POST(request: NextRequest, context: Context) {
   try {
     const { id, confirmationId } = await context.params;
     const action = request.nextUrl.searchParams.get("action");
-    const { session, contract } = await authorizeConfirmation(id, action === "terminate" ? "EDIT" : "MANAGE");
-    if (action !== "terminate" && contract.status === "COMPLETED" && session.role !== "ADMIN") throw new AppError("合同签署完成后仅管理员可以变更项目确认书状态", 403);
+    if (action !== "terminate" && action !== "activate") throw new AppError("不支持的操作", 400);
+    // The uploader has EDIT permission and must be able to retry activation
+    // if the signed file was persisted but the subsequent activation failed.
+    const { session, contract } = await authorizeConfirmation(id, "EDIT");
     const body = await request.json();
     if (!body || typeof body !== "object" || Array.isArray(body)) throw new AppError("请求格式错误", 400);
     const row = await prisma.contractProjectConfirmation.findFirst({ where: { id: confirmationId, contractId: id } });
     if (!row) throw new AppError("确认书不存在", 404);
     if (action === "terminate") {
+      if (contract.status !== "COMPLETED") throw new AppError("主合同已终止或尚未签署，不能单独终止项目确认书", 409);
       if (row.status !== "EFFECTIVE") throw new AppError("只有已签署生效的确认书可以终止", 409);
       if (row.version !== expectedVersion(body.expectedVersion)) throw new AppError("确认书版本已变更，请刷新后重试", 409);
       const terminationDate = typeof body.terminationDate === "string" ? body.terminationDate.trim() : "";
@@ -86,24 +89,27 @@ export async function POST(request: NextRequest, context: Context) {
       if (Number.isNaN(terminatedAt.getTime()) || (row.startDate && terminatedAt < row.startDate)) throw new AppError("终止日期不能早于合作开始日期", 400);
       const reason = typeof body.reason === "string" ? body.reason.trim() : "";
       if (!reason || reason.length > 2000) throw new AppError("请填写终止原因（最多2000字）", 400);
-      const records = await prisma.customerReconciliation.findMany({ where: { projectConfirmationId: confirmationId, deletedAt: null, planStatus: { not: "CANCELLED" } }, include: { settlements: { select: { status: true } }, billingRequestLines: { select: { id: true }, take: 1 }, receiptAllocations: { where: { status: "ACTIVE" }, select: { id: true }, take: 1 } } });
-      if (records.some(record => record.periodEnd > terminatedAt && (record.status === "CONFIRMED" || record.settlements.some(item => item.status === "SETTLED") || record.billingRequestLines.length > 0 || record.receiptAllocations.length > 0))) {
-        throw new AppError("终止日期涉及已确认、已开票或已收款的对账记录，请先核对财务记录后重试", 409);
-      }
       const adjustmentReason = `项目确认书 ${row.number} 于 ${terminationDate} 终止：${reason}`;
       await prisma.$transaction(async tx => {
+        const records = await tx.customerReconciliation.findMany({ where: { projectConfirmationId: confirmationId, deletedAt: null, planStatus: { not: "CANCELLED" } }, include: {
+          settlements: { select: { status: true } }, billingRequestLines: { select: { id: true }, take: 1 },
+          billingAllocations: { select: { id: true }, take: 1 }, invoiceLinks: { select: { id: true }, take: 1 },
+          receiptAllocations: { where: { status: "ACTIVE" }, select: { id: true }, take: 1 },
+        } });
+        if (records.some(record => record.periodEnd > terminatedAt && (record.status === "CONFIRMED" || record.settlements.some(item => item.status === "SETTLED") || record.billingRequestLines.length > 0 || record.billingAllocations.length > 0 || record.invoiceLinks.length > 0 || record.receiptAllocations.length > 0))) {
+          throw new AppError("终止日期涉及已确认、已开票、已结算或已收款的对账记录，请先核对财务记录后重试", 409);
+        }
         const updated = await tx.contractProjectConfirmation.updateMany({ where: { id: confirmationId, contractId: id, status: "EFFECTIVE", version: row.version }, data: { status: "TERMINATED", terminatedAt, endDate: row.endDate && row.endDate < terminatedAt ? row.endDate : terminatedAt, version: { increment: 1 } } });
         if (updated.count !== 1) throw new AppError("确认书状态已变更，请刷新后重试", 409);
         for (const record of records) {
-          const hasFinancialHistory = record.status === "CONFIRMED" || record.settlements.some(item => item.status === "SETTLED") || record.billingRequestLines.length > 0 || record.receiptAllocations.length > 0;
           if (record.periodStart > terminatedAt) await tx.customerReconciliation.update({ where: { id: record.id }, data: { planStatus: "CANCELLED", adjustmentReason } });
-          else if (record.periodEnd > terminatedAt && !hasFinancialHistory) await tx.customerReconciliation.update({ where: { id: record.id }, data: { periodEnd: terminatedAt, periodAdjusted: true, adjustmentReason } });
+          else if (record.periodEnd > terminatedAt) await tx.customerReconciliation.update({ where: { id: record.id }, data: { periodEnd: terminatedAt, periodAdjusted: true, adjustmentReason } });
         }
         await tx.financeAuditLog.create({ data: { entityType: "CONTRACT_CONFIRMATION", entityId: confirmationId, action: "TERMINATE", actorId: session.userId, fromStatus: "EFFECTIVE", toStatus: "TERMINATED", note: reason, metadata: JSON.stringify({ contractId: id, terminationDate, reason }) } });
       });
       return NextResponse.json({ ok: true });
     }
-    if (action !== "activate") throw new AppError("不支持的操作", 400);
+    if (row.status !== "DRAFT" || !row.signedFileUrl) throw new AppError("仅已上传签署原件的草稿可以重试生效", 409);
     return NextResponse.json({ result: await activateContractConfirmation(confirmationId, session.userId, expectedVersion(body.expectedVersion)) });
   } catch (error) { return confirmationResponseError(error); }
 }
