@@ -140,6 +140,7 @@ export function MultiSelectFilter({
     <div className={cn("relative", width)} ref={ref}>
       <button
         type="button"
+        aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
         disabled={isPending}
         className={cn(
@@ -170,6 +171,7 @@ export function MultiSelectFilter({
             <Search className="h-3.5 w-3.5 shrink-0 text-slate-400" />
             <input
               autoFocus
+              aria-label={`${placeholder}：查找或粘贴`}
               className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400"
               placeholder="查找 / 粘贴多个值..."
               value={q}
@@ -251,11 +253,11 @@ export function MultiSelectFilter({
             )}
           </div>
 
-          <div className="flex items-center justify-between border-t border-slate-100 p-2">
-            <p className="flex items-center gap-1 text-[11px] text-slate-400">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 p-2">
+            <p className="flex w-full items-center gap-1 text-[11px] text-slate-600">
               <Clipboard className="h-3 w-3" /> 支持批量粘贴（换行/逗号/Tab分隔）
             </p>
-            <div className="flex gap-1">
+            <div className="ml-auto flex shrink-0 gap-1 whitespace-nowrap">
               <button
                 type="button"
                 className="btn-secondary btn-sm"

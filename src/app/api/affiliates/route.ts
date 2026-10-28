@@ -150,7 +150,7 @@ export async function GET(req: NextRequest) {
 
   // 过往销售：按平台联盟商名称聚合本页联盟商的销售记录（销售额 + 单量）
   const pageNames = data.map((a) => a.platformAffiliateName).filter(Boolean);
-  const salesByName = new Map<string, { revenue: number; units: number }>();
+  const salesByName = new Map<string, { revenue: number; units: number | null; missingUnitsCount: number }>();
   if (pageNames.length) {
     const grouped = await prisma.salesRecord.groupBy({
       by: ["affiliateName"],
@@ -159,11 +159,13 @@ export async function GET(req: NextRequest) {
         ...salesScope(auth, "all"),
       }),
       _sum: { revenue: true, unitsSold: true },
+      _count: { _all: true, unitsSold: true },
     });
     for (const g of grouped) {
       salesByName.set(g.affiliateName, {
         revenue: g._sum.revenue ?? 0,
-        units: g._sum.unitsSold ?? 0,
+        units: g._sum.unitsSold,
+        missingUnitsCount: g._count._all - g._count.unitsSold,
       });
     }
   }
@@ -171,7 +173,8 @@ export async function GET(req: NextRequest) {
   const enriched = data.map((a: any) => ({
     ...a,
     salesRevenue: salesByName.get(a.platformAffiliateName)?.revenue ?? 0,
-    salesUnits: salesByName.get(a.platformAffiliateName)?.units ?? 0,
+    salesUnits: salesByName.get(a.platformAffiliateName)?.units ?? null,
+    salesUnitsMissingCount: salesByName.get(a.platformAffiliateName)?.missingUnitsCount ?? 0,
   }));
 
   return NextResponse.json({ data: enriched, total, page, pageSize });

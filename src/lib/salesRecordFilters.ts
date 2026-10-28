@@ -10,6 +10,7 @@ export const SALES_RECORD_FILTER_KEYS = [
   "regions",
   "stores",
   "affiliateNames",
+  "publisherIds",
   "types",
   "asins",
   "parentAsins",
@@ -64,6 +65,7 @@ export function buildSalesRecordWhereFromParams(
   appendStringFilter(clauses, "region", csvFilterValues(sp, "regions"));
   appendStringFilter(clauses, "store", csvFilterValues(sp, "stores"));
   appendStringFilter(clauses, "affiliateName", csvFilterValues(sp, "affiliateNames"), false);
+  appendStringFilter(clauses, "publisherId", csvFilterValues(sp, "publisherIds"));
 
   const types = csvFilterValues(sp, "types");
   if (types.length) {

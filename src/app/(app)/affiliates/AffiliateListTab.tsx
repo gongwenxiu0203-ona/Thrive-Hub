@@ -31,7 +31,8 @@ interface AffiliateRow {
   contactInfo: string | null;
   createdAt: string;
   salesRevenue: number;
-  salesUnits: number;
+  salesUnits: number | null;
+  salesUnitsMissingCount: number;
   personInCharge: { id: string; name: string } | null;
 }
 
@@ -145,13 +146,13 @@ export default function AffiliateListTab({ options }: Props) {
   function exportSelected() {
     const rows = data.filter((a) => selectedIds.has(a.id));
     if (rows.length === 0) return;
-    const headers = ["平台联盟商名称", "内部名称", "来源", "类目", "联盟商类型", "开发状态", "负责人", "过往销售额", "过往销量", "联系方式"];
+    const headers = ["平台联盟商名称", "内部名称", "来源", "类目", "联盟商类型", "开发状态", "负责人", "过往销售额", "过往销量（已知部分）", "销量缺失记录数", "联系方式"];
     const csvLines = [headers.join(",")];
     for (const a of rows) {
       const cells = [
         a.platformAffiliateName, a.internalAffiliateName ?? "", a.source ?? "", a.category ?? "",
         a.affiliateType ?? "", a.developmentStatus ?? "", a.personInCharge?.name ?? "",
-        String(a.salesRevenue ?? 0), String(a.salesUnits ?? 0), a.contactInfo ?? "",
+        String(a.salesRevenue ?? 0), a.salesUnits == null ? "" : String(a.salesUnits), String(a.salesUnitsMissingCount ?? 0), a.contactInfo ?? "",
       ].map((c) => `"${String(c).replace(/"/g, '""')}"`);
       csvLines.push(cells.join(","));
     }
@@ -495,7 +496,7 @@ export default function AffiliateListTab({ options }: Props) {
                   <td className="px-4 py-2.5 text-slate-500">{a.personInCharge?.name ?? "—"}</td>
                   <td className="px-4 py-2.5 text-xs text-slate-600">
                     {a.salesRevenue > 0
-                      ? <span title={`${a.salesUnits} 单`}>${a.salesRevenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                      ? <span title={a.salesUnits == null ? "来源未提供销售数量" : `${a.salesUnits} 件${a.salesUnitsMissingCount > 0 ? `（已知部分；${a.salesUnitsMissingCount} 条记录缺失销量）` : ""}`}>${a.salesRevenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
                       : "—"}
                   </td>
                   <td className="px-4 py-2.5">

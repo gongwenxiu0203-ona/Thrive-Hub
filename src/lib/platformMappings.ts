@@ -16,6 +16,8 @@ export type PlatformMapping = {
   defaultProgram?: string;
   /** Default 地区 Region fallback when not present in source. */
   defaultRegion?: string;
+  /** This platform's uploads must provide a non-empty Region column. */
+  requireRegion?: boolean;
   /** System field → candidate upload column headers. */
   fields: Record<string, string[]>;
 };
@@ -214,12 +216,58 @@ export const PLATFORMS: PlatformMapping[] = [
       addToCarts: ["Add to Carts"],
     },
   },
+  {
+    name: "Impact", requireRegion: true,
+    fields: {
+      affiliateName: ["Partner"], publisherId: ["Partner Id"], publisherUrl: ["Referring URL"],
+      orderDate: ["Action Date"], revenue: ["Revenue"], commission: ["Action Cost"],
+      lockDate: ["Locking Date"], clicks: ["Click to Action"],
+    },
+  },
+  {
+    name: "Rakuten", requireRegion: true,
+    fields: {
+      affiliateName: ["Publisher Name"], publisherId: ["Publisher ID"], publisherUrl: ["Publisher URL"],
+      orderDate: ["Transaction Date"], revenue: ["Sales"], commission: ["Total Commission"],
+      lockStatus: ["Lock Status"], clicks: ["# of Clicks"],
+    },
+  },
+  {
+    name: "Webgains", requireRegion: true,
+    fields: {
+      affiliateName: ["Publisher"], publisherId: ["Publisher ID"], publisherUrl: ["Publisher Site"],
+      orderDate: ["Date"], revenue: ["Sale Value"], commission: ["Commission"], lockDate: ["Lock Date"],
+    },
+  },
+  {
+    name: "AWIN", requireRegion: true,
+    fields: {
+      affiliateName: ["site_name"], publisherId: ["publisher_id"], publisherUrl: ["URL"],
+      orderDate: ["Transaction Date"], revenue: ["sale_amount"], commission: ["commission"],
+      lockStatus: ["commission_status"],
+    },
+  },
+  {
+    name: "Tradedoubler", requireRegion: true,
+    fields: {
+      affiliateName: ["publisherOrganizationName"], publisherId: ["publisherOrganizationId"],
+      orderDate: ["Period"], revenue: ["orderValue"], commission: ["publisherCommission"], clicks: ["clicks"],
+    },
+  },
+  {
+    name: "CJ", requireRegion: true,
+    fields: {
+      affiliateName: ["Publisher Name"], publisherId: ["Publisher CID"], orderDate: ["Posting Date"],
+      revenue: ["Sale Amount (USD)"], commission: ["Publisher Commission (USD)"], clicks: ["Clicks"],
+    },
+  },
 ];
 
 export const PLATFORM_NAMES = PLATFORMS.map((p) => p.name);
 
 export function getPlatform(name: string): PlatformMapping | undefined {
-  return PLATFORMS.find((p) => p.name === name);
+  const normalized = name.trim().toLowerCase();
+  return PLATFORMS.find((p) => p.name.toLowerCase() === normalized);
 }
 
 /** Suggest a mapping for the given platform based on what columns exist. */
@@ -239,6 +287,25 @@ export function suggestPlatformMapping(
         break;
       }
     }
+  }
+  // Shared system headers remain available in platform exports and templates.
+  // Exact aliases only: never infer a region from the platform or URL.
+  const sharedAliases: Record<string, string[]> = {
+    affiliatePlatform: ["联盟平台", "Affiliate Network Platform"],
+    store: ["店铺", "Store"], asin: ["ASIN"], brand: ["品牌", "Brand"],
+    affiliateName: ["平台联盟商名称", "Affiliate Name on Network"],
+    orderDate: ["订单日期", "Order Date"], unitsSold: ["销售数量", "Unit Sold"],
+    revenue: ["销售金额", "Revenue"], commission: ["联盟商佣金", "Commission for Publishers"],
+    commissionRate: ["联盟商佣金比例", "Commission Rate %"], clicks: ["点击量", "Clicks"],
+    region: ["地区", "Region", "地区 Region"],
+    parentAsin: ["父ASIN", "Parent ASIN"], storeProductLabel: ["链接标签", "Store-Product Label"],
+    publisherId: ["Publisher ID"], publisherUrl: ["Publisher URL"],
+    lockDate: ["Lock Date", "锁定日期 Lock Date"], lockStatus: ["Lock Status", "锁定／佣金状态 Lock Status"],
+  };
+  for (const [key, aliases] of Object.entries(sharedAliases)) {
+    if (mapping[key]) continue;
+    const index = lowerCols.findIndex((column) => aliases.some((alias) => column === alias.toLowerCase()));
+    if (index >= 0) mapping[key] = columns[index];
   }
   return mapping;
 }

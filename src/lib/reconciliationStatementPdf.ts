@@ -35,7 +35,7 @@ export type ReconciliationBiDetail = {
   parentAsin: string | null;
   storeProductLabel: string | null;
   orders: number;
-  unitsSold: number;
+  unitsSold: number | null;
   revenue: number;
 };
 
@@ -49,7 +49,8 @@ export type ReconciliationBiSection = {
   difference: number;
   recordCount: number;
   orderCount: number;
-  unitsSold: number;
+  unitsSold: number | null;
+  unitsMissingCount?: number;
   details: ReconciliationBiDetail[];
 };
 
@@ -142,8 +143,8 @@ function formatPercent(value: number | null): string {
   return `${(value * 100).toLocaleString("zh-CN", { maximumFractionDigits: 2 })}%`;
 }
 
-function formatNumber(value: number): string {
-  return Number(value || 0).toLocaleString("zh-CN", { maximumFractionDigits: 2 });
+function formatNumber(value: number | null): string {
+  return value == null ? "—" : value.toLocaleString("zh-CN", { maximumFractionDigits: 2 });
 }
 async function logoDataUri(): Promise<string> {
   logoDataPromise ??= fs
@@ -319,6 +320,7 @@ function renderBiOverview(section: ReconciliationBiSection): string {
     <rect x="868" y="286" width="300" height="110" rx="12" fill="#f7f8fa" stroke="#e7e0ef"/>
     <text x="888" y="320" font-family="${BODY_FONT}" font-size="13" fill="#667085">BI 明细 / 订单 / 销量</text>
     <text x="888" y="365" font-family="${BODY_FONT}" font-size="19" font-weight="700" fill="#334155">${section.recordCount} / ${formatNumber(section.orderCount)} / ${formatNumber(section.unitsSold)}</text>
+    ${(section.unitsMissingCount ?? 0) > 0 ? `<text x="888" y="386" font-family="${BODY_FONT}" font-size="10" fill="#475467">销量仅统计已知值；${section.unitsMissingCount} 条未提供</text>` : ""}
   `;
 }
 

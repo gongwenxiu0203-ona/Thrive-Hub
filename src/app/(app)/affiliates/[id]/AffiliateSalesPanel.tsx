@@ -15,13 +15,21 @@ export type SaleRec = {
   store: string | null;
   asin: string | null;
   revenue: number;
-  unitsSold: number;
+  unitsSold: number | null;
   commission: number;
   commissionRate: number;
   affiliatePlatform: string;
   affiliateProgram: string | null;
   storeProductLabel: string | null;
 };
+
+export function summarizeSalesUnits(records: Pick<SaleRec, "unitsSold">[]) {
+  const known = records.filter((record) => record.unitsSold != null);
+  return {
+    unitsSold: known.length ? known.reduce((sum, record) => sum + record.unitsSold!, 0) : null,
+    missingCount: records.length - known.length,
+  };
+}
 
 type SortState = { k: string; d: "asc" | "desc" };
 function toggleSort(s: SortState, k: string): SortState {
@@ -198,7 +206,7 @@ export function AffiliateSalesPanel({ salesRecords }: { salesRecords: SaleRec[] 
   }), [salesRecords, dateFrom, dateTo, selBrands, selStores, selLabels, selPrograms]);
 
   const totRevenue = useMemo(() => filtered.reduce((s, r) => s + r.revenue, 0), [filtered]);
-  const totUnits = useMemo(() => filtered.reduce((s, r) => s + r.unitsSold, 0), [filtered]);
+  const unitSummary = useMemo(() => summarizeSalesUnits(filtered), [filtered]);
   const totCommission = useMemo(() => filtered.reduce((s, r) => s + r.commission, 0), [filtered]);
   // Weighted average commissionRate by revenue (commissionRate is already a decimal, e.g. 0.10 = 10%)
   const avgRate = useMemo(() => {
@@ -207,37 +215,40 @@ export function AffiliateSalesPanel({ salesRecords }: { salesRecords: SaleRec[] 
   }, [filtered, totRevenue]);
 
   const dailyData = useMemo(() => {
-    const map = new Map<string, { revenue: number; unitsSold: number }>();
+    const map = new Map<string, { revenue: number; unitsSold: number | null }>();
     filtered.forEach(r => {
       const d = new Date(r.orderDate).toISOString().slice(0, 10);
-      const e = map.get(d) ?? { revenue: 0, unitsSold: 0 };
-      e.revenue += r.revenue; e.unitsSold += r.unitsSold;
+      const e = map.get(d) ?? { revenue: 0, unitsSold: null };
+      e.revenue += r.revenue;
+      if (r.unitsSold != null) e.unitsSold = (e.unitsSold ?? 0) + r.unitsSold;
       map.set(d, e);
     });
     return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([date, v]) => ({ date, ...v }));
   }, [filtered]);
 
   const weeklyData = useMemo(() => {
-    const map = new Map<string, { revenue: number; unitsSold: number }>();
+    const map = new Map<string, { revenue: number; unitsSold: number | null }>();
     filtered.forEach(r => {
       const d = new Date(r.orderDate);
       const jan1 = new Date(d.getFullYear(), 0, 1);
       const week = Math.ceil(((d.getTime() - jan1.getTime()) / 86400000 + jan1.getDay() + 1) / 7);
       const key = `${d.getFullYear()}-W${String(week).padStart(2, "0")}`;
-      const e = map.get(key) ?? { revenue: 0, unitsSold: 0 };
-      e.revenue += r.revenue; e.unitsSold += r.unitsSold;
+      const e = map.get(key) ?? { revenue: 0, unitsSold: null };
+      e.revenue += r.revenue;
+      if (r.unitsSold != null) e.unitsSold = (e.unitsSold ?? 0) + r.unitsSold;
       map.set(key, e);
     });
     return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([date, v]) => ({ date, ...v }));
   }, [filtered]);
 
   const monthlyData = useMemo(() => {
-    const map = new Map<string, { revenue: number; unitsSold: number }>();
+    const map = new Map<string, { revenue: number; unitsSold: number | null }>();
     filtered.forEach(r => {
       const d = new Date(r.orderDate);
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-      const e = map.get(key) ?? { revenue: 0, unitsSold: 0 };
-      e.revenue += r.revenue; e.unitsSold += r.unitsSold;
+      const e = map.get(key) ?? { revenue: 0, unitsSold: null };
+      e.revenue += r.revenue;
+      if (r.unitsSold != null) e.unitsSold = (e.unitsSold ?? 0) + r.unitsSold;
       map.set(key, e);
     });
     return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([date, v]) => ({ date, ...v }));
@@ -248,22 +259,26 @@ export function AffiliateSalesPanel({ salesRecords }: { salesRecords: SaleRec[] 
   const productRows = useMemo(() => {
     const map = new Map<string, {
       asin: string; brand: string; label: string;
-      revenue: number; unitsSold: number; commission: number; rateSum: number; count: number;
+      revenue: number; unitsSold: number | null; missingUnitsCount: number; commission: number; rateSum: number; count: number;
     }>();
     filtered.forEach(r => {
       const key = (r.asin ?? "") + "||" + r.brand;
       const e = map.get(key) ?? {
         asin: r.asin ?? "—", brand: r.brand, label: r.storeProductLabel ?? "—",
-        revenue: 0, unitsSold: 0, commission: 0, rateSum: 0, count: 0,
+        revenue: 0, unitsSold: null, missingUnitsCount: 0, commission: 0, rateSum: 0, count: 0,
       };
-      e.revenue += r.revenue; e.unitsSold += r.unitsSold;
+      e.revenue += r.revenue;
+      if (r.unitsSold != null) e.unitsSold = (e.unitsSold ?? 0) + r.unitsSold;
+      else e.missingUnitsCount++;
       e.commission += r.commission; e.rateSum += r.commissionRate; e.count++;
       map.set(key, e);
     });
     const rows = [...map.values()].map(r => ({ ...r, commissionRate: r.count > 0 ? r.rateSum / r.count : 0 }));
     return rows.sort((a, b) => {
-      const av = a[tableSort.k as keyof typeof a] as number;
-      const bv = b[tableSort.k as keyof typeof b] as number;
+      const av = a[tableSort.k as keyof typeof a] as number | null;
+      const bv = b[tableSort.k as keyof typeof b] as number | null;
+      if (av == null) return bv == null ? 0 : 1;
+      if (bv == null) return -1;
       return tableSort.d === "desc" ? bv - av : av - bv;
     });
   }, [filtered, tableSort]);
@@ -320,7 +335,7 @@ export function AffiliateSalesPanel({ salesRecords }: { salesRecords: SaleRec[] 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[
           { label: "销售额", value: formatCurrency(totRevenue), color: "text-brand-700" },
-          { label: "销售数量", value: formatNumber(totUnits), color: "text-slate-800" },
+          { label: unitSummary.missingCount ? "销售数量（已知部分）" : "销售数量", value: unitSummary.unitsSold == null ? "—" : formatNumber(unitSummary.unitsSold), color: "text-slate-800" },
           { label: "联盟佣金", value: formatCurrency(totCommission), color: "text-emerald-700" },
           { label: "实际佣金率", value: `${avgRate.toFixed(2)}%`, color: "text-amber-700" },
         ].map(({ label, value, color }) => (
@@ -330,6 +345,8 @@ export function AffiliateSalesPanel({ salesRecords }: { salesRecords: SaleRec[] 
           </div>
         ))}
       </div>
+
+      {unitSummary.missingCount > 0 && <p className="text-xs text-slate-600">{unitSummary.missingCount} / {filtered.length} 条记录未提供销售数量；销量汇总和趋势仅统计已提供的数据，全部缺失时显示“—”。销售额及佣金仍按全部记录统计。</p>}
 
       {/* Chart */}
       <div className="rounded-2xl border border-slate-200 bg-white p-4">
@@ -407,7 +424,7 @@ export function AffiliateSalesPanel({ salesRecords }: { salesRecords: SaleRec[] 
                     <td className="font-medium">{row.brand}</td>
                     <td className="text-slate-400">{row.label}</td>
                     <td className="text-right">{formatCurrency(row.revenue)}</td>
-                    <td className="text-right">{formatNumber(row.unitsSold)}</td>
+                    <td className="text-right" title={row.missingUnitsCount ? `${row.missingUnitsCount} / ${row.count} 条记录未提供销量` : undefined}>{row.unitsSold == null ? "—" : formatNumber(row.unitsSold)}{row.unitsSold != null && row.missingUnitsCount > 0 && <span className="ml-1 text-xs text-slate-600">（部分）</span>}</td>
                     <td className="text-right text-emerald-600">{formatCurrency(row.commission)}</td>
                     <td className="text-right">{(row.commissionRate * 100).toFixed(2)}%</td>
                   </tr>

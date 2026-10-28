@@ -1,5 +1,17 @@
 # Thrive Hub Handover
 
+## 2026-10-28 BI 可选字段、六平台映射与 Publisher ID 筛选（本地完成，未提交/发布）
+
+- 用户确认 Schema 变更，并在得知 SQLite `DROP TABLE SalesRecord` 重建风险后明确回复“我已了解风险，确认执行”；用户最高要求是历史 BI 数据不得改写/清空，先备份，失败回滚。线上仅完成备份与只读校验，没有部署/迁移/清理业务数据，服务持续 online，login HTTP 200。
+- 线上独立一致性备份：`/root/www/backups/dev_manual_bi_20261028_before_bi_optional_01.db`（778 MiB，0600），SHA256 `6b6a9d5b5229c26621eece5c7bf00a62bf5d7b4f8e8a1e58ef4417a61c021cae`。完整性 ok、外键无错误、1,351,966 条 SalesRecord；验证前后备份 SHA256 相同。该 manual 文件不匹配 daily/pre_deploy 清理规则，不能擅自删除。未来真实迁移前仍必须停 PM2、另做最新备份；不能回滚到今日旧快照而丢失后续新增业务。
+- 新迁移 `20261028120000_bi_optional_publisher_fields` 仅重建 SalesRecord：新增可空 publisherId/publisherUrl/lockDate/lockStatus，unitsSold 与 conversionRate 允许空，新增平台+Publisher ID 索引，原5个索引保留。显式 BEGIN IMMEDIATE/COMMIT 保护，全部40个旧字段逐列原样复制，历史0不转null；不改其他业务表、不清理历史批次。仅在临时副本通过 raw SQL 和 Prisma migrate deploy 验证，真实本地主库和生产库均未应用新迁移。
+- 数据保护脚本 `scripts/verify-bi-migration.py` 只接受新输出路径且源库只读。在完整线上备份副本上，旧字段逐值 SHA256、记录数、金额/佣金/销量总计与其他表记录数一致；模拟 DROP 后、rename 前失败并 rollback，旧表及全部数据完整恢复；两种结果均 integrity=ok、无外键错误。隔离验证产物留在服务器 `/tmp/thrive-bi-optional-20261028-a7d29c04/`，绝非在线数据库。
+- 上传：店铺、ASIN、销量非必填；新上传缺销量为null、真实0保留、非法数量带行号报错；对应转化率不可计算时为null。新增 Publisher ID/URL、Lock Date/Status，ID文本保留前导零，URL不覆盖推广链接，状态不当日期。缺少完整品牌/店铺/地区/ASIN键时跳过自动补足。失败补偿只清理本次新建的暂存批次，不改既有批次。
+- 新增 Impact/Rakuten/Webgains/AWIN/Tradedoubler/CJ 映射，既有12平台保留。用户明确 Impact `Click to Action` 直接映射 clicks，Tradedoubler `Period` 为具体日期；新6平台必须从源列提供地区，不默认US。Rakuten Lock Status/AWIN commission_status 入lockStatus，Impact Locking Date/Webgains Lock Date 入lockDate。
+- 看板新增可搜索多选 Publisher ID，URL参数publisherIds联动角色范围内的看板/明细/导出；明细显示4个新字段，URL只允许http(s)点击。缺失销量显示—、部分合计有缺失标注，销量不完整时不以全量佣金除部分销量计算CPA。联盟商/项目/PDF下游同样适配null，不改销售额/佣金。共用筛选器补充展开状态/搜索名称，并修复窄弹层页脚按钮挤成竖排。
+- TypeScript、prisma validate、导入规则/Publisher筛选/数据库存储/对账BI规则测试、数据保留及故障回滚测试、隔离主/项目库 Next.js 82/82 页构建通过。浏览器已验收桌面/窄屏搜索、前导零输入、无匹配状态、上传18个平台及提示；正向ID筛选数据库测试通过。未向真实BI写入测试数据，事务内测试夹具已回滚。
+- 本地3001当前连接临时副本 `C:/Users/17863/AppData/Local/Temp/thrive-bi-optional-20261028-9c34a2bd/engine.db`（Prisma新迁移已记录），项目库为同目录projects.db；旧的确认书预览库及原dev.db保留不动。此副本8,672条旧BI记录日期截至2025-09，因此默认最近12个月看板为空并非数据丢失，批次列表仍完整。开发会话id17052。未commit/push/部署；不要暂存无关个人设置、output、压缩包、`scripts/__pycache__`和此前临时脚本。
+
 ## 2026-10-27 生产发布完成：e61f207
 
 - 用户在部署前检查清单后明确回复“确认部署”；业务 commit `e61f207` 已 push 并部署到 `/root/www`。先停止 PM2 并确认 stopped，再执行完整 `npm run build`，成功后重启；82/82 页面构建通过。

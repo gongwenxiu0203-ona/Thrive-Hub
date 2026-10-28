@@ -4,7 +4,7 @@ import { useState, useMemo } from "react";
 import { Plus, Trash2, BarChart2, CheckCircle2 } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { AFFILIATE_COOP_STATUS_OPTIONS, COOPERATION_MODE_OPTIONS } from "@/lib/constants";
-import type { SaleRec } from "./AffiliateSalesPanel";
+import { summarizeSalesUnits, type SaleRec } from "./AffiliateSalesPanel";
 
 const CURRENCY_OPTIONS = ["USD ($)", "RMB (¥)", "EUR (€)", "GBP (£)"];
 
@@ -75,7 +75,7 @@ export default function CoopReviewModal({
   }), [salesData, histBrand, histProgram]);
 
   const histRevenue = useMemo(() => histFiltered.reduce((s, r) => s + r.revenue, 0), [histFiltered]);
-  const histUnits = useMemo(() => histFiltered.reduce((s, r) => s + r.unitsSold, 0), [histFiltered]);
+  const histUnits = useMemo(() => summarizeSalesUnits(histFiltered), [histFiltered]);
   const histRate = useMemo(() => {
     if (histRevenue === 0) return 0;
     return histFiltered.reduce((s, r) => s + r.commissionRate * r.revenue, 0) / histRevenue * 100;
@@ -457,8 +457,9 @@ export default function CoopReviewModal({
                       )}
                       {showUnits && (
                         <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-center">
-                          <p className="text-[10px] text-slate-400">销售数量</p>
-                          <p className="mt-0.5 text-sm font-bold text-slate-800">{histFiltered.reduce((s,r) => s + r.unitsSold, 0).toLocaleString()}</p>
+                          <p className="text-[10px] text-slate-400">销售数量{histUnits.missingCount > 0 ? "（已知部分）" : ""}</p>
+                          <p className="mt-0.5 text-sm font-bold text-slate-800">{histUnits.unitsSold == null ? "—" : histUnits.unitsSold.toLocaleString()}</p>
+                          {histUnits.missingCount > 0 && <p className="mt-1 text-xs text-slate-600">{histUnits.missingCount} 条记录未提供销量</p>}
                         </div>
                       )}
                       {showRate && (

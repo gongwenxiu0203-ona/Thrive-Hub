@@ -146,7 +146,7 @@ async function loadDashboardQueryData(where: Prisma.SalesRecordWhereInput) {
   ] = await Promise.all([
     prisma.salesRecord.aggregate({
       where,
-      _count: true,
+      _count: { _all: true, unitsSold: true },
       _sum: { revenue: true, commission: true, unitsSold: true },
     }),
     prisma.salesRecord.groupBy({ where, by: ["affiliateProgram"], _sum: { revenue: true } }),
@@ -161,11 +161,13 @@ async function loadDashboardQueryData(where: Prisma.SalesRecordWhereInput) {
     prisma.salesRecord.groupBy({
       where,
       by: ["affiliatePlatform", "affiliateProgram", "affiliateName", "affiliateType"],
+      _count: { _all: true, unitsSold: true },
       _sum: { revenue: true, unitsSold: true, commission: true, clicks: true },
     }),
     prisma.salesRecord.groupBy({
       where,
       by: ["affiliatePlatform", "affiliateProgram", "storeProductLabel", "brand", "parentAsin", "asin"],
+      _count: { _all: true, unitsSold: true },
       _sum: { revenue: true, unitsSold: true, commission: true },
     }),
     prisma.salesRecord.groupBy({
@@ -177,6 +179,7 @@ async function loadDashboardQueryData(where: Prisma.SalesRecordWhereInput) {
     prisma.salesRecord.groupBy({
       where,
       by: ["orderDate"],
+      _count: { _all: true, unitsSold: true },
       _sum: { revenue: true, unitsSold: true },
       orderBy: { orderDate: "asc" },
     }),
@@ -276,6 +279,7 @@ async function getBiFilterContext(baseWhere: Prisma.SalesRecordWhereInput): Prom
     regions,
     stores,
     affiliatePairs,
+    publisherIds,
     asins,
     parentAsins,
     labels,
@@ -287,6 +291,7 @@ async function getBiFilterContext(baseWhere: Prisma.SalesRecordWhereInput): Prom
     prisma.salesRecord.groupBy({ where: baseWhere, by: ["region"] }),
     prisma.salesRecord.groupBy({ where: baseWhere, by: ["store"] }),
     prisma.salesRecord.groupBy({ where: baseWhere, by: ["affiliateName", "affiliateType"] }),
+    prisma.salesRecord.groupBy({ where: baseWhere, by: ["publisherId"] }),
     prisma.salesRecord.groupBy({ where: baseWhere, by: ["asin"] }),
     prisma.salesRecord.groupBy({ where: baseWhere, by: ["parentAsin"] }),
     prisma.salesRecord.groupBy({ where: baseWhere, by: ["storeProductLabel"] }),
@@ -308,6 +313,7 @@ async function getBiFilterContext(baseWhere: Prisma.SalesRecordWhereInput): Prom
       regions: uniq(regions.map((r) => r.region)),
       stores: uniq(stores.map((r) => r.store)),
       affiliateNames: uniq(affiliatePairs.map((r) => r.affiliateName)),
+      publisherIds: uniq(publisherIds.map((r) => r.publisherId)),
       // Resolve types from the affiliate library so the dropdown shows current
       // types even if stored affiliateType fields are empty.
       types: uniq(affiliatePairs.map((r) => resolveTypePage(r.affiliateName, r.affiliateType))),
@@ -548,7 +554,7 @@ async function DashboardTab({
   // 按发布时间降序（空时间排最后）
   promoContentRows.sort((a, b) => (b.publishedAt || "").localeCompare(a.publishedAt || ""));
 
-  if (dashboardData.totals._count === 0) {
+  if (dashboardData.totals._count._all === 0) {
     const emptyChannelOpts: FilterOptions = isChannel
       ? {
           platforms: [],
@@ -557,6 +563,7 @@ async function DashboardTab({
           regions: filterOptions.regions,
           stores: filterOptions.stores,
           affiliateNames: [],
+          publisherIds: [],
           types: [],
           asins: [],
           parentAsins: [],
@@ -577,7 +584,8 @@ async function DashboardTab({
   // KPI totals
   const totalRevenue = dashboardData.totals._sum.revenue ?? 0;
   const totalCommission = dashboardData.totals._sum.commission ?? 0;
-  const totalUnits = dashboardData.totals._sum.unitsSold ?? 0;
+  const totalUnits = dashboardData.totals._sum.unitsSold;
+  const missingUnitRecords = dashboardData.totals._count._all - dashboardData.totals._count.unitsSold;
 
   const sumNamedGroups = <T,>(rows: T[], key: (row: T) => string, value: (row: T) => number) => {
     const values = new Map<string, number>();
@@ -626,6 +634,8 @@ async function DashboardTab({
     type: string;
     revenue: number;
     unitsSold: number;
+    unitRecordCount: number;
+    recordCount: number;
     commission: number;
     clicks: number;
   };
@@ -639,11 +649,15 @@ async function DashboardTab({
       type: resolveType(r.affiliateName, r.affiliateType),
       revenue: 0,
       unitsSold: 0,
+      unitRecordCount: 0,
+      recordCount: 0,
       commission: 0,
       clicks: 0,
     };
     existing.revenue += r._sum.revenue ?? 0;
     existing.unitsSold += r._sum.unitsSold ?? 0;
+    existing.unitRecordCount += r._count.unitsSold;
+    existing.recordCount += r._count._all;
     existing.commission += r._sum.commission ?? 0;
     existing.clicks += r._sum.clicks ?? 0;
     creatorMap.set(k, existing);
@@ -656,10 +670,11 @@ async function DashboardTab({
       name: c.name,
       type: c.type,
       revenue: Math.round(c.revenue * 100) / 100,
-      unitsSold: c.unitsSold,
+      unitsSold: c.unitRecordCount ? c.unitsSold : null,
+      missingUnitRecords: c.recordCount - c.unitRecordCount,
       commission: Math.round(c.commission * 100) / 100,
       rate: c.revenue > 0 ? c.commission / c.revenue : 0,
-      cpa: c.unitsSold > 0 ? c.commission / c.unitsSold : 0,
+      cpa: c.unitRecordCount === c.recordCount && c.unitsSold > 0 ? c.commission / c.unitsSold : null,
     }));
 
   // Products
@@ -672,6 +687,8 @@ async function DashboardTab({
     asin: string;
     revenue: number;
     unitsSold: number;
+    unitRecordCount: number;
+    recordCount: number;
     commission: number;
   };
   const productMap = new Map<string, ProductAgg>();
@@ -686,10 +703,14 @@ async function DashboardTab({
       asin: r.asin ?? "",
       revenue: 0,
       unitsSold: 0,
+      unitRecordCount: 0,
+      recordCount: 0,
       commission: 0,
     };
     existing.revenue += r._sum.revenue ?? 0;
     existing.unitsSold += r._sum.unitsSold ?? 0;
+    existing.unitRecordCount += r._count.unitsSold;
+    existing.recordCount += r._count._all;
     existing.commission += r._sum.commission ?? 0;
     productMap.set(k, existing);
   }
@@ -697,10 +718,12 @@ async function DashboardTab({
     .sort((a, b) => b.revenue - a.revenue)
     .map((p) => ({
       ...p,
+      unitsSold: p.unitRecordCount ? p.unitsSold : null,
+      missingUnitRecords: p.recordCount - p.unitRecordCount,
       revenue: Math.round(p.revenue * 100) / 100,
       commission: Math.round(p.commission * 100) / 100,
       rate: p.revenue > 0 ? p.commission / p.revenue : 0,
-      cpa: p.unitsSold > 0 ? p.commission / p.unitsSold : 0,
+      cpa: p.unitRecordCount === p.recordCount && p.unitsSold > 0 ? p.commission / p.unitsSold : null,
     }));
 
   // New affiliates (first-order in window)
@@ -715,12 +738,14 @@ async function DashboardTab({
     }));
 
   // Daily / Weekly / Monthly trend
-  const dayMap = new Map<string, { revenue: number; unitsSold: number }>();
+  const dayMap = new Map<string, { revenue: number; unitsSold: number; unitRecordCount: number; recordCount: number }>();
   for (const r of dashboardData.dailyGroups) {
     const d = r.orderDate.toISOString().slice(0, 10);
-    const existing = dayMap.get(d) ?? { revenue: 0, unitsSold: 0 };
+    const existing = dayMap.get(d) ?? { revenue: 0, unitsSold: 0, unitRecordCount: 0, recordCount: 0 };
     existing.revenue += r._sum.revenue ?? 0;
     existing.unitsSold += r._sum.unitsSold ?? 0;
+    existing.unitRecordCount += r._count.unitsSold;
+    existing.recordCount += r._count._all;
     dayMap.set(d, existing);
   }
   const daily = [...dayMap.entries()]
@@ -728,20 +753,23 @@ async function DashboardTab({
     .map(([date, v]) => ({
       date,
       revenue: Math.round(v.revenue * 100) / 100,
-      unitsSold: v.unitsSold,
+      unitsSold: v.unitRecordCount ? v.unitsSold : null,
+      missingUnitRecords: v.recordCount - v.unitRecordCount,
     }));
 
   // Weekly = ISO week-start (Monday)
-  const weekMap = new Map<string, { revenue: number; unitsSold: number }>();
+  const weekMap = new Map<string, { revenue: number; unitsSold: number; unitRecordCount: number; recordCount: number }>();
   for (const r of dashboardData.dailyGroups) {
     const d = new Date(r.orderDate);
     const day = d.getUTCDay();
     const diff = (day + 6) % 7;
     d.setUTCDate(d.getUTCDate() - diff);
     const k = d.toISOString().slice(0, 10);
-    const existing = weekMap.get(k) ?? { revenue: 0, unitsSold: 0 };
+    const existing = weekMap.get(k) ?? { revenue: 0, unitsSold: 0, unitRecordCount: 0, recordCount: 0 };
     existing.revenue += r._sum.revenue ?? 0;
     existing.unitsSold += r._sum.unitsSold ?? 0;
+    existing.unitRecordCount += r._count.unitsSold;
+    existing.recordCount += r._count._all;
     weekMap.set(k, existing);
   }
   const weekly = [...weekMap.entries()]
@@ -749,15 +777,18 @@ async function DashboardTab({
     .map(([date, v]) => ({
       date,
       revenue: Math.round(v.revenue * 100) / 100,
-      unitsSold: v.unitsSold,
+      unitsSold: v.unitRecordCount ? v.unitsSold : null,
+      missingUnitRecords: v.recordCount - v.unitRecordCount,
     }));
 
-  const monthMap = new Map<string, { revenue: number; unitsSold: number }>();
+  const monthMap = new Map<string, { revenue: number; unitsSold: number; unitRecordCount: number; recordCount: number }>();
   for (const r of dashboardData.dailyGroups) {
     const k = r.orderDate.toISOString().slice(0, 7);
-    const existing = monthMap.get(k) ?? { revenue: 0, unitsSold: 0 };
+    const existing = monthMap.get(k) ?? { revenue: 0, unitsSold: 0, unitRecordCount: 0, recordCount: 0 };
     existing.revenue += r._sum.revenue ?? 0;
     existing.unitsSold += r._sum.unitsSold ?? 0;
+    existing.unitRecordCount += r._count.unitsSold;
+    existing.recordCount += r._count._all;
     monthMap.set(k, existing);
   }
   const monthly = [...monthMap.entries()]
@@ -765,7 +796,8 @@ async function DashboardTab({
     .map(([date, v]) => ({
       date,
       revenue: Math.round(v.revenue * 100) / 100,
-      unitsSold: v.unitsSold,
+      unitsSold: v.unitRecordCount ? v.unitsSold : null,
+      missingUnitRecords: v.recordCount - v.unitRecordCount,
     }));
 
   // Build monthly series from database-grouped rows. This keeps the original
@@ -835,6 +867,7 @@ async function DashboardTab({
         regions: filterOptions.regions,
         stores: filterOptions.stores,
         affiliateNames: [],
+        publisherIds: [],
         types: [],
         asins: [],
         parentAsins: [],
@@ -869,11 +902,13 @@ async function DashboardTab({
         />
         <StatCard
           label="销售数量"
-          value={formatNumber(totalUnits)}
+          value={totalUnits === null ? "—" : formatNumber(totalUnits)}
           icon={<Package className="h-5 w-5" />}
           accent="text-amber-600"
         />
       </div>
+
+      {missingUnitRecords > 0 && <p className="text-sm text-slate-600" role="status">当前筛选有 {formatNumber(missingUnitRecords)} 条记录未提供销售数量；销量仅合计已提供的数据，未提供显示“—”，涉及缺失销量的 CPA 不计算。销售额和佣金仍包含全部记录。</p>}
 
       {!isChannel && (
         <SalesDashboard
@@ -935,6 +970,10 @@ async function DetailTab({
     store: r.store,
     brand: r.brand,
     affiliateName: r.affiliateName,
+    publisherId: r.publisherId,
+    publisherUrl: r.publisherUrl,
+    lockDate: r.lockDate?.toISOString().slice(0, 10) ?? null,
+    lockStatus: r.lockStatus,
     affiliateTypeLabel: resolveType(r.affiliateName, r.affiliateType),
     region: r.region,
     asin: r.asin,

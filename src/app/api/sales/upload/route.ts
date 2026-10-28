@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { errorResponse } from "@/lib/appError";
+import { AppError, errorResponse } from "@/lib/appError";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
-import { convertRow, getMappableFields, FIELD_HINTS } from "@/lib/salesImport";
+import { convertRow, getMappableFields, FIELD_HINTS, SalesImportValidationError } from "@/lib/salesImport";
 import { parseSheetChunksFromFile } from "@/lib/excelStream";
 import { unlink, stat } from "fs/promises";
 import path from "path";
@@ -191,6 +191,7 @@ export async function POST(req: Request) {
       { parentAsin: string | null; storeProductLabel: string | null }
     >();
     for (const m of asinMappings) {
+      if (![m.brand, m.store, m.region, m.asin].every((value) => String(value ?? "").trim())) continue;
       const key = [m.brand, m.store, m.region, m.asin]
         .map((x) => (x ?? "").toString().trim().toLowerCase())
         .join("||");
@@ -228,13 +229,13 @@ export async function POST(req: Request) {
         for (const rawRow of rawRows) {
           const sourceRowNumber = logicalRowIndex + 2;
           logicalRowIndex += 1;
-          const result = convertRow(
-            rawRow,
-            mapping,
-            platform,
-            customerId,
-            customerBrandName,
-          );
+          let result: ReturnType<typeof convertRow>;
+          try {
+            result = convertRow(rawRow, mapping, platform, customerId, customerBrandName);
+          } catch (error) {
+            if (error instanceof SalesImportValidationError) throw new AppError(`第 ${sourceRowNumber} 行：${error.message}`, 400, "INVALID_SALES_ROW");
+            throw error;
+          }
           if (!result) {
             skipped.push(sourceRowNumber);
             continue;
@@ -254,10 +255,10 @@ export async function POST(req: Request) {
             }
           }
 
-          const asinKey = [record.brand, record.store, record.region, record.asin]
-            .map((value) => (value ?? "").toString().trim().toLowerCase())
-            .join("||");
-          const asinMapping = asinMap.get(asinKey);
+          const asinParts = [record.brand, record.store, record.region, record.asin];
+          const asinKey = asinParts.every((value) => String(value ?? "").trim())
+            ? asinParts.map((value) => String(value).trim().toLowerCase()).join("||") : null;
+          const asinMapping = asinKey ? asinMap.get(asinKey) : undefined;
           if (asinMapping) {
             if (!record.parentAsin) record.parentAsin = asinMapping.parentAsin;
             if (!record.storeProductLabel) record.storeProductLabel = asinMapping.storeProductLabel;

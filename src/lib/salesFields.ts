@@ -45,6 +45,8 @@ export const SALES_FIELDS: SalesField[] = [
     type: "string",
     source: "upload",
   },
+  { key: "publisherId", label: "Publisher ID", type: "string", source: "upload" },
+  { key: "publisherUrl", label: "Publisher URL", type: "string", source: "upload" },
 
   // 时间
   {
@@ -53,6 +55,8 @@ export const SALES_FIELDS: SalesField[] = [
     type: "date",
     source: "upload",
   },
+  { key: "lockDate", label: "锁定日期 Lock Date", type: "date", source: "upload" },
+  { key: "lockStatus", label: "锁定／佣金状态 Lock Status", type: "string", source: "upload" },
 
   // 数字（销售）
   { key: "orders", label: "订单数 Orders", type: "int", source: "upload" },

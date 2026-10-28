@@ -14,6 +14,7 @@ const FILTER_KEYS = [
   "regions",
   "stores",
   "affiliateNames",
+  "publisherIds",
   "types",
   "asins",
   "parentAsins",
@@ -31,6 +32,7 @@ export type FilterOptions = {
   regions: string[];
   stores: string[];
   affiliateNames: string[];
+  publisherIds: string[];
   types: string[];
   asins: string[];
   parentAsins: string[];
@@ -189,6 +191,16 @@ export function BIFilters({
               paramKey="affiliateNames"
               placeholder="请选择"
               options={toOpts(options.affiliateNames)}
+              width="w-full"
+            />
+          </FilterCell>
+        )}
+        {!isChannel && (
+          <FilterCell label="Publisher ID">
+            <MultiSelectFilter
+              paramKey="publisherIds"
+              placeholder="搜索 / 选择 Publisher ID"
+              options={toOpts(options.publisherIds)}
               width="w-full"
             />
           </FilterCell>

@@ -26,19 +26,30 @@ export type SalesDetailRecord = {
   store: string | null;
   brand: string;
   affiliateName: string;
+  publisherId: string | null;
+  publisherUrl: string | null;
+  lockDate: string | null;
+  lockStatus: string | null;
   affiliateTypeLabel: string;
   region: string | null;
   asin: string | null;
   parentAsin: string | null;
   storeProductLabel: string | null;
   revenue: number;
-  unitsSold: number;
+  unitsSold: number | null;
   commission: number;
   commissionRate: number;
   customerId: string | null;
 };
 
 type CustomerOption = { id: string; brandName: string };
+function safePublisherUrl(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.href : null;
+  } catch { return null; }
+}
 type UndoState =
   | { type: "customer"; snapshots: SalesRecordUndoSnapshot[]; label: string }
   | { type: "delete"; ids: string[]; label: string };
@@ -297,11 +308,15 @@ export function SalesDetailTable({
               <th>店铺</th>
               <th>品牌</th>
               <th>联盟商</th>
+              <th>Publisher ID</th>
+              <th>Publisher URL</th>
               <th>类型</th>
               <th>地区</th>
               <th>ASIN</th>
               <th>Parent</th>
               <th>链接标签</th>
+              <th>锁定日期</th>
+              <th>锁定／佣金状态</th>
               <th className="text-right">销售金额</th>
               <th className="text-right">销售数量</th>
               <th className="text-right">佣金</th>
@@ -311,7 +326,7 @@ export function SalesDetailTable({
           <tbody>
             {records.length === 0 ? (
               <tr>
-                <td colSpan={16} className="py-8 text-center text-slate-400">
+                <td colSpan={20} className="py-8 text-center text-slate-400">
                   无符合条件的数据
                 </td>
               </tr>
@@ -332,13 +347,17 @@ export function SalesDetailTable({
                   <td>{r.store ?? "-"}</td>
                   <td>{r.brand}</td>
                   <td>{r.affiliateName}</td>
+                  <td>{r.publisherId || "—"}</td>
+                  <td>{safePublisherUrl(r.publisherUrl) ? <a href={safePublisherUrl(r.publisherUrl)!} target="_blank" rel="noopener noreferrer" className="text-purple-700 underline" title={r.publisherUrl!}>查看链接</a> : r.publisherUrl || "—"}</td>
                   <td>{r.affiliateTypeLabel || "-"}</td>
                   <td>{r.region ?? "-"}</td>
                   <td>{r.asin ?? "-"}</td>
                   <td>{r.parentAsin ?? "-"}</td>
                   <td>{r.storeProductLabel ?? "-"}</td>
+                  <td>{r.lockDate || "—"}</td>
+                  <td>{r.lockStatus || "—"}</td>
                   <td className="text-right">{formatCurrency(r.revenue)}</td>
-                  <td className="text-right">{r.unitsSold}</td>
+                  <td className="text-right">{r.unitsSold ?? "—"}</td>
                   <td className="text-right">{formatCurrency(r.commission)}</td>
                   <td className="text-right">{(r.commissionRate * 100).toFixed(2)}%</td>
                 </tr>

@@ -115,6 +115,7 @@ export async function POST(request: Request) {
           ? details.filter((row) => matchesBiProduct(snapshot, row) && snapshot.details.some((detail) => matchesBiDetail(detail, row)))
           : details;
         const currentBiSalesAmount = scopedDetails.reduce((sum, detail) => sum + detail.revenue, 0);
+        const knownUnitDetails = scopedDetails.filter((detail) => detail.unitsSold != null);
         const lockedSalesAmount = record.finalSalesAmount ?? record.actualSalesAmount;
         return {
           reconciliationId: record.id,
@@ -126,7 +127,8 @@ export async function POST(request: Request) {
           difference: currentBiSalesAmount - lockedSalesAmount,
           recordCount: scopedDetails.length,
           orderCount: scopedDetails.reduce((sum, detail) => sum + detail.orders, 0),
-          unitsSold: scopedDetails.reduce((sum, detail) => sum + detail.unitsSold, 0),
+          unitsSold: knownUnitDetails.length ? knownUnitDetails.reduce((sum, detail) => sum + detail.unitsSold!, 0) : null,
+          unitsMissingCount: scopedDetails.length - knownUnitDetails.length,
           details: scopedDetails,
         };
       }),

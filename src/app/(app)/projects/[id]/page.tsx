@@ -178,7 +178,7 @@ export default async function ProjectDetailPage({
           orderDate: { gte: monthStart, lt: monthEnd },
         }),
         _sum: { revenue: true, commission: true, unitsSold: true },
-        _count: true,
+        _count: { _all: true, unitsSold: true },
       })
     : null;
 
@@ -459,14 +459,14 @@ export default async function ProjectDetailPage({
             </Link>
           )}
         </div>
-        {monthAgg && (monthAgg._count ?? 0) > 0 ? (
+        {monthAgg && monthAgg._count._all > 0 ? (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <DataCard label={`${targetMonth} 销售金额`} value={formatCurrency(monthAgg._sum.revenue ?? 0)} />
-            <DataCard label={`${targetMonth} 销售数量`} value={formatNumber(monthAgg._sum.unitsSold ?? 0)} />
+            <DataCard label={`${targetMonth} 销售数量`} value={monthAgg._sum.unitsSold == null ? "—" : formatNumber(monthAgg._sum.unitsSold)} sub={monthAgg._count.unitsSold < monthAgg._count._all ? `仅统计已提供销量的记录；${monthAgg._count._all - monthAgg._count.unitsSold} 条缺失` : undefined} />
             <DataCard label={`${targetMonth} 联盟商佣金`} value={formatCurrency(monthAgg._sum.commission ?? 0)} />
             <DataCard
               label="BI 记录数"
-              value={formatNumber(monthAgg._count ?? 0)}
+              value={formatNumber(monthAgg._count._all)}
               sub="按订单日期归入当前月份"
               highlight
             />

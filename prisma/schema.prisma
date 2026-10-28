@@ -753,14 +753,18 @@ model SalesRecord {
   asin              String? // ASIN
   brand             String // 品牌 Brand
   affiliateName     String // 平台联盟商名称 Affiliate Name on Network
+  publisherId       String? // 平台联盟商 ID，文本保留前导零
+  publisherUrl      String? // 平台联盟商 URL，与推广链接独立
   region            String? // 地区 Region
 
   // 时间
   orderDate DateTime // 订单日期 Order Date
+  lockDate  DateTime? // 锁定日期，可为空
+  lockStatus String? // 锁定/佣金状态，与锁定日期独立
 
   // 销售数字
   orders           Int   @default(0) // 订单数 Orders
-  unitsSold        Int   @default(0) // 销售数量 Unit Sold
+  unitsSold        Int? // 销售数量 Unit Sold；空值表示来源未提供
   revenue          Float @default(0) // 销售金额 Revenue
   commission       Float @default(0) // 联盟商佣金 Commission for Publishers
   commissionRate   Float @default(0) // 联盟商佣金比例 Commission Rate %
@@ -773,7 +777,7 @@ model SalesRecord {
   // 流量数字
   clicks         Int   @default(0) // 点击量 Clicks
   addToCarts     Int   @default(0) // 加入购物车 Add to Carts
-  conversionRate Float @default(0) // 转化率 Conversion Rate（公式）
+  conversionRate Float? // 转化率 Conversion Rate；缺销量时不可计算
   epc            Float @default(0) // EPC（公式）
   acos           Float @default(0) // ACOS（公式）
 
@@ -804,6 +808,7 @@ model SalesRecord {
   customer Customer?  @relation(fields: [customerId], references: [id], onDelete: SetNull)
 
   @@index([affiliatePlatform])
+  @@index([affiliatePlatform, publisherId])
   @@index([brand])
   @@index([region])
   @@index([orderDate])

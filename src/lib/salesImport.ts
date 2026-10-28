@@ -10,6 +10,11 @@ export { SALES_FIELDS, UPLOAD_FIELDS } from "./salesFields";
 /** Row type after sheet_to_json. */
 export type RawRow = Record<string, unknown>;
 
+/** Expected source-data errors are reported with their Excel row by the API. */
+export class SalesImportValidationError extends Error {
+  constructor(message: string) { super(message); this.name = "SalesImportValidationError"; }
+}
+
 function pick(row: RawRow, col: string | undefined): unknown {
   if (!col) return undefined;
   return row[col];
@@ -25,6 +30,21 @@ function toNumber(v: unknown): number {
 
 function toInt(v: unknown): number {
   return Math.round(toNumber(v));
+}
+
+function isBlank(v: unknown): boolean {
+  return v === null || v === undefined || (typeof v === "string" && v.trim() === "");
+}
+
+function nullableText(v: unknown): string | null {
+  return isBlank(v) ? null : String(v).trim();
+}
+
+function optionalUnits(v: unknown): number | null {
+  if (isBlank(v)) return null;
+  const value = typeof v === "number" ? v : Number(String(v).replace(/,/g, "").trim());
+  if (!Number.isSafeInteger(value)) throw new SalesImportValidationError("销售数量必须为有效整数；未提供时请留空");
+  return value;
 }
 
 function toRate(v: unknown): number {
@@ -58,6 +78,8 @@ const REGION_MAP: Record<string, string> = {
   "austria": "AT",
   "singapore": "SG",
   "india": "IN",
+  "美国": "US", "加拿大": "CA", "英国": "UK", "德国": "DE", "日本": "JP",
+  "法国": "FR", "澳大利亚": "AU", "墨西哥": "MX", "意大利": "IT", "西班牙": "ES",
 };
 function normalizeRegion(v: string): string {
   const lower = v.toLowerCase().trim();
@@ -67,6 +89,12 @@ function normalizeRegion(v: string): string {
 function toDate(v: unknown): Date | null {
   if (v === null || v === undefined || v === "") return null;
   if (v instanceof Date) return Number.isFinite(v.getTime()) ? v : null;
+  const dateOnly = typeof v === "string" ? v.trim().match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/) : null;
+  if (dateOnly) {
+    const [, year, month, day] = dateOnly.map(Number);
+    const parsed = new Date(Date.UTC(year, month - 1, day));
+    return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day ? parsed : null;
+  }
   const excelSerial = typeof v === "number"
     ? v
     : typeof v === "string" && /^\d{5}(?:\.\d+)?$/.test(v.trim())
@@ -123,10 +151,10 @@ export function convertRow(
   const totalFee =
     commission + platformFee + affiliateFlatfee + platformFlatfee + sampleFee;
 
-  const unitsSold = toInt(pick(row, mapping.unitsSold));
+  const unitsSold = optionalUnits(pick(row, mapping.unitsSold));
   const clicks = toInt(pick(row, mapping.clicks));
 
-  const conversionRate = clicks > 0 ? unitsSold / clicks : 0;
+  const conversionRate = unitsSold !== null && clicks > 0 ? unitsSold / clicks : null;
   const epc = clicks > 0 ? commission / clicks : 0;
   const acos = revenue > 0 ? totalFee / revenue : 0;
 
@@ -141,14 +169,25 @@ export function convertRow(
     computedPlatformFee = revenue * 0.025;
   }
 
+  const rawRegion = nullableText(pick(row, mapping.region));
+  const selectedPlatform = getPlatform(platform);
+  if ((p?.requireRegion || selectedPlatform?.requireRegion) && !rawRegion) {
+    throw new SalesImportValidationError(`${p?.name || selectedPlatform?.name || platform} 数据必须提供地区 Region，不能自动填为 US`);
+  }
+  const rawLockDate = pick(row, mapping.lockDate);
+  const lockDate = isBlank(rawLockDate) ? null : toDate(rawLockDate);
+  if (!isBlank(rawLockDate) && !lockDate) {
+    throw new SalesImportValidationError("锁定日期 Lock Date 格式无效；状态文字请映射到「锁定／佣金状态」，没有日期可留空");
+  }
+
   const record: ConvertedRecord = {
     affiliatePlatform: resolvedPlatform || platform,
     affiliateProgram:
       (pick(row, mapping.affiliateProgram) as string | undefined) ||
       p?.defaultProgram ||
       null,
-    store: (pick(row, mapping.store) as string | undefined) || null,
-    asin: (pick(row, mapping.asin) as string | undefined) || null,
+    store: nullableText(pick(row, mapping.store)),
+    asin: nullableText(pick(row, mapping.asin)),
     brand: capitalizeBrandName(
       ((pick(row, mapping.brand) as string | undefined) || "").toString() ||
       customerBrandName ||
@@ -158,10 +197,12 @@ export function convertRow(
       ((pick(row, mapping.affiliateName) as string | undefined) || "")
         .toString()
         .trim() || "",
-    region: normalizeRegion(
-      ((pick(row, mapping.region) as string | undefined) || p?.defaultRegion || "US").toString()
-    ),
+    publisherId: nullableText(pick(row, mapping.publisherId)),
+    publisherUrl: nullableText(pick(row, mapping.publisherUrl)),
+    region: normalizeRegion(rawRegion || p?.defaultRegion || "US"),
     orderDate,
+    lockDate,
+    lockStatus: nullableText(pick(row, mapping.lockStatus)),
     orders: toInt(pick(row, mapping.orders)),
     unitsSold,
     revenue,
@@ -209,12 +250,9 @@ export function convertRow(
 
 // Required fields for upload mapping
 const REQUIRED_KEYS = new Set([
-  "store",
-  "asin",
   "brand",
   "affiliateName",
   "orderDate",
-  "unitsSold",
   "revenue",
   "commission",
   "commissionRate",
@@ -227,6 +265,16 @@ export const FIELD_HINTS: Record<string, string> = {
   brand: "不映射时默认使用关联客户品牌名",
   affiliatePlatform: "不映射时使用上方所选联盟平台",
   commissionRate: "不映射时自动计算（联盟商佣金 ÷ 销售金额）",
+};
+
+export const OPTIONAL_FIELD_HINTS: Record<string, string> = {
+  store: "非必填；未提供时不按店铺匹配 ASIN 信息",
+  asin: "非必填；未提供时不自动补足商品信息",
+  unitsSold: "非必填；空值表示未提供，不视为零销量",
+  publisherId: "非必填；按文本保存，保留前导零；不同平台的 ID 不合并",
+  publisherUrl: "非必填；独立保存，不覆盖推广链接",
+  lockDate: "非必填；只填写日期，没有日期可留空",
+  lockStatus: "非必填；Lock Status / commission_status 等状态文字填写在此处",
 };
 
 /** Get a stripped-down list of fields the user maps in the wizard. */

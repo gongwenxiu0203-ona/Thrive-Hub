@@ -13,7 +13,7 @@ import {
   X,
 } from "lucide-react";
 import { deleteBatch } from "@/actions/sales";
-import { getMappableFields, FIELD_HINTS } from "@/lib/salesImport";
+import { getMappableFields, FIELD_HINTS, OPTIONAL_FIELD_HINTS } from "@/lib/salesImport";
 import { PLATFORM_NAMES } from "@/lib/platformMappings";
 import { formatDateTime, formatNumber } from "@/lib/utils";
 
@@ -252,8 +252,9 @@ export function UploadPanel({
       <section className="rounded-lg border border-amber-200 bg-amber-50 p-4">
         <p className="mb-2 text-sm font-semibold text-amber-800">📋 数据上传规则</p>
         <ol className="list-decimal list-inside space-y-1 text-xs text-amber-700">
-          <li>源数据从平台下载后上传时，缺少的必填字段需在映射步骤中手动补足（如品牌、佣金比例等）。</li>
-          <li>上传前请删除无效数据行（如销售金额为 0、佣金为 0 的行），避免影响统计准确性。</li>
+          <li>请核对订单日期、联盟商名称、销售金额、联盟商佣金和地区的映射；品牌和佣金比例可由系统补足。</li>
+          <li>店铺、ASIN、销售数量为非必填；没有销量时留空，不会当作零销量。真实的零金额、零佣金无需为上传而删除。</li>
+          <li>Publisher ID、Publisher URL、锁定日期及锁定／佣金状态可选；日期和状态请分别映射。</li>
         </ol>
         <div className="mt-3 flex items-center gap-2">
           <a
@@ -262,7 +263,7 @@ export function UploadPanel({
           >
             <Download className="h-3.5 w-3.5" /> 下载通用上传模板
           </a>
-          <span className="text-xs text-amber-500">（不区分平台，包含所有必填列）</span>
+          <span className="text-xs text-amber-700">（不区分平台，包含常用必填与可选字段）</span>
         </div>
       </section>
 
@@ -433,7 +434,8 @@ export function UploadPanel({
                     const preview = col
                       ? String(parsed.sampleRows[0]?.[col] ?? "")
                       : "";
-                    const hint = FIELD_HINTS[field.key];
+                    const autoHint = FIELD_HINTS[field.key];
+                    const hint = autoHint || OPTIONAL_FIELD_HINTS[field.key];
                     return (
                       <tr key={field.key}>
                         <td className="font-medium text-slate-700">
@@ -442,7 +444,7 @@ export function UploadPanel({
                             <span className="ml-1 text-rose-500">*</span>
                           )}
                           {hint && (
-                            <p className="mt-0.5 text-[10px] font-normal text-slate-400">
+                            <p className="mt-0.5 text-xs font-normal text-slate-600">
                               {hint}
                             </p>
                           )}
@@ -450,7 +452,7 @@ export function UploadPanel({
                         <td>
                           <select
                             className={`input ${
-                              field.required && !col && !hint ? "border-rose-400" : ""
+                              field.required && !col && !autoHint ? "border-rose-400" : ""
                             }`}
                             value={col}
                             onChange={(e) =>
@@ -460,7 +462,7 @@ export function UploadPanel({
                               }))
                             }
                           >
-                            <option value="">— {hint ? "自动处理" : "不导入"} —</option>
+                            <option value="">— {autoHint ? "自动处理" : "不导入"} —</option>
                             {parsed.columns.map((c) => (
                               <option key={c} value={c}>
                                 {c}
@@ -500,7 +502,7 @@ export function UploadPanel({
             </div>
             {phase === "importing" && (
               <p className="mt-3 rounded-lg bg-brand-50 px-3 py-2 text-xs text-brand-700">
-                大文件正在服务器端校验、查重并分批写入。请保持此页面打开，完成后会自动刷新批次列表。
+                大文件正在服务器端校验并分批写入。请保持此页面打开，完成后会自动刷新批次列表。
               </p>
             )}
           </div>

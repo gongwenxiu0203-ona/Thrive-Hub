@@ -18,13 +18,15 @@ export async function GET(req: Request) {
   const platform = url.searchParams.get("platform") ?? "";
 
   if (!platform) {
-    // Universal template — fixed headers matching the required fields
+    // Universal template — required business fields plus commonly used optional columns.
     const universalHeaders: Record<string, string> = {
       "联盟平台": "",
       "店铺": "",
       "ASIN": "",
       "品牌": "",
       "平台联盟商名称": "",
+      "Publisher ID": "",
+      "Publisher URL": "",
       "订单日期": "",
       "销售数量": "",
       "销售金额": "",
@@ -33,6 +35,9 @@ export async function GET(req: Request) {
       "地区": "",
       "链接标签": "",
       "父ASIN": "",
+      "Lock Date": "",
+      "Lock Status": "",
+      "点击量": "",
     };
     const buffer = buildSheet([universalHeaders], "通用上传模板");
     return new NextResponse(new Uint8Array(buffer), {

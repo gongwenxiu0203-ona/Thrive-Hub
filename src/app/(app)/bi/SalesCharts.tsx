@@ -61,7 +61,8 @@ type Pair = { name: string; value: number };
 type DailyPoint = {
   date: string;
   revenue: number;
-  unitsSold: number;
+  unitsSold: number | null;
+  missingUnitRecords: number;
 };
 type SeriesPoint = Record<string, string | number>;
 
@@ -99,10 +100,11 @@ export function SalesDashboard({
     name: string;
     type: string;
     revenue: number;
-    unitsSold: number;
+    unitsSold: number | null;
+    missingUnitRecords: number;
     commission: number;
     rate: number;
-    cpa: number;
+    cpa: number | null;
   }[];
   topProducts: {
     platform: string;
@@ -112,10 +114,11 @@ export function SalesDashboard({
     parentAsin: string;
     asin: string;
     revenue: number;
-    unitsSold: number;
+    unitsSold: number | null;
+    missingUnitRecords: number;
     commission: number;
     rate: number;
-    cpa: number;
+    cpa: number | null;
   }[];
   daily: DailyPoint[];
   weekly: DailyPoint[];
@@ -160,10 +163,14 @@ export function SalesDashboard({
 
   const sortedCreators = [...topCreators].sort((a, b) => {
     const k = crSort.k as keyof (typeof topCreators)[0];
+    if (a[k] === null) return b[k] === null ? 0 : 1;
+    if (b[k] === null) return -1;
     return crSort.d === "desc" ? (b[k] as number) - (a[k] as number) : (a[k] as number) - (b[k] as number);
   });
   const sortedProducts = [...topProducts].sort((a, b) => {
     const k = prSort.k as keyof (typeof topProducts)[0];
+    if (a[k] === null) return b[k] === null ? 0 : 1;
+    if (b[k] === null) return -1;
     return prSort.d === "desc" ? (b[k] as number) - (a[k] as number) : (a[k] as number) - (b[k] as number);
   });
 
@@ -304,10 +311,11 @@ export function SalesDashboard({
           联盟商名称: c.name,
           联盟商类型: c.type,
           销售金额: c.revenue,
-          销售数量: c.unitsSold,
+          销售数量: c.unitsSold ?? "",
+          未提供销量记录数: c.missingUnitRecords,
           联盟商佣金: c.commission,
           实际佣金率: c.rate,
-          CPA: c.cpa,
+          CPA: c.cpa ?? "",
         }))}
         exportName="all-creator-by-gmv"
         height="h-[360px] overflow-auto"
@@ -341,14 +349,14 @@ export function SalesDashboard({
                   <td>{c.name}</td>
                   <td>{c.type || "—"}</td>
                   <td className="text-right">{formatCurrency(c.revenue)}</td>
-                  <td className="text-right">{formatNumber(c.unitsSold)}</td>
+                  <td className="text-right" title={c.missingUnitRecords ? `${c.missingUnitRecords} 条记录未提供销量` : undefined}>{c.unitsSold === null ? "—" : `${formatNumber(c.unitsSold)}${c.missingUnitRecords ? "（部分）" : ""}`}</td>
                   <td className="text-right">
                     {formatCurrency(c.commission)}
                   </td>
                   <td className="text-right">
                     {(c.rate * 100).toFixed(2)}%
                   </td>
-                  <td className="text-right">{c.cpa.toFixed(2)}</td>
+                  <td className="text-right">{c.cpa === null ? "—" : c.cpa.toFixed(2)}</td>
                 </tr>
               ))
             )}
@@ -367,10 +375,11 @@ export function SalesDashboard({
           "Parent Asin": p.parentAsin,
           ASIN: p.asin,
           销售金额: p.revenue,
-          销售数量: p.unitsSold,
+          销售数量: p.unitsSold ?? "",
+          未提供销量记录数: p.missingUnitRecords,
           联盟商佣金: p.commission,
           实际佣金率: p.rate,
-          CPA: p.cpa,
+          CPA: p.cpa ?? "",
         }))}
         exportName="products-by-gmv"
         height="h-[360px] overflow-auto"
@@ -408,14 +417,14 @@ export function SalesDashboard({
                   <td>{p.parentAsin || "—"}</td>
                   <td>{p.asin || "—"}</td>
                   <td className="text-right">{formatCurrency(p.revenue)}</td>
-                  <td className="text-right">{formatNumber(p.unitsSold)}</td>
+                  <td className="text-right" title={p.missingUnitRecords ? `${p.missingUnitRecords} 条记录未提供销量` : undefined}>{p.unitsSold === null ? "—" : `${formatNumber(p.unitsSold)}${p.missingUnitRecords ? "（部分）" : ""}`}</td>
                   <td className="text-right">
                     {formatCurrency(p.commission)}
                   </td>
                   <td className="text-right">
                     {(p.rate * 100).toFixed(2)}%
                   </td>
-                  <td className="text-right">{p.cpa.toFixed(2)}</td>
+                  <td className="text-right">{p.cpa === null ? "—" : p.cpa.toFixed(2)}</td>
                 </tr>
               ))
             )}
@@ -497,7 +506,8 @@ export function SalesDashboard({
         exportRows={trendData.map((d) => ({
           时间: d.date,
           销售金额: d.revenue,
-          销售数量: d.unitsSold,
+          销售数量: d.unitsSold ?? "",
+          未提供销量记录数: d.missingUnitRecords,
         }))}
         exportName={`sales-trend-${trendTab}`}
         height="h-[420px]"
