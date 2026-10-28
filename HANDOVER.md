@@ -1,5 +1,12 @@
 # Thrive Hub Handover
 
+## 2026-10-28 BI 发布完成：7aa5147
+
+- 用户在部署前清单及高危 Schema/重建提醒后明确确认部署。业务 commit `7aa5147` 已 push 并上线；先拉代码、停止 PM2 并确认 stopped，随后执行备份、完整 `npm run build`、迁移、数据核对，均成功后才重启。生产82/82页构建通过；主库77、项目库3迁移均最新。
+- 停服后的即时独立回滚备份 `/root/www/backups/dev_manual_bi_20261028_release_7aa5147_01.db`（2026-10-28 13:08北京时间，815587328 bytes，0600）检查完整性ok、外键无错误。构建另备份 `/root/www/backups/dev_pre_deploy_20261028_144459_661.db`；项目库备份 `/root/thrive-data/project-backups/projects_pre_deploy_2026-10-28T06-47-01-570Z.db`。独立manual备份与11:18备份均保留，不能擅自删除；自动pre_deploy按既有策略轮换1份。
+- 重启前以只读连接比较即时备份和真实生产主库：1,351,966条SalesRecord全部40个旧字段逐值SHA256均为 `49b80ea811fbd9896def717b7ec09f15c6807f9035329b9be139bae26f52509d`，记录数、GMV/佣金/销量/总费用完全一致；其他业务表记录数一致，只有_prisma_migrations新增本次1条成功记录。原索引/触发器保留，历史记录新增4字段均为NULL，主库/项目库完整性ok、外键无错误。
+- PM2重启后online，localhost:3000/login HTTP200，错误日志最后写入仍是部署前12:30（大小17070302 bytes），未出现本次启动新增错误；启动后105秒复核状态稳定。保留服务器原.env等未提交文件，验证Python缓存为非业务产物。没有执行历史BI清理、回填、0转null或测试数据导入，未触发回滚。以下“本地未发布”段落为发布前过程记录，本次代码现已上线。
+
 ## 2026-10-28 BI 可选字段、六平台映射与 Publisher ID 筛选（本地完成，未提交/发布）
 
 - 用户确认 Schema 变更，并在得知 SQLite `DROP TABLE SalesRecord` 重建风险后明确回复“我已了解风险，确认执行”；用户最高要求是历史 BI 数据不得改写/清空，先备份，失败回滚。线上仅完成备份与只读校验，没有部署/迁移/清理业务数据，服务持续 online，login HTTP 200。
