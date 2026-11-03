@@ -1,5 +1,12 @@
 # Thrive Hub Handover
 
+## 2026-11-03 财务收款资料及付款可选关联已部署：7411c63
+
+- 用户在部署清单后明确确认部署，覆盖下方手动部署交接和本地未发布状态。业务7411c63已push并上线，拉代码后先停PM2并确认stopped，再备份、迁移、完整构建；82/82页成功，主库78、项目库3迁移均最新。
+- 停服后独立即时备份`/root/www/backups/dev_manual_finance_7411c63_20261103_01.db`，1506578432 bytes、0600，完整性ok、外键无错误。构建另备份`/root/www/backups/dev_pre_deploy_20261103_175648_681.db`和`/root/thrive-data/project-backups/projects_pre_deploy_2026-11-03T09-58-00-147Z.db`。独立manual保留，旧部署前备份按原仅保留1份策略轮换，没有清理业务数据。
+- 重启前只读对比即时备份：FinanceAccountProfile/PaymentRequest/ExpenseClaim所有旧列逐值SHA256一致，各业务表记录数一致；SalesRecord1357614条，revenue36228561.86127807、commission6743969.260356801、units1821020、totalFee6933604.988913757完全一致。新增3列历史值均NULL，新迁移成功；主库/项目库integrity=ok、foreign_key_check无错误。
+- 所有检查成功后才重启，PID1956742 online、localhost:3000/login HTTP200。错误日志最后写入仍部署前2026-11-03 17:42:55 +0800，大小17113790，无本次启动新增错误。未在生产创建测试数据或付款申请，保留生产.env及原未跟踪文件。无回滚。
+
 ## 2026-11-03 财务收款资料发布交接（手动部署）
 
 - 用户要求将下述财务账户和可选关联两轮修改一起commit/push GitHub，并仅提供手动部署代码；不代执行生产部署。独立发布审查无阻断问题，规则/TypeScript测试通过。
