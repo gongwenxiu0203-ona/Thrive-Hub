@@ -1,5 +1,24 @@
 # Thrive Hub Handover
 
+## 2026-11-03 财务收款资料发布交接（手动部署）
+
+- 用户要求将下述财务账户和可选关联两轮修改一起commit/push GitHub，并仅提供手动部署代码；不代执行生产部署。独立发布审查无阻断问题，规则/TypeScript测试通过。
+- 只读查询生产当前版本0683e21，最近每日备份2026-11-03 03:01:20 +0800，文件dev_daily_20261103_030001.db，1506578432 bytes，integrity=ok。实际部署仍须停PM2后即时备份，不能将今日凌晨备份当作即时回滚点。新迁移仅3条ADD COLUMN；不要在生产执行测试夹具、回填或清理脚本。
+
+## 2026-11-03 渠道/联盟付款关联改为可选（本地，未提交/部署）
+
+- 用户明确取消渠道商/联盟商付款必须关联票据和到账的限制，两项都空、只选一项或都选择均可提交。前端已有“可选”标签不变；服务端仅在提供ID时校验有效性，两项都选时仍校验有效到账核销与票据匹配。审核、收款账户分类、自动渠道付款来源规则保持不变。
+- 新增paymentReferences.ts及payment-optional-references-test.ts，覆盖未选、只选票据、只选到账、均选择、无效引用及不匹配核销。无新增Schema或迁移，不清理/回填历史。此条覆盖下方账户改造记录中“现有关联规则未改变”的过程描述。
+
+## 2026-11-03 联盟商银行资料及付款完整快照（本地修改，未提交/部署）
+
+- 用户单独确认非破坏性Schema变更：`20261103120000_finance_payee_holder_fields`仅向FinanceAccountProfile新增可空accountHolderType/accountHolderMobile/accountHolderEmail，分别表示personal/business、持有人手机、邮箱；Checking/Savings复用bankAccountType，其余复用已有银行/地址字段。无DROP、DELETE或历史回填。
+- 联盟商收款资料按用户指定中英文字段展示，名称支持资源库搜索或手填；币种为32种常见币种下拉，两个账户类型分别下拉。旧SWIFT等仍保留；编辑时不再把原联盟商关联ID误替换为资料ID，未提交的附件/默认标志保持原值。旧非标准bankAccountType可原样保留，新建/改值仅Checking/Savings。失败时保留表单并显示显著错误。
+- 付款前端及后端同步分类匹配：CHANNEL->CHANNEL_PAYEE、AFFILIATE->AFFILIATE_PAYEE、SUPPLIER->SUPPLIER_PAYEE/SUPPLIER_BANK；税费/薪酬/其他不限制现有收款账户类别。切换分类清空不兼容账户；选择后带户名/币种并展示全部资料。现有渠道/联盟付款关联已开票及已核销到账规则未改变。
+- 提交付款时从数据库读取选定账户并保存明确白名单的完整不可变快照；审核/财务工作台和申请进度均展示快照，不从当前资料补造历史。旧快照缺值显示—。
+- 本地备份：`backups/finance-payee-20261103-01/before.db`；来自上一轮BI预览副本，未迁移真实prisma/dev.db或生产库。原字段/各表SHA256在新迁移前后完全一致，integrity=ok、外键错误0，新字段历史均NULL。隔离engine.db通过Prisma78个迁移；本地3001仅连接该目录engine.db和projects.db。
+- 规则测试及隔离存储事务回滚测试通过（完整字段、分类、前导零、后续修改不覆盖申请）；TypeScript/Prisma validate/diff检查通过。隔离Next.js production build 82/82页成功，项目库使用外置临时副本（首次检查因项目库位于工作区被安全校验拦截，修正路径后通过）。独立审查无剩余阻断问题。用户已登录本地预览测试，已观察到表单和完整账户带出，截图output/finance-payee-preview-20261103.png。没有向生产写数据；用户本地手工测试记录仅在预览副本。尚未commit/push/部署。
+
 ## 2026-10-28 BI 发布完成：7aa5147
 
 - 用户在部署前清单及高危 Schema/重建提醒后明确确认部署。业务 commit `7aa5147` 已 push 并上线；先拉代码、停止 PM2 并确认 stopped，随后执行备份、完整 `npm run build`、迁移、数据核对，均成功后才重启。生产82/82页构建通过；主库77、项目库3迁移均最新。

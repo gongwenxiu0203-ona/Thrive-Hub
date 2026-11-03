@@ -4,6 +4,7 @@ import { requireSession } from "@/lib/session";
 import { hasPermissionLevel } from "@/lib/permissionGuard";
 import { resolveUserPermission } from "@/lib/permissionResolver";
 import { isStaff } from "@/lib/permissions";
+import { financePayeeDetails } from "@/lib/financePayee";
 import { FinanceWorkbenchClient } from "./FinanceWorkbenchClient";
 import { FinanceFlowHub, type ProfileCategory } from "./FinanceFlowHub";
 import { UnifiedFinancePanel } from "./UnifiedFinancePanel";
@@ -567,7 +568,7 @@ export default async function FinanceWorkbenchPage({
                   { label: "付款类型", value: row.requestType },
                   { label: "付款主体", value: row.payerEntity },
                   { label: "付款账户", value: (() => { try { const account = JSON.parse(row.payeeSnapshot || "{}"); return `${account.payerAccountName ?? "—"} · ${account.payerAccountNumber ?? "—"}`; } catch { return "—"; } })() },
-                  { label: "收款账户", value: (() => { try { const account = JSON.parse(row.payeeSnapshot || "{}"); return `${account.accountName ?? "—"} · ${account.bankName ?? "—"} · ${account.accountNumber ?? "—"}`; } catch { return "—"; } })() },
+                  ...financePayeeDetails(row.payeeSnapshot),
                   { label: "计划付款日期", value: row.scheduledAt?.toISOString().slice(0, 10) ?? "—" },
                   { label: "关联票据", value: row.relatedInvoiceId ?? "—" },
                   { label: "关联到账", value: row.relatedReceiptId ?? "—" },
@@ -690,6 +691,17 @@ export default async function FinanceWorkbenchPage({
                       !account.accountType.toUpperCase().includes("COMPANY"),
                   )
                   .map((account) => ({
+                    accountType: account.accountType,
+                    country: account.country ?? undefined,
+                    accountHolderType: account.accountHolderType ?? undefined,
+                    accountHolderMobile: account.accountHolderMobile ?? undefined,
+                    accountHolderEmail: account.accountHolderEmail ?? undefined,
+                    bankAddress: account.bankAddress ?? undefined,
+                    payeeAddress: account.payeeAddress ?? undefined,
+                    routingNumber: account.routingNumber ?? undefined,
+                    bankAccountType: account.bankAccountType ?? undefined,
+                    note: account.note ?? undefined,
+                    swiftCode: account.swiftCode ?? undefined,
                     id: account.id,
                     label: account.name,
                     subtitle: `${account.accountName} · ${account.currency}`,
@@ -733,6 +745,12 @@ export default async function FinanceWorkbenchPage({
                     })),
                   ),
                   ...financeAccounts.map((account) => ({
+                    ownerObjectId: account.payerAccountKey ?? undefined,
+                    accountType: account.accountType,
+                    country: account.country ?? undefined,
+                    accountHolderType: account.accountHolderType ?? undefined,
+                    accountHolderMobile: account.accountHolderMobile ?? undefined,
+                    accountHolderEmail: account.accountHolderEmail ?? undefined,
                     id: account.id,
                     label: account.name,
                     subtitle: account.legalEntity,
@@ -806,6 +824,7 @@ export default async function FinanceWorkbenchPage({
                   requestNo: row.requestNo,
                   objectName: row.supplier?.name ?? "未关联收款对象",
                   detail: row.reason,
+                  details: financePayeeDetails(row.payeeSnapshot),
                   currency: row.currency,
                   amount: row.amount,
                   status: row.status,

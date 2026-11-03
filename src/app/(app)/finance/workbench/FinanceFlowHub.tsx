@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ClipboardEvent, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 import { PARTY_B_COMPANIES } from "@/lib/partyB";
+import { financePayeeDetails, isPayeeCategoryAllowed } from "@/lib/financePayee";
 import {
   ArrowLeft,
   Building2,
@@ -32,7 +33,13 @@ export type FinanceObjectOption = {
   label: string;
   subtitle?: string;
   customerId?: string;
+  ownerObjectId?: string;
   accountName?: string;
+  accountType?: string;
+  country?: string;
+  accountHolderType?: string;
+  accountHolderMobile?: string;
+  accountHolderEmail?: string;
   legalEntityKey?: string;
   accountNumber?: string;
   bankName?: string;
@@ -66,6 +73,7 @@ export type FinanceProgressRow = {
   applicant?: string;
   submittedAt?: string;
   note?: string | null;
+  details?: Array<{ label: string; value: string }>;
   items?: Array<{ description: string; period: string; quantity: number; unitPrice: number; amount: number; remark?: string | null; taxRate?: number | null; taxAmount?: number | null }>;
   paymentProofUrls?: string[];
   documents?: Array<{
@@ -118,6 +126,7 @@ const profileLabels: Record<ProfileCategory, string> = {
   AFFILIATE_PAYEE: "联盟商收款账户",
   EMPLOYEE_REIMBURSEMENT: "个人报销账户",
 };
+const ACCOUNT_CURRENCIES = ["CNY", "USD", "HKD", "EUR", "GBP", "JPY", "CAD", "AUD", "NZD", "SGD", "CHF", "AED", "INR", "KRW", "THB", "MYR", "PHP", "IDR", "TWD", "VND", "BRL", "MXN", "ZAR", "SEK", "NOK", "DKK", "PLN", "CZK", "HUF", "TRY", "SAR", "ILS"];
 const emptyLine = () => ({
   key: crypto.randomUUID(),
   feeType: "MONTHLY_FEE",
@@ -144,9 +153,11 @@ export function FinanceFlowHub({
   const [module, setModule] = useState<Module>(focusedBillingRequestId ? "BILLING" : "HOME");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [submitFailed, setSubmitFailed] = useState(false);
   async function submit(kind: SubmitKind, payload: Record<string, unknown>) {
     setBusy(true);
     setMessage("");
+    setSubmitFailed(false);
     try {
       let result: { ok: boolean; error?: string };
       if (kind === "BILLING")
@@ -168,6 +179,12 @@ export function FinanceFlowHub({
       setMessage(
         result.ok ? "已提交到财务流程。" : (result.error ?? "提交失败。"),
       );
+      setSubmitFailed(!result.ok);
+      return result.ok;
+    } catch (error) {
+      setSubmitFailed(true);
+      setMessage(error instanceof Error ? error.message : "请求中断，请重试；已填写内容仍保留。" );
+      return false;
     } finally {
       setBusy(false);
     }
@@ -238,7 +255,7 @@ export function FinanceFlowHub({
         </div>
       </div>
       {message && (
-        <p className="mx-5 mt-4 rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-700">
+        <p role={submitFailed ? "alert" : "status"} className={`mx-5 mt-4 rounded-md px-3 py-2 text-sm ${submitFailed ? "border border-rose-200 bg-rose-50 text-rose-800" : "bg-slate-50 text-slate-700"}`}>
           {message}
         </p>
       )}
@@ -891,7 +908,7 @@ function AttachmentInput({ label, scope, value, onChange, disabled }: { label: s
 }
 
 function PaymentForm({ data, disabled, onSubmit }: FormProps) {
-  const currencies = ["CNY", "USD", "HKD", "EUR", "GBP", "JPY", "CAD", "AUD", "SGD", "CHF", "AED", "INR", "KRW", "THB", "MYR", "PHP", "IDR", "TWD"];
+  const currencies = ACCOUNT_CURRENCIES;
   const currencySymbol: Record<string, string> = { CNY: "¥", USD: "$", HKD: "HK$", EUR: "€", GBP: "£", JPY: "¥", CAD: "C$", AUD: "A$", SGD: "S$", CHF: "CHF", AED: "د.إ", INR: "₹", KRW: "₩", THB: "฿", MYR: "RM", PHP: "₱", IDR: "Rp", TWD: "NT$" };
   const defaultReviewerId = data.reviewerOptions?.find((row) => row.subtitle?.toLowerCase() === "shallow.w@thraiveagency.com")?.id ?? data.reviewerOptions?.find((row) => `${row.label} ${row.subtitle ?? ""}`.toLowerCase().includes("shallow"))?.id ?? "";
   const [form, setForm] = useState({
@@ -911,6 +928,8 @@ function PaymentForm({ data, disabled, onSubmit }: FormProps) {
     reviewerId: defaultReviewerId,
   });
   const [showErrors, setShowErrors] = useState(false);
+  const payeeAccounts = data.payeeAccounts.filter((row) => isPayeeCategoryAllowed(form.category, row.accountType ?? ""));
+  const selectedPayee = payeeAccounts.find((row) => row.id === form.payeeAccountId);
   const payerAccounts = data.payerAccounts.filter((row) => !form.payerEntityId || (form.payerEntityId === "THRAIVE_HK" ? /thraive|香港|hong kong/i.test(`${row.subtitle ?? ""} ${row.legalEntityKey ?? ""}`) : /佛山|灵跃|foshan|lingyue/i.test(`${row.subtitle ?? ""} ${row.legalEntityKey ?? ""}`)));
   const errors = [!form.payerEntityId && "请选择付款主体", !form.payerAccountId && "请选择付款账户", !form.reviewerId && "请选择审核人", !form.payeeName.trim() && "请填写收款对象", (!Number.isFinite(Number(form.amount)) || Number(form.amount) <= 0) && "请填写大于 0 的金额"].filter(Boolean) as string[];
   const patch = (key: keyof typeof form, value: string) => setForm((current) => ({ ...current, [key]: value }));
@@ -925,7 +944,14 @@ function PaymentForm({ data, disabled, onSubmit }: FormProps) {
         <select
           className="input"
           value={form.category}
-          onChange={(e) => patch("category", e.target.value)}
+          onChange={(e) => {
+            const category = e.target.value;
+            setForm((current) => {
+              const selected = data.payeeAccounts.find((row) => row.id === current.payeeAccountId);
+              const keepAccount = !selected || isPayeeCategoryAllowed(category, selected.accountType ?? "");
+              return { ...current, category, payeeAccountId: keepAccount ? current.payeeAccountId : "", payeeName: keepAccount ? current.payeeName : "" };
+            });
+          }}
         >
           <option value="SUPPLIER">公司采购付款</option>
           <option value="CHANNEL">渠道商付款</option>
@@ -956,9 +982,19 @@ function PaymentForm({ data, disabled, onSubmit }: FormProps) {
       <SelectField
         label="系统已有收款账户"
         value={form.payeeAccountId}
-        setValue={(v) => setForm((current) => ({ ...current, payeeAccountId: v, payeeName: data.payeeAccounts.find((row) => row.id === v)?.accountName ?? current.payeeName }))}
-        options={[{ id: "", label: "无收款账户（手动填写户名）" }, ...data.payeeAccounts]}
+        setValue={(v) => {
+          const selected = payeeAccounts.find((row) => row.id === v);
+          setForm((current) => ({ ...current, payeeAccountId: v, payeeName: selected?.accountName ?? "", currency: selected?.currency ?? current.currency }));
+        }}
+        options={[{ id: "", label: "无收款账户（手动填写户名）" }, ...payeeAccounts]}
       />
+      {selectedPayee && <div className="md:col-span-2 xl:col-span-3">
+        <p className="mb-3 text-sm font-medium text-slate-900">收款账户资料</p>
+        <dl className="grid gap-x-6 gap-y-3 rounded-lg bg-slate-50 p-4 text-sm md:grid-cols-2 xl:grid-cols-3">
+          {financePayeeDetails({ ...selectedPayee, name: selectedPayee.label }).map((item) => <div key={item.label} className="min-w-0"><dt className="text-xs text-slate-600">{item.label}</dt><dd className="mt-1 whitespace-pre-wrap break-words text-slate-900">{item.value}</dd></div>)}
+        </dl>
+        <p className="mt-2 text-xs text-slate-600">提交时保存上述账户资料快照，后续资料变更不会覆盖本申请。</p>
+      </div>}
       <TextField
         label="收款对象 / 户名"
         value={form.payeeName}
@@ -969,7 +1005,7 @@ function PaymentForm({ data, disabled, onSubmit }: FormProps) {
         value={form.reason}
         setValue={(v) => patch("reason", v)}
       />
-      <Field label="币种"><select className="input" value={form.currency} onChange={(e) => patch("currency", e.target.value)}>{currencies.map((code) => <option key={code} value={code}>{code} · {currencySymbol[code]}</option>)}</select></Field>
+      <Field label="币种"><select className="input" value={form.currency} onChange={(e) => patch("currency", e.target.value)}>{!currencies.includes(form.currency) && <option value={form.currency}>{form.currency}</option>}{currencies.map((code) => <option key={code} value={code}>{code}{currencySymbol[code] ? ` · ${currencySymbol[code]}` : ""}</option>)}</select></Field>
       <p className="self-end pb-2 text-sm font-medium text-slate-700">金额符号：{currencySymbol[form.currency] ?? form.currency}</p>
       <TextField
         label="金额"
@@ -1212,6 +1248,10 @@ function ProfileForm({ data, disabled, onSubmit }: FormProps) {
     payeeAddress: "",
     routingNumber: "",
     bankAccountType: "",
+    country: "",
+    accountHolderType: "",
+    accountHolderMobile: "",
+    accountHolderEmail: "",
     note: "",
     currency: ["CHANNEL_PAYEE", "AFFILIATE_PAYEE"].includes(category) ? "USD" : "CNY",
   });
@@ -1243,7 +1283,7 @@ function ProfileForm({ data, disabled, onSubmit }: FormProps) {
     setEditingId(row.id);
     setManualAffiliate(category === "AFFILIATE_PAYEE");
     setForm({
-      ownerObjectId: row.id,
+      ownerObjectId: row.ownerObjectId ?? "",
       legalEntityKey: row.legalEntityKey ?? "",
       name: row.label,
       accountName: row.accountName ?? "",
@@ -1254,6 +1294,10 @@ function ProfileForm({ data, disabled, onSubmit }: FormProps) {
       payeeAddress: row.payeeAddress ?? "",
       routingNumber: row.routingNumber ?? "",
       bankAccountType: row.bankAccountType ?? "",
+      country: row.country ?? "",
+      accountHolderType: row.accountHolderType ?? "",
+      accountHolderMobile: row.accountHolderMobile ?? "",
+      accountHolderEmail: row.accountHolderEmail ?? "",
       note: row.note ?? "",
       currency: row.currency ?? (["CHANNEL_PAYEE", "AFFILIATE_PAYEE"].includes(category) ? "USD" : "CNY"),
     });
@@ -1330,7 +1374,7 @@ function ProfileForm({ data, disabled, onSubmit }: FormProps) {
                 options={nameOptions}
               />
             ) : category === "AFFILIATE_PAYEE" && !manualAffiliate ? (
-              <Field label="资料名称">
+              <Field label="联盟商名称">
                 <div className="flex gap-2">
                   <input
                     className="input"
@@ -1339,7 +1383,7 @@ function ProfileForm({ data, disabled, onSubmit }: FormProps) {
                     onChange={(event) => {
                       const value = event.target.value;
                       const selected = nameOptions.find((row) => row.label === value);
-                      setForm((current) => ({ ...current, name: value, ownerObjectId: selected?.id ?? "", accountName: current.accountName || value }));
+                      setForm((current) => ({ ...current, name: value, ownerObjectId: selected?.id ?? "" }));
                     }}
                     placeholder="搜索联盟资源库"
                   />
@@ -1348,31 +1392,40 @@ function ProfileForm({ data, disabled, onSubmit }: FormProps) {
                 </div>
               </Field>
             ) : (
-              <TextField label="资料名称" value={form.name} setValue={(value) => patch("name", value)} />
+              <TextField label={category === "AFFILIATE_PAYEE" ? "联盟商名称" : "资料名称"} value={form.name} setValue={(value) => patch("name", value)} />
             )}
+            {category === "AFFILIATE_PAYEE" ? <>
+              <TextField label="Bank Country/Region 银行所在国家或地区" value={form.country} setValue={(value) => patch("country", value)} />
+              <TextField label="Bank Name 银行全称" value={form.bankName} setValue={(value) => patch("bankName", value)} />
+              <TextField label="Routing Number (ABA) 银行代码" value={form.routingNumber} setValue={(value) => patch("routingNumber", value)} />
+              <TextField label="Bank Address 银行地址" value={form.bankAddress} setValue={(value) => patch("bankAddress", value)} />
+              <Field label="Bank account type 银行账户类型"><select className="input" value={form.accountHolderType} onChange={(event) => patch("accountHolderType", event.target.value)}><option value="">请选择</option><option value="personal">个人 personal</option><option value="business">企业 business</option></select></Field>
+              <Field label="Bank account currency 银行账户币种"><select className="input" value={form.currency} onChange={(event) => patch("currency", event.target.value)}>{!ACCOUNT_CURRENCIES.includes(form.currency) && <option value={form.currency}>{form.currency}</option>}{ACCOUNT_CURRENCIES.map((currency) => <option key={currency} value={currency}>{currency}</option>)}</select></Field>
+              <TextField label="Account Holder Name 账户持有人名称" value={form.accountName} setValue={(value) => patch("accountName", value)} />
+              <TextField label="Account Number 银行账号" value={form.accountNumber} setValue={(value) => patch("accountNumber", value)} />
+              <Field label="Account Type 账户类型"><select className="input" value={form.bankAccountType} onChange={(event) => patch("bankAccountType", event.target.value)}><option value="">请选择</option>{form.bankAccountType && !["Checking", "Savings"].includes(form.bankAccountType) && <option value={form.bankAccountType}>{form.bankAccountType}（历史值）</option>}<option value="Checking">Checking</option><option value="Savings">Savings</option></select></Field>
+              <TextField label="Account Holder Mobile Number 账户持有人手机号" type="tel" value={form.accountHolderMobile} setValue={(value) => patch("accountHolderMobile", value)} />
+              <TextField label="Account Holder Email Address 账户持有人邮箱" type="email" value={form.accountHolderEmail} setValue={(value) => patch("accountHolderEmail", value)} />
+              <Field label="Beneficiary Address 账户持有人地址和邮政编码"><textarea className="input min-h-20" value={form.payeeAddress} onChange={(event) => patch("payeeAddress", event.target.value)} /></Field>
+              <Field label="备注" wide><textarea className="input min-h-20" value={form.note} onChange={(event) => patch("note", event.target.value)} /></Field>
+            </> : <>
             {category === "COMPANY_PAYER" && <Field label="关联合同签约主体"><select className="input" value={form.legalEntityKey} onChange={(event) => patch("legalEntityKey", event.target.value)}><option value="">未关联（合同中仍可手动选择）</option>{Object.values(PARTY_B_COMPANIES).map((entity) => <option key={entity.key} value={entity.key}>{entity.label}</option>)}</select><p className="mt-1 text-xs text-slate-500">创建合同时，选择此主体会默认勾选本账户；不会改变已保存合同的账户快照。</p></Field>}
             <TextField label={companyLabel} value={form.accountName} setValue={(value) => patch("accountName", value)} />
             <TextField label={category === "EMPLOYEE_REIMBURSEMENT" || category === "CHANNEL_PAYEE" ? "收款账号/银行账号" : "银行账号"} value={form.accountNumber} setValue={(value) => patch("accountNumber", value)} />
-            <TextField label={category === "AFFILIATE_PAYEE" ? "银行名称及开户行" : category === "COMPANY_PAYER" ? "开户银行" : "开户行"} value={form.bankName} setValue={(value) => patch("bankName", value)} />
-            <TextField label={category === "AFFILIATE_PAYEE" ? "SWIFT Code" : "SWIFT Code/税号"} value={form.swiftCode} setValue={(value) => patch("swiftCode", value)} />
+            <TextField label={category === "COMPANY_PAYER" ? "开户银行" : "开户行"} value={form.bankName} setValue={(value) => patch("bankName", value)} />
+            <TextField label="SWIFT Code/税号" value={form.swiftCode} setValue={(value) => patch("swiftCode", value)} />
             {category === "COMPANY_PAYER" && <TextField label="路由 ABA" value={form.routingNumber} setValue={(value) => patch("routingNumber", value)} />}
             {category === "COMPANY_PAYER" && <TextField label="账户类型" value={form.bankAccountType} setValue={(value) => patch("bankAccountType", value)} />}
             <TextField label="银行地址" value={form.bankAddress} setValue={(value) => patch("bankAddress", value)} />
-            {category === "AFFILIATE_PAYEE" && (
-              <>
-                <TextField label="收款人地址" value={form.payeeAddress} setValue={(value) => patch("payeeAddress", value)} />
-                <TextField label="Routing Number (ACH)" value={form.routingNumber} setValue={(value) => patch("routingNumber", value)} />
-                <TextField label="备注" value={form.note} setValue={(value) => patch("note", value)} />
-              </>
-            )}
+            </>}
           </div>
           <div className="mt-5 flex justify-end gap-3">
             <button className="btn-secondary" onClick={() => setEditorOpen(false)}>取消</button>
             <button
               className="btn-primary"
               disabled={disabled || !form.name.trim() || !form.accountName.trim() || !form.accountNumber.trim()}
-              onClick={() => {
-                onSubmit({
+              onClick={async () => {
+                const saved = await onSubmit({
                   id: editingId || undefined,
                   name: form.name,
                   accountType: category,
@@ -1387,10 +1440,14 @@ function ProfileForm({ data, disabled, onSubmit }: FormProps) {
                   payeeAddress: form.payeeAddress,
                   routingNumber: form.routingNumber,
                   bankAccountType: form.bankAccountType,
+                  country: form.country,
+                  accountHolderType: form.accountHolderType,
+                  accountHolderMobile: form.accountHolderMobile,
+                  accountHolderEmail: form.accountHolderEmail,
                   note: form.note,
                   payerAccountKey: form.ownerObjectId || undefined,
                 });
-                setEditorOpen(false);
+                if (saved) setEditorOpen(false);
               }}
             >
               {editingId ? "保存修改" : "创建资料"}
@@ -1552,7 +1609,7 @@ function LegacyProfileForm({ data, disabled, onSubmit }: FormProps) {
 type FormProps = {
   data: FinanceFlowHubData;
   disabled: boolean;
-  onSubmit: (payload: Record<string, unknown>) => void;
+  onSubmit: (payload: Record<string, unknown>) => void | Promise<boolean>;
 };
 function Entry({
   icon,
@@ -1832,9 +1889,10 @@ function ProgressTable({
                       {document.label}
                     </a>
                   ))}
-                  {kind === "BILLING_REQUEST" && <button type="button" className="ml-3 font-medium text-brand-700 hover:underline" onClick={() => setExpandedId(expandedId === row.id ? null : row.id)}>{expandedId === row.id ? "收起详情" : "查看详情"}</button>}
+                  {(kind === "BILLING_REQUEST" || Boolean(row.details?.length)) && <button type="button" className="ml-3 font-medium text-brand-700 hover:underline" onClick={() => setExpandedId(expandedId === row.id ? null : row.id)}>{expandedId === row.id ? "收起详情" : "查看详情"}</button>}
                 </td>
               </tr>
+              {expandedId === row.id && kind !== "BILLING_REQUEST" && Boolean(row.details?.length) && <tr><td colSpan={5} className="bg-slate-50/70 p-4"><dl className="grid gap-x-6 gap-y-3 text-sm md:grid-cols-2 xl:grid-cols-3">{row.details?.map((item) => <div key={item.label} className="min-w-0"><dt className="text-xs text-slate-600">{item.label}</dt><dd className="mt-1 whitespace-pre-wrap break-words text-slate-900">{item.value}</dd></div>)}</dl></td></tr>}
               {expandedId === row.id && kind === "BILLING_REQUEST" && (
                 <tr><td colSpan={5} className="bg-slate-50/70 p-4">
                   <div className="grid gap-3 text-xs text-slate-600 md:grid-cols-3">

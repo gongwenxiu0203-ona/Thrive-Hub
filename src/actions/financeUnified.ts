@@ -7,6 +7,8 @@ import { requireSession } from "@/lib/session";
 import { PARTY_B_COMPANIES } from "@/lib/partyB";
 import { isStaff } from "@/lib/permissions";
 import { createTwoStageFinanceApproval, normalizeFinanceUrls } from "@/lib/financeApproval";
+import { createPayeeSnapshot, isPayeeCategoryAllowed } from "@/lib/financePayee";
+import { validateOptionalPaymentReferences } from "@/lib/paymentReferences";
 
 const round = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 const refNo = (prefix: string) => `${prefix}-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 6).toUpperCase()}`;
@@ -177,7 +179,7 @@ export async function saveCustomerBillingProfile(input: { customerId: string; na
   } catch (error) { return { ok: false, error: error instanceof Error ? error.message : "保存开票资料失败。" }; }
 }
 
-export async function saveFinanceAccountProfile(input: { id?: string; name: string; accountType: string; legalEntity: string; legalEntityKey?: string; accountName: string; bankName?: string; accountNumber: string; currency?: string; country?: string; swiftCode?: string; bankAddress?: string; payeeAddress?: string; routingNumber?: string; bankAccountType?: string; note?: string; payerAccountKey?: string; attachmentUrls?: string[]; isDefault?: boolean }) {
+export async function saveFinanceAccountProfile(input: { id?: string; name: string; accountType: string; legalEntity: string; legalEntityKey?: string; accountName: string; bankName?: string; accountNumber: string; currency?: string; country?: string; swiftCode?: string; bankAddress?: string; payeeAddress?: string; routingNumber?: string; bankAccountType?: string; accountHolderType?: string; accountHolderMobile?: string; accountHolderEmail?: string; note?: string; payerAccountKey?: string; attachmentUrls?: string[]; isDefault?: boolean }) {
   try {
     const session = await requireSession();
     await requireFeaturePermission(session, "finance.profiles", "MANAGE");
@@ -187,7 +189,18 @@ export async function saveFinanceAccountProfile(input: { id?: string; name: stri
     if (legalEntityKey && (!["COMPANY_PAYER", "COMPANY_BANK"].includes(input.accountType) || !Object.hasOwn(PARTY_B_COMPANIES, legalEntityKey))) return { ok: false, error: "请选择有效的公司签约主体" };
     const currency = cleanCurrency(input.currency || (["CUSTOMER_BILLING", "COMPANY_PAYER", "SUPPLIER_PAYEE", "EMPLOYEE_REIMBURSEMENT"].includes(input.accountType) ? "CNY" : "USD"));
     if (!input.name.trim() || !legalEntity || !input.accountName.trim() || !accountNumber || !currency) return { ok: false, error: "请完整填写账户名称、主体、户名、账号和币种。" };
+    const holderType = input.accountHolderType?.trim().toLowerCase() || null;
+    const holderMobile = input.accountHolderMobile?.trim() || null;
+    const holderEmail = input.accountHolderEmail?.trim() || null;
+    const bankAccountType = input.bankAccountType?.trim() || null;
+    if (holderType && !["personal", "business"].includes(holderType)) return { ok: false, error: "银行账户类型请选择个人 personal 或企业 business。" };
+    if (holderMobile && holderMobile.length > 80) return { ok: false, error: "账户持有人手机号不能超过 80 个字符。" };
+    if (holderEmail && (holderEmail.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(holderEmail))) return { ok: false, error: "请填写有效的账户持有人邮箱。" };
     const saved = await prisma.$transaction(async (tx) => {
+      if (input.accountType === "AFFILIATE_PAYEE" && bankAccountType && !["checking", "savings"].includes(bankAccountType.toLowerCase())) {
+        const previous = input.id ? await tx.financeAccountProfile.findUnique({ where: { id: input.id }, select: { bankAccountType: true, accountType: true } }) : null;
+        if (!previous || previous.accountType !== "AFFILIATE_PAYEE" || previous.bankAccountType !== bankAccountType) throw new Error("账户类型请选择 Checking 或 Savings。");
+      }
       const duplicate = await tx.financeAccountProfile.findFirst({ where: { legalEntity, accountNumber, currency, status: "ACTIVE", ...(input.id ? { id: { not: input.id } } : {}) }, select: { id: true } });
       if (duplicate) throw new Error("相同付款主体、账号和币种的财务账户已存在，请勿重复创建。");
       if (input.isDefault) await tx.financeAccountProfile.updateMany({ where: { legalEntity, currency, status: "ACTIVE" }, data: { isDefault: false } });
@@ -197,7 +210,14 @@ export async function saveFinanceAccountProfile(input: { id?: string; name: stri
         .filter(Boolean)
         .join(" / ") || null;
       const data = { name: cleanText(input.name), accountType: input.accountType || "COMPANY_BANK", legalEntity, accountName: cleanText(input.accountName), bankName: input.bankName ? cleanText(input.bankName) : null, accountNumber, currency, country: input.country?.trim().toUpperCase() || null, swiftCode: normalizedSwiftCode, bankAddress: input.bankAddress ? cleanText(input.bankAddress) : null, payeeAddress: input.payeeAddress ? cleanText(input.payeeAddress) : null, routingNumber: input.routingNumber?.trim() || null, bankAccountType: input.bankAccountType?.trim() || null, note: input.note?.trim() || null, payerAccountKey: input.payerAccountKey?.trim() || null, attachmentUrls: JSON.stringify(normalizeFinanceUrls(input.attachmentUrls)), isDefault: !!input.isDefault };
-      const linkedData = { ...data, ...(input.legalEntityKey !== undefined ? { legalEntityKey } : {}) };
+      const linkedData = { ...data,
+        attachmentUrls: input.attachmentUrls === undefined ? undefined : data.attachmentUrls,
+        isDefault: input.isDefault === undefined ? undefined : data.isDefault,
+        payerAccountKey: input.payerAccountKey === undefined ? undefined : data.payerAccountKey,
+        ...(input.legalEntityKey !== undefined ? { legalEntityKey } : {}),
+        ...(input.accountHolderType !== undefined ? { accountHolderType: holderType } : {}),
+        ...(input.accountHolderMobile !== undefined ? { accountHolderMobile: holderMobile } : {}),
+        ...(input.accountHolderEmail !== undefined ? { accountHolderEmail: holderEmail } : {}) };
       return input.id ? tx.financeAccountProfile.update({ where: { id: input.id }, data: linkedData }) : tx.financeAccountProfile.create({ data: { ...linkedData, profileNo: refNo("ACC"), createdById: session.userId } });
     });
     revalidatePath("/finance/workbench"); return { ok: true, id: saved.id };
@@ -223,17 +243,15 @@ export async function createSupplierAndPaymentRequest(input: { reviewerId?: stri
       const swiftCode = payee?.swiftCode ?? (input.swiftCode?.replace(/\s+/g, "").toUpperCase() || null);
       if (!accountName) throw new Error("请填写收款对象或选择收款账户。");
       const requestType = (input.supplierType || "SUPPLIER").toUpperCase();
+      if (payee && !isPayeeCategoryAllowed(requestType, payee.accountType)) throw new Error("所选收款账户分类与付款分类不匹配，请重新选择对应类别的收款账户。");
       if (["CHANNEL", "AFFILIATE"].includes(requestType)) {
-        if (!input.relatedInvoiceId || !input.relatedReceiptId) throw new Error("渠道或联盟付款必须关联已开票票据和客户到账记录。");
-        const issuedInvoice = await tx.invoice.findFirst({ where: { id: input.relatedInvoiceId, status: "ISSUED", deletedAt: null }, select: { id: true, accountsReceivableId: true, customerId: true } });
-        if (!issuedInvoice) throw new Error("关联票据不存在或尚未开票。");
-        const receipt = await tx.customerReceipt.findFirst({ where: { id: input.relatedReceiptId, customerId: issuedInvoice.customerId ?? undefined, status: { not: "REVERSED" }, allocations: { some: { status: "ACTIVE", allocatedAmount: { gt: 0 }, OR: [{ invoiceId: issuedInvoice.id }, { accountsReceivableId: issuedInvoice.accountsReceivableId ?? "__none__" }] } } }, select: { id: true } });
-        if (!receipt) throw new Error("关联客户到账记录尚未有效核销到该票据，不能提交渠道或联盟付款。");
+        await validateOptionalPaymentReferences(tx, input.relatedInvoiceId, input.relatedReceiptId);
       }
       const supplierName = cleanText(input.supplierName);
       let supplier = await tx.supplier.findFirst({ where: { name: supplierName, type: requestType, status: "ACTIVE" }, select: { id: true } });
       if (!supplier) supplier = await tx.supplier.create({ data: { supplierNo: refNo("SUP"), name: supplierName, type: requestType, country: input.country?.trim().toUpperCase() || null, ...(accountNumber ? { bankAccounts: { create: { accountName, bankName, accountNumber, country: input.country?.trim().toUpperCase() || null, currency: cleanCurrency(input.currency), swiftCode, isDefault: true } } } : {}) }, select: { id: true } });
-      const created = await tx.paymentRequest.create({ data: { requestNo: refNo("PAY"), applicantId: session.userId, supplierId: supplier.id, requestType, payerEntity: payer.legalEntity, payerAccountKey: payer.payerAccountKey ?? payer.id, payeeSnapshot: JSON.stringify({ accountName, bankName, accountNumber, swiftCode, payeeProfileId: payee?.id ?? null, payerProfileId: payer.id, payerAccountName: payer.accountName, payerAccountNumber: payer.accountNumber }), reason: cleanText(input.reason), currency: cleanCurrency(input.currency), amount, scheduledAt: input.scheduledAt ? new Date(`${input.scheduledAt}T00:00:00`) : null, relatedInvoiceId: input.relatedInvoiceId || null, relatedReceiptId: input.relatedReceiptId || null, note: input.note?.trim() || null, items: { create: { description: cleanText(input.reason), amount, currency: cleanCurrency(input.currency), invoiceUrls: JSON.stringify(normalizeFinanceUrls(input.invoiceUrls)) } } }, select: { id: true } });
+      const payeeDetails = createPayeeSnapshot(payee ?? { name: supplierName, accountName, bankName, accountNumber, swiftCode, country: input.country?.trim() || null, currency: cleanCurrency(input.currency) });
+      const created = await tx.paymentRequest.create({ data: { requestNo: refNo("PAY"), applicantId: session.userId, supplierId: supplier.id, requestType, payerEntity: payer.legalEntity, payerAccountKey: payer.payerAccountKey ?? payer.id, payeeSnapshot: JSON.stringify({ ...payeeDetails, payeeProfileId: payee?.id ?? null, payerProfileId: payer.id, payerAccountName: payer.accountName, payerAccountNumber: payer.accountNumber }), reason: cleanText(input.reason), currency: cleanCurrency(input.currency), amount, scheduledAt: input.scheduledAt ? new Date(`${input.scheduledAt}T00:00:00`) : null, relatedInvoiceId: input.relatedInvoiceId || null, relatedReceiptId: input.relatedReceiptId || null, note: input.note?.trim() || null, items: { create: { description: cleanText(input.reason), amount, currency: cleanCurrency(input.currency), invoiceUrls: JSON.stringify(normalizeFinanceUrls(input.invoiceUrls)) } } }, select: { id: true } });
       const reviewer = await createTwoStageFinanceApproval(tx, "PAYMENT_REQUEST", created.id, input.reviewerId);
       await tx.reminder.create({ data: { title: `待审核付款申请：${created.id}`, content: `${supplierName}的付款申请等待你审核。\n[[href:/finance/workbench?mainTab=PAYMENT&focusRequest=${created.id}]]`, remindDate: new Date(), type: "PAYMENT_REVIEW", targetId: reviewer.id, createdById: session.userId } });
       const attachments = normalizeFinanceUrls(input.attachmentUrls);
