@@ -9,6 +9,7 @@ import { isStaff } from "@/lib/permissions";
 import { createTwoStageFinanceApproval, normalizeFinanceUrls } from "@/lib/financeApproval";
 import { createPayeeSnapshot, isPayeeCategoryAllowed } from "@/lib/financePayee";
 import { validateOptionalPaymentReferences } from "@/lib/paymentReferences";
+import { linkBillingRequestAttachments } from "@/lib/billingRequestAttachments";
 
 const round = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 const refNo = (prefix: string) => `${prefix}-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 6).toUpperCase()}`;
@@ -44,6 +45,7 @@ export async function submitManualBillingRequest(input: {
   documentType: "INVOICE" | "DOMESTIC";
   reviewerId?: string;
   note?: string;
+  attachmentUrls?: string[];
   items: ManualBillingItemInput[];
 }) {
   try {
@@ -88,6 +90,7 @@ export async function submitManualBillingRequest(input: {
         requestedAmount, sourceType: "MANUAL", applicantNote: input.note?.trim() || null,
         manualItems: { create: normalized.map((item) => ({ description: item.description, feeType: item.feeType, currency: item.currency, periodType: item.periodType, periodLabel: item.periodLabel.trim(), promoPlatform: item.promoPlatform?.trim() || null, targetSite: item.targetSite?.trim() || null, affiliatePlatform: item.affiliatePlatform?.trim() || null, quantity: item.quantity, unitPrice: item.unitPrice, amount: item.amount, serviceMonths: item.serviceMonths, netAmount: item.netAmount, taxRate: item.taxRate, taxAmount: item.taxAmount, grossAmount: item.grossAmount, remark: item.remark?.trim() || null, sortOrder: item.sortOrder })) }
       }, select: { id: true, requestNo: true } });
+      await linkBillingRequestAttachments(tx, session.userId, created.id, input.attachmentUrls);
       const reviewer = await createTwoStageFinanceApproval(tx, "BILLING_REQUEST", created.id, input.reviewerId);
       await tx.reminder.create({ data: {
         title: `待审核开票申请：${created.requestNo}`,
@@ -188,7 +191,7 @@ export async function saveFinanceAccountProfile(input: { id?: string; name: stri
     const legalEntityKey = input.legalEntityKey?.trim() || null;
     if (legalEntityKey && (!["COMPANY_PAYER", "COMPANY_BANK"].includes(input.accountType) || !Object.hasOwn(PARTY_B_COMPANIES, legalEntityKey))) return { ok: false, error: "请选择有效的公司签约主体" };
     const currency = cleanCurrency(input.currency || (["CUSTOMER_BILLING", "COMPANY_PAYER", "SUPPLIER_PAYEE", "EMPLOYEE_REIMBURSEMENT"].includes(input.accountType) ? "CNY" : "USD"));
-    if (!input.name.trim() || !legalEntity || !input.accountName.trim() || !accountNumber || !currency) return { ok: false, error: "请完整填写账户名称、主体、户名、账号和币种。" };
+    if (!input.name.trim() || !legalEntity || !input.accountName.trim() || (!accountNumber && input.accountType !== "CUSTOMER_BILLING") || !currency) return { ok: false, error: input.accountType === "CUSTOMER_BILLING" ? "请完整填写资料名称、发票抬头和币种。" : "请完整填写账户名称、主体、户名、账号和币种。" };
     const holderType = input.accountHolderType?.trim().toLowerCase() || null;
     const holderMobile = input.accountHolderMobile?.trim() || null;
     const holderEmail = input.accountHolderEmail?.trim() || null;
@@ -201,7 +204,7 @@ export async function saveFinanceAccountProfile(input: { id?: string; name: stri
         const previous = input.id ? await tx.financeAccountProfile.findUnique({ where: { id: input.id }, select: { bankAccountType: true, accountType: true } }) : null;
         if (!previous || previous.accountType !== "AFFILIATE_PAYEE" || previous.bankAccountType !== bankAccountType) throw new Error("账户类型请选择 Checking 或 Savings。");
       }
-      const duplicate = await tx.financeAccountProfile.findFirst({ where: { legalEntity, accountNumber, currency, status: "ACTIVE", ...(input.id ? { id: { not: input.id } } : {}) }, select: { id: true } });
+      const duplicate = accountNumber ? await tx.financeAccountProfile.findFirst({ where: { legalEntity, accountNumber, currency, status: "ACTIVE", ...(input.id ? { id: { not: input.id } } : {}) }, select: { id: true } }) : null;
       if (duplicate) throw new Error("相同付款主体、账号和币种的财务账户已存在，请勿重复创建。");
       if (input.isDefault) await tx.financeAccountProfile.updateMany({ where: { legalEntity, currency, status: "ACTIVE" }, data: { isDefault: false } });
       const normalizedSwiftCode = input.swiftCode
@@ -350,6 +353,7 @@ export async function decideFinanceRequest(entityType: "BILLING_REQUEST" | "PAYM
         const expected = { id, status: "APPROVED" };
         const changed = entityType === "PAYMENT_REQUEST" ? await tx.paymentRequest.updateMany({ where: expected, data: { status: "PAID", paidById: session.userId, paidAt, transactionNo, paymentProofUrls: JSON.stringify(proofUrls) } }) : await tx.expenseClaim.updateMany({ where: expected, data: { status: "PAID", paidAt, paymentProofUrls: JSON.stringify(proofUrls) } });
         if (changed.count !== 1) throw new Error("申请状态已变化，付款未写入。");
+        await tx.financeAttachment.createMany({ data: proofUrls.map(fileUrl => ({ entityType, entityId: id, attachmentType: "PAYMENT_PROOF", fileUrl, uploadedById: session.userId })) });
         await tx.reminder.create({ data: { title: "付款已完成", content: `你的${entityType === "PAYMENT_REQUEST" ? "付款申请" : "费用报销"}已付款，可在财务工作台下载付款凭证。\n[[href:/finance/workbench?mainTab=PAYMENT&focusRequest=${id}]]`, remindDate: now, type: "FINANCE_RESULT", targetId: entity.applicantId, createdById: session.userId } });
       }
     });

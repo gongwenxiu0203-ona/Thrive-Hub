@@ -3,6 +3,8 @@ import { readFile } from "fs/promises";
 import path from "path";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
+import { isStaff } from "@/lib/permissions";
+import { findLegacyPaymentProof } from "@/lib/financePaymentProof";
 import {
   AttachmentEntityNotFoundError,
   isAttachmentEntityType,
@@ -48,14 +50,23 @@ export async function GET(
     where: { fileUrl: `/uploads/${safeName}` },
     select: { entityType: true, entityId: true },
   });
-  const financeAttachment = !attachment ? await prisma.financeAttachment.findFirst({
-    where: { fileUrl: `/uploads/${safeName}`, entityType: { in: ["PAYMENT_REQUEST", "EXPENSE_CLAIM"] } },
-    select: { entityType: true, entityId: true },
-  }) : null;
+  const financeAttachment = !attachment ? (await prisma.financeAttachment.findFirst({
+    where: { fileUrl: `/uploads/${safeName}`, entityType: { in: ["PAYMENT_REQUEST", "EXPENSE_CLAIM", "BILLING_REQUEST", "BILLING_STAGED"] } },
+    select: { entityType: true, entityId: true, uploadedById: true },
+  }) ?? await findLegacyPaymentProof(prisma, `/uploads/${safeName}`)) : null;
   if ((!attachment || !isAttachmentEntityType(attachment.entityType)) && !financeAttachment) return NextResponse.json({ error: "文件不存在" }, { status: 404 });
 
   try {
     if (financeAttachment) {
+      if (["BILLING_REQUEST", "BILLING_STAGED"].includes(financeAttachment.entityType) && !isStaff(session.role)) return NextResponse.json({ error: "文件不存在" }, { status: 404 });
+      if (financeAttachment.entityType === "BILLING_STAGED") {
+        if (financeAttachment.uploadedById !== session.userId || financeAttachment.entityId !== session.userId) return NextResponse.json({ error: "文件不存在" }, { status: 404 });
+      } else if (financeAttachment.entityType === "BILLING_REQUEST") {
+        const record = await prisma.billingRequest.findUnique({ where: { id: financeAttachment.entityId }, select: { applicantId: true } });
+        if (!record) return NextResponse.json({ error: "文件不存在" }, { status: 404 });
+        const assigned = await prisma.financeApprovalStep.findFirst({ where: { entityType: "BILLING_REQUEST", entityId: financeAttachment.entityId, assigneeId: session.userId }, select: { id: true } });
+        if (record.applicantId !== session.userId && !assigned) await requireFeaturePermission(session, "finance.billing_requests", "READ");
+      } else {
       const isPayment = financeAttachment.entityType === "PAYMENT_REQUEST";
       const record = isPayment
         ? await prisma.paymentRequest.findUnique({ where: { id: financeAttachment.entityId }, select: { applicantId: true } })
@@ -63,6 +74,7 @@ export async function GET(
       const ownerId = record && ("applicantId" in record ? record.applicantId : record.employeeId);
       if (!ownerId) return NextResponse.json({ error: "文件不存在" }, { status: 404 });
       if (session.userId !== ownerId) await requireFeaturePermission(session, isPayment ? "finance.payment_requests" : "finance.expenses", "READ");
+      }
     } else if (attachment && isAttachmentEntityType(attachment.entityType)) {
       await requireAttachmentEntityAccess(session, attachment.entityType, attachment.entityId, "READ");
     }

@@ -8,9 +8,11 @@ import {
   deleteBillingRequest,
 } from "@/actions/billingRequests";
 import { Modal } from "@/components/ui/Modal";
+import { readApiError } from "@/lib/clientError";
 import { batchDecideFinanceRequests, cancelFinanceRequests, changeFinanceRequestReviewer, decideFinanceRequest } from "@/actions/financeUnified";
 
 type BillingRow = {
+  attachmentUrls?: string[];
   id: string;
   requestNo: string;
   customerName: string;
@@ -226,6 +228,7 @@ export function FinanceWorkbenchClient({
   const [batchReason, setBatchReason] = useState("");
   const [paying, setPaying] = useState<OutgoingRow | null>(null);
   const [uploadingProof, setUploadingProof] = useState(false);
+  const [paymentError, setPaymentError] = useState("");
   const [paymentForm, setPaymentForm] = useState({ paidAt: new Date().toISOString().slice(0, 10), transactionNo: "", proofUrls: "", comment: "" });
   const [outgoingFilter, setOutgoingFilter] = useState<
     "ALL" | OutgoingRow["category"] | "EXPENSE"
@@ -335,9 +338,55 @@ export function FinanceWorkbenchClient({
       if (!result.ok) setError(result.error ?? "更换审核人失败"); else router.refresh();
     });
   }
+  function submitPaymentSettlement() {
+    if (!paying || pending || uploadingProof) return;
+    const proofUrls = paymentForm.proofUrls.split(/[\n,]/).map((item) => item.trim()).filter(Boolean);
+    const missing = [!paymentForm.paidAt && "付款日期", !paymentForm.transactionNo.trim() && "交易流水号", !proofUrls.length && "付款回单"].filter(Boolean);
+    if (missing.length) return setPaymentError(`请填写${missing.join("、")}后再确认付款。`);
+    setPaymentError("");
+    startTransition(async () => {
+      try {
+        const result = await decideFinanceRequest(paying.kind === "PAYMENT" ? "PAYMENT_REQUEST" : "EXPENSE_CLAIM", paying.id, "PAID", {
+          paidAt: paymentForm.paidAt, transactionNo: paymentForm.transactionNo, proofUrls, comment: paymentForm.comment,
+        });
+        if (!result.ok) setPaymentError(result.error ?? "付款登记失败，请重试。");
+        else { setPaying(null); router.refresh(); }
+      } catch (error) {
+        setPaymentError(error instanceof Error ? error.message : "请求中断，请重试；已填信息和上传凭证仍保留。");
+      }
+    });
+  }
+  const [proofDownloadError, setProofDownloadError] = useState("");
+  const [downloadingProof, setDownloadingProof] = useState<string | null>(null);
+  async function downloadPaymentProof(url: string) {
+    setProofDownloadError("");
+    if (!url.startsWith("/uploads/")) {
+      try {
+        const parsed = new URL(url);
+        if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("凭证链接无效。");
+        if (["example.com", "www.example.com"].includes(parsed.hostname)) throw new Error("这条演示记录使用的是占位凭证链接，没有可下载的真实文件。请使用实际上传的付款凭证测试。");
+        window.open(parsed.href, "_blank", "noopener,noreferrer");
+      } catch (error) { setProofDownloadError(error instanceof Error ? error.message : "凭证链接无效。"); }
+      return;
+    }
+    setDownloadingProof(url);
+    try {
+      const response = await fetch(`${url}?download=1`);
+      if (response.redirected) throw new Error("登录状态已失效，请重新登录后下载凭证。");
+      if (!response.ok) throw new Error(await readApiError(response, "凭证下载失败，请确认文件存在且当前账号有访问权限。"));
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = decodeURIComponent(url.split("/").pop() || "付款凭证");
+      document.body.appendChild(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    } catch (error) { setProofDownloadError(error instanceof Error ? error.message : "下载请求中断，请稍后重试。"); }
+    finally { setDownloadingProof(null); }
+  }
   async function uploadPaymentProofs(files: File[]) {
     if (!files.length) return;
-    setUploadingProof(true); setError("");
+    setUploadingProof(true); setPaymentError("");
     const uploaded: string[] = [];
     try {
       for (const file of files) {
@@ -347,10 +396,11 @@ export function FinanceWorkbenchClient({
         if (!response.ok || !body.fileUrl) throw new Error(body.error ?? `${file.name} 上传失败`);
         uploaded.push(body.fileUrl);
       }
-      const existing = paymentForm.proofUrls.split(/[\n,]/).map((item) => item.trim()).filter(Boolean);
-      setPaymentForm({ ...paymentForm, proofUrls: [...new Set([...existing, ...uploaded])].join("\n") });
-    } catch (uploadError) { setError(uploadError instanceof Error ? uploadError.message : "付款回单上传失败"); }
-    finally { setUploadingProof(false); }
+    } catch (uploadError) { setPaymentError(uploadError instanceof Error ? uploadError.message : "付款回单上传失败"); }
+    finally {
+      if (uploaded.length) setPaymentForm((current) => ({ ...current, proofUrls: [...new Set([...current.proofUrls.split(/[\n,]/).map(item => item.trim()).filter(Boolean), ...uploaded])].join("\n") }));
+      setUploadingProof(false);
+    }
   }
   const filteredBilling = billingRequests.filter((row) => {
     if (billingFilter !== "ALL" && row.status !== billingFilter) return false;
@@ -392,6 +442,7 @@ export function FinanceWorkbenchClient({
   }
   return (
     <div className="space-y-6">
+      {proofDownloadError && <Modal open onClose={() => setProofDownloadError("")} title="凭证下载失败" size="sm"><p role="alert" className="text-sm text-rose-800">{proofDownloadError}</p><div className="mt-4 flex justify-end"><button type="button" className="btn-secondary" onClick={() => setProofDownloadError("")}>知道了</button></div></Modal>}
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-sm font-medium text-brand-600">
@@ -618,7 +669,7 @@ export function FinanceWorkbenchClient({
                         )}
                       </td>
                     </tr>
-                    {expandedBilling === row.id && <tr><td colSpan={7} className="bg-[#faf8ff] px-5 py-4"><div className="grid gap-3 text-sm md:grid-cols-4"><p><span className="text-xs text-slate-500">申请单</span><br />{row.requestNo}</p><p><span className="text-xs text-slate-500">客户 / 申请人</span><br />{row.customerName} · {row.applicantName}</p><p><span className="text-xs text-slate-500">审核人</span><br />{row.reviewerName ?? "—"}</p><p><span className="text-xs text-slate-500">申请金额</span><br />{money(row.requestedAmount, row.currency)}</p><p><span className="text-xs text-slate-500">票据方式</span><br />{row.documentType === "DOMESTIC" ? "国内发票" : "Invoice"}</p><p><span className="text-xs text-slate-500">明细数量</span><br />{row.lineCount} 条</p><p><span className="text-xs text-slate-500">关联合同</span><br />{row.contractNos.join("、") || "—"}</p><p><span className="text-xs text-slate-500">当前状态</span><br />{displayBillingStatus(row)}</p>{visibleApplicantNote(row.applicantNote) && <p className="md:col-span-4"><span className="text-xs text-slate-500">申请备注</span><br /><span className="whitespace-pre-wrap break-words">{visibleApplicantNote(row.applicantNote)}</span></p>}</div><BillingItemsTable row={row} /></td></tr>}
+                    {expandedBilling === row.id && <tr><td colSpan={7} className="bg-[#faf8ff] px-5 py-4"><div className="grid gap-3 text-sm md:grid-cols-4"><p><span className="text-xs text-slate-500">申请单</span><br />{row.requestNo}</p><p><span className="text-xs text-slate-500">客户 / 申请人</span><br />{row.customerName} · {row.applicantName}</p><p><span className="text-xs text-slate-500">审核人</span><br />{row.reviewerName ?? "—"}</p><p><span className="text-xs text-slate-500">申请金额</span><br />{money(row.requestedAmount, row.currency)}</p><p><span className="text-xs text-slate-500">票据方式</span><br />{row.documentType === "DOMESTIC" ? "国内发票" : "Invoice"}</p><p><span className="text-xs text-slate-500">明细数量</span><br />{row.lineCount} 条</p><p><span className="text-xs text-slate-500">关联合同</span><br />{row.contractNos.join("、") || "—"}</p><p><span className="text-xs text-slate-500">当前状态</span><br />{displayBillingStatus(row)}</p>{visibleApplicantNote(row.applicantNote) && <p className="md:col-span-4"><span className="text-xs text-slate-500">申请备注</span><br /><span className="whitespace-pre-wrap break-words">{visibleApplicantNote(row.applicantNote)}</span></p>}</div><BillingItemsTable row={row} /><AttachmentLinks urls={row.attachmentUrls ?? []} label="客户确认金额截图" /></td></tr>}
                     </Fragment>
                   ))}
                 </tbody>
@@ -979,7 +1030,7 @@ export function FinanceWorkbenchClient({
                       <td className="text-right">
                         {money(row.amount, row.currency)}
                       </td>
-                      <td className="px-3 text-right"><div className="flex flex-wrap justify-end gap-x-3 gap-y-1">{row.approvalStatus === "PENDING" && row.reviewerId === currentUserId && <button type="button" className="font-medium text-brand-700 hover:underline" disabled={pending} onClick={() => { setReviewingOutgoing(row); setReviewReason(""); }}>审核</button>}{isAdmin && ["SUBMITTED", "REJECTED"].includes(row.status) && <button type="button" className="font-medium text-rose-700 hover:underline" onClick={() => { setSelectedOutgoing([row.id]); setBatchReason(""); setBatchDialog("DELETE"); }}>删除</button>}<button type="button" className="text-brand-700 hover:underline" onClick={() => setExpandedOutgoing(expandedOutgoing === row.id ? null : row.id)}>{expandedOutgoing === row.id ? "收起详情" : "详情"}</button>{row.status === "APPROVED" && canEditPayment && <button type="button" className="font-medium text-brand-700 hover:underline" onClick={() => { setPaying(row); setPaymentForm({ paidAt: new Date().toISOString().slice(0, 10), transactionNo: "", proofUrls: "", comment: "" }); }}>核销</button>}{row.paymentProofUrls.map((url, index) => <a key={url} href={url} target="_blank" rel="noreferrer" download className="font-medium text-brand-700 hover:underline">下载凭证{row.paymentProofUrls.length > 1 ? index + 1 : ""}</a>)}</div></td>
+                      <td className="px-3 text-right"><div className="flex flex-wrap justify-end gap-x-3 gap-y-1">{row.approvalStatus === "PENDING" && row.reviewerId === currentUserId && <button type="button" className="font-medium text-brand-700 hover:underline" disabled={pending} onClick={() => { setReviewingOutgoing(row); setReviewReason(""); }}>审核</button>}{isAdmin && ["SUBMITTED", "REJECTED"].includes(row.status) && <button type="button" className="font-medium text-rose-700 hover:underline" onClick={() => { setSelectedOutgoing([row.id]); setBatchReason(""); setBatchDialog("DELETE"); }}>删除</button>}<button type="button" className="text-brand-700 hover:underline" onClick={() => setExpandedOutgoing(expandedOutgoing === row.id ? null : row.id)}>{expandedOutgoing === row.id ? "收起详情" : "详情"}</button>{row.status === "APPROVED" && canEditPayment && <button type="button" className="font-medium text-brand-700 hover:underline" onClick={() => { setPaymentError(""); setPaying(row); setPaymentForm({ paidAt: new Date().toISOString().slice(0, 10), transactionNo: "", proofUrls: "", comment: "" }); }}>核销</button>}{row.paymentProofUrls.map((url, index) => <button type="button" key={url} disabled={downloadingProof !== null} onClick={() => void downloadPaymentProof(url)} className="font-medium text-brand-700 hover:underline disabled:opacity-50">{downloadingProof === url ? "下载中…" : "下载凭证"}{row.paymentProofUrls.length > 1 ? index + 1 : ""}</button>)}</div></td>
                     </tr>
                     {expandedOutgoing === row.id && <tr><td colSpan={7} className="bg-[#faf8ff] px-5 py-4"><OutgoingDetails row={row} />{row.applicantId === currentUserId && row.approvalStatus === "PENDING" && <label className="mt-3 block max-w-md text-xs font-medium text-slate-600">更换审核人<select className="input mt-1" value={row.reviewerId ?? ""} disabled={pending} onChange={(event) => changeOutgoingReviewer(row, event.target.value)}>{reviewerOptions.map((option) => <option key={option.id} value={option.id}>{option.label} · {option.email}</option>)}</select></label>}</td></tr>}
                     </Fragment>
@@ -1119,7 +1170,7 @@ export function FinanceWorkbenchClient({
       )}
       {reviewingBilling && (
         <Modal open onClose={() => !pending && setReviewingBilling(null)} title="审核开票申请" size="md">
-          <div className="space-y-4"><div className="grid gap-3 rounded-lg bg-[#faf8ff] p-4 text-sm sm:grid-cols-2"><p><span className="text-xs text-slate-500">申请单</span><br />{reviewingBilling.requestNo}</p><p><span className="text-xs text-slate-500">客户 / 申请人</span><br />{reviewingBilling.customerName} · {reviewingBilling.applicantName}</p><p><span className="text-xs text-slate-500">票据方式</span><br />{reviewingBilling.documentType === "DOMESTIC" ? "国内发票" : "Invoice"} · {reviewingBilling.lineCount} 条</p><p><span className="text-xs text-slate-500">申请金额</span><br />{money(reviewingBilling.requestedAmount, reviewingBilling.currency)}</p><p className="sm:col-span-2"><span className="text-xs text-slate-500">关联合同</span><br />{reviewingBilling.contractNos.join("、") || "—"}</p>{visibleApplicantNote(reviewingBilling.applicantNote) && <p className="sm:col-span-2"><span className="text-xs text-slate-500">申请备注</span><br /><span className="whitespace-pre-wrap break-words">{visibleApplicantNote(reviewingBilling.applicantNote)}</span></p>}</div><BillingItemsTable row={reviewingBilling} /><label className="block text-sm"><span className="label">退回原因（选择退回时必填）</span><textarea className="input min-h-24" value={reviewReason} onChange={(event) => setReviewReason(event.target.value)} placeholder="请说明需要申请人补充或修改的内容" /></label><div className="flex justify-end gap-2"><button type="button" className="btn-secondary" disabled={pending} onClick={() => setReviewingBilling(null)}>取消</button><button type="button" className="btn-secondary text-rose-700" disabled={pending || reviewReason.trim().length < 2} onClick={() => startTransition(async () => { const result = await decideFinanceRequest("BILLING_REQUEST", reviewingBilling.id, "REJECT", reviewReason); if (!result.ok) setError(result.error ?? "退回失败"); else { setReviewingBilling(null); router.refresh(); } })}>退回申请</button><button type="button" className="btn-primary" disabled={pending} onClick={() => startTransition(async () => { const result = await decideFinanceRequest("BILLING_REQUEST", reviewingBilling.id, "APPROVE"); if (!result.ok) setError(result.error ?? "审核失败"); else { setReviewingBilling(null); router.refresh(); } })}>审核通过</button></div></div>
+          <div className="space-y-4"><div className="grid gap-3 rounded-lg bg-[#faf8ff] p-4 text-sm sm:grid-cols-2"><p><span className="text-xs text-slate-500">申请单</span><br />{reviewingBilling.requestNo}</p><p><span className="text-xs text-slate-500">客户 / 申请人</span><br />{reviewingBilling.customerName} · {reviewingBilling.applicantName}</p><p><span className="text-xs text-slate-500">票据方式</span><br />{reviewingBilling.documentType === "DOMESTIC" ? "国内发票" : "Invoice"} · {reviewingBilling.lineCount} 条</p><p><span className="text-xs text-slate-500">申请金额</span><br />{money(reviewingBilling.requestedAmount, reviewingBilling.currency)}</p><p className="sm:col-span-2"><span className="text-xs text-slate-500">关联合同</span><br />{reviewingBilling.contractNos.join("、") || "—"}</p>{visibleApplicantNote(reviewingBilling.applicantNote) && <p className="sm:col-span-2"><span className="text-xs text-slate-500">申请备注</span><br /><span className="whitespace-pre-wrap break-words">{visibleApplicantNote(reviewingBilling.applicantNote)}</span></p>}</div><BillingItemsTable row={reviewingBilling} /><AttachmentLinks urls={reviewingBilling.attachmentUrls ?? []} label="客户确认金额截图" /><label className="block text-sm"><span className="label">退回原因（选择退回时必填）</span><textarea className="input min-h-24" value={reviewReason} onChange={(event) => setReviewReason(event.target.value)} placeholder="请说明需要申请人补充或修改的内容" /></label><div className="flex justify-end gap-2"><button type="button" className="btn-secondary" disabled={pending} onClick={() => setReviewingBilling(null)}>取消</button><button type="button" className="btn-secondary text-rose-700" disabled={pending || reviewReason.trim().length < 2} onClick={() => startTransition(async () => { const result = await decideFinanceRequest("BILLING_REQUEST", reviewingBilling.id, "REJECT", reviewReason); if (!result.ok) setError(result.error ?? "退回失败"); else { setReviewingBilling(null); router.refresh(); } })}>退回申请</button><button type="button" className="btn-primary" disabled={pending} onClick={() => startTransition(async () => { const result = await decideFinanceRequest("BILLING_REQUEST", reviewingBilling.id, "APPROVE"); if (!result.ok) setError(result.error ?? "审核失败"); else { setReviewingBilling(null); router.refresh(); } })}>审核通过</button></div></div>
         </Modal>
       )}
       {reviewingOutgoing && (
@@ -1128,8 +1179,9 @@ export function FinanceWorkbenchClient({
         </Modal>
       )}
       {paying && (
-        <Modal open onClose={() => !pending && setPaying(null)} title="登记付款并核销" size="sm">
-          <div className="space-y-4"><p className="text-sm text-slate-700">{paying.requestNo} · {paying.objectName} · <strong>{money(paying.amount, paying.currency)}</strong></p><label className="block text-sm"><span className="label">付款日期 *</span><input type="date" className="input" value={paymentForm.paidAt} onChange={(event) => setPaymentForm({ ...paymentForm, paidAt: event.target.value })} /></label><label className="block text-sm"><span className="label">交易流水号 *</span><input className="input" value={paymentForm.transactionNo} onChange={(event) => setPaymentForm({ ...paymentForm, transactionNo: event.target.value })} /></label><label className="block text-sm"><span className="label">付款回单 *</span><input type="file" multiple className="input mb-2" disabled={uploadingProof || pending} onChange={(event) => void uploadPaymentProofs(Array.from(event.target.files ?? []))} /><textarea className="input min-h-24" value={paymentForm.proofUrls} onChange={(event) => setPaymentForm({ ...paymentForm, proofUrls: event.target.value })} placeholder="也可填写回单 URL，每行一条" />{uploadingProof && <span className="mt-1 block text-xs text-slate-500">正在上传付款回单…</span>}</label><label className="block text-sm"><span className="label">付款备注</span><textarea className="input min-h-20" value={paymentForm.comment} onChange={(event) => setPaymentForm({ ...paymentForm, comment: event.target.value })} /></label><div className="flex justify-end gap-2"><button type="button" className="btn-secondary" disabled={pending || uploadingProof} onClick={() => setPaying(null)}>取消</button><button type="button" className="btn-primary" disabled={pending || uploadingProof || !paymentForm.paidAt || !paymentForm.transactionNo.trim() || !paymentForm.proofUrls.trim()} onClick={() => startTransition(async () => { const result = await decideFinanceRequest(paying.kind === "PAYMENT" ? "PAYMENT_REQUEST" : "EXPENSE_CLAIM", paying.id, "PAID", { paidAt: paymentForm.paidAt, transactionNo: paymentForm.transactionNo, proofUrls: paymentForm.proofUrls.split(/[\n,]/).map((item) => item.trim()).filter(Boolean), comment: paymentForm.comment }); if (!result.ok) setError(result.error ?? "付款登记失败"); else { setPaying(null); router.refresh(); } })}>{pending ? "处理中…" : "确认付款并核销"}</button></div></div>
+        <Modal open onClose={() => !pending && !uploadingProof && setPaying(null)} title="登记付款并核销" size="sm">
+          {paymentError && <p role="alert" className="mb-4 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{paymentError}</p>}
+          <div className="space-y-4"><p className="text-sm text-slate-700">{paying.requestNo} · {paying.objectName} · <strong>{money(paying.amount, paying.currency)}</strong></p><label className="block text-sm"><span className="label">付款日期 *</span><input type="date" className="input" value={paymentForm.paidAt} onChange={(event) => setPaymentForm({ ...paymentForm, paidAt: event.target.value })} /></label><label className="block text-sm"><span className="label">交易流水号 *</span><input className="input" value={paymentForm.transactionNo} onChange={(event) => setPaymentForm({ ...paymentForm, transactionNo: event.target.value })} /></label><label className="block text-sm"><span className="label">付款回单 *</span><input type="file" multiple className="input mb-2" disabled={uploadingProof || pending} onChange={(event) => void uploadPaymentProofs(Array.from(event.target.files ?? []))} /><textarea className="input min-h-24" value={paymentForm.proofUrls} onChange={(event) => setPaymentForm({ ...paymentForm, proofUrls: event.target.value })} placeholder="也可填写回单 URL，每行一条" />{uploadingProof && <span className="mt-1 block text-xs text-slate-500">正在上传付款回单…</span>}</label><label className="block text-sm"><span className="label">付款备注</span><textarea className="input min-h-20" value={paymentForm.comment} onChange={(event) => setPaymentForm({ ...paymentForm, comment: event.target.value })} /></label><div className="flex justify-end gap-2"><button type="button" className="btn-secondary" disabled={pending || uploadingProof} onClick={() => setPaying(null)}>取消</button><button type="button" className="btn-primary" disabled={pending || uploadingProof} onClick={submitPaymentSettlement}>{pending ? "处理中…" : "确认付款并核销"}</button></div></div>
         </Modal>
       )}
       {batchDialog && (

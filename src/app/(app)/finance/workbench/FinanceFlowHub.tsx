@@ -74,6 +74,7 @@ export type FinanceProgressRow = {
   submittedAt?: string;
   note?: string | null;
   details?: Array<{ label: string; value: string }>;
+  attachmentUrls?: string[];
   items?: Array<{ description: string; period: string; quantity: number; unitPrice: number; amount: number; remark?: string | null; taxRate?: number | null; taxAmount?: number | null }>;
   paymentProofUrls?: string[];
   documents?: Array<{
@@ -331,6 +332,9 @@ function BillingForm({ data, disabled, onSubmit }: FormProps) {
   const [terms, setTerms] = useState(
     "Terms & Conditions Our Account Information is as follows. Wire transfer only.",
   );
+  const [confirmationAttachments, setConfirmationAttachments] = useState("");
+  const [uploadingConfirmation, setUploadingConfirmation] = useState(false);
+  const invalidConfirmationLinks = splitUrls(confirmationAttachments).some(url => !url.startsWith("/uploads/") && !/^https:\/\//i.test(url));
   const defaultReviewerId = data.reviewerOptions?.find((row) => row.subtitle?.toLowerCase() === "shallow.w@thraiveagency.com")?.id ?? data.reviewerOptions?.find((row) => `${row.label} ${row.subtitle ?? ""}`.toLowerCase().includes("shallow"))?.id ?? "";
   const [reviewerId, setReviewerId] = useState(defaultReviewerId);
   const customerProfiles = data.financeProfiles.filter(
@@ -765,6 +769,7 @@ function BillingForm({ data, disabled, onSubmit }: FormProps) {
           );
         })}
       </div>
+      <AttachmentInput label="请上传客户确认金额截图" scope="BILLING" value={confirmationAttachments} onChange={setConfirmationAttachments} disabled={disabled} onUploadingChange={setUploadingConfirmation} />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <button
           className="btn-secondary"
@@ -783,7 +788,7 @@ function BillingForm({ data, disabled, onSubmit }: FormProps) {
           <button
             className="btn-primary"
               disabled={
-                disabled ||
+                disabled || uploadingConfirmation || invalidConfirmationLinks ||
               !reviewerId ||
               !customerId ||
               (type === "INVOICE" && !contractId) ||
@@ -795,6 +800,7 @@ function BillingForm({ data, disabled, onSubmit }: FormProps) {
             onClick={() =>
               onSubmit({
                 documentType: type,
+                attachmentUrls: splitUrls(confirmationAttachments),
                 reviewerId,
                 customerId,
                 contractId: contractId || undefined,
@@ -860,15 +866,17 @@ function BillingForm({ data, disabled, onSubmit }: FormProps) {
   );
 }
 
-function AttachmentInput({ label, scope, value, onChange, disabled }: { label: string; scope: "PAYMENT" | "EXPENSE"; value: string; onChange: (value: string) => void; disabled?: boolean }) {
+function AttachmentInput({ label, scope, value, onChange, disabled, onUploadingChange }: { label: string; scope: "PAYMENT" | "EXPENSE" | "BILLING"; value: string; onChange: (value: string) => void; disabled?: boolean; onUploadingChange?: (uploading: boolean) => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const uploadLock = useRef(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const urls = splitUrls(value);
   const setUrls = (next: string[]) => onChange([...new Set(next)].join("\n"));
   async function uploadFiles(files: File[]) {
-    if (!files.length || disabled) return;
-    setUploading(true); setError("");
+    if (!files.length || disabled || uploadLock.current) return;
+    uploadLock.current = true;
+    setUploading(true); onUploadingChange?.(true); setError("");
     const uploaded: string[] = [];
     const failures: string[] = [];
     for (const file of files) {
@@ -885,7 +893,8 @@ function AttachmentInput({ label, scope, value, onChange, disabled }: { label: s
     }
     if (uploaded.length) setUrls([...urls, ...uploaded]);
     if (failures.length) setError(failures.join("；"));
-    setUploading(false);
+    uploadLock.current = false;
+    setUploading(false); onUploadingChange?.(false);
     if (inputRef.current) inputRef.current.value = "";
   }
   function pasteFiles(event: ClipboardEvent<HTMLDivElement>) {
@@ -899,7 +908,8 @@ function AttachmentInput({ label, scope, value, onChange, disabled }: { label: s
         <button type="button" className="btn-secondary btn-sm" disabled={disabled || uploading} onClick={() => inputRef.current?.click()}><Upload className="h-3.5 w-3.5" />{uploading ? "上传中…" : "选择本地文件（可多选）"}</button>
         <span className="inline-flex items-center gap-1 text-xs text-slate-600"><Paperclip className="h-3.5 w-3.5" />也可复制文件后直接粘贴到此区域</span>
       </div>
-      <div className="mt-3 flex items-start gap-2"><Link2 className="mt-2.5 h-4 w-4 shrink-0 text-slate-500" /><textarea aria-label={`${label}外部链接`} className="input min-h-16" value={urls.filter(url => !url.startsWith("/uploads/")).join("\n")} onChange={event => setUrls([...urls.filter(url => url.startsWith("/uploads/")), ...splitUrls(event.target.value)])} placeholder="也可填写附件 URL，每行一条或用逗号分隔" /></div>
+      <div className="mt-3 flex items-start gap-2"><Link2 className="mt-2.5 h-4 w-4 shrink-0 text-slate-500" /><textarea aria-label={`${label}外部链接`} disabled={disabled || uploading} className="input min-h-16" value={urls.filter(url => !url.startsWith("/uploads/")).join("\n")} onChange={event => setUrls([...urls.filter(url => url.startsWith("/uploads/")), ...splitUrls(event.target.value)])} placeholder="也可填写 HTTPS 附件链接，每行一条或用逗号分隔" /></div>
+      {urls.some(url => !url.startsWith("/uploads/") && !/^https:\/\//i.test(url)) && <p role="alert" className="mt-2 text-xs text-rose-700">外部附件请使用 HTTPS 链接。</p>}
       {urls.length > 0 && <ul className="mt-3 space-y-1.5" aria-label={`${label}清单`}>{urls.map((url, index) => <li key={`${url}-${index}`} className="flex min-w-0 items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-2 text-xs"><FileText className="h-4 w-4 shrink-0 text-slate-400" /><a href={url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate text-brand-700 hover:underline">{url.startsWith("/uploads/") ? decodeURIComponent(url.split("/").pop() || `本地附件 ${index + 1}`) : url}</a><button type="button" aria-label={`移除附件 ${index + 1}`} disabled={disabled || uploading} className="rounded p-1 text-slate-500 hover:bg-rose-50 hover:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300" onClick={() => setUrls(urls.filter((_, itemIndex) => itemIndex !== index))}><X className="h-3.5 w-3.5" /></button></li>)}</ul>}
       {error && <p role="alert" className="mt-2 text-xs text-rose-700">{error}</p>}
       <p className="mt-2 text-xs text-slate-500">单个本地文件不超过 20MB；支持 PDF、图片、Office、CSV、TXT 和 ZIP。</p>
@@ -1411,19 +1421,19 @@ function ProfileForm({ data, disabled, onSubmit }: FormProps) {
             </> : <>
             {category === "COMPANY_PAYER" && <Field label="关联合同签约主体"><select className="input" value={form.legalEntityKey} onChange={(event) => patch("legalEntityKey", event.target.value)}><option value="">未关联（合同中仍可手动选择）</option>{Object.values(PARTY_B_COMPANIES).map((entity) => <option key={entity.key} value={entity.key}>{entity.label}</option>)}</select><p className="mt-1 text-xs text-slate-500">创建合同时，选择此主体会默认勾选本账户；不会改变已保存合同的账户快照。</p></Field>}
             <TextField label={companyLabel} value={form.accountName} setValue={(value) => patch("accountName", value)} />
-            <TextField label={category === "EMPLOYEE_REIMBURSEMENT" || category === "CHANNEL_PAYEE" ? "收款账号/银行账号" : "银行账号"} value={form.accountNumber} setValue={(value) => patch("accountNumber", value)} />
-            <TextField label={category === "COMPANY_PAYER" ? "开户银行" : "开户行"} value={form.bankName} setValue={(value) => patch("bankName", value)} />
+            <TextField label={category === "CUSTOMER_BILLING" ? "银行账号（选填）" : category === "EMPLOYEE_REIMBURSEMENT" || category === "CHANNEL_PAYEE" ? "收款账号/银行账号" : "银行账号"} value={form.accountNumber} setValue={(value) => patch("accountNumber", value)} />
+            <TextField label={category === "CUSTOMER_BILLING" ? "开户行（选填）" : category === "COMPANY_PAYER" ? "开户银行" : "开户行"} value={form.bankName} setValue={(value) => patch("bankName", value)} />
             <TextField label="SWIFT Code/税号" value={form.swiftCode} setValue={(value) => patch("swiftCode", value)} />
             {category === "COMPANY_PAYER" && <TextField label="路由 ABA" value={form.routingNumber} setValue={(value) => patch("routingNumber", value)} />}
             {category === "COMPANY_PAYER" && <TextField label="账户类型" value={form.bankAccountType} setValue={(value) => patch("bankAccountType", value)} />}
-            <TextField label="银行地址" value={form.bankAddress} setValue={(value) => patch("bankAddress", value)} />
+            <TextField label={category === "CUSTOMER_BILLING" ? "银行地址（选填）" : "银行地址"} value={form.bankAddress} setValue={(value) => patch("bankAddress", value)} />
             </>}
           </div>
           <div className="mt-5 flex justify-end gap-3">
             <button className="btn-secondary" onClick={() => setEditorOpen(false)}>取消</button>
             <button
               className="btn-primary"
-              disabled={disabled || !form.name.trim() || !form.accountName.trim() || !form.accountNumber.trim()}
+              disabled={disabled || !form.name.trim() || !form.accountName.trim() || (category !== "CUSTOMER_BILLING" && !form.accountNumber.trim())}
               onClick={async () => {
                 const saved = await onSubmit({
                   id: editingId || undefined,
@@ -1905,6 +1915,7 @@ function ProgressTable({
                     <table className="w-full min-w-[620px] text-xs"><thead><tr className="border-b bg-slate-50 text-left text-slate-500"><th className="p-2">明细</th><th>期间</th><th>数量</th><th>单价</th><th>税率</th><th>税额</th><th>金额</th></tr></thead><tbody>{(row.items ?? []).map((item, index) => <tr key={index} className="border-b last:border-0"><td className="p-2"><span>{item.description}</span>{item.remark?.trim() && <span className="mt-1 block whitespace-pre-wrap break-words text-slate-500">备注：{item.remark}</span>}</td><td>{item.period}</td><td>{item.quantity}</td><td>{item.unitPrice.toFixed(2)}</td><td>{item.taxRate == null ? "不适用" : `${(item.taxRate * 100).toFixed(2)}%`}</td><td>{item.taxAmount == null ? "不适用" : item.taxAmount.toFixed(2)}</td><td>{item.amount.toFixed(2)}</td></tr>)}</tbody></table>
                   </div>
                   {row.applicantId === currentUserId && row.steps?.[0]?.status === "PENDING" && <label className="mt-3 block max-w-sm text-xs font-medium text-slate-600">更换审核人<select className="input mt-1" value={row.steps?.[0]?.assigneeId ?? ""} disabled={busyId === row.id} onChange={(event) => void changeReviewer(row, event.target.value)}>{reviewerOptions.map((option) => <option key={option.id} value={option.id}>{option.label}{option.subtitle ? ` · ${option.subtitle}` : ""}</option>)}</select></label>}
+                  {Boolean(row.attachmentUrls?.length) && <div className="mt-3 space-y-1 text-xs"><p className="font-medium text-slate-700">客户确认金额截图</p>{row.attachmentUrls?.filter(url => /^\/uploads\/[^/]/.test(url) || /^https?:\/\//i.test(url)).map((url, index) => <a key={url} href={url} target="_blank" rel="noopener noreferrer" className="block break-all text-brand-700 underline">查看附件 {index + 1}</a>)}</div>}
                 </td></tr>
               )}
               </Fragment>

@@ -3,6 +3,8 @@ import { errorResponse } from "@/lib/appError";
 import { requireFeaturePermission } from "@/lib/permissionGuard";
 import { getSession } from "@/lib/session";
 import { saveUploadedFile } from "@/lib/upload";
+import { prisma } from "@/lib/prisma";
+import { isStaff } from "@/lib/permissions";
 
 export async function POST(request: Request) {
   const session = await getSession();
@@ -15,12 +17,17 @@ export async function POST(request: Request) {
   const scope = String(form.get("scope") || "");
   const file = form.get("file");
   if (!(file instanceof File)) return NextResponse.json({ error: "请选择需要上传的文件" }, { status: 400 });
-  if (scope !== "PAYMENT" && scope !== "EXPENSE") return NextResponse.json({ error: "附件用途无效" }, { status: 400 });
+  if (scope !== "PAYMENT" && scope !== "EXPENSE" && scope !== "BILLING") return NextResponse.json({ error: "附件用途无效" }, { status: 400 });
+  if (scope === "BILLING" && !isStaff(session.role)) return NextResponse.json({ error: "仅内部员工可以上传开票申请附件" }, { status: 403 });
 
-  try { await requireFeaturePermission(session, scope === "PAYMENT" ? "finance.payment_requests" : "finance.expenses", "EDIT"); }
+  try { await requireFeaturePermission(session, scope === "PAYMENT" ? "finance.payment_requests" : scope === "BILLING" ? "finance.billing_requests" : "finance.expenses", "EDIT"); }
   catch (error) {
     return errorResponse(error, `finance.attachment.stage.${scope.toLowerCase()}`);
   }
-  try { return NextResponse.json(await saveUploadedFile(file)); }
+  try {
+    const saved = await saveUploadedFile(file);
+    if (scope === "BILLING") await prisma.financeAttachment.create({ data: { entityType: "BILLING_STAGED", entityId: session.userId, attachmentType: "CUSTOMER_AMOUNT_CONFIRMATION", fileUrl: saved.fileUrl, fileName: saved.fileName, uploadedById: session.userId } });
+    return NextResponse.json(saved);
+  }
   catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "文件上传失败" }, { status: 400 }); }
 }

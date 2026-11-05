@@ -1,5 +1,29 @@
 # Thrive Hub Handover
 
+## 2026-11-05 财务两轮修改发布准备（用户手动部署）
+
+- 用户授权将本轮及上一轮全部相关修改commit/push，并要求完整手动部署代码；不授权代执行生产部署。本次无新Schema或迁移，不执行回填/清理。
+- 生产只读预检：版本72ec95d、Ubuntu22.04.5、Node20.20.2，无chromium/google-chrome；daily最新2026-11-05 03:01:27 +0800、1506578432bytes、integrity=ok。部署须stop PM2确认后即时备份，npm ci安装新依赖，再安装Chrome及系统库；scripts/invoice-pdf-smoke.ts加载生产.env，仅内存生成合成PDF并检查有效性，不写DB、不保存文件，须通过后build再核对DB并重启。
+- 本地新smoke首次受限执行出现Chrome启动60s超时，沙箱外复核exit0：1页124898bytes，未创建业务数据；不能将受限环境超时隐瞒为通过。类型检查/回单规则和既有真实PDF渲染验证通过。生产尚未执行任何写入或部署。
+
+## 2026-11-05 付款凭证下载与Invoice预览/导出同版（本地，未提交/部署）
+
+- 用户实测TEST-PAY-002下载失败。只读核对当前预览库：PAID记录保存`/uploads/7fbdb7ed-2e5b-4cb2-9f88-eb1d48229379.docx`且文件存在，并非占位；下载接口只查询附件表，而历史PAID仅写paymentProofUrls，导致404。现新核销在同事务创建FinanceAttachment/PAYMENT_PROOF；旧回单只读查PAID记录并JSON数组精确URL匹配后执行原申请人/模块权限检查，不回填旧数据。TEST-EXP示例中的example.com占位仍不是文件，不伪造。
+- 下载按钮本地fetch检查状态再blob下载，401/404/网络错误在独立弹窗显示；外链仅HTTP(S)新窗口，example.com明确提示演示占位；不代理请求外部网址。
+- tsconfig.json排除output生成目录，避免隔离构建副本被重复纳入源码类型检查；真实src、scripts及.next/types仍检查。
+- 用户要求导出与原实时预览一致，已废弃独立Canvas版式：invoiceDocument.ts为唯一HTML/CSS模板，InvoiceEditor iframe与generateInvoicePdf(Puppeteer)共用。固定A4宽、64x64 Logo容器object-contain、Tinos常规/加粗及SourceHan中文兜底，两端相同字体与布局。已嵌入开放字体及许可；原PDF函数签名/邮件下载调用不变。
+- 新增运行依赖puppeteer24与@fontsource/tinos，next serverExternalPackages增加puppeteer。正式部署必须先npm ci，安装/确认Linux Chromium和运行库（或PUPPETEER_EXECUTABLE_PATH），再执行真实PDF smoke测试；不能仅git pull+build就认定PDF可用。本地用已有Windows Chrome测试，不下载安装额外浏览器。单进程单渲染、最多5排队；缺浏览器明确报错，不降级旧Canvas。所有文本转义、固定资产dataURL、禁止PDF渲染器远程抓取。
+- 无Schema/迁移/生产数据修改。TypeScript、付款/报销回单精确匹配规则、截图附件存储事务回滚测试通过；真正生成3页PDF，screen/print同数据布局及字体粗细指标一致，4字体已加载，PDF内嵌Tinos Regular/Bold、文本可抽取、PNG目视正常。隔离Next整合生产build82/82页exit0（本次本机耗时异常长，不能外推线上性能）；浏览器UI工具仍报告Work禁用，未绕过。测试文件仍output/pdf/invoice-logo-ratio-test.pdf（名称沿用旧测试）。本轮覆盖下方早期仅Logo比例修复；未commit/push/部署。
+
+## 2026-11-05 财务核销反馈、开票截图附件及PDF Logo（本地修改，未提交/部署）
+
+- 核销无反馈的确定问题：FinanceWorkbenchClient仅把错误放在开票区域，付款tab/核销modal不可见；缺必填字段时按钮静默禁用、请求异常未捕获。现改为modal内红色alert、点击提示缺项、异常捕获，保留输入及已上传凭证，多文件部分成功也保留。后端审批/付款权限与状态保护未放宽；未在生产执行真实付款，具体业务拒绝原因需由新错误提示定位。
+- Invoice PDF原竖向Logo1765x2107被固定150x62拉伸，已改contain等比缩放，首页/续页、下载及邮件共用。4页回归PDF和首页/续页PNG验证无压扁或重叠。
+- 客户开票资料银行账号/开户行/银行地址改为选填，前后端仅对CUSTOMER_BILLING放宽账号；其他收付款类别仍要求账号。空账号不参与重复银行账号校验。
+- 国内及Invoice开票申请共用“请上传客户确认金额截图”，支持本地、多文件、粘贴、HTTPS外链。上传中锁定重复上传和链接编辑，禁止提前提交；链接不合法明确提示。复用FinanceAttachment：BILLING_STAGED本人暂存，提交事务校验上传人后原子转BILLING_REQUEST/CUSTOMER_AMOUNT_CONFIRMATION。审核、财务详情及本人进度均可查看；临时文件仅本人可读，正式截图按申请人/指定审核人/内部开票READ权限访问。不暴露到PDF中，不读取外链内容。
+- 付款详情类型由financePaymentLabels映射为前端选项中文，不再展示AFFILIATE等代码。
+- 无Schema/迁移，无生产数据修改。隔离预览仍3001连接backups/finance-payee-20261103-01/engine.db和projects.db。附件存储/归属/去重/不安全链接拒绝及中文付款类型测试在该副本事务中全部回滚；TypeScript、diff检查、4页PDF比例及视觉验证、最终隔离生产构建82/82页通过，本地login HTTP200。浏览器工具报告Work设置禁用本地浏览器，未绕过，UI交互及真实付款核销仍需人工验收。未commit/push/部署；勿提交.claude设置、output及scripts/_payment-ui-patch.cjs等既有/临时产物。
+
 ## 2026-11-03 财务收款资料及付款可选关联已部署：7411c63
 
 - 用户在部署清单后明确确认部署，覆盖下方手动部署交接和本地未发布状态。业务7411c63已push并上线，拉代码后先停PM2并确认stopped，再备份、迁移、完整构建；82/82页成功，主库78、项目库3迁移均最新。

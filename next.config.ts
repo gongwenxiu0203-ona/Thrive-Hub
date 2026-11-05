@@ -9,6 +9,7 @@ const nextConfig: NextConfig = {
     "exceljs",
     "unzipper",
     "@napi-rs/canvas",
+    "puppeteer",
   ],
   experimental: {
     // Allow API route FormData up to the 100 MB contract limit plus multipart overhead.

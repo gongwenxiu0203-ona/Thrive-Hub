@@ -5,6 +5,7 @@ import { hasPermissionLevel } from "@/lib/permissionGuard";
 import { resolveUserPermission } from "@/lib/permissionResolver";
 import { isStaff } from "@/lib/permissions";
 import { financePayeeDetails } from "@/lib/financePayee";
+import { paymentTypeLabel } from "@/lib/financePaymentLabels";
 import { FinanceWorkbenchClient } from "./FinanceWorkbenchClient";
 import { FinanceFlowHub, type ProfileCategory } from "./FinanceFlowHub";
 import { UnifiedFinancePanel } from "./UnifiedFinancePanel";
@@ -328,6 +329,7 @@ export default async function FinanceWorkbenchPage({
     }),
     prisma.financeAttachment.findMany({
       where: { OR: [
+        { entityType: "BILLING_REQUEST", entityId: { in: visibleBillingIds } },
         { entityType: "PAYMENT_REQUEST", entityId: { in: visiblePaymentIds } },
         { entityType: "EXPENSE_CLAIM", entityId: { in: visibleExpenseIds } },
       ] },
@@ -402,6 +404,7 @@ export default async function FinanceWorkbenchPage({
                 ),
                 sourceType: row.sourceType,
                 applicantNote: row.applicantNote,
+                attachmentUrls: requestAttachments.filter((file) => file.entityType === "BILLING_REQUEST" && file.entityId === row.id).map((file) => file.fileUrl),
                 status:
                   row.status === "PROCESSING" && issuedAmount > 0
                     ? "PARTIAL"
@@ -565,7 +568,7 @@ export default async function FinanceWorkbenchPage({
                 items: row.items.map((item) => ({ description: item.description, amount: item.amount, currency: item.currency, invoiceUrls: parseStringList(item.invoiceUrls) })),
                 attachmentUrls: requestAttachments.filter((file) => file.entityType === "PAYMENT_REQUEST" && file.entityId === row.id).map((file) => file.fileUrl),
                 details: [
-                  { label: "付款类型", value: row.requestType },
+                  { label: "付款类型", value: paymentTypeLabel(row.requestType) },
                   { label: "付款主体", value: row.payerEntity },
                   { label: "付款账户", value: (() => { try { const account = JSON.parse(row.payeeSnapshot || "{}"); return `${account.payerAccountName ?? "—"} · ${account.payerAccountNumber ?? "—"}`; } catch { return "—"; } })() },
                   ...financePayeeDetails(row.payeeSnapshot),
@@ -793,6 +796,7 @@ export default async function FinanceWorkbenchPage({
                     applicant: row.applicant.name,
                     submittedAt: row.submittedAt.toISOString(),
                     note: row.applicantNote,
+                    attachmentUrls: requestAttachments.filter((file) => file.entityType === "BILLING_REQUEST" && file.entityId === row.id).map((file) => file.fileUrl),
                     documents: row.invoices
                       .filter(
                         (invoice) =>
