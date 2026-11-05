@@ -1,5 +1,14 @@
 # Thrive Hub Handover
 
+## 2026-11-05 财务两轮修改已部署：d6ba026
+
+- 用户后续明确改为代部署，并确认继续等待 Chromium 安装，覆盖下方“手动部署/尚未发布”的过程状态。业务提交 `d6ba026434f118e94107ecbbe55d0cfe5c702541` 已 push 并上线；本次无新 Schema、迁移、回填或清理。保留生产原 `.env` 和未跟踪文件。
+- 按顺序拉代码、停止 PM2 并确认 stopped、独立即时备份、安装依赖/浏览器、PDF smoke、完整 build、核对数据库、重启。即时备份 `/root/www/backups/dev_manual_release_d6ba026_20261105_01.db`（1506578432 bytes、0600、integrity=ok）保留，不擅自清理。构建备份 `/root/www/backups/dev_pre_deploy_20261105_164748_392.db`；项目库备份 `/root/thrive-data/project-backups/projects_pre_deploy_2026-11-05T08-49-08-423Z.db`。
+- Chrome 官方下载首次耗时较长且 SSH 中断，缓存安装重试成功 exit0；实际路径 `/root/.cache/puppeteer/chrome/linux-148.0.7778.97/chrome-linux64/chrome`，运行用户 root。npm ci 成功；npm 报告29项依赖漏洞（1 low/5 moderate/22 high/1 critical），未擅自 audit fix，需另行评估。
+- 生产 build 82/82 页 exit0；主库78/项目库3迁移均最新。重启前两库 integrity=ok、外键无错误；与即时备份比较全表记录数不变，FinanceAccountProfile/PaymentRequest/ExpenseClaim/BillingRequest/FinanceAttachment 的旧字段逐值 SHA256 一致。BI 1510898 条，revenue=37235700.20128231、commission=7085058.905956274、units=1821056、totalFee=7294641.902263657 全部一致；未创建生产测试票据/付款或清理业务数据。
+- PM2 重启 PID2598735 online、login HTTP200。在线合成 PDF 测试1页124903 bytes 成功，含脚本启动总耗时9.96秒；Chrome 峰值 PSS688.8MB、MemAvailable最低483.5MB；期间27次login全部200、最大58ms，结束Chrome进程0。此前停服 smoke 峰值743MB。服务器仅2GB RAM/2GB swap，以上不是并发或真实业务全链路压测，不能保证无卡顿；保持单进程串行渲染/有限队列，集中导出仍有内存风险。
+- 启动最初错误日志未增加；随后新增173 bytes为 `Failed to find Server Action "x"` 的部署版本不匹配提示，不能说上线后完全无日志。旧页面需刷新，持续复现时再定位请求；日志尾部 sales/upload P2028 属部署前已有。真实付款核销/用户票据下载仍需人工业务验收，未用生产真实付款冒充测试。
+
 ## 2026-11-05 财务两轮修改发布准备（用户手动部署）
 
 - 用户授权将本轮及上一轮全部相关修改commit/push，并要求完整手动部署代码；不授权代执行生产部署。本次无新Schema或迁移，不执行回填/清理。
