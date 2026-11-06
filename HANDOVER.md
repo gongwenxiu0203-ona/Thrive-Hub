@@ -2,6 +2,9 @@
 
 ## 2026-11-06 飞书个人通知接入（本地完成，待凭证联调/发布）
 
+- 首次上线尝试：65874c6已push并拉到服务器，停PM2后即时备份main `backups/dev_manual_feishu_20261106_01.db`（1506578432bytes）和项目 `projects_manual_feishu_20261106_01.db`（270336bytes），两者完整性/外键正常。安全安装了独立通知env，原FEISHU_APP凭证保留，env原件备份 `backups/env_manual_feishu_20261106_01`（0600）。预检发现生产env和PM2均未配置JWT_SECRET，故在任何build/迁移之前主动拦截；核验主库无本次migration、完整性和旧build保留后恢复旧版，PID2854109，login200、错误日志未新增。
+- 为避免擅自轮换网站登录密钥导致全员失效，飞书授权改用独立 `FEISHU_NOTIFY_STATE_SECRET`（优先；仅回退到>=32字符的JWT）；相应env/docs/OAuth拒绝路径测试同步。原网站会话签名配置风险已向用户说明，需另行安排修复，不在本次暗改。该修正不新增Schema；正在本地复测构建，后续正式部署必须停服再生成更新的02备份，不能把恢复服务前的01备份当最新回滚点。
+
 - 用户已明确“确认提交并部署飞书通知”。发布复测修复新入队默认时间可能领先JS due筛选的毫秒边界，显式使用JS nextAttemptAt；队列连续10轮、OAuth、旧数据核对、独立tsc及最终86/86构建通过。新增 `scripts/verify-feishu-release.py` 对备份与迁移后所有旧表全字段流式SHA256及旧schema/迁移记录校验，本地PASS。一次性私有部署helper改用base64脚本和SSH stdin传凭证；已在服务器临时目录以纯模拟凭证演练换行、旧key保留、原子替换/0600和env备份，真实配置未动。helper位于output，不纳入提交。
 
 - 用户开通权限后再次实际核对成功：通知AppID `cli_aa66f5ffe1b85c13`，企业 `Thraive Digital Marketing`，tenant_key `1943066d21071bac`；该非Secret标识已加入私有本地配置模板。没有发送消息。生产只读预检当前caa1db6、PM2 online，最近每日备份2026-11-06 03:01:36 +0800、1506578432bytes、integrity=ok，磁盘余14GB。接下来等待本次commit/push及部署清单确认，仍未更改生产配置/数据库/cron。

@@ -7,7 +7,7 @@ async function main() {
   const db = process.env.FEISHU_TEST_DATABASE_URL;
   if (!db?.startsWith("file:") || !db.replace(/\\/g, "/").includes("backups/") || /prisma\/dev\.db/i.test(db)) throw new Error("Provide explicit isolated FEISHU_TEST_DATABASE_URL inside backups/");
   process.env.DATABASE_URL = db;
-  Object.assign(process.env, { JWT_SECRET: "isolated-test-signing-key-never-production", FEISHU_NOTIFY_ENABLED: "true", FEISHU_NOTIFY_APP_ID: "cli_test", FEISHU_NOTIFY_APP_SECRET: "test-only", FEISHU_NOTIFY_TENANT_KEY: "tenant_test", NEXT_PUBLIC_APP_URL: "https://thrive.test" });
+  Object.assign(process.env, { JWT_SECRET: "legacy-test-only", FEISHU_NOTIFY_STATE_SECRET: "isolated-state-signing-key-never-production", FEISHU_NOTIFY_ENABLED: "true", FEISHU_NOTIFY_APP_ID: "cli_test", FEISHU_NOTIFY_APP_SECRET: "test-only", FEISHU_NOTIFY_TENANT_KEY: "tenant_test", NEXT_PUBLIC_APP_URL: "https://thrive.test" });
   const { completeAuthorization, OAUTH_COOKIE, sameOrigin, safeFeishuError } = await import("../src/lib/feishuOAuth");
   const { prisma } = await import("../src/lib/prisma");
   const realFetch = globalThis.fetch;
@@ -20,7 +20,7 @@ async function main() {
   prisma.feishuBinding.create = (async () => { writes++; throw new Error("Unexpected binding write"); }) as unknown as typeof realCreate;
   const session = "fake-session";
   const payload = { userId: "test-user", state: "state", verifier: "verifier", appId: "cli_test", sessionHash: createHash("sha256").update(session).digest("hex") };
-  const signed = (overrides = {}, expires = "10m") => new SignJWT({ ...payload, ...overrides }).setProtectedHeader({ alg: "HS256" }).setAudience("feishu-bind").setIssuedAt().setExpirationTime(expires).sign(new TextEncoder().encode(process.env.JWT_SECRET));
+  const signed = (overrides = {}, expires = "10m") => new SignJWT({ ...payload, ...overrides }).setProtectedHeader({ alg: "HS256" }).setAudience("feishu-bind").setIssuedAt().setExpirationTime(expires).sign(new TextEncoder().encode(process.env.FEISHU_NOTIFY_STATE_SECRET));
   function req(cookie: string, state = "state", sessionValue = session) {
     return new NextRequest(`https://thrive.test/api/settings/feishu/callback?state=${state}&code=mock_code`, { headers: { cookie: `ams_session=${sessionValue}; ${OAUTH_COOKIE}=${cookie}` } });
   }

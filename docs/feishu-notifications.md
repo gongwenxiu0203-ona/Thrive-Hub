@@ -28,12 +28,13 @@ FEISHU_NOTIFY_APP_ID=企业自建应用的AppID
 FEISHU_NOTIFY_APP_SECRET=只在服务器填写真实Secret
 FEISHU_NOTIFY_TENANT_KEY=经过核对的企业tenant_key
 FEISHU_NOTIFY_CRON_SECRET=独立64位十六进制随机密钥
+FEISHU_NOTIFY_STATE_SECRET=另一个独立64位十六进制随机签名密钥
 NEXT_PUBLIC_APP_URL=https://网站正式域名
 ```
 
 - 在安全终端用 `openssl rand -hex 32` 生成定时密钥，不能复用JWT密钥或把它放在URL里。
 - 保持 `FEISHU_NOTIFY_ENABLED=false` 直到配置、数据库迁移、构建检查都通过。改为 true 并按正常发布流程更新进程环境后，个人才可以绑定和测试。
-- Secret 仅保存在受限环境文件，OAuth用户 access/refresh token 不落库。生产环境还须有安全的 `JWT_SECRET`。
+- Secret 仅保存在受限环境文件，OAuth用户 access/refresh token 不落库。授权state使用独立 `FEISHU_NOTIFY_STATE_SECRET`，不需要为了接入飞书而轮换原登录密钥；网站自身仍应单独维护安全的 `JWT_SECRET`，其轮换会影响旧会话，需另行评估。
 
 ## 发布与定时任务
 

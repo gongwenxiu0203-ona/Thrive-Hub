@@ -11,8 +11,9 @@ import { feishuRequest, notificationConfig } from "./feishuClient";
 export const OAUTH_COOKIE = "thraive_feishu_bind";
 export const cookieOptions = { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax" as const, path: "/api/settings/feishu", maxAge: 600 };
 function secret() {
-  const value = process.env.JWT_SECRET;
-  if (!value || value === "dev-secret-change-me") throw new Error("请先配置安全的网站签名密钥");
+  // Isolate OAuth state from website session-key rotation and legacy session configuration.
+  const value = process.env.FEISHU_NOTIFY_STATE_SECRET || process.env.JWT_SECRET;
+  if (!value || value.length < 32 || value === "dev-secret-change-me") throw new Error("请先配置安全的飞书授权签名密钥");
   return new TextEncoder().encode(value);
 }
 export function sameOrigin(req: NextRequest) {
@@ -60,7 +61,7 @@ export function apiError(message: string, status = 400) { return NextResponse.js
 
 export function safeFeishuError(error: unknown) {
   const message = error instanceof Error ? error.message : "";
-  if (/^(飞书通知尚未配置完成|网站地址配置不正确|请先配置安全的网站签名密钥|请先绑定飞书账号|飞书连接失败或超时，请稍后重试|飞书返回异常响应|飞书应用凭证获取失败|飞书未返回消息编号|通知链接无效)$/.test(message) || /^飞书请求失败（\d+），请检查应用权限及配置$/.test(message)) return message;
+  if (/^(飞书通知尚未配置完成|网站地址配置不正确|请先配置安全的飞书授权签名密钥|请先绑定飞书账号|飞书连接失败或超时，请稍后重试|飞书返回异常响应|飞书应用凭证获取失败|飞书未返回消息编号|通知链接无效)$/.test(message) || /^飞书请求失败（\d+），请检查应用权限及配置$/.test(message)) return message;
   return "操作暂时失败，请稍后重试；如持续失败请联系管理员";
 }
 export async function withFeishuUser(handler: (user: NonNullable<Awaited<ReturnType<typeof currentFeishuUser>>>) => Promise<Response>): Promise<Response> {
