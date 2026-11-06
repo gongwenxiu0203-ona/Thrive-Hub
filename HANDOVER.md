@@ -1,5 +1,25 @@
 # Thrive Hub Handover
 
+## 2026-11-06 飞书个人通知接入（本地完成，待凭证联调/发布）
+
+- 用户已明确“确认提交并部署飞书通知”。发布复测修复新入队默认时间可能领先JS due筛选的毫秒边界，显式使用JS nextAttemptAt；队列连续10轮、OAuth、旧数据核对、独立tsc及最终86/86构建通过。新增 `scripts/verify-feishu-release.py` 对备份与迁移后所有旧表全字段流式SHA256及旧schema/迁移记录校验，本地PASS。一次性私有部署helper改用base64脚本和SSH stdin传凭证；已在服务器临时目录以纯模拟凭证演练换行、旧key保留、原子替换/0600和env备份，真实配置未动。helper位于output，不纳入提交。
+
+- 用户开通权限后再次实际核对成功：通知AppID `cli_aa66f5ffe1b85c13`，企业 `Thraive Digital Marketing`，tenant_key `1943066d21071bac`；该非Secret标识已加入私有本地配置模板。没有发送消息。生产只读预检当前caa1db6、PM2 online，最近每日备份2026-11-06 03:01:36 +0800、1506578432bytes、integrity=ok，磁盘余14GB。接下来等待本次commit/push及部署清单确认，仍未更改生产配置/数据库/cron。
+
+- 用户随后告知已填写本地私有凭证。官方接口实际核对：应用凭证获取成功；企业信息查询返回99991672，白名单权限诊断为缺少 `tenant:tenant:readonly`。尚未获得tenant_key；需管理员开通获取企业信息权限并发布生效后重试。未输出Secret/token、未发送消息、未修改生产配置或数据库。检查脚本已加安全的接口阶段和权限名诊断，不输出原始响应。
+
+- 用户明确回复“确认数据库结构变更”，授权新增飞书绑定和配送两表。迁移 `20261106120000_feishu_notifications` 显式 BEGIN IMMEDIATE/COMMIT，只 CREATE TABLE/INDEX，旧 User/Reminder 仅增加 Prisma 反向关系，不重建/改写旧业务表、BI或通知；生产未迁移、未部署、未安装cron。
+- 新增个人设置飞书绑定、启停、解绑、本人测试消息及最近配送状态；采用现有 Impeccable Product 设计规范，移除把注册时 `feishuAuth` 日历勾选视为真实授权的展示。此功能限已启用内部 ADMIN/USER，不改变网站原有登录及业务权限。
+- OAuth 使用固定公开网站地址、PKCE S256、10分钟签名HttpOnly cookie、随机state、网站用户/当前session哈希/应用/企业校验；同一飞书身份不可绑定多个网站用户。不保存用户OAuth access/refresh token，不泄露Provider原始错误或Secret。
+- Worker统一扫描事务已提交的Reminder，按本人target和binding.enabledAt/createdAt处理新增；不按remindDate补发。只发送标题+白名单详情链接，不发送银行/附件/财务备注。唯一任务、稳定UUID、原子lease领取、有限退避重试；发送前再查当前绑定/用户/通知目标/软删，解绑与用户移除级联仅删除新表个人记录，不移交飞书身份。不能保证撤回在途消息或绝对exactly-once。
+- 新cron `/api/cron/feishu-notifications` 已加入middleware机器端点白名单，仍独立校验至少32字符Bearer密钥；`scripts/feishu-notify-cron.cjs`读取服务器env，通过本机HTTP调用，文档使用flock。默认关闭，独立 `FEISHU_NOTIFY_*`，不会覆盖原飞书折扣表格同步 `FEISHU_APP_*`。
+- 本地数据保护：从上轮预览engine只读SQLite backup生成 `backups/feishu-notify-20261106-02/before.db` 和隔离engine；最终79迁移成功，全旧表/列/行逐值SHA256一致、完整性ok、外键无错误，新表空。`fault-rehearsal.db`模拟迁移中途失败并ROLLBACK，历史数据完全保留。01目录为早期无显式事务版本的演练副本，保留不覆盖，最终迁移以02为准；未改真实prisma/dev.db。
+- 自动验证：worker mock隐私/并发去重/重试/租约/目标移交/暂停/解绑/用户删除级联；OAuth错state/user/app/session/过期/错企业及错误脱敏；本地production HTTP session/role/Origin、PKCE授权地址、无效回调、cron实际通过middleware并校验密钥、settings SSR均通过，无真实飞书发送/绑定，fixtures全部回滚。TypeScript与diff检查通过，Next生产构建86/86页exit0；生产构建跳过类型检查，独立tsc已另行通过。
+- 构建使用独立外置项目副本 `C:/Users/17863/AppData/Local/Temp/thrive-feishu-build-298fd2a015fc48678c7f8b99158d1380/projects.db`，其3迁移最新；未动现有项目库。本地HTTP测试使用假的App/Secret和固定JWT，3002测试服务已停止。Next公开环境变量构建时冻结，HTTP测试使用本机构建fixture域名；生产必须以正确正式域名构建，不能靠启动时修改NEXT_PUBLIC_APP_URL修复。
+- 当前预览 http://127.0.0.1:3001/settings（session26729）只连接02隔离engine及上述外置项目副本，FEISHU_NOTIFY_ENABLED=false；未完成浏览器交互/真实企业授权验收，不宣称推送已启用。配置与启用步骤见 `docs/feishu-notifications.md`。
+- 用户提供通知应用AppID `cli_aa66f5ffe1b85c13`，不知道tenant_key。只读核对生产旧表格应用AppID不匹配，通知Secret尚未配置；没有覆盖旧凭证。正式公开地址只读核实为 https://thraivehub.com，回调为 https://thraivehub.com/api/settings/feishu/callback。已建立Git忽略的 `.env.feishu-notify.local`模板，等待用户自行填Secret；不得读取/输出原值，不提交Git。`scripts/feishu-notify-check.cjs`仅凭证+企业查询，不发消息，可核对tenant_key；尚未使用真实新凭证查询。App Secret不要在聊天里索取。
+- 未commit/push/生产部署；需用户完成安全配置、飞书后台权限/可用范围/发布，并完成真实授权与本人测试。发布仍须按AGENTS中文部署前清单及确认，停PM2、即时备份、迁移/构建/旧数据核对后才重启，再保留既有crontab追加任务。无关.claude设置、output、私有文件与旧临时脚本未纳入本轮。
+
 ## 2026-11-05 财务两轮修改已部署：d6ba026
 
 - 用户后续明确改为代部署，并确认继续等待 Chromium 安装，覆盖下方“手动部署/尚未发布”的过程状态。业务提交 `d6ba026434f118e94107ecbbe55d0cfe5c702541` 已 push 并上线；本次无新 Schema、迁移、回填或清理。保留生产原 `.env` 和未跟踪文件。

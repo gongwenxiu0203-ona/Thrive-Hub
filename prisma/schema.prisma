@@ -49,6 +49,7 @@ model User {
   invitedById   String? // 邀请人 userId（注册时带 ?inviter=... 参数）
   // Integration authorizations chosen at registration time.
   feishuAuth    Boolean  @default(false) // 飞书日历同步授权
+  feishuNotificationBinding FeishuBinding?
   googleAuth    Boolean  @default(false) // Google 日历同步授权
   emailAuth     Boolean  @default(false) // 邮件收发授权
   createdAt     DateTime @default(now())
@@ -596,6 +597,47 @@ model Reminder {
 
   target    User @relation("ReminderTarget", fields: [targetId], references: [id])
   createdBy User @relation("ReminderCreator", fields: [createdById], references: [id])
+  feishuDeliveries FeishuNotificationDelivery[]
+}
+
+// Notification identity is personal: never transferred with business ownership.
+model FeishuBinding {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  appId       String
+  tenantKey   String
+  openId      String
+  displayName String
+  enabled     Boolean  @default(true)
+  enabledAt   DateTime @default(now())
+  lastTestAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deliveries  FeishuNotificationDelivery[]
+
+  @@unique([appId, tenantKey, openId])
+}
+
+model FeishuNotificationDelivery {
+  id            String   @id @default(cuid())
+  bindingId     String
+  reminderId    String
+  status        String   @default("PENDING") // PENDING | PROCESSING | SENT | FAILED | CANCELLED
+  attempts      Int      @default(0)
+  nextAttemptAt DateTime @default(now())
+  leaseUntil    DateTime?
+  leaseToken    String?
+  lastError     String?
+  sentAt        DateTime?
+  messageId     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  binding       FeishuBinding @relation(fields: [bindingId], references: [id], onDelete: Cascade)
+  reminder      Reminder @relation(fields: [reminderId], references: [id], onDelete: Cascade)
+
+  @@unique([bindingId, reminderId])
+  @@index([status, nextAttemptAt])
 }
 
 // 联盟资源库 — 字段与「资源库字段.xlsx」第一行完全对应

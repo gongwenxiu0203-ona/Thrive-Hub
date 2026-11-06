@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { User, Mail, Shield, Bell, CheckCircle2, Lock, Eye, EyeOff } from "lucide-react";
+import { FeishuNotificationSettings } from "./FeishuNotificationSettings";
 
 interface Props {
   id: string;
@@ -202,6 +203,8 @@ export function SettingsClient({ id, name, email, role, feishuAuth, googleAuth, 
         </button>
       </div>
 
+      <FeishuNotificationSettings />
+
       {/* Authorizations card */}
       <div className="rounded-2xl border border-slate-200 bg-white p-6 space-y-4">
         <div className="flex items-center gap-2 mb-4">
@@ -211,7 +214,6 @@ export function SettingsClient({ id, name, email, role, feishuAuth, googleAuth, 
         {[
           { key: "emailAuth", label: "邮件接收授权", desc: "授权应用发送系统邮件至你的邮箱", icon: Mail, current: emailAuth },
           { key: "googleAuth", label: "Google 日历同步", desc: "授权同步任务截止日期到 Google 日历", icon: Bell, current: googleAuth },
-          { key: "feishuAuth", label: "飞书日历同步", desc: "授权同步任务截止日期到飞书日历", icon: Bell, current: feishuAuth },
         ].map(({ key, label, desc, icon: Icon, current }) => (
           <div key={key} className="flex items-center justify-between rounded-xl border border-slate-100 p-3">
             <div className="flex items-center gap-3">
