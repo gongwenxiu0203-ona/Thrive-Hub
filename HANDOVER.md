@@ -1,5 +1,17 @@
 # Thrive Hub Handover
 
+## 2026-11-06 飞书通知已部署并启用：c0ba617（包含65874c6）
+
+- 用户明确确认提交并部署，业务65874c6和独立state签名修正c0ba617均已push并上线。生产86/86页构建exit0，主库79/项目库3迁移最新。新迁移只新增两个空表；没有创建生产测试账号/绑定/业务通知，没有发送真实飞书消息，用户仍需自行绑定并测试。
+- 最终停服后的即时回滚点：`/root/www/backups/dev_manual_feishu_20261106_02.db`（1506578432 bytes，2026-11-06 11:43:38 +0800）及 `/root/thrive-data/project-backups/projects_manual_feishu_20261106_02.db`（270336 bytes，11:44:51），0600且完整性/外键通过。01手动备份也保留，不覆盖/清除。构建自动备份为 `dev_pre_deploy_20261106_114458_044.db` 和 `projects_pre_deploy_2026-11-06T03-46-15-130Z.db`，仅按既有策略轮换上一份pre_deploy，没有清理业务数据。
+- 重启前 `scripts/verify-feishu-release.py` 比较所有旧表全字段流式SHA256、列定义、既有schema及迁移记录，全部与02即时备份一致，仅一条已完成迁移和两个空新表增加。完整证明日志 `/root/www/backups/verify_feishu_20261106_02.log`。项目库所有表hash（含迁移）也一致；两库integrity=ok、FK无错误。所有检查通过后才恢复服务。
+- 实际时间必须如实交接：构建已于11:48完成，但工具结果等待异常延长，root未及时拿到完成结果，造成最终停服从约11:43延长至12:49；已向用户道歉，不能把本次描述为短暂停服或正常耗时。此前首次预检拦截JWT缺失时没有迁移/构建，曾恢复旧版服务；最终02备份覆盖恢复服务后可能新增的数据。不能据此用旧01备份回滚。
+- 已安全写入独立通知App/tenant及Secret，原FEISHU_APP表格同步凭证不变；独立cron/state密钥各为随机64hex，不在Git、参数或日志暴露。原env快照 `backups/env_manual_feishu_20261106_01`，追加state前快照 `backups/env_manual_feishu_state_20261106_02`，均0600。
+- 用户在异步问题中明确同意“同时更换，接受所有账号重新登录”。已将原缺失的网站JWT_SECRET换为另一个独立随机64hex，改前配置保存 `backups/env_manual_jwt_20261106_01`；原登录会话因此失效，业务数据不变。上线HTTP校验旧签名401，新签名仅使用明确不存在的虚拟用户得到403，未假冒任何真实用户。JWT/state/cron三密钥独立。
+- PM2 PID2872441 online，本机及公网 https://thraivehub.com/login 均200。错误日志仍2026-11-06 11:02:49 +0800、17128759 bytes，无本次恢复新增错误。飞书cron无密钥401、正确密钥200，返回queued/sent/failed/cancelled均0；真实企业授权与本人消息收取仍待用户验收，不能声称已收到消息。
+- 已备份原root crontab至 `backups/crontab_manual_feishu_20261106_01`（0600），保留所有旧行并追加每分钟flock + `scripts/feishu-notify-cron.cjs`，只从服务端env读取密钥、请求本机API。每日03:00备份和每15分钟项目提醒未变。用户入口 https://thraivehub.com/settings，重新登录后点击“绑定飞书并启用推送”及“发送测试消息”；只推绑定后的新通知，不补发历史。
+- 工作区无关个人设置、output部署helper、临时脚本及私有配置均未提交；生产原env/backup_db.sh/签章/scanner等保留。后续不得把新密钥填进文档或聊天，也不要擅自清理手动回滚备份。
+
 ## 2026-11-06 飞书个人通知接入（本地完成，待凭证联调/发布）
 
 - 首次上线尝试：65874c6已push并拉到服务器，停PM2后即时备份main `backups/dev_manual_feishu_20261106_01.db`（1506578432bytes）和项目 `projects_manual_feishu_20261106_01.db`（270336bytes），两者完整性/外键正常。安全安装了独立通知env，原FEISHU_APP凭证保留，env原件备份 `backups/env_manual_feishu_20261106_01`（0600）。预检发现生产env和PM2均未配置JWT_SECRET，故在任何build/迁移之前主动拦截；核验主库无本次migration、完整性和旧build保留后恢复旧版，PID2854109，login200、错误日志未新增。
