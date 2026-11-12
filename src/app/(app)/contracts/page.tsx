@@ -1,5 +1,7 @@
 ﻿import Link from "next/link";
 import { FilePlus } from "lucide-react";
+import { ContractAMEditor } from "@/components/contracts/ContractAMEditor";
+import { adminHasFeature } from "@/lib/session";
 import { Fragment } from "react";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
@@ -187,8 +189,11 @@ export default async function ContractsPage({
   const statusOptions = Object.entries(CONTRACT_STATUS_LABELS).map(([value, label]) => ({ value, label }));
   const customerFilterOptions = customers.map((c) => ({ value: c.id, label: c.brandName }));
 
+  const canAssignAM=isStaff(session.role)&&await adminHasFeature(session,"contracts.records","EDIT");
+  const amUsers=canAssignAM?await prisma.user.findMany({where:{status:"APPROVED"},select:{id:true,name:true,email:true,role:true},orderBy:{name:"asc"}}):[];
   return (
     <div className="space-y-6">
+      {canAssignAM&&contracts.length>0&&<ContractAMEditor contracts={contracts.map(c=>({id:c.id,label:`${c.contractNo} · ${c.customer?.brandName||"无关联客户"}`}))} users={amUsers.map(u=>({id:u.id,label:`${u.name} · ${u.email}${["ADMIN","USER"].includes(u.role)?"":"（仅站内信）"}`}))}/>}
       <PageHeader
         title="合同管理"
         description={

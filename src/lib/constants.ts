@@ -292,6 +292,7 @@ export const REMINDER_TYPE_LABELS: Record<string, string> = {
   PAYMENT_REVIEW: "付款审核",
   EXPENSE_REVIEW: "报销审核",
   FINANCE_RESULT: "财务结果",
+  AM_PAYMENT_CHECK: "AM付款跟进",
 };
 
 export const REMINDER_TYPE_COLORS: Record<string, string> = {
@@ -307,6 +308,7 @@ export const REMINDER_TYPE_COLORS: Record<string, string> = {
   PAYMENT_REVIEW: "bg-indigo-100 text-indigo-700",
   EXPENSE_REVIEW: "bg-amber-100 text-amber-700",
   FINANCE_RESULT: "bg-emerald-100 text-emerald-700",
+  AM_PAYMENT_CHECK: "bg-indigo-100 text-indigo-700",
 };
 
 // ---- Finance: Reconciliation -----------------------------------------------

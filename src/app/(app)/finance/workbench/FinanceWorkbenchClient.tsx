@@ -10,10 +10,13 @@ import {
 import { Modal } from "@/components/ui/Modal";
 import { readApiError } from "@/lib/clientError";
 import { DomesticBillingInfo } from "@/components/finance/DomesticBillingInfo";
+import { FinanceRequestTimeline, type FinanceTimelineEvent } from "@/components/finance/FinanceRequestTimeline";
 import type { DomesticBillingDetails } from "@/lib/domesticBilling";
 import { batchDecideFinanceRequests, cancelFinanceRequests, changeFinanceRequestReviewer, decideFinanceRequest } from "@/actions/financeUnified";
 
 type BillingRow = {
+  applicantId?: string;
+  timeline?: FinanceTimelineEvent[];
   domesticDetails?: DomesticBillingDetails | null;
   attachmentUrls?: string[];
   id: string;
@@ -27,7 +30,7 @@ type BillingRow = {
   sourceType: string;
   applicantNote: string | null;
   status: string;
-  approvalStatus: "PENDING" | "APPROVED" | "REJECTED" | null;
+  approvalStatus: "PENDING" | "APPROVED" | "REJECTED" | "SKIPPED" | null;
   reviewerName: string | null;
   reviewerId: string | null;
   items: Array<{ description: string; period: string; quantity: number; unitPrice: number; amount: number; remark?: string | null; taxRate?: number | null; taxAmount?: number | null }>;
@@ -95,6 +98,7 @@ type PayableExceptionRow = {
   createdAt: string;
 };
 type OutgoingRow = {
+  timeline?: FinanceTimelineEvent[];
   id: string;
   requestNo: string;
   category: "CHANNEL" | "AFFILIATE" | "SUPPLIER" | "OTHER";
@@ -132,6 +136,7 @@ function OutgoingDetails({ row }: { row: OutgoingRow }) {
     </div>
     {(row.items ?? []).length > 0 && <div className="rounded-lg border border-slate-200 p-3"><p className="mb-2 font-medium">{row.kind === "PAYMENT" ? "付款明细" : "报销明细"}</p>{row.items?.map((item, index) => <div key={index} className="border-t border-slate-100 py-2 first:border-0"><p>{item.description} · {money(item.amount, row.currency)}</p><p className="text-xs text-slate-500">{[item.expenseType, item.expenseDate, item.invoiceTitle, item.invoiceNumber].filter(Boolean).join(" · ")}</p>{item.remark && <p className="whitespace-pre-wrap text-xs">备注：{item.remark}</p>}<AttachmentLinks urls={item.invoiceUrls ?? []} label={`明细 ${index + 1} 附件`} /></div>)}</div>}
     <AttachmentLinks urls={row.attachmentUrls ?? []} label={row.kind === "PAYMENT" ? "付款附件" : "报销附件"} />
+    <FinanceRequestTimeline events={row.timeline} />
   </div>;
 }
 
@@ -406,16 +411,18 @@ export function FinanceWorkbenchClient({
       setUploadingProof(false);
     }
   }
+  const billingBucket = (row: BillingRow) => row.status === "SUBMITTED" && ["APPROVED", "SKIPPED"].includes(row.approvalStatus ?? "") ? "PROCESSING" : row.status;
   const filteredBilling = billingRequests.filter((row) => {
-    if (billingFilter !== "ALL" && row.status !== billingFilter) return false;
+    if (billingFilter !== "ALL" && billingBucket(row) !== billingFilter) return false;
     const day = row.submittedAt.slice(0, 10);
     return (!fromDate || day >= fromDate) && (!toDate || day <= toDate);
   });
   const billingCount = (status: BillingFilter) =>
     status === "ALL"
       ? billingRequests.length
-      : billingRequests.filter((row) => row.status === status).length;
+      : billingRequests.filter((row) => billingBucket(row) === status).length;
   const displayBillingStatus = (row: BillingRow) => {
+    if (row.status === "SUBMITTED" && row.approvalStatus === "SKIPPED") return "无需审核 · 待开票";
     if (row.status === "SUBMITTED" && row.approvalStatus === "APPROVED") return "审核通过 · 待开票";
     if (row.status === "SUBMITTED" && row.approvalStatus === "REJECTED") return "审核未通过";
     return billingLabels[row.status] ?? row.status;
@@ -606,7 +613,7 @@ export function FinanceWorkbenchClient({
                         </p>
                       </td>
                       <td>
-                        <span className={`rounded-full px-2 py-1 text-xs ${row.status === "SUBMITTED" && row.approvalStatus === "APPROVED" ? "bg-emerald-100 font-medium text-emerald-700" : row.approvalStatus === "REJECTED" ? "bg-rose-100 text-rose-700" : "bg-slate-100 text-slate-700"}`}>
+                        <span className={`rounded-full px-2 py-1 text-xs ${row.status === "SUBMITTED" && ["APPROVED", "SKIPPED"].includes(row.approvalStatus ?? "") ? "bg-emerald-100 font-medium text-emerald-700" : row.approvalStatus === "REJECTED" ? "bg-rose-100 text-rose-700" : "bg-slate-100 text-slate-700"}`}>
                           {displayBillingStatus(row)}
                         </span>
                         {row.reviewerName && <p className="mt-1 text-xs text-slate-500">审核人：{row.reviewerName}</p>}
@@ -622,6 +629,7 @@ export function FinanceWorkbenchClient({
                         )}
                       </td>
                       <td className="px-5 text-right">
+                        {row.status === "REJECTED" && row.applicantId === currentUserId && <Link className="mr-3 text-xs font-medium text-brand-700 hover:underline" href={`/finance/workbench?editRequestType=BILLING_REQUEST&editRequestId=${encodeURIComponent(row.id)}`}>修改并重新提交</Link>}
                         {row.status === "SUBMITTED" && row.approvalStatus === "PENDING" && row.reviewerId === currentUserId && <button type="button" className="mr-3 text-xs font-medium text-brand-700 hover:underline" disabled={pending} onClick={() => { setReviewingBilling(row); setReviewReason(""); }}>审核</button>}
                         {isAdmin && <button type="button" className="mr-3 text-xs font-medium text-rose-700 hover:underline" onClick={() => { setDeleting(row); setDeleteReason(""); }}>删除</button>}
                         {row.documents.map((document, index) => (
@@ -630,7 +638,7 @@ export function FinanceWorkbenchClient({
                           </a>
                         ))}
                         <button type="button" className="mr-3 text-xs font-medium text-brand-700 hover:underline" onClick={() => setExpandedBilling(expandedBilling === row.id ? null : row.id)}>{expandedBilling === row.id ? "收起详情" : "详情"}</button>
-                        {row.status === "SUBMITTED" && row.approvalStatus === "APPROVED" && canEditBilling ? (
+                        {row.status === "SUBMITTED" && ["APPROVED", "SKIPPED"].includes(row.approvalStatus ?? "") && canEditBilling ? (
                           <button
                             className="btn-primary"
                             disabled={pending}
@@ -673,7 +681,7 @@ export function FinanceWorkbenchClient({
                         )}
                       </td>
                     </tr>
-                    {expandedBilling === row.id && <tr><td colSpan={7} className="bg-[#faf8ff] px-5 py-4"><div className="grid gap-3 text-sm md:grid-cols-4"><p><span className="text-xs text-slate-500">申请单</span><br />{row.requestNo}</p><p><span className="text-xs text-slate-500">客户 / 申请人</span><br />{row.customerName} · {row.applicantName}</p><p><span className="text-xs text-slate-500">审核人</span><br />{row.reviewerName ?? "—"}</p><p><span className="text-xs text-slate-500">申请金额</span><br />{money(row.requestedAmount, row.currency)}</p><p><span className="text-xs text-slate-500">票据方式</span><br />{row.documentType === "DOMESTIC" ? "国内发票" : "Invoice"}</p><p><span className="text-xs text-slate-500">明细数量</span><br />{row.lineCount} 条</p><p><span className="text-xs text-slate-500">关联合同</span><br />{row.contractNos.join("、") || "—"}</p><p><span className="text-xs text-slate-500">当前状态</span><br />{displayBillingStatus(row)}</p>{visibleApplicantNote(row.applicantNote) && <p className="md:col-span-4"><span className="text-xs text-slate-500">申请备注</span><br /><span className="whitespace-pre-wrap break-words">{visibleApplicantNote(row.applicantNote)}</span></p>}</div>{row.documentType === "DOMESTIC" && <DomesticBillingInfo details={row.domesticDetails} />}<BillingItemsTable row={row} /><AttachmentLinks urls={row.attachmentUrls ?? []} label="客户确认金额截图" /></td></tr>}
+                    {expandedBilling === row.id && <tr><td colSpan={7} className="bg-[#faf8ff] px-5 py-4"><div className="grid gap-3 text-sm md:grid-cols-4"><p><span className="text-xs text-slate-500">申请单</span><br />{row.requestNo}</p><p><span className="text-xs text-slate-500">客户 / 申请人</span><br />{row.customerName} · {row.applicantName}</p><p><span className="text-xs text-slate-500">审核人</span><br />{row.reviewerName ?? "—"}</p><p><span className="text-xs text-slate-500">申请金额</span><br />{money(row.requestedAmount, row.currency)}</p><p><span className="text-xs text-slate-500">票据方式</span><br />{row.documentType === "DOMESTIC" ? "国内发票" : "Invoice"}</p><p><span className="text-xs text-slate-500">明细数量</span><br />{row.lineCount} 条</p><p><span className="text-xs text-slate-500">关联合同</span><br />{row.contractNos.join("、") || "—"}</p><p><span className="text-xs text-slate-500">当前状态</span><br />{displayBillingStatus(row)}</p>{visibleApplicantNote(row.applicantNote) && <p className="md:col-span-4"><span className="text-xs text-slate-500">申请备注</span><br /><span className="whitespace-pre-wrap break-words">{visibleApplicantNote(row.applicantNote)}</span></p>}</div>{row.documentType === "DOMESTIC" && <DomesticBillingInfo details={row.domesticDetails} />}<BillingItemsTable row={row} /><AttachmentLinks urls={row.attachmentUrls ?? []} label="客户确认金额截图" /><FinanceRequestTimeline events={row.timeline} /></td></tr>}
                     </Fragment>
                   ))}
                 </tbody>
@@ -1034,7 +1042,7 @@ export function FinanceWorkbenchClient({
                       <td className="text-right">
                         {money(row.amount, row.currency)}
                       </td>
-                      <td className="px-3 text-right"><div className="flex flex-wrap justify-end gap-x-3 gap-y-1">{row.approvalStatus === "PENDING" && row.reviewerId === currentUserId && <button type="button" className="font-medium text-brand-700 hover:underline" disabled={pending} onClick={() => { setReviewingOutgoing(row); setReviewReason(""); }}>审核</button>}{isAdmin && ["SUBMITTED", "REJECTED"].includes(row.status) && <button type="button" className="font-medium text-rose-700 hover:underline" onClick={() => { setSelectedOutgoing([row.id]); setBatchReason(""); setBatchDialog("DELETE"); }}>删除</button>}<button type="button" className="text-brand-700 hover:underline" onClick={() => setExpandedOutgoing(expandedOutgoing === row.id ? null : row.id)}>{expandedOutgoing === row.id ? "收起详情" : "详情"}</button>{row.status === "APPROVED" && canEditPayment && <button type="button" className="font-medium text-brand-700 hover:underline" onClick={() => { setPaymentError(""); setPaying(row); setPaymentForm({ paidAt: new Date().toISOString().slice(0, 10), transactionNo: "", proofUrls: "", comment: "" }); }}>核销</button>}{row.paymentProofUrls.map((url, index) => <button type="button" key={url} disabled={downloadingProof !== null} onClick={() => void downloadPaymentProof(url)} className="font-medium text-brand-700 hover:underline disabled:opacity-50">{downloadingProof === url ? "下载中…" : "下载凭证"}{row.paymentProofUrls.length > 1 ? index + 1 : ""}</button>)}</div></td>
+<td className="px-3 text-right"><div className="flex flex-wrap justify-end gap-x-3 gap-y-1">{row.status === "REJECTED" && row.applicantId === currentUserId && <Link className="font-medium text-brand-700 hover:underline" href={`/finance/workbench?editRequestType=${row.kind === "PAYMENT" ? "PAYMENT_REQUEST" : "EXPENSE_CLAIM"}&editRequestId=${encodeURIComponent(row.id)}`}>修改并重新提交</Link>}{row.approvalStatus === "PENDING" && row.reviewerId === currentUserId && <button type="button" className="font-medium text-brand-700 hover:underline" disabled={pending} onClick={() => { setReviewingOutgoing(row); setReviewReason(""); }}>审核</button>}{isAdmin && ["SUBMITTED", "REJECTED"].includes(row.status) && <button type="button" className="font-medium text-rose-700 hover:underline" onClick={() => { setSelectedOutgoing([row.id]); setBatchReason(""); setBatchDialog("DELETE"); }}>删除</button>}<button type="button" className="text-brand-700 hover:underline" onClick={() => setExpandedOutgoing(expandedOutgoing === row.id ? null : row.id)}>{expandedOutgoing === row.id ? "收起详情" : "详情"}</button>{row.status === "APPROVED" && canEditPayment && <button type="button" className="font-medium text-brand-700 hover:underline" onClick={() => { setPaymentError(""); setPaying(row); setPaymentForm({ paidAt: new Date().toISOString().slice(0, 10), transactionNo: "", proofUrls: "", comment: "" }); }}>核销</button>}{row.paymentProofUrls.map((url, index) => <button type="button" key={url} disabled={downloadingProof !== null} onClick={() => void downloadPaymentProof(url)} className="font-medium text-brand-700 hover:underline disabled:opacity-50">{downloadingProof === url ? "下载中…" : "下载凭证"}{row.paymentProofUrls.length > 1 ? index + 1 : ""}</button>)}</div></td>
                     </tr>
                     {expandedOutgoing === row.id && <tr><td colSpan={7} className="bg-[#faf8ff] px-5 py-4"><OutgoingDetails row={row} />{row.applicantId === currentUserId && row.approvalStatus === "PENDING" && <label className="mt-3 block max-w-md text-xs font-medium text-slate-600">更换审核人<select className="input mt-1" value={row.reviewerId ?? ""} disabled={pending} onChange={(event) => changeOutgoingReviewer(row, event.target.value)}>{reviewerOptions.map((option) => <option key={option.id} value={option.id}>{option.label} · {option.email}</option>)}</select></label>}</td></tr>}
                     </Fragment>
@@ -1263,6 +1271,7 @@ function BillingItemsTable({ row }: { row: BillingRow }) {
         <tbody className="divide-y divide-slate-100">{row.items.map((item, index) => <tr key={`${item.description}-${index}`}><td className="px-3 py-2"><span className="font-medium text-slate-800">{item.description}</span>{item.remark?.trim() && <span className="mt-1 block whitespace-pre-wrap break-words text-xs text-slate-500">备注：{item.remark}</span>}</td><td>{item.period || "—"}</td><td className="text-right">{item.quantity}</td><td className="text-right">{money(item.unitPrice, row.currency)}</td><td className="text-right">{item.taxRate == null ? "不适用" : `${(item.taxRate * 100).toFixed(2)}%`}</td><td className="px-3 text-right font-medium">{money(item.amount, row.currency)}</td></tr>)}</tbody>
       </table>
       {!row.items.length && <p className="p-4 text-center text-sm text-slate-500">暂无开票明细。</p>}
+      <FinanceRequestTimeline events={row.timeline} />
     </div>
   );
 }

@@ -1,7 +1,8 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useRef, useState, type ClipboardEvent, type ReactNode } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { getFinanceRequestEditData, resubmitManualBillingRequest, resubmitSupplierPaymentRequest, resubmitEmployeeExpenseClaim } from "@/actions/financeResubmit";
 import { PARTY_B_COMPANIES } from "@/lib/partyB";
 import { financePayeeDetails, isPayeeCategoryAllowed } from "@/lib/financePayee";
 import {
@@ -18,6 +19,8 @@ import {
   X,
 } from "lucide-react";
 import { readApiError } from "@/lib/clientError";
+import { domesticMetadata } from "@/lib/domesticBilling";
+import { FinanceRequestTimeline, type FinanceTimelineEvent } from "@/components/finance/FinanceRequestTimeline";
 import {
   changeBillingRequestReviewer,
   createExpenseClaim,
@@ -61,6 +64,7 @@ export type FinanceObjectOption = {
   receivingAccounts?: Array<{ key: string; label: string }>;
 };
 export type FinanceProgressRow = {
+  timeline?: FinanceTimelineEvent[];
   id: string;
   applicantId?: string;
   requestNo: string;
@@ -84,12 +88,13 @@ export type FinanceProgressRow = {
   }>;
   steps?: Array<{
     label: string;
-    status: "PENDING" | "APPROVED" | "REJECTED";
+    status: "PENDING" | "APPROVED" | "REJECTED" | "SKIPPED";
     assignee?: string;
     assigneeId?: string;
   }>;
 };
 export type FinanceFlowHubData = {
+  approvalPolicies?: Partial<Record<"BILLING_REQUEST" | "PAYMENT_REQUEST" | "EXPENSE_CLAIM", {reviewRequired:boolean;defaultReviewerId:string|null;defaultProcessorId:string|null}>>;
   currentUserId?: string;
   currentUserIsAdmin?: boolean;
   customers: FinanceObjectOption[];
@@ -140,6 +145,10 @@ const emptyLine = () => ({
   targetSite: "",
   affiliatePlatform: "",
   remark: "",
+  originalDescription: "",
+  originalPeriodType: "MONTH",
+  originalId: "",
+  projectConfirmationId: "",
 });
 
 export function FinanceFlowHub({
@@ -150,18 +159,54 @@ export function FinanceFlowHub({
   canEdit: boolean;
 }) {
   const searchParams = useSearchParams();
+  const router = useRouter();
+  const editId = searchParams.get("editRequestId");
+  const editType = searchParams.get("editRequestType");
+  const [editInput, setEditInput] = useState<Record<string, unknown> | null>(null);
+  const [editError, setEditError] = useState("");
+  const [originalSnapshot, setOriginalSnapshot] = useState<Record<string, unknown>>({});
+  useEffect(() => {
+    if (!editId || !editType) { setEditInput(null); return; }
+    let active = true;
+    setEditInput(null); setEditError("");
+    void getFinanceRequestEditData(editType as "BILLING_REQUEST" | "PAYMENT_REQUEST" | "EXPENSE_CLAIM", editId).then(result => {
+      if (!active) return;
+      if (!result.ok || !result.data) { setEditError(result.error ?? "无法读取原申请"); return; }
+      setEditInput(result.data.input as unknown as Record<string, unknown>);
+      setOriginalSnapshot({ requestNo: result.data.requestNo, ...result.data.input });
+      setModule(editType === "BILLING_REQUEST" ? "BILLING" : editType === "PAYMENT_REQUEST" ? "PAYMENT" : "EXPENSE");
+    }).catch(error => { if (active) setEditError(error instanceof Error ? error.message : "读取失败"); });
+    return () => { active = false; };
+  }, [editId, editType]);
   const focusedBillingRequestId = searchParams.get("focusBillingRequest");
-  const [module, setModule] = useState<Module>(focusedBillingRequestId ? "BILLING" : "HOME");
+  const [module, setModule] = useState<Module>(focusedBillingRequestId ? "BILLING" : searchParams.get("focusPaymentRequest") ? "PAYMENT" : searchParams.get("focusExpenseClaim") ? "EXPENSE" : "HOME");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [submitFailed, setSubmitFailed] = useState(false);
   async function submit(kind: SubmitKind, payload: Record<string, unknown>) {
+    if (editInput) payload = { ...editInput, ...payload };
+    if (editId && editType !== (kind === "BILLING" ? "BILLING_REQUEST" : kind === "PAYMENT" ? "PAYMENT_REQUEST" : kind === "EXPENSE" ? "EXPENSE_CLAIM" : "")) {
+      setSubmitFailed(true); setMessage("原申请类型不匹配，请返回原申请重新打开编辑。"); return false;
+    }
+    if (editInput) {
+      const stale = kind === "BILLING" ? !data.customers.some(row => row.id === payload.customerId) || Boolean(payload.contractId && !data.contracts.some(row => row.id === payload.contractId))
+        : kind === "PAYMENT" ? !data.payerAccounts.some(row => row.id === payload.payerAccountProfileId) || Boolean(payload.payeeAccountProfileId && !data.payeeAccounts.some(row => row.id === payload.payeeAccountProfileId)) : false;
+      if (stale) { setSubmitFailed(true); setMessage("原关联对象或账户已失效，请重新选择有效对象后再提交。原始数据不会自动替换。"); return false; }
+    }
     setBusy(true);
     setMessage("");
     setSubmitFailed(false);
     try {
       let result: { ok: boolean; error?: string };
-      if (kind === "BILLING")
+      if (editId && editInput && kind !== "PROFILE") {
+        if (kind === "BILLING") result = await resubmitManualBillingRequest(editId, payload as Parameters<typeof resubmitManualBillingRequest>[1]);
+        else if (kind === "PAYMENT") result = await resubmitSupplierPaymentRequest(editId, payload as Parameters<typeof resubmitSupplierPaymentRequest>[1]);
+        else result = await resubmitEmployeeExpenseClaim(editId, payload as Parameters<typeof resubmitEmployeeExpenseClaim>[1]);
+        if (result.ok) {
+          router.replace(`/finance/workbench?tab=flows&focus${kind === "BILLING" ? "BillingRequest" : kind === "PAYMENT" ? "PaymentRequest" : "ExpenseClaim"}=${encodeURIComponent(editId)}`);
+          router.refresh();
+        }
+      } else if (kind === "BILLING")
         result = await submitManualBillingRequest(
           payload as Parameters<typeof submitManualBillingRequest>[0],
         );
@@ -190,6 +235,7 @@ export function FinanceFlowHub({
       setBusy(false);
     }
   }
+  if (editId && !editInput) return <section className="card p-5" role={editError ? "alert" : "status"}>{editError || "正在读取原申请，请稍候…"}</section>;
   if (module === "HOME")
     return (
       <section className="card overflow-hidden">
@@ -233,6 +279,7 @@ export function FinanceFlowHub({
         <button
           className="btn-secondary"
           onClick={() => {
+            if (editId) router.replace("/finance/workbench?tab=flows");
             setModule("HOME");
             setMessage("");
           }}
@@ -260,9 +307,13 @@ export function FinanceFlowHub({
           {message}
         </p>
       )}
+      {editId && <p className="mx-5 mt-4 rounded-md bg-amber-50 p-3 text-sm text-amber-900">正在修改退回的原申请，重新提交后保留原单号并开始新一轮审核。请核对原有账户、附件和明细。</p>}
+      {editId && <details className="mx-5 mt-3 rounded-lg border border-slate-200 p-3 text-sm"><summary className="cursor-pointer font-medium">原单快照（关联失效时供核对，不自动切换账户）</summary><dl className="mt-3 grid gap-3 md:grid-cols-2">{["requestNo", "supplierName", "payerEntity", "accountName", "accountNumber", "bankName", "reimbursementEntity", "note"].filter(key => originalSnapshot[key]).map(key => <div key={key}><dt className="text-xs text-slate-500">{({requestNo:"原单号",supplierName:"原收款对象",payerEntity:"原付款主体",accountName:"原账户名",accountNumber:"原账号",bankName:"原银行",reimbursementEntity:"原报销主体",note:"原备注与票据元数据"} as Record<string,string>)[key]}</dt><dd className="whitespace-pre-wrap break-all">{String(originalSnapshot[key])}</dd></div>)}</dl></details>}
       {module === "BILLING" && (
         <>
           <BillingForm
+            key={editId ?? "new-billing"}
+            initial={editInput ?? undefined}
             data={data}
             disabled={!canEdit || busy}
             onSubmit={(payload) => submit("BILLING", payload)}
@@ -279,12 +330,16 @@ export function FinanceFlowHub({
       {module === "PAYMENT" && (
         <>
           <PaymentForm
+            key={editId ?? "new-payment"}
+            initial={editInput ?? undefined}
             data={data}
             disabled={!canEdit || busy}
             onSubmit={(payload) => submit("PAYMENT", payload)}
           />
           <ProgressTable
             kind="PAYMENT_REQUEST"
+            currentUserId={data.currentUserId}
+            focusId={searchParams.get("focusPaymentRequest")}
             rows={data.paymentProgress ?? []}
           />
         </>
@@ -292,12 +347,16 @@ export function FinanceFlowHub({
       {module === "EXPENSE" && (
         <>
           <ExpenseForm
+            key={editId ?? "new-expense"}
+            initial={editInput ?? undefined}
             data={data}
             disabled={!canEdit || busy}
             onSubmit={(payload) => submit("EXPENSE", payload)}
           />
           <ProgressTable
             kind="EXPENSE_CLAIM"
+            currentUserId={data.currentUserId}
+            focusId={searchParams.get("focusExpenseClaim")}
             rows={data.expenseProgress ?? []}
           />
         </>
@@ -313,7 +372,7 @@ export function FinanceFlowHub({
   );
 }
 
-function BillingForm({ data, disabled, onSubmit }: FormProps) {
+function BillingForm({ data, disabled, onSubmit, initial }: FormProps) {
   const initialInvoiceDate = new Date().toISOString().slice(0, 10);
   const initialDueDate = new Date(`${initialInvoiceDate}T00:00:00`);
   initialDueDate.setDate(initialDueDate.getDate() + 15);
@@ -333,10 +392,40 @@ function BillingForm({ data, disabled, onSubmit }: FormProps) {
     "Terms & Conditions Our Account Information is as follows. Wire transfer only.",
   );
   const [confirmationAttachments, setConfirmationAttachments] = useState("");
+  const [invoiceApplicantNote, setInvoiceApplicantNote] = useState("");
   const [uploadingConfirmation, setUploadingConfirmation] = useState(false);
   const invalidConfirmationLinks = splitUrls(confirmationAttachments).some(url => !url.startsWith("/uploads/") && !/^https:\/\//i.test(url));
-  const defaultReviewerId = data.reviewerOptions?.find((row) => row.subtitle?.toLowerCase() === "shallow.w@thraiveagency.com")?.id ?? data.reviewerOptions?.find((row) => `${row.label} ${row.subtitle ?? ""}`.toLowerCase().includes("shallow"))?.id ?? "";
+  const reviewRequired = data.approvalPolicies?.BILLING_REQUEST?.reviewRequired !== false;
+  const defaultReviewerId = data.approvalPolicies?.BILLING_REQUEST?.defaultReviewerId ?? "";
   const [reviewerId, setReviewerId] = useState(defaultReviewerId);
+  useEffect(() => {
+    if (!initial) return;
+    setType(initial.documentType === "DOMESTIC" ? "DOMESTIC" : "INVOICE");
+    setCustomerId(String(initial.customerId ?? "")); setContractId(String(initial.contractId ?? ""));
+    setReviewerId(String(initial.reviewerId ?? ""));
+    setConfirmationAttachments(Array.isArray(initial.attachmentUrls) ? initial.attachmentUrls.join("\n") : String(initial.attachmentUrls ?? ""));
+    const note = String(initial.note ?? "");
+    if (note.startsWith("INVOICE_META:")) {
+      try {
+        const meta = JSON.parse(note.slice(13));
+        setBankAccountKey(meta.bankAccountKey ?? ""); setInvoiceDate(meta.invoiceDate ?? initialInvoiceDate); setDueDate(meta.dueDate ?? "");
+        setClientName(meta.clientName ?? ""); setClientAddress(meta.clientAddress ?? ""); setTerms(meta.terms ?? ""); setInvoiceApplicantNote(meta.applicantNote ?? "");
+      } catch { /* Keep original metadata in the submission payload until explicitly replaced. */ }
+    } else {
+      const meta = domesticMetadata(note);
+      setBillingProfileId(meta.profileId ?? "");
+      setInvoiceKind(meta.invoiceKind ?? "NORMAL");
+    }
+    const items = (initial.items ?? []) as Array<Record<string, unknown>>;
+    if (items.length) {
+      setCurrency(String(items[0].currency ?? "CNY"));
+      setLines(items.map(item => ({ ...emptyLine(), ...item, key: crypto.randomUUID(),
+        originalId: String(item.id ?? ""), projectConfirmationId: String(item.projectConfirmationId ?? ""), originalPeriodType: String(item.periodType ?? "MONTH"), originalDescription: String(item.description ?? ""), feeType: String(item.feeType ?? "MONTHLY_FEE"), quantity: String(item.quantity ?? 1), unitPrice: String(item.unitPrice ?? ""), currency: String(item.currency ?? "CNY"), taxRate: String(Number(item.taxRate ?? 0) * 100),
+        months: Array.isArray(item.serviceMonths) && item.serviceMonths.length ? item.serviceMonths as string[] : String(item.periodLabel ?? "").split(/[,、]/).filter(Boolean),
+        promoPlatform: String(item.promoPlatform ?? ""), targetSite: String(item.targetSite ?? ""), affiliatePlatform: String(item.affiliatePlatform ?? ""), remark: String(item.remark ?? ""),
+      })));
+    }
+  }, [initial]);
   const customerProfiles = data.financeProfiles.filter(
     (row) =>
       row.category === "CUSTOMER_BILLING" &&
@@ -389,6 +478,7 @@ function BillingForm({ data, disabled, onSubmit }: FormProps) {
     );
   return (
     <div className="space-y-5 p-5">
+      {initial && type === "INVOICE" && <TextField label="申请备注" value={invoiceApplicantNote} setValue={setInvoiceApplicantNote} />}
       <div className="flex items-center justify-between">
         <button
           className="text-sm font-medium text-brand-700"
@@ -401,7 +491,7 @@ function BillingForm({ data, disabled, onSubmit }: FormProps) {
         </span>
       </div>
       <div className="grid gap-4 md:grid-cols-3">
-        <SelectField label="审核人" value={reviewerId} setValue={setReviewerId} options={data.reviewerOptions ?? []} />
+        {reviewRequired ? <SelectField label="审核人" value={reviewerId} setValue={setReviewerId} options={data.reviewerOptions ?? []} /> : <p className="text-sm text-slate-700">按管理员配置，本申请无需初审，提交后交财务处理。</p>}
         <SelectField
           label="客户"
           value={customerId}
@@ -553,10 +643,12 @@ function BillingForm({ data, disabled, onSubmit }: FormProps) {
               key={line.key}
               className="rounded-lg border border-slate-200 p-4"
             >
+              {initial && <TextField label="明细描述" value={line.originalDescription} setValue={value => patchLine(line.key, { originalDescription: value })} />}
+              {initial && line.originalPeriodType === "DATE_RANGE" && <TextField label="服务日期区间（保留原日期区间类型）" value={line.months.join(",")} setValue={value => patchLine(line.key, { months: value ? [value] : [] })} />}
               <div className="mb-3 flex justify-between">
                 <strong className="text-sm">开票明细 {index + 1}</strong>
                 <button
-                  disabled={lines.length === 1}
+                  disabled={lines.length === 1 || lines.some(row => Boolean(row.projectConfirmationId))}
                   onClick={() =>
                     setLines((rows) =>
                       rows.filter((row) => row.key !== line.key),
@@ -789,7 +881,7 @@ function BillingForm({ data, disabled, onSubmit }: FormProps) {
             className="btn-primary"
               disabled={
                 disabled || uploadingConfirmation || invalidConfirmationLinks ||
-              !reviewerId ||
+              (reviewRequired && !reviewerId) ||
               !customerId ||
               (type === "INVOICE" && !contractId) ||
               (type === "INVOICE" && !bankAccountKey) ||
@@ -814,13 +906,14 @@ function BillingForm({ data, disabled, onSubmit }: FormProps) {
                         clientName,
                         clientAddress,
                         terms,
-                        applicantNote: lines
+                        applicantNote: initial ? invoiceApplicantNote : lines
                           .map((row) => row.remark.trim())
                           .filter(Boolean)
                           .join("\n"),
                       })}`,
                 items: lines.map((row) => ({
-                  description:
+                  id: row.originalId || undefined,
+                  description: row.originalDescription ? row.originalDescription :
                     type === "INVOICE"
                       ? [
                           data.customers.find((item) => item.id === customerId)
@@ -842,9 +935,9 @@ function BillingForm({ data, disabled, onSubmit }: FormProps) {
                       : row.feeType,
                   feeType: row.feeType,
                   currency: row.currency,
-                  periodType: "MONTH",
+                  periodType: row.originalPeriodType,
                   periodLabel: row.months.join(","),
-                  serviceMonths: row.months,
+                  serviceMonths: row.originalPeriodType === "DATE_RANGE" ? [] : row.months,
                   quantity: Number(row.quantity),
                   unitPrice: Number(row.unitPrice),
                   netAmount: Number(row.quantity) * Number(row.unitPrice),
@@ -917,10 +1010,13 @@ function AttachmentInput({ label, scope, value, onChange, disabled, onUploadingC
   </Field>;
 }
 
-function PaymentForm({ data, disabled, onSubmit }: FormProps) {
+function PaymentForm({ data, disabled, onSubmit, initial }: FormProps) {
+  const [paymentItems, setPaymentItems] = useState<Array<{description: string; amount: number; currency?: string; invoiceUrls?: string | string[]}>>(() => (initial?.items ?? []) as Array<{description: string; amount: number; currency?: string; invoiceUrls?: string | string[]}>);
+  const itemTotal = paymentItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
   const currencies = ACCOUNT_CURRENCIES;
   const currencySymbol: Record<string, string> = { CNY: "¥", USD: "$", HKD: "HK$", EUR: "€", GBP: "£", JPY: "¥", CAD: "C$", AUD: "A$", SGD: "S$", CHF: "CHF", AED: "د.إ", INR: "₹", KRW: "₩", THB: "฿", MYR: "RM", PHP: "₱", IDR: "Rp", TWD: "NT$" };
-  const defaultReviewerId = data.reviewerOptions?.find((row) => row.subtitle?.toLowerCase() === "shallow.w@thraiveagency.com")?.id ?? data.reviewerOptions?.find((row) => `${row.label} ${row.subtitle ?? ""}`.toLowerCase().includes("shallow"))?.id ?? "";
+  const reviewRequired = data.approvalPolicies?.PAYMENT_REQUEST?.reviewRequired !== false;
+  const defaultReviewerId = data.approvalPolicies?.PAYMENT_REQUEST?.defaultReviewerId ?? "";
   const [form, setForm] = useState({
     category: "SUPPLIER",
     payerEntityId: "",
@@ -938,10 +1034,18 @@ function PaymentForm({ data, disabled, onSubmit }: FormProps) {
     reviewerId: defaultReviewerId,
   });
   const [showErrors, setShowErrors] = useState(false);
+  useEffect(() => {
+    if (!initial) return;
+    const mapped = { ...initial, category: initial.supplierType, payeeName: initial.supplierName,
+      payerEntityId: data.companyEntities.find(row => row.label === initial.payerEntity)?.id ?? initial.payerEntity,
+      payerAccountId: initial.payerAccountProfileId, payeeAccountId: initial.payeeAccountProfileId ?? initial.payeeMode,
+      billingRequestId: initial.relatedInvoiceId, receiptId: initial.relatedReceiptId };
+    setForm(current => Object.fromEntries(Object.entries(current).map(([key, value]) => [key, key === "attachmentUrls" && Array.isArray(initial[key]) ? initial[key].join("\n") : mapped[key as keyof typeof mapped] == null ? value : String(mapped[key as keyof typeof mapped])])) as typeof current);
+  }, [initial]);
   const payeeAccounts = data.payeeAccounts.filter((row) => isPayeeCategoryAllowed(form.category, row.accountType ?? ""));
   const selectedPayee = payeeAccounts.find((row) => row.id === form.payeeAccountId);
   const payerAccounts = data.payerAccounts.filter((row) => !form.payerEntityId || (form.payerEntityId === "THRAIVE_HK" ? /thraive|香港|hong kong/i.test(`${row.subtitle ?? ""} ${row.legalEntityKey ?? ""}`) : /佛山|灵跃|foshan|lingyue/i.test(`${row.subtitle ?? ""} ${row.legalEntityKey ?? ""}`)));
-  const errors = [!form.payerEntityId && "请选择付款主体", !form.payerAccountId && "请选择付款账户", !form.reviewerId && "请选择审核人", !form.payeeName.trim() && "请填写收款对象", (!Number.isFinite(Number(form.amount)) || Number(form.amount) <= 0) && "请填写大于 0 的金额"].filter(Boolean) as string[];
+  const errors = [!form.payerEntityId && "请选择付款主体", !form.payerAccountId && "请选择付款账户", reviewRequired && !form.reviewerId && "请选择审核人", !form.payeeName.trim() && "请填写收款对象", (!Number.isFinite(Number(form.amount)) || Number(form.amount) <= 0) && "请填写大于 0 的金额"].filter(Boolean) as string[];
   const patch = (key: keyof typeof form, value: string) => setForm((current) => ({ ...current, [key]: value }));
   const chooseEntity = (entityId: string) => {
     const matching = data.payerAccounts.filter((row) => entityId === "THRAIVE_HK" ? /thraive|香港|hong kong/i.test(`${row.subtitle ?? ""} ${row.legalEntityKey ?? ""}`) : /佛山|灵跃|foshan|lingyue/i.test(`${row.subtitle ?? ""} ${row.legalEntityKey ?? ""}`));
@@ -972,7 +1076,8 @@ function PaymentForm({ data, disabled, onSubmit }: FormProps) {
         </select>
       </Field>
       <SelectField
-        label="审核人"
+        label={reviewRequired ? "审核人" : "无需初审（按管理员配置）"}
+        disabled={!reviewRequired}
         value={form.reviewerId}
         setValue={(v) => patch("reviewerId", v)}
         options={data.reviewerOptions ?? []}
@@ -996,7 +1101,7 @@ function PaymentForm({ data, disabled, onSubmit }: FormProps) {
           const selected = payeeAccounts.find((row) => row.id === v);
           setForm((current) => ({ ...current, payeeAccountId: v, payeeName: selected?.accountName ?? "", currency: selected?.currency ?? current.currency }));
         }}
-        options={[{ id: "", label: "无收款账户（手动填写户名）" }, ...payeeAccounts]}
+        options={[{ id: "NONE", label: "无收款账户（手动填写户名）" }, { id: "PAYONEER", label: "Payoneer账号（手动填写户名）" }, ...payeeAccounts]}
       />
       {selectedPayee && <div className="md:col-span-2 xl:col-span-3">
         <p className="mb-3 text-sm font-medium text-slate-900">收款账户资料</p>
@@ -1017,12 +1122,8 @@ function PaymentForm({ data, disabled, onSubmit }: FormProps) {
       />
       <Field label="币种"><select className="input" value={form.currency} onChange={(e) => patch("currency", e.target.value)}>{!currencies.includes(form.currency) && <option value={form.currency}>{form.currency}</option>}{currencies.map((code) => <option key={code} value={code}>{code}{currencySymbol[code] ? ` · ${currencySymbol[code]}` : ""}</option>)}</select></Field>
       <p className="self-end pb-2 text-sm font-medium text-slate-700">金额符号：{currencySymbol[form.currency] ?? form.currency}</p>
-      <TextField
-        label="金额"
-        type="number"
-        value={form.amount}
-        setValue={(v) => patch("amount", v)}
-      />
+      {paymentItems.length ? <Field label="金额（按明细合计）"><input className="input bg-slate-50" readOnly value={itemTotal.toFixed(2)} /></Field> : <TextField label="金额" type="number" value={form.amount} setValue={(v) => patch("amount", v)} />}
+      {paymentItems.length > 0 && <div className="col-span-full space-y-3"><p className="text-sm font-medium">付款明细（原单全部明细）</p>{paymentItems.map((item, index) => <div key={index} className="grid gap-3 rounded-lg border border-slate-200 p-4 md:grid-cols-3"><TextField label={`明细 ${index + 1} 内容`} value={item.description} setValue={value => setPaymentItems(items => items.map((row,i) => i === index ? {...row,description:value} : row))} /><TextField label="明细金额" type="number" value={String(item.amount)} setValue={value => setPaymentItems(items => items.map((row,i) => i === index ? {...row,amount:Number(value)} : row))} /><p className="self-center text-sm text-slate-600">币种：{form.currency}</p><AttachmentInput label="明细附件" scope="PAYMENT" value={Array.isArray(item.invoiceUrls) ? item.invoiceUrls.join("\n") : String(item.invoiceUrls ?? "")} onChange={value => setPaymentItems(items => items.map((row,i) => i === index ? {...row,invoiceUrls:splitUrls(value)} : row))} disabled={disabled} /></div>)}</div>}
       <TextField
         label="计划付款日"
         type="date"
@@ -1071,10 +1172,12 @@ function PaymentForm({ data, disabled, onSubmit }: FormProps) {
               (row) => row.id === form.payerEntityId,
             )?.label,
             payerAccountProfileId: form.payerAccountId,
-            payeeAccountProfileId: form.payeeAccountId || undefined,
+            payeeAccountProfileId: ["NONE", "PAYONEER"].includes(form.payeeAccountId) ? undefined : form.payeeAccountId || undefined,
+            payeeMode: form.payeeAccountId === "PAYONEER" ? "PAYONEER" : selectedPayee ? "PROFILE" : "NONE",
             reason: form.reason,
             currency: form.currency,
-            amount: Number(form.amount),
+            amount: paymentItems.length ? Math.round(itemTotal * 100) / 100 : Number(form.amount),
+            ...(paymentItems.length ? {items: paymentItems.map(item => ({...item,currency:form.currency}))} : {}),
             scheduledAt: form.scheduledAt,
             relatedInvoiceId: form.billingRequestId || undefined,
             relatedReceiptId: form.receiptId || undefined,
@@ -1090,8 +1193,11 @@ function PaymentForm({ data, disabled, onSubmit }: FormProps) {
   );
 }
 
-function ExpenseForm({ data, disabled, onSubmit }: FormProps) {
-  const defaultReviewerId = data.reviewerOptions?.find((row) => row.subtitle?.toLowerCase() === "shallow.w@thraiveagency.com")?.id ?? data.reviewerOptions?.find((row) => `${row.label} ${row.subtitle ?? ""}`.toLowerCase().includes("shallow"))?.id ?? "";
+function ExpenseForm({ data, disabled, onSubmit, initial }: FormProps) {
+  const [firstMetadata, setFirstMetadata] = useState<Record<string, unknown>>(() => ((initial?.items ?? []) as Array<Record<string, unknown>>)[0] ?? {});
+  const [extraItems, setExtraItems] = useState<Array<Record<string, unknown>>>(() => ((initial?.items ?? []) as Array<Record<string, unknown>>).slice(1));
+  const reviewRequired = data.approvalPolicies?.EXPENSE_CLAIM?.reviewRequired !== false;
+  const defaultReviewerId = data.approvalPolicies?.EXPENSE_CLAIM?.defaultReviewerId ?? "";
   const [form, setForm] = useState({
     entityId: "",
     expenseType: "SOFTWARE",
@@ -1109,13 +1215,20 @@ function ExpenseForm({ data, disabled, onSubmit }: FormProps) {
   });
   const patch = (key: keyof typeof form, value: string) =>
     setForm({ ...form, [key]: value });
+  useEffect(() => {
+    if (!initial) return;
+    const first = ((initial.items ?? []) as Array<Record<string, unknown>>)[0] ?? {};
+    const mapped: Record<string, unknown> = { ...initial, ...first, entityId: data.companyEntities.find(row => row.label === initial.reimbursementEntity)?.id ?? initial.reimbursementEntity };
+    setForm(current => Object.fromEntries(Object.entries(current).map(([key, value]) => [key, key === "attachmentUrls" && Array.isArray(initial[key]) ? initial[key].join("\n") : mapped[key] == null ? value : String(mapped[key])])) as typeof current);
+  }, [initial]);
   const employeeAccounts = data.financeProfiles.filter(
     (row) => row.category === "EMPLOYEE_REIMBURSEMENT",
   );
   return (
     <FormGrid>
       <SelectField
-        label="审核人"
+        label={reviewRequired ? "审核人" : "无需初审（按管理员配置）"}
+        disabled={!reviewRequired}
         value={form.reviewerId}
         setValue={(v) => patch("reviewerId", v)}
         options={data.reviewerOptions ?? []}
@@ -1197,7 +1310,7 @@ function ExpenseForm({ data, disabled, onSubmit }: FormProps) {
         disabled={
           disabled ||
           !form.entityId ||
-          !form.reviewerId ||
+          (reviewRequired && !form.reviewerId) ||
           !form.description ||
           Number(form.amount) <= 0 ||
           (!form.reimbursementAccountId &&
@@ -1222,6 +1335,7 @@ function ExpenseForm({ data, disabled, onSubmit }: FormProps) {
             attachmentUrls: splitUrls(form.attachmentUrls),
             items: [
               {
+                ...firstMetadata,
                 description: form.description,
                 expenseType:
                   form.expenseType === "OTHER"
@@ -1229,14 +1343,17 @@ function ExpenseForm({ data, disabled, onSubmit }: FormProps) {
                     : form.expenseType,
                 expenseDate: form.expenseDate,
                 amount: Number(form.amount),
-                invoiceUrls: splitUrls(form.attachmentUrls),
+                invoiceUrls: initial ? (firstMetadata.invoiceUrls ?? []) : splitUrls(form.attachmentUrls),
               },
+              ...extraItems,
             ],
           })
         }
       >
-        提交费用报销
+        {initial ? "保存修改并重新提交" : "提交费用报销"}
       </Submit>
+      {initial && <div className="col-span-full grid gap-3 rounded-lg border border-slate-200 p-4 md:grid-cols-3">{["invoiceTitle", "invoiceNumber", "remark"].map(key => <TextField key={key} label={key === "invoiceTitle" ? "明细 1 发票抬头" : key === "invoiceNumber" ? "明细 1 发票号码" : "明细 1 备注"} value={String(firstMetadata[key] ?? "")} setValue={value => setFirstMetadata(item => ({...item,[key]:value}))} />)}<AttachmentInput scope="EXPENSE" label="明细 1 附件" value={Array.isArray(firstMetadata.invoiceUrls) ? firstMetadata.invoiceUrls.join("\n") : ""} onChange={value => setFirstMetadata(item => ({...item,invoiceUrls:splitUrls(value)}))} /></div>}
+      {extraItems.map((item, index) => <div key={index} className="col-span-full rounded-lg border border-slate-200 p-4"><p className="mb-3 font-medium">报销明细 {index + 2}</p><div className="grid gap-3 md:grid-cols-3">{["description", "expenseType", "expenseDate", "amount", "invoiceTitle", "invoiceNumber", "remark"].map(key => <TextField key={key} label={({description:"费用内容",expenseType:"费用类型",expenseDate:"发生日期",amount:"金额",invoiceTitle:"发票抬头",invoiceNumber:"发票号码",remark:"备注"} as Record<string,string>)[key]} type={key === "amount" ? "number" : key === "expenseDate" ? "date" : "text"} value={String(item[key] ?? "")} setValue={value => setExtraItems(items => items.map((row, i) => i === index ? { ...row, [key]: key === "amount" ? Number(value) : value } : row))} />)}</div><AttachmentInput scope="EXPENSE" label="明细附件" value={Array.isArray(item.invoiceUrls) ? item.invoiceUrls.join("\n") : ""} onChange={value => setExtraItems(items => items.map((row,i) => i === index ? {...row,invoiceUrls:splitUrls(value)} : row))} /></div>)}
     </FormGrid>
   );
 }
@@ -1617,6 +1734,7 @@ function LegacyProfileForm({ data, disabled, onSubmit }: FormProps) {
 }
 
 type FormProps = {
+  initial?: Record<string, unknown>;
   data: FinanceFlowHubData;
   disabled: boolean;
   onSubmit: (payload: Record<string, unknown>) => void | Promise<boolean>;
@@ -1718,20 +1836,24 @@ function SelectField({
   value,
   setValue,
   options,
+  disabled = false,
 }: {
   label: string;
   value: string;
   setValue: (value: string) => void;
   options: FinanceObjectOption[];
+  disabled?: boolean;
 }) {
   return (
     <Field label={label}>
       <select
         className="input"
         value={value}
+        disabled={disabled}
         onChange={(e) => setValue(e.target.value)}
       >
         <option value="">请选择</option>
+        {value && !options.some(row => row.id === value) && <option value={value}>原关联已失效：{value}（请重新选择）</option>}
         {options.map((row) => (
           <option key={row.id} value={row.id}>
             {row.label}
@@ -1884,7 +2006,7 @@ function ProgressTable({
                           ? "已完成"
                           : step.status === "REJECTED"
                             ? "已驳回"
-                            : "待处理"}{step.assignee ? ` · ${step.assignee}` : ""}
+                            : step.status === "SKIPPED" ? "无需审核" : "待处理"}{step.assignee ? ` · ${step.assignee}` : ""}
                       </span>
                     ))}
                   </div>
@@ -1895,6 +2017,7 @@ function ProgressTable({
                   ) : (
                     <span>{statusText(row)}</span>
                   )}
+                  {row.applicantId === currentUserId && row.status === "REJECTED" && <a className="ml-3 font-medium text-brand-700 hover:underline" href={`/finance/workbench?tab=flows&editRequestType=${kind}&editRequestId=${encodeURIComponent(row.id)}`}>修改并重新提交</a>}
                   {kind === "BILLING_REQUEST" && row.applicantId === currentUserId && row.documents?.map((document) => (
                     <a key={document.id} href={document.downloadUrl} target="_blank" rel="noreferrer" download className="ml-3 font-medium text-brand-700 hover:underline">
                       {document.label}
@@ -1903,7 +2026,7 @@ function ProgressTable({
                   {(kind === "BILLING_REQUEST" || Boolean(row.details?.length)) && <button type="button" className="ml-3 font-medium text-brand-700 hover:underline" onClick={() => setExpandedId(expandedId === row.id ? null : row.id)}>{expandedId === row.id ? "收起详情" : "查看详情"}</button>}
                 </td>
               </tr>
-              {expandedId === row.id && kind !== "BILLING_REQUEST" && Boolean(row.details?.length) && <tr><td colSpan={5} className="bg-slate-50/70 p-4"><dl className="grid gap-x-6 gap-y-3 text-sm md:grid-cols-2 xl:grid-cols-3">{row.details?.map((item) => <div key={item.label} className="min-w-0"><dt className="text-xs text-slate-600">{item.label}</dt><dd className="mt-1 whitespace-pre-wrap break-words text-slate-900">{item.value}</dd></div>)}</dl></td></tr>}
+{expandedId === row.id && kind !== "BILLING_REQUEST" && Boolean(row.details?.length) && <tr><td colSpan={5} className="bg-slate-50/70 p-4"><dl className="grid gap-x-6 gap-y-3 text-sm md:grid-cols-2 xl:grid-cols-3">{row.details?.map((item) => <div key={item.label} className="min-w-0"><dt className="text-xs text-slate-600">{item.label}</dt><dd className="mt-1 whitespace-pre-wrap break-words text-slate-900">{item.value}</dd></div>)}</dl><FinanceRequestTimeline events={row.timeline} /></td></tr>}
               {expandedId === row.id && kind === "BILLING_REQUEST" && (
                 <tr><td colSpan={5} className="bg-slate-50/70 p-4">
                   <div className="grid gap-3 text-xs text-slate-600 md:grid-cols-3">
@@ -1917,6 +2040,7 @@ function ProgressTable({
                   </div>
                   {row.applicantId === currentUserId && row.steps?.[0]?.status === "PENDING" && <label className="mt-3 block max-w-sm text-xs font-medium text-slate-600">更换审核人<select className="input mt-1" value={row.steps?.[0]?.assigneeId ?? ""} disabled={busyId === row.id} onChange={(event) => void changeReviewer(row, event.target.value)}>{reviewerOptions.map((option) => <option key={option.id} value={option.id}>{option.label}{option.subtitle ? ` · ${option.subtitle}` : ""}</option>)}</select></label>}
                   {Boolean(row.attachmentUrls?.length) && <div className="mt-3 space-y-1 text-xs"><p className="font-medium text-slate-700">客户确认金额截图</p>{row.attachmentUrls?.filter(url => /^\/uploads\/[^/]/.test(url) || /^https?:\/\//i.test(url)).map((url, index) => <a key={url} href={url} target="_blank" rel="noopener noreferrer" className="block break-all text-brand-700 underline">查看附件 {index + 1}</a>)}</div>}
+                  <FinanceRequestTimeline events={row.timeline} />
                 </td></tr>
               )}
               </Fragment>

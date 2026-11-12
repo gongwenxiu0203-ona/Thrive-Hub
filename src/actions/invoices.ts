@@ -291,6 +291,9 @@ async function refreshBillingRequestStatus(
       : { status: "PROCESSING", completedAt: null },
   });
   if (completed && request.status !== "COMPLETED") {
+    const {recordFinanceEvent}=await import('@/lib/financeRequestHistory');
+    await tx.financeApprovalStep.updateMany({where:{entityType:'BILLING_REQUEST',entityId:billingRequestId,stepNo:2,status:'PENDING'},data:{status:'APPROVED',operatorId:actorId,actedAt:new Date(),comment:'Invoice开具完成'}});
+    await recordFinanceEvent(tx,'BILLING_REQUEST',billingRequestId,actorId,'INVOICE_ISSUED','Invoice开具完成',request.status,'COMPLETED');
     const invoice =
       issuedInvoice ?? request.invoices[request.invoices.length - 1] ?? null;
     await tx.reminder.create({

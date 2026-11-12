@@ -8,6 +8,7 @@ import { domesticInvoiceForm, domesticInvoiceFile, DomesticUploadError } from "@
 import { saveUploadedFile } from "@/lib/upload";
 import { allocateDomesticAmounts } from "@/lib/domesticBilling";
 import { resolveDomesticBillingDetails } from "@/lib/domesticBillingDetails";
+import {recordFinanceEvent} from '@/lib/financeRequestHistory';
 
 const round = (value: number) =>
   Math.round((value + Number.EPSILON) * 100) / 100;
@@ -199,6 +200,8 @@ export async function POST(
         where: { id: billing.id },
         data: { status: "COMPLETED", completedAt: new Date() },
       });
+      await tx.financeApprovalStep.updateMany({where:{entityType:'BILLING_REQUEST',entityId:billing.id,stepNo:2,status:'PENDING'},data:{status:'APPROVED',operatorId:session.userId,actedAt:new Date(),comment:'国内发票归档完成'}});
+      await recordFinanceEvent(tx,'BILLING_REQUEST',billing.id,session.userId,'DOMESTIC_ISSUED','国内发票归档完成','PROCESSING','COMPLETED');
       await tx.reminder.create({
         data: {
           title: `国内发票已开具：${invoiceNumber}`,

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { ContractAMPanel } from "@/components/contracts/ContractAMPanel";
 import { FileDown, Pencil } from "lucide-react";
 import { BackButton } from "@/components/BackButton";
 import { archivedFixedFeePercent } from "@/lib/channelArchiveRules";
@@ -133,7 +134,7 @@ export default async function ContractDetailPage({
     for (const review of contract.reviews) if (!timeline.some((row) => row.action === "SUBMIT_REVIEW" && row.createdAt === review.createdAt.toISOString())) timeline.push({ id: `review-${review.id}`, action: "REVIEW_ROUND", actor: review.reviewer?.name ?? "—", note: `第 ${review.round} 轮审核 · ${review.status === "PENDING" ? "审核中" : review.status === "APPROVED" ? "已通过" : "已退回"}`, fromStatus: null, toStatus: review.status === "PENDING" ? "REVIEWING" : review.status === "APPROVED" ? "SIGNING" : "REJECTED", createdAt: review.updatedAt.toISOString() });
     timeline.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     const canReview = contract.status === "REVIEWING" && (session.role === "ADMIN" || contract.reviewerId === session.userId);
-    return <FrameworkContractDetail contract={contract} isAdmin={session.role === "ADMIN"} canEdit={canEdit} canCreateConfirmation={canCreateConfirmation} canReview={canReview} internal={internal} selectedId={(await searchParams).confirmation} timeline={timeline} />;
+    return <div className="space-y-6"><ContractAMPanel contractId={id}/><FrameworkContractDetail contract={contract} isAdmin={session.role === "ADMIN"} canEdit={canEdit} canCreateConfirmation={canCreateConfirmation} canReview={canReview} internal={internal} selectedId={(await searchParams).confirmation} timeline={timeline} /></div>;
   }
 
   const [users, files, customers] = await Promise.all([
@@ -373,6 +374,7 @@ export default async function ContractDetailPage({
 
   return (
     <div className="space-y-6">
+      <ContractAMPanel contractId={id}/>
       <div>
         <BackButton label="返回合同列表" fallbackHref="/contracts" />
         <div className="flex flex-wrap items-center justify-between gap-3">

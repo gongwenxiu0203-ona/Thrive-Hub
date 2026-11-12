@@ -10,8 +10,10 @@ import { createTwoStageFinanceApproval, normalizeFinanceUrls } from "@/lib/finan
 import { createPayeeSnapshot, isPayeeCategoryAllowed } from "@/lib/financePayee";
 import { validateOptionalPaymentReferences } from "@/lib/paymentReferences";
 import { linkBillingRequestAttachments } from "@/lib/billingRequestAttachments";
+import { linkFinanceRequestAttachments } from '@/lib/financeRequestAttachments';
 import { resolveDomesticBillingDetails } from "@/lib/domesticBillingDetails";
 import { domesticMetadata } from "@/lib/domesticBilling";
+import { captureFinanceRevision, recordFinanceEvent } from '@/lib/financeRequestHistory';
 
 const round = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 const refNo = (prefix: string) => `${prefix}-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 6).toUpperCase()}`;
@@ -55,7 +57,6 @@ export async function submitManualBillingRequest(input: {
     await requireFeaturePermission(session, "finance.billing_requests", "EDIT");
     if (!isStaff(session.role)) return { ok: false, error: "仅内部员工可以提交开票申请。" };
     if (!input.customerId || !["INVOICE", "DOMESTIC"].includes(input.documentType)) return { ok: false, error: "请选择客户和票据类型。" };
-    if (!input.reviewerId) return { ok: false, error: "请选择审核人。" };
     if (input.reviewerId === session.userId && session.role !== "ADMIN") return { ok: false, error: "非管理员申请人不能选择自己作为审核人。" };
     if (!input.items.length || input.items.length > 50) return { ok: false, error: "请填写 1 至 50 条开票明细。" };
     if (input.items.some((item) => (item.remark?.trim().length ?? 0) > 2000)) {
@@ -102,11 +103,13 @@ export async function submitManualBillingRequest(input: {
       }, select: { id: true, requestNo: true } });
       await linkBillingRequestAttachments(tx, session.userId, created.id, input.attachmentUrls);
       const reviewer = await createTwoStageFinanceApproval(tx, "BILLING_REQUEST", created.id, input.reviewerId);
-      await tx.reminder.create({ data: {
+      if(reviewer.reviewRequired) await tx.reminder.create({ data: {
         title: `待审核开票申请：${created.requestNo}`,
         content: `${customer.brandName}提交了${input.documentType === "DOMESTIC" ? "国内发票" : "Invoice"}申请，请查看明细并审核。\n[[href:/finance/workbench?focusBillingRequest=${created.id}]]`,
         remindDate: new Date(), type: "BILLING_REVIEW", targetId: reviewer.id, createdById: session.userId,
       } });
+      await captureFinanceRevision(tx,'BILLING_REQUEST',created.id,session.userId);
+      await recordFinanceEvent(tx,'BILLING_REQUEST',created.id,session.userId,'SUBMIT','提交开票申请',undefined,'SUBMITTED');
       return created;
     });
     revalidatePath("/finance/workbench");
@@ -237,23 +240,26 @@ export async function saveFinanceAccountProfile(input: { id?: string; name: stri
   } catch (error) { return { ok: false, error: error instanceof Error ? error.message : "保存财务账户失败。" }; }
 }
 
-export async function createSupplierAndPaymentRequest(input: { reviewerId?: string; supplierName: string; supplierType: string; country?: string; accountName: string; bankName?: string; accountNumber: string; swiftCode?: string; payeeAccountProfileId?: string; payerEntity?: string; payerAccountKey?: string; payerAccountProfileId?: string; reason: string; currency: string; amount: number; scheduledAt?: string; relatedInvoiceId?: string; relatedReceiptId?: string; invoiceUrls?: string | string[]; attachmentUrls?: string[]; note?: string }) {
+export async function createSupplierAndPaymentRequest(input: { payeeMode?: 'PROFILE'|'NONE'|'PAYONEER'; reviewerId?: string; supplierName: string; supplierType: string; country?: string; accountName: string; bankName?: string; accountNumber: string; swiftCode?: string; payeeAccountProfileId?: string; payerEntity?: string; payerAccountKey?: string; payerAccountProfileId?: string; reason: string; currency: string; amount: number; scheduledAt?: string; relatedInvoiceId?: string; relatedReceiptId?: string; invoiceUrls?: string | string[]; attachmentUrls?: string[]; note?: string }) {
   try {
     const session = await requireSession(); await requireFeaturePermission(session, "finance.payment_requests", "EDIT");
     const amount = round(Number(input.amount)); if (!input.supplierName.trim() || !input.accountName.trim() || !input.reason.trim() || !Number.isFinite(amount) || amount <= 0) return { ok: false, error: "请完整填写收款对象、付款事由和有效金额。" };
-    if (!input.reviewerId) return { ok: false, error: "请选择审核人。" };
     if (input.reviewerId === session.userId && session.role !== "ADMIN") return { ok: false, error: "非管理员申请人不能选择自己作为审核人。" };
     if (!input.payerAccountProfileId) return { ok: false, error: "付款主体和付款账户必须从统一财务账户目录选择。" };
     const result = await prisma.$transaction(async (tx) => {
       const payer = await tx.financeAccountProfile.findFirst({ where: { id: input.payerAccountProfileId, status: "ACTIVE" } });
       if (!payer) throw new Error("所选付款主体或账户不存在、已停用，请重新选择。");
       if (!["COMPANY_PAYER", "COMPANY_BANK"].includes(payer.accountType)) throw new Error("付款账户必须选择已启用的公司账户。");
-      const payee = input.payeeAccountProfileId ? await tx.financeAccountProfile.findFirst({ where: { id: input.payeeAccountProfileId, status: "ACTIVE" } }) : null;
+      const mode=input.payeeMode??(input.payeeAccountProfileId?'PROFILE':'NONE');
+      if(!['PROFILE','NONE','PAYONEER'].includes(mode))throw new Error('请选择有效的收款方式。');
+      if(mode==='PROFILE'&&!input.payeeAccountProfileId)throw new Error('请选择系统已有收款账户。');
+      if(mode!=='PROFILE'&&input.payeeAccountProfileId)throw new Error('手填收款方式不可同时关联系统账户。');
+      const payee = mode==='PROFILE' ? await tx.financeAccountProfile.findFirst({ where: { id: input.payeeAccountProfileId, status: "ACTIVE" } }) : null;
       if (input.payeeAccountProfileId && !payee) throw new Error("所选收款账户不存在或已停用，请重新选择。");
       const accountName = payee?.accountName ?? cleanText(input.accountName);
-      const accountNumber = payee?.accountNumber ?? input.accountNumber.replace(/\s+/g, "");
-      const bankName = payee?.bankName ?? (input.bankName ? cleanText(input.bankName) : null);
-      const swiftCode = payee?.swiftCode ?? (input.swiftCode?.replace(/\s+/g, "").toUpperCase() || null);
+      const accountNumber = payee?.accountNumber ?? '';
+      const bankName = payee?.bankName ?? null;
+      const swiftCode = payee?.swiftCode ?? null;
       if (!accountName) throw new Error("请填写收款对象或选择收款账户。");
       const requestType = (input.supplierType || "SUPPLIER").toUpperCase();
       if (payee && !isPayeeCategoryAllowed(requestType, payee.accountType)) throw new Error("所选收款账户分类与付款分类不匹配，请重新选择对应类别的收款账户。");
@@ -263,12 +269,13 @@ export async function createSupplierAndPaymentRequest(input: { reviewerId?: stri
       const supplierName = cleanText(input.supplierName);
       let supplier = await tx.supplier.findFirst({ where: { name: supplierName, type: requestType, status: "ACTIVE" }, select: { id: true } });
       if (!supplier) supplier = await tx.supplier.create({ data: { supplierNo: refNo("SUP"), name: supplierName, type: requestType, country: input.country?.trim().toUpperCase() || null, ...(accountNumber ? { bankAccounts: { create: { accountName, bankName, accountNumber, country: input.country?.trim().toUpperCase() || null, currency: cleanCurrency(input.currency), swiftCode, isDefault: true } } } : {}) }, select: { id: true } });
-      const payeeDetails = createPayeeSnapshot(payee ?? { name: supplierName, accountName, bankName, accountNumber, swiftCode, country: input.country?.trim() || null, currency: cleanCurrency(input.currency) });
+      const payeeDetails = {...createPayeeSnapshot(payee ?? { name: supplierName, accountName, bankName, accountNumber:mode==='PROFILE'?accountNumber:'', swiftCode, country: input.country?.trim() || null, currency: cleanCurrency(input.currency) }),paymentMethod:mode};
       const created = await tx.paymentRequest.create({ data: { requestNo: refNo("PAY"), applicantId: session.userId, supplierId: supplier.id, requestType, payerEntity: payer.legalEntity, payerAccountKey: payer.payerAccountKey ?? payer.id, payeeSnapshot: JSON.stringify({ ...payeeDetails, payeeProfileId: payee?.id ?? null, payerProfileId: payer.id, payerAccountName: payer.accountName, payerAccountNumber: payer.accountNumber }), reason: cleanText(input.reason), currency: cleanCurrency(input.currency), amount, scheduledAt: input.scheduledAt ? new Date(`${input.scheduledAt}T00:00:00`) : null, relatedInvoiceId: input.relatedInvoiceId || null, relatedReceiptId: input.relatedReceiptId || null, note: input.note?.trim() || null, items: { create: { description: cleanText(input.reason), amount, currency: cleanCurrency(input.currency), invoiceUrls: JSON.stringify(normalizeFinanceUrls(input.invoiceUrls)) } } }, select: { id: true } });
       const reviewer = await createTwoStageFinanceApproval(tx, "PAYMENT_REQUEST", created.id, input.reviewerId);
-      await tx.reminder.create({ data: { title: `待审核付款申请：${created.id}`, content: `${supplierName}的付款申请等待你审核。\n[[href:/finance/workbench?mainTab=PAYMENT&focusRequest=${created.id}]]`, remindDate: new Date(), type: "PAYMENT_REVIEW", targetId: reviewer.id, createdById: session.userId } });
-      const attachments = normalizeFinanceUrls(input.attachmentUrls);
-      if (attachments.length) await tx.financeAttachment.createMany({ data: attachments.map((fileUrl, index) => ({ entityType: "PAYMENT_REQUEST", entityId: created.id, attachmentType: "SUPPORTING_DOCUMENT", fileUrl, uploadedById: session.userId, version: index + 1 })) });
+      if(reviewer.reviewRequired)await tx.reminder.create({ data: { title: `待审核付款申请：${created.id}`, content: `${supplierName}的付款申请等待你审核。\n[[href:/finance/workbench?mainTab=PAYMENT&focusRequest=${created.id}]]`, remindDate: new Date(), type: "PAYMENT_REVIEW", targetId: reviewer.id, createdById: session.userId } });
+      await linkFinanceRequestAttachments(tx,'PAYMENT_REQUEST',created.id,session.userId,input.attachmentUrls,normalizeFinanceUrls(input.invoiceUrls));
+      await captureFinanceRevision(tx,'PAYMENT_REQUEST',created.id,session.userId);
+      await recordFinanceEvent(tx,'PAYMENT_REQUEST',created.id,session.userId,'SUBMIT','提交付款申请');
       return created;
     });
     revalidatePath("/finance/workbench"); return { ok: true, id: result.id };
@@ -279,16 +286,16 @@ export async function createExpenseClaim(input: { reviewerId?: string; reimburse
   try {
     const session = await requireSession(); await requireFeaturePermission(session, "finance.expenses", "EDIT");
     if (!input.reimbursementEntity.trim() || !input.accountName.trim() || !input.accountNumber.trim() || !input.items.length) return { ok: false, error: "请完整填写报销主体、收款账户和费用明细。" };
-    if (!input.reviewerId) return { ok: false, error: "请选择审核人。" };
     if (input.reviewerId === session.userId && session.role !== "ADMIN") return { ok: false, error: "非管理员申请人不能选择自己作为审核人。" };
     const items = input.items.map((item, sortOrder) => { const amount = round(Number(item.amount)); if (!item.description.trim() || !item.expenseType || !item.expenseDate || amount <= 0) throw new Error("请完整填写每条费用明细。"); return { ...item, amount, sortOrder }; });
     const totalAmount = round(items.reduce((sum, item) => sum + item.amount, 0));
     const claim = await prisma.$transaction(async (tx) => {
       const created = await tx.expenseClaim.create({ data: { claimNo: refNo("EXP"), employeeId: session.userId, reimbursementEntity: cleanText(input.reimbursementEntity), currency: cleanCurrency(input.currency), totalAmount, payeeSnapshot: JSON.stringify({ accountName: cleanText(input.accountName), accountNumber: input.accountNumber.replace(/\s+/g, "") }), note: input.note?.trim() || null, items: { create: items.map((item) => ({ description: cleanText(item.description), expenseType: item.expenseType, expenseDate: new Date(`${item.expenseDate}T00:00:00`), currency: cleanCurrency(input.currency), amount: item.amount, invoiceTitle: item.invoiceTitle ? cleanText(item.invoiceTitle) : null, invoiceNumber: item.invoiceNumber?.replace(/\s+/g, "").toUpperCase() || null, invoiceUrls: JSON.stringify(normalizeFinanceUrls(item.invoiceUrls)), remark: item.remark?.trim() || null, sortOrder: item.sortOrder })) } }, select: { id: true } });
       const reviewer = await createTwoStageFinanceApproval(tx, "EXPENSE_CLAIM", created.id, input.reviewerId);
-      await tx.reminder.create({ data: { title: `待审核费用报销：${created.id}`, content: `${cleanText(input.reimbursementEntity)}的费用报销等待你审核。\n[[href:/finance/workbench?mainTab=PAYMENT&focusRequest=${created.id}]]`, remindDate: new Date(), type: "EXPENSE_REVIEW", targetId: reviewer.id, createdById: session.userId } });
-      const attachments = normalizeFinanceUrls(input.attachmentUrls);
-      if (attachments.length) await tx.financeAttachment.createMany({ data: attachments.map((fileUrl, index) => ({ entityType: "EXPENSE_CLAIM", entityId: created.id, attachmentType: "SUPPORTING_DOCUMENT", fileUrl, uploadedById: session.userId, version: index + 1 })) });
+      if(reviewer.reviewRequired)await tx.reminder.create({ data: { title: `待审核费用报销：${created.id}`, content: `${cleanText(input.reimbursementEntity)}的费用报销等待你审核。\n[[href:/finance/workbench?mainTab=PAYMENT&focusRequest=${created.id}]]`, remindDate: new Date(), type: "EXPENSE_REVIEW", targetId: reviewer.id, createdById: session.userId } });
+      await linkFinanceRequestAttachments(tx,'EXPENSE_CLAIM',created.id,session.userId,input.attachmentUrls,items.flatMap(item=>normalizeFinanceUrls(item.invoiceUrls)));
+      await captureFinanceRevision(tx,'EXPENSE_CLAIM',created.id,session.userId);
+      await recordFinanceEvent(tx,'EXPENSE_CLAIM',created.id,session.userId,'SUBMIT','提交费用报销');
       return created;
     });
     revalidatePath("/finance/workbench"); return { ok: true, id: claim.id };
@@ -331,6 +338,7 @@ export async function decideFinanceRequest(entityType: "BILLING_REQUEST" | "PAYM
             : await tx.expenseClaim.updateMany({ where: { id, status: "APPROVED" }, data: update });
         if (changed.count !== 1) throw new Error("申请状态已变化，退回未写入。");
         await tx.reminder.create({ data: { title: "财务申请已退回", content: `你的申请已由财务退回：${comment}\n[[href:/finance/workbench?${entityType === "BILLING_REQUEST" ? `focusBillingRequest=${id}` : `mainTab=PAYMENT&focusRequest=${id}`}]]`, remindDate: now, type: "FINANCE_RESULT", targetId: entity.applicantId, createdById: session.userId } });
+        await recordFinanceEvent(tx,entityType,id,session.userId,'FINANCE_REJECT',comment,entity.status,'REJECTED');
         return;
       }
       if (action === "APPROVE" || action === "REJECT") {
@@ -350,9 +358,10 @@ export async function decideFinanceRequest(entityType: "BILLING_REQUEST" | "PAYM
         const changed = entityType === "BILLING_REQUEST" ? await tx.billingRequest.updateMany({ where: expected, data: update }) : entityType === "PAYMENT_REQUEST" ? await tx.paymentRequest.updateMany({ where: expected, data: update }) : await tx.expenseClaim.updateMany({ where: expected, data: update });
         if (changed.count !== 1) throw new Error("申请状态已变化，审批未写入。");
         await tx.reminder.create({ data: { title: action === "APPROVE" ? "财务申请审核通过" : "财务申请已退回", content: `${action === "APPROVE" ? "你的申请已审核通过。" : `你的申请已被退回：${comment}`}\n[[href:/finance/workbench?${entityType === "BILLING_REQUEST" ? `focusBillingRequest=${id}` : `mainTab=PAYMENT&focusRequest=${id}`}]]`, remindDate: now, type: "FINANCE_RESULT", targetId: entity.applicantId, createdById: session.userId } });
+        await recordFinanceEvent(tx,entityType,id,session.userId,action,comment,entity.status,update.status);
       } else {
         if (entityType === "BILLING_REQUEST") throw new Error("开票申请不能执行付款操作。");
-        if (entity.status !== "APPROVED") throw new Error("仅 Shallow 初审通过的申请可以付款。");
+        if (entity.status !== "APPROVED") throw new Error("仅审核通过或按配置免审的待付款申请可以付款。");
         const proofUrls = normalizeFinanceUrls(typeof details === "string" ? details : details?.proofUrls);
         const transactionNo = typeof details === "string" ? "" : details?.transactionNo?.trim() || "";
         const paidAtText = typeof details === "string" ? "" : details?.paidAt?.trim() || "";
@@ -365,6 +374,7 @@ export async function decideFinanceRequest(entityType: "BILLING_REQUEST" | "PAYM
         if (changed.count !== 1) throw new Error("申请状态已变化，付款未写入。");
         await tx.financeAttachment.createMany({ data: proofUrls.map(fileUrl => ({ entityType, entityId: id, attachmentType: "PAYMENT_PROOF", fileUrl, uploadedById: session.userId })) });
         await tx.reminder.create({ data: { title: "付款已完成", content: `你的${entityType === "PAYMENT_REQUEST" ? "付款申请" : "费用报销"}已付款，可在财务工作台下载付款凭证。\n[[href:/finance/workbench?mainTab=PAYMENT&focusRequest=${id}]]`, remindDate: now, type: "FINANCE_RESULT", targetId: entity.applicantId, createdById: session.userId } });
+        await recordFinanceEvent(tx,entityType,id,session.userId,'PAID',comment,entity.status,'PAID');
       }
     });
     revalidatePath("/finance/workbench"); return { ok: true };

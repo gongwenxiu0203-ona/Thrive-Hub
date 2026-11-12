@@ -1,5 +1,23 @@
 # Thrive Hub Handover
 
+## 2026-11-12 本轮发布收尾（用户要求commit/push，手动部署）
+
+- 用户追问未完成为何不继续后，重新执行next build --experimental-debug-memory-usage，编译12.2分钟，87/87静态页面，最终exit0；此前中止不能算成功，本次已补足完整构建。最新预览在3001，使用新建preview.db隔离副本（从旧虚构测试ui.db在线备份并仅追加本次迁移），真实dev/生产未改。Computer Use因无法可靠识别当前浏览器URL而被安全终止，不能声称视觉/浏览器交互验收通过。
+- 本轮用户明确只commit/push，生产手动部署。只读生产当前c4373d8，最近每日备份2026-11-12 03:01:55 +0800、1506578432 bytes、integrity=ok。新增scripts/deploy-finance-am.sh手动发布脚本：核对指定commit与两库存在、停PM2并确认stopped、build自动两库备份迁移、verify-finance-am-migration.py比较旧主库所有数据与新增4空表、生成独立AM cron密钥（旧env私有备份）、成功后restart/login200、备份保留旧crontab并追加5分钟flock扫描。此脚本适用于本次首次迁移发布；失败/中断后不要盲目反复执行或重启，应先核对迁移及备份状态。
+- 未执行生产pull、构建、迁移、env写入或cron安装。生效分账/月度AM真实推送及浏览器仍需用户上线验收；外部角色飞书不支持，已绑定启用内部账号沿用现有配送。所有无关私有文件和隔离测试数据库不提交。
+
+## 2026-11-12 合同AM、审批配置与退回重提（本地待完整构建/手动验收，未发布）
+
+- 用户明确确认数据库结构变更；新增迁移20261112160000_contract_am_finance_workflows，仅CREATE四表与索引：ContractAMAssignment、ContractAMMonthlyDispatch、FinanceApprovalPolicy、FinanceRequestRevision。不重建旧表/不清表。真实本地库在线备份backups/finance-am-workflow-20261112-01/before.db，迁移测试另用baseline.db/engine.db；verify-finance-am-migration.py验证所有旧表schema和行哈希不变、仅新迁移与4空表增加，integrity/FK通过。真实dev.db和生产未迁移。
+- 合同详情多选AM、首页批量APPEND/REPLACE/CLEAR；逐条合同scope及EDIT校验，不授予AM额外数据权限。AM扫描按上海每月5日09点后当日、签署完成有效且未结束合作客户；合同/人/月唯一事务防重，账号移交同步AM关系，历史投递键保留。站内Reminder进入原飞书队列；仅已绑定启用内部账号能飞书推送，外部账号仅站内。cron API独立CONTRACT_AM_CRON_SECRET，runner scripts/contract-am-cron.cjs；生产密钥/cron尚未配置，不能称已启用定时推送。
+- 管理员面板新增财务审批配置，只允许实际启用管理员且admin.permissions权限；三类流程可设置审核人/免审批/默认财务经办人，配置版本并发保护，新提交/重提读取当前策略，在途不改。SKIPPED兼容待开票与财务受理；免审批不跳过开票/付款/凭证核销事实。
+- 修复NONE与空占位值冲突，PAYONEER独立手填收款方式，服务端白名单存payeeSnapshot.paymentMethod。退回本人原单编辑与重提，字段、日期区间、明细、备注、账户、附件预填，重提原ID/单号、CAS、旧步骤/政策/内容快照、流转审计、新审核待办。多明细付款/报销保留，关联确认书手工项固定原关联/次序；对账源单仍须回原业务流程，不可覆盖已确认源金额或已有票据/付款事实。
+- 新financeResubmit.ts按实际User启用状态/内部角色+本人+EDIT+REJECTED鉴权。上传stage三种_STAGED绑定本人，新申请绑定正式附件，重提只归档旧引用不删原件。stage新增精确middleware排除并独立真实账号/功能鉴权，避免FormData重放。
+- 验证：类型检查通过；finance-approval-policy-test、contract-am-rules-test及finance-am-integration-test通过。finance-resubmit-integration-test真实SQLite事务（仅mock身份/框架边界）验证三类创建/退回/本人DTO/新策略/同ID重提/原附件引用/非本人拒绝/两次并发恰一成功/付款事实锁定，integrity/FK通过；每次使用新example.invalid隔离fixture，无真实飞书或物理附件上传测试。完整构建进行中，视觉及真实推送未验收，不可声称通过。
+- 只读prisma migrate diff发现旧ContractFieldReview/InvoiceContract/Project等历史schema drift；仅预览未保存执行任何DROP/重建SQL，本次迁移仍只4CREATE TABLE，禁止顺手自动修复旧差异。
+- 未commit/push/部署；无关私有设置、output、临时脚本保留。发布前需重新确认清单并停PM2、即时备份两库、migrate/build成功后重启；不可在在线SQLite连接上构建迁移。
+- 后续收尾：手工确认书关联项保留原关联/次序，历史多明细付款支持items编辑而非合并；DATE_RANGE保留。补真实启用账号校验、AM中文提醒标签、SKIPPED待开票受理和工作台路由、revision轮次时间线。最新typecheck及三类并发重提/AM隔离集成均通过。完整next build在隔离engine库、本机权限环境长时间停在compile且CPU持续占用，主动中止（exit非0），不能当作构建成功；发布仍被完整构建及浏览器人工验收阻挡。没有生产改动、真实通知或提交推送。本地旧预览此前已停，需构建完成后再恢复，不应向用户承诺3001已可用。
+
 ## 2026-11-12 国内发票与渠道合同归档修复（待用户手动部署）
 
 - 国内发票详情/审核/继续开票增加抬头、税号、普票/专票、地址电话及银行等信息；新申请由服务端读取所选资料并保存快照，旧申请按原资料ID回读并明确提示为当前资料、开票前核对。不重算已开票历史。

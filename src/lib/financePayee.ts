@@ -6,6 +6,7 @@ export type FinancePayeeData = {
   bankAddress?: string | null; payeeAddress?: string | null; routingNumber?: string | null;
   bankAccountType?: string | null; accountHolderType?: string | null;
   accountHolderMobile?: string | null; accountHolderEmail?: string | null; note?: string | null;
+  paymentMethod?: string | null;
 };
 
 export function isPayeeCategoryAllowed(requestType: string, accountType?: string | null) {
@@ -20,6 +21,7 @@ export function isPayeeCategoryAllowed(requestType: string, accountType?: string
 export function createPayeeSnapshot(account: FinancePayeeData): FinancePayeeData {
   return {
     name: account.name ?? account.label ?? null, accountType: account.accountType ?? null,
+    paymentMethod: account.paymentMethod ?? null,
     country: account.country ?? null, bankName: account.bankName ?? null,
     routingNumber: account.routingNumber ?? null, bankAddress: account.bankAddress ?? null,
     accountHolderType: account.accountHolderType ?? null, currency: account.currency ?? null,
@@ -39,6 +41,7 @@ export function financePayeeDetails(input: unknown): Array<{ label: string; valu
   const text = (key: string) => typeof account[key] === "string" && account[key].trim() ? account[key] as string : "—";
   const holder = text("accountHolderType");
   const fields: Array<[string, string]> = [
+    ...(text("paymentMethod") === "PAYONEER" ? [["收款方式", "Payoneer账号"] as [string,string]] : text("paymentMethod") === "NONE" ? [["收款方式", "无收款账户（手动填写户名）"] as [string,string]] : []),
     ["收款资料名称", text("name") === "—" ? text("label") : text("name")],
     ["Bank Country/Region 银行所在国家或地区", text("country")],
     ["Bank Name 银行全称", text("bankName")],

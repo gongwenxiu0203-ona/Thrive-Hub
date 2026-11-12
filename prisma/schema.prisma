@@ -123,6 +123,8 @@ model User {
   channelDocumentsReviewed            ChannelBusinessDocument[]   @relation("ChannelDocumentReviewer")
   channelPaymentsCreated              ChannelPayment[]            @relation("ChannelPaymentCreator")
   financeAuditLogs                    FinanceAuditLog[]           @relation("FinanceAuditActor")
+  contractAMAssignments               ContractAMAssignment[]       @relation("ContractAMUser")
+  contractAMAssignmentsCreated        ContractAMAssignment[]       @relation("ContractAMAssigner")
 }
 
 // 角色级权限配置（每个角色 + 功能 = 一个等级）
@@ -392,6 +394,7 @@ model Contract {
   annotations            ContractAnnotation[]
   reconciliations        CustomerReconciliation[]
   channelReconciliations ChannelReconciliation[]  @relation("ContractChannelReconciliations")
+  amAssignments          ContractAMAssignment[]
   projects               Project[]
   invoices               Invoice[]
   invoiceLinks           InvoiceContract[]
@@ -2295,6 +2298,61 @@ model ExpenseClaimItem {
 
   @@index([expenseClaimId, sortOrder])
   @@index([invoiceNumber])
+}
+
+// Additive workflow settings; account ids deliberately remain historical scalar references.
+model FinanceApprovalPolicy {
+  id                   String   @id @default(cuid())
+  entityType           String   @unique
+  reviewRequired       Boolean  @default(true)
+  defaultReviewerId    String?
+  defaultProcessorId   String?
+  version              Int      @default(1)
+  updatedById          String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
+
+// Immutable snapshots: current approval steps can advance without erasing earlier rounds.
+model FinanceRequestRevision {
+  id             String   @id @default(cuid())
+  entityType     String
+  entityId       String
+  revisionNo     Int
+  snapshot       String
+  policySnapshot String   @default("{}")
+  stepsSnapshot  String   @default("[]")
+  createdById    String
+  createdAt      DateTime @default(now())
+
+  @@unique([entityType, entityId, revisionNo])
+  @@index([entityType, entityId, createdAt])
+}
+
+model ContractAMAssignment {
+  id           String   @id @default(cuid())
+  contractId   String
+  userId       String
+  assignedById String
+  createdAt    DateTime @default(now())
+  contract     Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  user         User     @relation("ContractAMUser", fields: [userId], references: [id])
+  assignedBy   User     @relation("ContractAMAssigner", fields: [assignedById], references: [id])
+
+  @@unique([contractId, userId])
+  @@index([userId])
+}
+
+// Keep monthly dispatch keys even if AM assignments change or the message is deleted.
+model ContractAMMonthlyDispatch {
+  id           String   @id @default(cuid())
+  contractId   String
+  targetUserId String
+  yearMonth    String
+  reminderId   String?
+  createdAt    DateTime @default(now())
+
+  @@unique([contractId, targetUserId, yearMonth])
 }
 
 model FinanceApprovalStep {

@@ -1,13 +1,16 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 export function FinanceWorkspaceSections({ workbench, flows }: { workbench: ReactNode; flows: ReactNode }) {
   const search = useSearchParams();
+  const routeTarget = search.has("editRequestId") || search.get("tab") === "flows" || search.get("action") === "new-billing" ? "FLOWS" : search.has("focusBillingRequest") || search.has("focusRequest") ? "WORKBENCH" : null;
   const [section, setSection] = useState<"WORKBENCH" | "FLOWS">(
-    search.get("action") === "new-billing" || search.has("focusBillingRequest") ? "FLOWS" : "WORKBENCH",
+    routeTarget ?? "WORKBENCH",
   );
+  const targetId = search.get("editRequestId") ?? search.get("focusBillingRequest") ?? search.get("focusRequest");
+  useEffect(() => { if (routeTarget) setSection(routeTarget); }, [routeTarget, targetId]);
 
   return (
     <div className="space-y-5">

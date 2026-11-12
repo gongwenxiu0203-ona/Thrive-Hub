@@ -51,7 +51,8 @@ export async function GET(
     select: { entityType: true, entityId: true },
   });
   const financeAttachment = !attachment ? (await prisma.financeAttachment.findFirst({
-    where: { fileUrl: `/uploads/${safeName}`, entityType: { in: ["PAYMENT_REQUEST", "EXPENSE_CLAIM", "BILLING_REQUEST", "BILLING_STAGED"] } },
+    where: { fileUrl: `/uploads/${safeName}`, entityType: { in: ["PAYMENT_REQUEST", "EXPENSE_CLAIM", "BILLING_REQUEST", "BILLING_STAGED", "PAYMENT_STAGED", "EXPENSE_STAGED"] } },
+    orderBy: { createdAt: 'desc' },
     select: { entityType: true, entityId: true, uploadedById: true },
   }) ?? await findLegacyPaymentProof(prisma, `/uploads/${safeName}`)) : null;
   if ((!attachment || !isAttachmentEntityType(attachment.entityType)) && !financeAttachment) return NextResponse.json({ error: "文件不存在" }, { status: 404 });
@@ -59,7 +60,8 @@ export async function GET(
   try {
     if (financeAttachment) {
       if (["BILLING_REQUEST", "BILLING_STAGED"].includes(financeAttachment.entityType) && !isStaff(session.role)) return NextResponse.json({ error: "文件不存在" }, { status: 404 });
-      if (financeAttachment.entityType === "BILLING_STAGED") {
+      if (financeAttachment.entityType.endsWith('_STAGED')) {
+        if (!isStaff(session.role)) return NextResponse.json({ error: "文件不存在" }, { status: 404 });
         if (financeAttachment.uploadedById !== session.userId || financeAttachment.entityId !== session.userId) return NextResponse.json({ error: "文件不存在" }, { status: 404 });
       } else if (financeAttachment.entityType === "BILLING_REQUEST") {
         const record = await prisma.billingRequest.findUnique({ where: { id: financeAttachment.entityId }, select: { applicantId: true } });

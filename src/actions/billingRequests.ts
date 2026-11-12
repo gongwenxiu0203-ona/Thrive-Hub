@@ -6,6 +6,7 @@ import { financeDataView, isStaff, reconciliationScope } from "@/lib/dataScope";
 import { requireFeaturePermission } from "@/lib/permissionGuard";
 import { requireSession } from "@/lib/session";
 import { createTwoStageFinanceApproval } from "@/lib/financeApproval";
+import { captureFinanceRevision, recordFinanceEvent } from '@/lib/financeRequestHistory';
 import { confirmationSubmissionIssue } from "@/lib/reconciliationConfirmation";
 
 const REQUEST_STATUSES = ["SUBMITTED", "PROCESSING"];
@@ -162,11 +163,13 @@ export async function submitBillingRequest(input: SubmitBillingRequestInput) {
           select: { id: true, requestNo: true },
         });
         const reviewer = await createTwoStageFinanceApproval(tx, "BILLING_REQUEST", request.id);
-        await tx.reminder.create({ data: {
+        if(reviewer.reviewRequired) await tx.reminder.create({ data: {
           title: `待审核开票申请：${request.requestNo}`,
           content: `${group[0].customer.brandName}提交了${input.documentType === "DOMESTIC" ? "国内发票" : "Invoice"}申请，请查看明细并审核。\n[[href:/finance/workbench?focusBillingRequest=${request.id}]]`,
           remindDate: new Date(), type: "BILLING_REVIEW", targetId: reviewer.id, createdById: session.userId,
         } });
+        await captureFinanceRevision(tx,'BILLING_REQUEST',request.id,session.userId);
+        await recordFinanceEvent(tx,'BILLING_REQUEST',request.id,session.userId,'SUBMIT','提交对账开票申请');
         results.push(request);
       }
       return results;
@@ -204,8 +207,8 @@ export async function acceptBillingRequest(id: string) {
         },
         select: { status: true },
       });
-      if (approved?.status !== "APPROVED")
-        throw new Error("开票申请必须先由 Shallow 初审通过。");
+      if (!approved || !["APPROVED","SKIPPED"].includes(approved.status))
+        throw new Error("开票申请须先审核通过，或按提交时配置免审核。");
       const changed = await tx.billingRequest.updateMany({
         where: { id, status: "SUBMITTED" },
         data: {
@@ -224,6 +227,7 @@ export async function acceptBillingRequest(id: string) {
           },
           data: { operatorId: session.userId, comment: "财务已受理" },
         });
+      if(changed.count===1)await recordFinanceEvent(tx,'BILLING_REQUEST',id,session.userId,'ACCEPT','财务受理开票申请','SUBMITTED','PROCESSING');
       return changed;
     });
     if (!result.count)

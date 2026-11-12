@@ -9,6 +9,7 @@ import { paymentTypeLabel } from "@/lib/financePaymentLabels";
 import { FinanceWorkbenchClient } from "./FinanceWorkbenchClient";
 import { resolveDomesticBillingDetails } from "@/lib/domesticBillingDetails";
 import { FinanceFlowHub, type ProfileCategory } from "./FinanceFlowHub";
+import { resolveFinancePoliciesForDisplay } from "@/lib/financeApproval";
 import { UnifiedFinancePanel } from "./UnifiedFinancePanel";
 import { FinanceWorkspaceSections } from "./FinanceWorkspaceSections";
 import {
@@ -300,10 +301,20 @@ export default async function FinanceWorkbenchPage({
       }),
     ]);
   const financeUserMap = new Map(financeUsers.map((row) => [row.id, row.name]));
+  const approvalPolicies = await resolveFinancePoliciesForDisplay(prisma);
   const domesticDetailsById = new Map(await Promise.all(billingRequests.filter(row=>row.documentType==='DOMESTIC').map(async row=>[row.id,await resolveDomesticBillingDetails(prisma,row.applicantNote,row.customerId)] as const)));
   const visibleBillingIds = billingRequests.map((row) => row.id);
   const visiblePaymentIds = paymentRequests.map((row) => row.id);
   const visibleExpenseIds = expenseClaims.map((row) => row.id);
+  const historyScope = [{entityType:"BILLING_REQUEST",entityId:{in:visibleBillingIds}}, {entityType:"PAYMENT_REQUEST",entityId:{in:visiblePaymentIds}}, {entityType:"EXPENSE_CLAIM",entityId:{in:visibleExpenseIds}}];
+  const [auditEvents, revisions] = await Promise.all([
+    prisma.financeAuditLog.findMany({where:{OR:historyScope},include:{actor:{select:{name:true}}},orderBy:{createdAt:"asc"}}),
+    prisma.financeRequestRevision.findMany({where:{OR:historyScope},select:{id:true,entityType:true,entityId:true,revisionNo:true,createdById:true,createdAt:true},orderBy:{createdAt:"asc"}}),
+  ]);
+  const timelineFor = (entityType:string,entityId:string) => [
+    ...auditEvents.filter(event=>event.entityType===entityType&&event.entityId===entityId).map(event=>({id:event.id,action:event.action,createdAt:event.createdAt.toISOString(),actorName:event.actor.name,note:event.note,fromStatus:event.fromStatus,toStatus:event.toStatus,revisionNo:Number(auditMetadata(event.metadata).revisionNo)||undefined})),
+    ...revisions.filter(row=>row.entityType===entityType&&row.entityId===entityId).map(row=>({id:`revision-${row.id}`,action:"REVISION",createdAt:row.createdAt.toISOString(),actorName:financeUserMap.get(row.createdById)??"历史账号",note:"已保留本轮申请内容、附件及审批设置快照。",revisionNo:row.revisionNo,fromStatus:null,toStatus:null})),
+  ].sort((a,b)=>a.createdAt.localeCompare(b.createdAt)||a.id.localeCompare(b.id));
   const [financeAccounts, approvalSteps, requestAttachments] = await Promise.all([
     prisma.financeAccountProfile.findMany({
       where: { status: "ACTIVE" },
@@ -345,8 +356,8 @@ export default async function FinanceWorkbenchPage({
         (step) => step.entityType === entityType && step.entityId === entityId,
       )
       .map((step) => ({
-        label: step.stepType === "SHALLOW_REVIEW" ? "Shallow 审核" : "财务处理",
-        status: step.status as "PENDING" | "APPROVED" | "REJECTED",
+        label: step.stepType === "SHALLOW_REVIEW" ? "申请审核" : "财务处理",
+        status: step.status as "PENDING" | "APPROVED" | "REJECTED" | "SKIPPED",
         assignee: step.assigneeId
           ? financeUserMap.get(step.assigneeId)
           : undefined,
@@ -394,6 +405,7 @@ export default async function FinanceWorkbenchPage({
                 requestNo: row.requestNo,
                 customerName: row.customer.brandName,
                 applicantName: row.applicant.name,
+                applicantId: row.applicantId,
                 documentType: row.documentType,
                 mergeMode: row.mergeMode,
                 lineCount: row.lines.length + row.manualItems.length,
@@ -412,12 +424,13 @@ export default async function FinanceWorkbenchPage({
                   row.status === "PROCESSING" && issuedAmount > 0
                     ? "PARTIAL"
                     : row.status,
-                approvalStatus: (approvalSteps.find((step) => step.entityType === "BILLING_REQUEST" && step.entityId === row.id && step.stepNo === 1)?.status as "PENDING" | "APPROVED" | "REJECTED" | null) ?? null,
+                approvalStatus: (approvalSteps.find((step) => step.entityType === "BILLING_REQUEST" && step.entityId === row.id && step.stepNo === 1)?.status as "PENDING" | "APPROVED" | "REJECTED" | "SKIPPED" | null) ?? null,
                 reviewerName: (() => {
                   const reviewerId = approvalSteps.find((step) => step.entityType === "BILLING_REQUEST" && step.entityId === row.id && step.stepNo === 1)?.assigneeId;
                   return reviewerId ? financeUserMap.get(reviewerId) ?? null : null;
                 })(),
                 reviewerId: approvalSteps.find((step) => step.entityType === "BILLING_REQUEST" && step.entityId === row.id && step.stepNo === 1)?.assigneeId ?? null,
+                timeline: timelineFor("BILLING_REQUEST", row.id),
                 items: row.manualItems.length
                   ? row.manualItems.map((item) => ({ description: item.description, period: item.periodLabel, quantity: item.quantity, unitPrice: item.unitPrice, amount: item.amount, remark: item.remark, taxRate: item.taxRate, taxAmount: item.taxAmount }))
                   : row.lines.map((line) => ({ description: line.feeType === "FIXED_FEE" ? "固定费" : "销售佣金", period: line.reconciliation.contract.contractNo, quantity: 1, unitPrice: line.requestedAmount, amount: line.requestedAmount })),
@@ -580,6 +593,7 @@ export default async function FinanceWorkbenchPage({
                   { label: "关联到账", value: row.relatedReceiptId ?? "—" },
                 ],
                 reviewerId: approvalSteps.find((step) => step.entityType === "PAYMENT_REQUEST" && step.entityId === row.id && step.stepNo === 1)?.assigneeId ?? null,
+                timeline: timelineFor("PAYMENT_REQUEST", row.id),
                 reviewerName: (() => { const id = approvalSteps.find((step) => step.entityType === "PAYMENT_REQUEST" && step.entityId === row.id && step.stepNo === 1)?.assigneeId; return id ? financeUserMap.get(id) ?? null : null; })(),
                 approvalStatus: approvalSteps.find((step) => step.entityType === "PAYMENT_REQUEST" && step.entityId === row.id && step.stepNo === 1)?.status ?? null,
                 paymentProofUrls: parseStringList(row.paymentProofUrls),
@@ -607,6 +621,7 @@ export default async function FinanceWorkbenchPage({
                   { label: "收款账户", value: (() => { try { const account = JSON.parse(row.payeeSnapshot || "{}"); return `${account.accountName ?? "—"} · ${account.accountNumber ?? "—"}`; } catch { return "—"; } })() },
                 ],
                 reviewerId: approvalSteps.find((step) => step.entityType === "EXPENSE_CLAIM" && step.entityId === row.id && step.stepNo === 1)?.assigneeId ?? null,
+                timeline: timelineFor("EXPENSE_CLAIM", row.id),
                 reviewerName: (() => { const id = approvalSteps.find((step) => step.entityType === "EXPENSE_CLAIM" && step.entityId === row.id && step.stepNo === 1)?.assigneeId; return id ? financeUserMap.get(id) ?? null : null; })(),
                 approvalStatus: approvalSteps.find((step) => step.entityType === "EXPENSE_CLAIM" && step.entityId === row.id && step.stepNo === 1)?.status ?? null,
                 paymentProofUrls: parseStringList(row.paymentProofUrls),
@@ -631,6 +646,7 @@ export default async function FinanceWorkbenchPage({
                 hasPermissionLevel(profilePermission, "EDIT")
               }
               data={{
+                approvalPolicies,
                 currentUserId: session.userId,
                 currentUserIsAdmin: session.role === "ADMIN",
                 customers: financeCustomers.map((customer) => ({
@@ -822,12 +838,14 @@ export default async function FinanceWorkbenchPage({
                       ? row.manualItems.map((item) => ({ description: item.description, period: item.periodLabel, quantity: item.quantity, unitPrice: item.unitPrice, amount: item.amount, remark: item.remark, taxRate: item.taxRate, taxAmount: item.taxAmount }))
                       : row.lines.map((line) => ({ description: line.feeType === "FIXED_FEE" ? "固定费" : "销售佣金", period: line.reconciliation?.contract.contractNo ?? "对账申请", quantity: 1, unitPrice: line.requestedAmount, amount: line.requestedAmount })),
                     steps: stepsFor("BILLING_REQUEST", row.id),
+                    timeline: timelineFor("BILLING_REQUEST", row.id),
                   })),
                 reviewerOptions: financeUsers
                   .filter((user) => session.role === "ADMIN" || user.id !== session.userId)
                   .map((user) => ({ id: user.id, label: user.name, subtitle: user.email })),
                 paymentProgress: paymentRequests.map((row) => ({
                   id: row.id,
+                  applicantId: row.applicantId,
                   requestNo: row.requestNo,
                   objectName: row.supplier?.name ?? "未关联收款对象",
                   detail: row.reason,
@@ -836,10 +854,15 @@ export default async function FinanceWorkbenchPage({
                   amount: row.amount,
                   status: row.status,
                   rejectionReason: row.rejectionReason,
-                  steps: stepsFor("PAYMENT_REQUEST", row.id),
+                  note: row.note,
+                  attachmentUrls: requestAttachments.filter(file => file.entityType === "PAYMENT_REQUEST" && file.entityId === row.id).map(file => file.fileUrl),
+                  items: row.items.map(item => ({description:item.description,period:row.scheduledAt?.toISOString().slice(0,10)??"—",quantity:1,unitPrice:item.amount,amount:item.amount})),
+                    steps: stepsFor("PAYMENT_REQUEST", row.id),
+                    timeline: timelineFor("PAYMENT_REQUEST", row.id),
                 })),
                 expenseProgress: expenseClaims.map((row) => ({
                   id: row.id,
+                  applicantId: row.employeeId,
                   requestNo: row.claimNo,
                   objectName: financeUserMap.get(row.employeeId) ?? "员工",
                   detail: row.reimbursementEntity,
@@ -847,7 +870,12 @@ export default async function FinanceWorkbenchPage({
                   amount: row.totalAmount,
                   status: row.status,
                   rejectionReason: row.rejectionReason,
-                  steps: stepsFor("EXPENSE_CLAIM", row.id),
+                  note: row.note,
+                  details: financePayeeDetails(row.payeeSnapshot),
+                  attachmentUrls: requestAttachments.filter(file => file.entityType === "EXPENSE_CLAIM" && file.entityId === row.id).map(file => file.fileUrl),
+                  items: row.items.map(item => ({description:item.description,period:item.expenseDate.toISOString().slice(0,10),quantity:1,unitPrice:item.amount,amount:item.amount,remark:item.remark})),
+                    steps: stepsFor("EXPENSE_CLAIM", row.id),
+                    timeline: timelineFor("EXPENSE_CLAIM", row.id),
                 })),
               }}
             />

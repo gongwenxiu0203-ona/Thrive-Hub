@@ -15,6 +15,7 @@ import {
 import { PermissionsPanel } from "./PermissionsPanel";
 import { IntakeReviewPanel } from "./IntakeReviewPanel";
 import { EmailSettingsPanel } from "./EmailSettingsPanel";
+import { FinanceApprovalSettingsPanel } from "./FinanceApprovalSettingsPanel";
 import { SystemErrorsPanel } from "./SystemErrorsPanel";
 import {
   AdminOverviewPanel,
@@ -110,7 +111,7 @@ const ROLE_COLORS: Record<string, string> = {
   CHANNEL: "bg-teal-100 text-teal-700",
 };
 
-type AdminTab = "overview" | "intake" | "pending" | "all" | "permissions" | "quality" | "audit" | "api" | "email" | "errors";
+type AdminTab = "overview" | "intake" | "pending" | "all" | "permissions" | "quality" | "audit" | "api" | "email" | "errors" | "finance";
 
 export function AdminClient({
   initialUsers,
@@ -135,6 +136,7 @@ export function AdminClient({
     PERM_LEVELS.indexOf(permissions[feature] ?? "NONE") >=
     PERM_LEVELS.indexOf(required);
   const readableTabs: AdminTab[] = [
+    ...(isAdmin && hasAtLeast("admin.permissions", "READ") ? ["finance" as const] : []),
     ...(isAdmin && hasAtLeast("admin.system_errors", "READ") ? ["errors" as const] : []),
     ...(hasAtLeast("intake.review", "READ") ? ["intake" as const] : []),
     ...(hasAtLeast("admin.users", "READ") ? ["overview" as const, "all" as const] : []),
@@ -607,6 +609,7 @@ export function AdminClient({
         {hasAtLeast("admin.api_access", "READ") && (
           <button type="button" onClick={() => setTab("email")} className={tab === "email" ? "tab-trigger tab-trigger-active" : "tab-trigger"}>邮件配置</button>
         )}
+        {isAdmin && hasAtLeast("admin.permissions", "READ") && <button type="button" onClick={() => setTab("finance")} className={tab === "finance" ? "tab-trigger tab-trigger-active" : "tab-trigger"}>财务审批配置</button>}
       </div>
 
       {tab === "overview" && hasAtLeast("admin.users", "READ") && <AdminOverviewPanel overview={overview} issues={qualityIssues} auditLogs={auditLogs} apiLogs={apiLogs} />}
@@ -617,6 +620,7 @@ export function AdminClient({
       {tab === "api" && hasAtLeast("admin.api_access", "READ") && <ApiAccessPanel logs={apiLogs} />}
       {tab === "errors" && isAdmin && hasAtLeast("admin.system_errors", "READ") && <SystemErrorsPanel canEdit={hasAtLeast("admin.system_errors", "EDIT")} />}
       {tab === "email" && hasAtLeast("admin.api_access", "READ") && <EmailSettingsPanel canManage={hasAtLeast("admin.api_access", "MANAGE")} />}
+      {tab === "finance" && isAdmin && hasAtLeast("admin.permissions", "READ") && <FinanceApprovalSettingsPanel canManage={hasAtLeast("admin.permissions", "MANAGE")} />}
 
       {error && !showCreate && (
         <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">

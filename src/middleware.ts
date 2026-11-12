@@ -21,6 +21,8 @@ const PUBLIC_PREFIXES = [
   "/api/cron/project-discount-reminders",
   // Machine-to-machine endpoint: requires its independent FEISHU_NOTIFY_CRON_SECRET.
   "/api/cron/feishu-notifications",
+  // Independent bearer secret is verified in this route.
+  "/api/cron/contract-am-reminders",
   "/contract-fill",        // 外部合同填写链接（无需登录）
   "/api/contract-fill",    // 外部填写提交 API
 ];
@@ -103,5 +105,5 @@ export const config = {
   // These upload routes authenticate and authorize inside the route/action.
   // Excluding them here is intentional: Next middleware buffers/replays
   // multipart bodies, which can strip fields or break large-file streaming.
-  matcher: ["/((?!api/sales/parse|api/contracts/framework-submit|api/finance/billing/[^/]+/domestic(?:/extract)?/?$|_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!api/sales/parse|api/contracts/framework-submit|api/finance/attachments/stage/?$|api/finance/billing/[^/]+/domestic(?:/extract)?/?$|_next/static|_next/image|favicon.ico).*)"],
 };

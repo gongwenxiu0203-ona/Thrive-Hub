@@ -85,6 +85,7 @@ async function getTransferImpacts(userId: string) {
     financeAuditLogs,
     contractAddenda,
     financeAccountProfiles,
+    contractAMAssignments,
   ] = await Promise.all([
     prisma.user.count({ where: { invitedById: userId } }),
     prisma.user.count({ where: { channelUserId: userId, NOT: { id: userId } } }),
@@ -124,11 +125,12 @@ async function getTransferImpacts(userId: string) {
     prisma.financeAuditLog.count({ where: { actorId: userId } }),
     prisma.contractAddendum.count({ where: { uploadedById: userId } }),
     prisma.financeAccountProfile.count({ where: { createdById: userId } }),
+    prisma.contractAMAssignment.count({ where: { OR: [{ userId }, { assignedById: userId }] } }),
   ]);
 
   const impacts: TransferImpact[] = [
     { key: "customers", label: "客户及负责人关联", count: customers },
-    { key: "contracts", label: "合同及审核", count: contracts + contractFieldReviews + contractReviews },
+    { key: "contracts", label: "合同及审核、AM分配", count: contracts + contractFieldReviews + contractReviews + contractAMAssignments },
     { key: "tasks", label: "任务与提醒", count: tasks + reminders },
     { key: "projects", label: "项目、目标与工作日志", count: projects + projectGmvTargets + projectChannelTargets + projectEntries + workLogs },
     {
@@ -332,6 +334,18 @@ async function deleteUserAndTransfer(
     await tx.contract.updateMany({ where: { ownerId: id }, data: { ownerId: recipient.id } });
     await tx.contract.updateMany({ where: { reviewerId: id }, data: { reviewerId: recipient.id } });
     await tx.contract.updateMany({ where: { createdById: id }, data: { createdById: recipient.id } });
+    // Merge AM ownership when the recipient already has the same contract assignment.
+    const amAssignments = await tx.contractAMAssignment.findMany({ where: { userId: id } });
+    for (const assignment of amAssignments) {
+      await tx.contractAMAssignment.upsert({
+        where: { contractId_userId: { contractId: assignment.contractId, userId: recipient.id } },
+        update: {},
+        create: { contractId: assignment.contractId, userId: recipient.id, assignedById: assignment.assignedById === id ? recipient.id : assignment.assignedById },
+      });
+      await tx.contractAMAssignment.delete({ where: { id: assignment.id } });
+    }
+    await tx.contractAMAssignment.updateMany({ where: { assignedById: id }, data: { assignedById: recipient.id } });
+    // Monthly dispatch identifiers are historical scalar keys and are not reassigned.
     await tx.contractFieldReview.updateMany({ where: { reviewerId: id }, data: { reviewerId: recipient.id } });
     await tx.contractReview.updateMany({ where: { reviewerId: id }, data: { reviewerId: recipient.id } });
     await tx.contractTemplate.updateMany({ where: { uploadedById: id }, data: { uploadedById: recipient.id } });
