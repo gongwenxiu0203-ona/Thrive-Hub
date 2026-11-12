@@ -16,14 +16,21 @@ def schema(db):
 
 def fingerprint(db, table, omit_new_migration=False):
     quoted = '"' + table.replace('"', '""') + '"'
-    rows = db.execute("SELECT * FROM " + quoted)
+    # Production BI can exceed 1 GB. Stream in indexed primary-key order rather
+    # than materializing/sorting the entire table in Python memory.
+    columns = db.execute("PRAGMA table_info(" + quoted + ")").fetchall()
+    primary = [col[1] for col in sorted(columns, key=lambda col: col[5]) if col[5]]
+    order = primary or [col[1] for col in columns]
+    ordering = ",".join('"' + col.replace('"', '""') + '"' for col in order)
+    rows = db.execute("SELECT * FROM " + quoted + " ORDER BY " + ordering)
     names = [col[0] for col in rows.description]
-    records = []
+    digest, count = hashlib.sha256(), 0
     for row in rows:
         if omit_new_migration and row[names.index("migration_name")] == "20261112160000_contract_am_finance_workflows":
             continue
-        records.append(json.dumps(row, ensure_ascii=False, default=lambda value: value.hex(), separators=(",", ":")))
-    return hashlib.sha256("\n".join(sorted(records)).encode()).hexdigest(), len(records)
+        encoded = json.dumps(row, ensure_ascii=False, default=lambda value: value.hex(), separators=(",", ":")).encode()
+        digest.update(encoded); digest.update(b"\n"); count += 1
+    return digest.hexdigest(), count
 
 def main():
     if len(sys.argv) != 3:
