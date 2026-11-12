@@ -1,6 +1,6 @@
 ﻿import Link from "next/link";
 import { FilePlus } from "lucide-react";
-import { ContractAMEditor } from "@/components/contracts/ContractAMEditor";
+import { ContractAMSelectionProvider,ContractAMCheckbox,ContractAMBulkActions } from "@/components/contracts/ContractAMSelection";
 import { adminHasFeature } from "@/lib/session";
 import { Fragment } from "react";
 import { prisma } from "@/lib/prisma";
@@ -73,10 +73,10 @@ const confirmationStatusLabels: Record<string, string> = {
   VOID: "已作废",
 };
 
-const contractColumnWidths = [152, 140, 180, 86, 104, 104, 90, 90, 108, 82, 120, 132, 82, 104, 112];
+const contractColumnWidths = [152, 140, 180, 86, 104, 104, 160, 90, 90, 108, 82, 120, 132, 82, 104, 112];
 
-function ContractColumnLayout() {
-  return <colgroup>{contractColumnWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>;
+function ContractColumnLayout({selectable=false}:{selectable?:boolean}) {
+  return <colgroup>{selectable&&<col style={{width:40}}/>}{contractColumnWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>;
 }
 
 function missingContractFields(ct: Record<string, unknown>): string[] {
@@ -153,6 +153,7 @@ export default async function ContractsPage({
       include: {
         customer: true, owner: true, reviewer: true, createdBy: true,
         splitRule: true,
+        amAssignments: {include:{user:{select:{name:true,email:true}}},orderBy:{createdAt:"asc"}},
         projectConfirmations: {
           orderBy: [{ number: "asc" }, { createdAt: "asc" }],
           include: { versions: { orderBy: { createdAt: "asc" }, select: { snapshot: true, createdAt: true } } },
@@ -192,8 +193,7 @@ export default async function ContractsPage({
   const canAssignAM=isStaff(session.role)&&await adminHasFeature(session,"contracts.records","EDIT");
   const amUsers=canAssignAM?await prisma.user.findMany({where:{status:"APPROVED"},select:{id:true,name:true,email:true,role:true},orderBy:{name:"asc"}}):[];
   return (
-    <div className="space-y-6">
-      {canAssignAM&&contracts.length>0&&<ContractAMEditor contracts={contracts.map(c=>({id:c.id,label:`${c.contractNo} · ${c.customer?.brandName||"无关联客户"}`}))} users={amUsers.map(u=>({id:u.id,label:`${u.name} · ${u.email}${["ADMIN","USER"].includes(u.role)?"":"（仅站内信）"}`}))}/>}
+    <ContractAMSelectionProvider key={`${category}:${contracts.map(c=>c.id).join(",")}`} ids={contracts.map(c=>c.id)} canEdit={canAssignAM} users={amUsers.map(u=>({id:u.id,label:`${u.name} · ${u.email}${["ADMIN","USER"].includes(u.role)?"":"（仅站内信）"}`}))}><div className="space-y-6">
       <PageHeader
         title="合同管理"
         description={
@@ -207,6 +207,7 @@ export default async function ContractsPage({
           <div className="flex items-center gap-2">
             {isStaff(session.role) && <ScopeToggle />}
             {isStaff(session.role) && <Link href="/contracts/new" className="btn-primary flex items-center gap-1.5 text-sm"><FilePlus className="h-4 w-4" /> 新建合同</Link>}
+            <ContractAMBulkActions />
           </div>
         }
       />
@@ -238,16 +239,18 @@ export default async function ContractsPage({
         <EmptyState title="暂无合同" description="点击右上角新建合同" />
       ) : category === "brand" ? (
         <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <table className="w-full min-w-[1706px] table-fixed text-sm">
-            <ContractColumnLayout />
+          <table className="w-full table-fixed text-sm" style={{minWidth:contractColumnWidths.reduce((sum,width)=>sum+width,0)+(canAssignAM?40:0)}}>
+            <ContractColumnLayout selectable={canAssignAM} />
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50/60">
+                {canAssignAM&&<th className="px-3 py-3"><ContractAMCheckbox/></th>}
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">合同编号</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">关联客户</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">甲方公司</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">类型</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">开始时间</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">结束时间</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">AM</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">负责人</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">审核人</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">固费</th>
@@ -304,6 +307,7 @@ export default async function ContractsPage({
                 return (
                 <Fragment key={ct.id}>
                 <tr className="group hover:bg-slate-50/60 transition-colors">
+                  {canAssignAM&&<td className="px-3 py-3"><ContractAMCheckbox id={ct.id} label={ct.contractNo}/></td>}
                   <td className="px-4 py-3">
                     <Link
                       href={`/contracts/${ct.id}`}
@@ -337,6 +341,7 @@ export default async function ContractsPage({
                   <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-600">
                     {displayEnd ? formatDate(displayEnd) : <span className="text-slate-300">—</span>}
                   </td>
+                  <td className="break-words px-4 py-3 text-sm text-slate-700" title={ct.amAssignments.map(row=>row.user.email).join("、")}>{ct.amAssignments.map(row=>row.user.name||row.user.email).join("、")||"—"}</td>
                   <td className="px-4 py-3 text-sm text-slate-700">{ct.owner?.name ?? <span className="text-slate-300">—</span>}</td>
                   <td className="px-4 py-3 text-sm text-slate-700">{ct.reviewer?.name ?? <span className="text-slate-300">—</span>}</td>
                   <td className="px-4 py-3 text-xs text-slate-600">{framework ? hasMultipleConfirmations ? "按确认书" : monthlyFee ? `${monthlyFee.currency} ${monthlyFee.amount}` : "0" : ct.feeAmount ?? <span className="text-slate-300">—</span>}</td>
@@ -368,26 +373,28 @@ export default async function ContractsPage({
                 </tr>
                 {framework && hasMultipleConfirmations && (
                   <tr className="bg-slate-50/70">
-                    <td colSpan={15} className="p-0">
+                    <td colSpan={canAssignAM?17:16} className="p-0">
                       <details className="group/confirmations">
                         <summary className="cursor-pointer list-none px-4 py-3 text-sm font-medium text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-purple-300">
                           <span className="inline-flex items-center gap-2">项目确认书明细 <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs text-purple-800">{decodedConfirmations.length} 份</span><span className="text-xs font-normal text-slate-500 group-open/confirmations:hidden">展开查看</span></span>
                         </summary>
                         <div className="overflow-hidden border-t border-slate-200 bg-white">
                           <table className="w-full table-fixed text-xs">
-                            <ContractColumnLayout />
+                            <ContractColumnLayout selectable={canAssignAM} />
                             <tbody className="divide-y divide-slate-100">
                               {decodedConfirmations.map(({ row, draft, issues }) => {
                                 const complete = issues.length === 0;
                                 const signedVersion = row.signedFileUrl ? row.versions.find((version) => { try { return JSON.parse(version.snapshot).signedFileUrl === row.signedFileUrl; } catch { return false; } }) : null;
                                 const uploadTime = signedVersion ? formatDate(signedVersion.createdAt) : row.signedFileUrl && row.effectiveAt ? formatDate(row.effectiveAt) : null;
                                 return <tr key={row.id} className="align-top hover:bg-slate-50">
+                                  {canAssignAM&&<td/>}
                                   <td className="px-4 py-3"><Link className="font-medium text-purple-700 hover:underline" href={`/contracts/${ct.id}/confirmations?focus=${row.id}#confirmation-${row.id}`}>{row.number}</Link><span className="mt-1 block text-[11px] text-slate-500">项目确认书</span></td>
                                   <td className="px-4 py-3 text-slate-300">—</td>
                                   <td className="px-4 py-3 text-slate-300">—</td>
                                   <td className="px-4 py-3 text-slate-600">项目确认书</td>
                                   <td className="whitespace-nowrap px-4 py-3 text-slate-700">{draft.startDate || "—"}</td>
                                   <td className="whitespace-nowrap px-4 py-3 text-slate-700">{draft.endDate || "—"}</td>
+                                  <td className="px-4 py-3 text-slate-300">—</td>
                                   <td className="px-4 py-3 text-slate-300">—</td>
                                   <td className="px-4 py-3 text-slate-300">—</td>
                                   <td className="px-4 py-3 text-slate-700">{draft.monthlyFee ? `${draft.monthlyFee.currency} ${draft.monthlyFee.amount}` : "0"}</td>
@@ -416,15 +423,19 @@ export default async function ContractsPage({
         <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
           <table className="w-full min-w-[1120px] text-sm">
             <thead><tr className="border-b border-slate-200 bg-slate-50">
-              {['合同编号','关联客户','乙方公司','合同起止时间','固费乙方比例','联盟运营佣金规则','状态','原件'].map((label) => <th key={label} className="px-4 py-3 text-left text-xs font-semibold text-slate-600">{label}</th>)}
+              {canAssignAM&&<th className="px-3 py-3"><ContractAMCheckbox/></th>}
+              {['合同编号','关联客户','乙方公司','合同起止时间','AM','负责人','固费乙方比例','联盟运营佣金规则','状态','原件'].map((label) => <th key={label} className="px-4 py-3 text-left text-xs font-semibold text-slate-600">{label}</th>)}
             </tr></thead>
             <tbody className="divide-y divide-slate-100">{contracts.map((ct) => {
               const rule = ct.splitRule;
               return <tr key={ct.id} className="hover:bg-slate-50">
+                {canAssignAM&&<td className="px-3 py-3"><ContractAMCheckbox id={ct.id} label={ct.contractNo}/></td>}
                 <td className="px-4 py-3"><Link href={`/contracts/${ct.id}`} className="font-semibold text-brand-700 hover:underline">{ct.contractNo}</Link></td>
                 <td className="px-4 py-3 text-slate-700">{ct.customer?.brandName ?? '—'}</td>
                 <td className="px-4 py-3 text-slate-700">{ct.partyBCompany ?? '—'}</td>
                 <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-600">{ct.startDate ? formatDate(ct.startDate) : '—'} ~ {ct.endDate ? formatDate(ct.endDate) : '—'}</td>
+                <td className="px-4 py-3 text-slate-700">{ct.amAssignments.map(row=>row.user.name||row.user.email).join("、")||"—"}</td>
+                <td className="px-4 py-3 text-slate-700">{ct.owner?.name||"—"}</td>
                 <td className="px-4 py-3 text-slate-700">{rule ? `${(rule.fixedFeeRate * 100).toFixed(2).replace(/\.00$/, '')}%` : '—'}</td>
                 <td className="px-4 py-3 text-xs text-slate-600">{rule ? <>低于 USD {rule.commissionThresholdAmount.toLocaleString()}：{(rule.commissionBelowRate * 100).toFixed(0)}%；达到或超过：{(rule.commissionAtOrAboveRate * 100).toFixed(0)}%</> : '—'}</td>
                 <td className="px-4 py-3"><Badge className={CONTRACT_STATUS_COLORS[ct.status]}>{labelOf(CONTRACT_STATUS_LABELS, ct.status)}</Badge></td>
@@ -437,12 +448,15 @@ export default async function ContractsPage({
         <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
           <table className="w-full min-w-[820px] text-sm">
             <thead><tr className="border-b border-slate-200 bg-slate-50">
-              {['合同编号','合同开始时间','合同截止时间','负责人','状态','原件'].map((label) => <th key={label} className="px-4 py-3 text-left text-xs font-semibold text-slate-600">{label}</th>)}
+              {canAssignAM&&<th className="px-3 py-3"><ContractAMCheckbox/></th>}
+              {['合同编号','合同开始时间','合同截止时间','AM','负责人','状态','原件'].map((label) => <th key={label} className="px-4 py-3 text-left text-xs font-semibold text-slate-600">{label}</th>)}
             </tr></thead>
             <tbody className="divide-y divide-slate-100">{contracts.map((ct) => <tr key={ct.id} className="hover:bg-slate-50">
+              {canAssignAM&&<td className="px-3 py-3"><ContractAMCheckbox id={ct.id} label={ct.contractNo}/></td>}
               <td className="px-4 py-3"><Link href={`/contracts/${ct.id}`} className="font-semibold text-brand-700 hover:underline">{ct.contractNo}</Link></td>
               <td className="px-4 py-3 text-slate-700">{ct.startDate ? formatDate(ct.startDate) : '—'}</td>
               <td className="px-4 py-3 text-slate-700">{ct.endDate ? formatDate(ct.endDate) : '—'}</td>
+              <td className="px-4 py-3 text-slate-700">{ct.amAssignments.map(row=>row.user.name||row.user.email).join("、")||"—"}</td>
               <td className="px-4 py-3 text-slate-700">{ct.owner?.name ?? '—'}</td>
               <td className="px-4 py-3"><Badge className={CONTRACT_STATUS_COLORS[ct.status]}>{labelOf(CONTRACT_STATUS_LABELS, ct.status)}</Badge></td>
               <td className="px-4 py-3">{ct.fileUrl ? <a href={ct.fileUrl} download className="font-medium text-brand-700 hover:underline">下载原件</a> : <span className="text-slate-400">未上传</span>}</td>
@@ -454,6 +468,6 @@ export default async function ContractsPage({
       <p className="text-xs text-slate-400">
         共 {contracts.length} / {allContracts.length} 份合同
       </p>
-    </div>
+    </div></ContractAMSelectionProvider>
   );
 }

@@ -1,11 +1,26 @@
 "use client";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { Modal } from "@/components/ui/Modal";
 import { assignContractAM } from "@/actions/contractAM";
-type Option={id:string;label:string};
-export function ContractAMEditor({contracts,users,initialIds=[]}:{contracts:Option[];users:Option[];initialIds?:string[]}){
-  const [selected,setSelected]=useState<string[]>(contracts.length===1?[contracts[0].id]:[]);
-  const [amIds,setAmIds]=useState(initialIds),[mode,setMode]=useState<"APPEND"|"REPLACE"|"CLEAR">("APPEND");
-  const [error,setError]=useState(""),[success,setSuccess]=useState("");const[pending,start]=useTransition();const router=useRouter();
-  return <details className="rounded-xl border border-slate-200 bg-white p-4"><summary className="cursor-pointer font-semibold">{contracts.length===1?"AM分配":"批量设置AM"}</summary><div className="mt-4 space-y-4 text-sm"><p className="max-w-prose text-slate-600">签署完成且有效的客户合同，每月5日09:00（北京时间）提醒AM确认客户付款情况。分配不授予额外数据权限；飞书仅支持已绑定并启用推送的内部账号，外部账号仅收站内信。</p>{contracts.length>1&&<fieldset><legend className="font-medium">选择合同（已选{selected.length}份）</legend><button type="button" className="mt-2 text-brand-700" onClick={()=>setSelected(selected.length===contracts.length?[]:contracts.map(x=>x.id))}>全选 / 取消全选</button><div className="mt-2 max-h-48 overflow-y-auto">{contracts.map(c=><label className="flex items-center gap-2 py-1" key={c.id}><input type="checkbox" checked={selected.includes(c.id)} onChange={e=>setSelected(e.target.checked?[...selected,c.id]:selected.filter(id=>id!==c.id))}/>{c.label}</label>)}</div></fieldset>}<label className="block">设置方式<select className="input mt-1" value={mode} onChange={e=>setMode(e.target.value as typeof mode)}><option value="APPEND">追加AM（保留原分配）</option><option value="REPLACE">替换AM（覆盖原分配）</option><option value="CLEAR">清除AM分配</option></select></label>{mode!=="CLEAR"&&<fieldset><legend className="font-medium">AM账号（可多选）</legend><div className="mt-2 max-h-56 overflow-y-auto">{users.map(u=><label className="flex items-center gap-2 py-1" key={u.id}><input type="checkbox" checked={amIds.includes(u.id)} onChange={e=>setAmIds(e.target.checked?[...amIds,u.id]:amIds.filter(id=>id!==u.id))}/>{u.label}</label>)}</div></fieldset>}{mode!=="APPEND"&&<p className="text-amber-800">本次将{mode==="CLEAR"?"清除":"替换"}{selected.length}份合同现有的AM分配，历史提醒不删除。</p>}{error&&<p role="alert" className="text-rose-700">{error}</p>}{success&&<p role="status" className="text-emerald-700">{success}</p>}<button className="btn-primary" disabled={pending||!selected.length||(mode!=="CLEAR"&&!amIds.length)} onClick={()=>start(async()=>{setError("");setSuccess("");const result=await assignContractAM(selected,amIds,mode);if(!result.ok)setError(result.error||"保存失败");else{setSuccess("AM分配已保存");router.refresh();}})}>{pending?"保存中…":"保存AM分配"}</button></div></details>;
+export type AMOption = { id: string; label: string };
+export function ContractAMEditor({contracts,users,initialIds=[],bulk=false,open:controlledOpen,onClose}:{contracts:AMOption[];users:AMOption[];initialIds?:string[];bulk?:boolean;open?:boolean;onClose?:()=>void}) {
+  const [ownOpen,setOpen]=useState(false),[amIds,setAMIds]=useState(initialIds),[query,setQuery]=useState(""),[error,setError]=useState("");
+  const [mode,setMode]=useState<"APPEND"|"REPLACE"|"CLEAR">("APPEND");
+  const [pending,start]=useTransition();const router=useRouter();
+  const close=()=>{if(!pending){setOpen(false);onClose?.();}};
+  const filtered=users.filter(user=>user.label.toLowerCase().includes(query.trim().toLowerCase()));
+  return <>
+    {controlledOpen===undefined&&<button type="button" className="btn-secondary text-sm" onClick={()=>{setAMIds(initialIds);setMode("APPEND");setQuery("");setError("");setOpen(true);}}>设置 AM</button>}
+    <Modal open={controlledOpen??ownOpen} onClose={close} title={bulk?"批量设置 AM":"设置合同 AM"} size="md"><div className="space-y-4">
+      <p className="text-sm text-slate-700">{bulk?`已选 ${contracts.length} 份合同，本次同步设置所选合同的 AM。`:"选择负责该合同的 AM，可同时分配多个账号。"}</p>
+      <label className="block text-sm"><span className="label">设置方式</span><select className="input" value={mode} disabled={pending} onChange={e=>setMode(e.target.value as typeof mode)}><option value="APPEND">追加 AM（保留原分配）</option><option value="REPLACE">替换 AM（覆盖原分配）</option><option value="CLEAR">清除 AM（移除全部分配）</option></select></label>
+      {mode!=="CLEAR"&&<div className="space-y-2 text-sm"><span className="block font-medium text-slate-700">AM 账号（可多选）</span><details className="rounded-md border border-slate-300"><summary className="cursor-pointer px-3 py-2 focus-visible:outline-brand-600">{amIds.length?`已选 ${amIds.length} 个账号，点击调整`:"请选择系统注册账号"}</summary><div className="border-t border-slate-200 p-2"><input aria-label="搜索 AM 账号" className="input mb-2" placeholder="搜索姓名或邮箱" value={query} onChange={e=>setQuery(e.target.value)}/><div className="max-h-52 overflow-y-auto">{filtered.map(user=><label className="flex cursor-pointer items-start gap-2 rounded px-2 py-2 hover:bg-slate-50" key={user.id}><input type="checkbox" className="mt-1" disabled={pending} checked={amIds.includes(user.id)} onChange={e=>setAMIds(e.target.checked?[...amIds,user.id]:amIds.filter(id=>id!==user.id))}/><span className="break-all">{user.label}</span></label>)}{!filtered.length&&<p className="p-2 text-slate-600">没有匹配的已启用账号。</p>}</div></div></details><p className="break-words text-xs text-slate-600">{users.filter(user=>amIds.includes(user.id)).map(user=>user.label).join("；")||"尚未选择账号"}</p></div>}
+      {mode==="CLEAR"&&<p className="text-sm text-amber-800">保存后将清除{bulk?"所选合同":"当前合同"}的全部 AM 分配，历史提醒仍保留。</p>}
+      {mode==="REPLACE"&&<p className="text-sm text-amber-800">保存后将以本次选择的账号替换原 AM 分配；未选中的原 AM 将被移除。</p>}
+      <p className="text-xs text-slate-600">仅列出已启用账号；AM 分配不扩大数据权限。飞书仅支持已绑定并启用推送的内部账号。</p>
+      {error&&<p role="alert" className="rounded-md bg-rose-50 p-3 text-sm text-rose-800">{error}</p>}
+      <div className="flex justify-end gap-2"><button type="button" className="btn-secondary" disabled={pending} onClick={close}>取消</button><button type="button" className="btn-primary" disabled={pending||!contracts.length||(mode!=="CLEAR"&&!amIds.length)} onClick={()=>start(async()=>{setError("");const result=await assignContractAM(contracts.map(c=>c.id),amIds,mode);if(!result.ok)setError(result.error||"保存失败");else{setOpen(false);onClose?.();router.refresh();}})}>{pending?"保存中…":"保存 AM 分配"}</button></div>
+    </div></Modal>
+  </>;
 }

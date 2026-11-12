@@ -1,5 +1,19 @@
 # Thrive Hub Handover
 
+## 2026-11-12 AM交互位置调整（本地完成，未提交/未发布）
+
+- 用户随后明确要求commit/push并手动部署。发布前只读确认生产c103c07、80迁移最新、AM cron已有1条；本次无新增迁移，不能重复使用首次迁移专用deploy-finance-am.sh（其4新表空表断言不适用于后续发布）。使用通用停PM2→build自动备份→成功restart流程，保留既有env/cron/业务数据。最近每日备份2026-11-12 03:01:55 +0800完整性正常。仅提交AM相关组件/页面/测试/本交接，私有配置及测试数据库不提交。
+- 本次发布前最终next build已通过：编译10.4分钟、87/87页、exit0（隔离engine数据库、关闭飞书）。本地预览构建时停止，构建后恢复；没有执行生产pull/stop/build/restart。
+
+- 用户追加要求详情同首页区分追加/替换/清除：共享ContractAMEditor始终展示三种模式，默认追加；替换/清除显式提示影响，未选账号不再隐式变成清除（必须选择CLEAR），两入口保存后同步刷新。
+
+- 按用户明确位置要求移除合同首页独立AM合同勾选面板。新增ContractAMSelection上下文，三类列表编号前勾选/表头全选，PageHeader新建合同后批量操作→批量设置AM；下拉搜索注册启用账号、多选，追加/替换/清除沿用原权限后端。
+- 三类列表查询同一amAssignments关系并显示AM列；品牌/事务性位于结束时间与负责人之间，渠道在起止时间与负责人之间。嵌套确认书子表补空列与colSpan/colgroup避免错列。
+- ContractAMPanel拆为info/button两种视图并React cache共享查询；详情标题合同编号下显示账号，设置时间/操作人账号以slate-500辅助字显示；设置按钮在修改合同编号前，归档详情无编号按钮则放标题操作区。FrameworkContractDetail同样接入。停用既有AM保留并明确提示取消选择，不静默丢失。
+- 两入口共用assignContractAM，保存router.refresh+revalidate列表和各详情；没有Schema/migration或AM提醒规则变更。Impeccable沿用现有控件/弹窗和浅灰辅助文案，不重设品牌风格。
+- 验证：typecheck及diff check通过；contract-am-layout-test.ts在新隔离fixture验证布局结构、真实关系持久化、设置人/时间、批量/单份追加替换清除及刷新路径。contract-am-page-smoke-test.ts在preview副本中创建example.invalid虚构测试账号合同，认证HTTP验证4种详情与3种列表共7页SSR正常返回AM布局信息，开发模式实际编译通过；不代表真实浏览器点击/视觉验收或本次production build通过。
+- 本地3001为新dev预览，使用backups/finance-am-workflow-20261112-01/preview.db且FEISHU_NOTIFY_ENABLED=false。真实dev/生产数据未改，未commit/push/部署。无关私有配置和临时文件保留。
+
 ## 2026-11-12 本轮发布收尾（用户要求commit/push，手动部署）
 
 - 用户追问未完成为何不继续后，重新执行next build --experimental-debug-memory-usage，编译12.2分钟，87/87静态页面，最终exit0；此前中止不能算成功，本次已补足完整构建。最新预览在3001，使用新建preview.db隔离副本（从旧虚构测试ui.db在线备份并仅追加本次迁移），真实dev/生产未改。Computer Use因无法可靠识别当前浏览器URL而被安全终止，不能声称视觉/浏览器交互验收通过。

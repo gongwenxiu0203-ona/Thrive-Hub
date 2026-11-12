@@ -134,7 +134,7 @@ export default async function ContractDetailPage({
     for (const review of contract.reviews) if (!timeline.some((row) => row.action === "SUBMIT_REVIEW" && row.createdAt === review.createdAt.toISOString())) timeline.push({ id: `review-${review.id}`, action: "REVIEW_ROUND", actor: review.reviewer?.name ?? "—", note: `第 ${review.round} 轮审核 · ${review.status === "PENDING" ? "审核中" : review.status === "APPROVED" ? "已通过" : "已退回"}`, fromStatus: null, toStatus: review.status === "PENDING" ? "REVIEWING" : review.status === "APPROVED" ? "SIGNING" : "REJECTED", createdAt: review.updatedAt.toISOString() });
     timeline.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     const canReview = contract.status === "REVIEWING" && (session.role === "ADMIN" || contract.reviewerId === session.userId);
-    return <div className="space-y-6"><ContractAMPanel contractId={id}/><FrameworkContractDetail contract={contract} isAdmin={session.role === "ADMIN"} canEdit={canEdit} canCreateConfirmation={canCreateConfirmation} canReview={canReview} internal={internal} selectedId={(await searchParams).confirmation} timeline={timeline} /></div>;
+    return <div className="space-y-6"><FrameworkContractDetail contract={contract} isAdmin={session.role === "ADMIN"} canEdit={canEdit} canCreateConfirmation={canCreateConfirmation} canReview={canReview} internal={internal} selectedId={(await searchParams).confirmation} timeline={timeline} /></div>;
   }
 
   const [users, files, customers] = await Promise.all([
@@ -374,19 +374,19 @@ export default async function ContractDetailPage({
 
   return (
     <div className="space-y-6">
-      <ContractAMPanel contractId={id}/>
       <div>
         <BackButton label="返回合同列表" fallbackHref="/contracts" />
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
+          <div className="min-w-0"><div className="flex items-center gap-3">
             <h1 className="text-2xl font-semibold text-slate-900">
               {contract.contractNo}
             </h1>
             <Badge className={CONTRACT_STATUS_COLORS[contract.status]}>
               {labelOf(CONTRACT_STATUS_LABELS, contract.status)}
             </Badge>
-          </div>
+          </div><ContractAMPanel contractId={id}/></div>
           <div className="flex flex-wrap items-center gap-2">
+            {isSimpleArchive&&<ContractAMPanel contractId={id} variant="button"/>}
             {contract.type === "BRAND" && (session.role === "ADMIN" || session.role === "USER") && (
               <Link href={`/contracts/${contract.id}/confirmations`} className="btn-secondary text-sm">项目确认书</Link>
             )}
@@ -601,7 +601,7 @@ export default async function ContractDetailPage({
       {!isSimpleArchive && <section className="card p-5">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h2 className="font-semibold text-slate-900">合同基础信息</h2>
-          {isAdmin && <ContractNumberEditor contractId={contract.id} contractNo={contract.contractNo} />}
+          <div className="flex flex-wrap gap-2"><ContractAMPanel contractId={id} variant="button"/>{isAdmin && <ContractNumberEditor contractId={contract.id} contractNo={contract.contractNo} />}</div>
         </div>
         <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-4">
           <Field label="合同编号" value={contract.contractNo} />
