@@ -2,8 +2,14 @@
 
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
+import { DomesticBillingInfo } from "@/components/finance/DomesticBillingInfo";
+import { domesticPrefill, type DomesticBillingDetails } from "@/lib/domesticBilling";
 
 type RequestData = {
+  domesticDetails?: DomesticBillingDetails | null;
+  initialAmounts?: ReturnType<typeof domesticPrefill>;
+  mixedTaxRates?: boolean;
+  taxDataKnown?: boolean;
   id: string;
   requestNo: string;
   currency: string;
@@ -34,6 +40,8 @@ export function DomesticInvoiceForm({ request }: { request: RequestData }) {
   const [pending, setPending] = useState(false);
   const [recognizing, setRecognizing] = useState(false);
   const [error, setError] = useState("");
+  const initialAmounts=request.initialAmounts ?? domesticPrefill(request.requestedAmount);
+  const [amountsEdited,setAmountsEdited]=useState(false);
   const [recognition, setRecognition] = useState<{
     tone: "success" | "warning" | "error";
     message: string;
@@ -41,12 +49,13 @@ export function DomesticInvoiceForm({ request }: { request: RequestData }) {
   const [fields, setFields] = useState<FormFields>({
     invoiceNumber: "",
     invoiceCode: "",
-    invoiceType: "VAT_ORDINARY",
+    invoiceType: request.domesticDetails?.invoiceType ?? "VAT_ORDINARY",
     invoiceDate: new Date().toISOString().slice(0, 10),
-    netAmount: request.requestedAmount.toFixed(2),
-    taxRate: "1",
+    netAmount: initialAmounts.netAmount.toFixed(2),
+    taxRate: String(initialAmounts.taxRate),
   });
   const calculatedAmounts = useMemo(() => {
+    if(!amountsEdited)return {taxAmount:initialAmounts.taxAmount.toFixed(2),taxInclusiveAmount:initialAmounts.taxInclusiveAmount.toFixed(2)};
     const netAmount = Number(fields.netAmount);
     const taxRate = Number(fields.taxRate);
     if (!Number.isFinite(netAmount) || !Number.isFinite(taxRate)) {
@@ -57,9 +66,11 @@ export function DomesticInvoiceForm({ request }: { request: RequestData }) {
       taxAmount: taxAmount.toFixed(2),
       taxInclusiveAmount: roundMoney(netAmount + taxAmount).toFixed(2),
     };
-  }, [fields.netAmount, fields.taxRate]);
-  const update = (key: keyof FormFields, value: string) =>
+  }, [fields.netAmount, fields.taxRate,amountsEdited,initialAmounts.taxAmount,initialAmounts.taxInclusiveAmount]);
+  const update = (key: keyof FormFields, value: string) => {
+    if(key==='netAmount'||key==='taxRate')setAmountsEdited(true);
     setFields((current) => ({ ...current, [key]: value }));
+  };
 
   async function recognize(file: File | undefined) {
     if (!file) return;
@@ -80,6 +91,7 @@ export function DomesticInvoiceForm({ request }: { request: RequestData }) {
           message: payload.error ?? "自动识别失败，请手工填写。",
         });
       const extracted = payload.fields ?? {};
+      if(extracted.netAmount!==undefined || extracted.taxRate!==undefined)setAmountsEdited(true);
       setFields((current) => ({
         ...current,
         invoiceNumber: extracted.invoiceNumber ?? current.invoiceNumber,
@@ -137,6 +149,8 @@ export function DomesticInvoiceForm({ request }: { request: RequestData }) {
         : "border-red-200 bg-red-50 text-red-700";
   return (
     <form onSubmit={submit} className="space-y-6">
+      <DomesticBillingInfo details={request.domesticDetails} />
+      {request.taxDataKnown===false&&<p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">历史申请没有完整税额明细，暂按1%从含税总额拆分；请根据实际发票核对税率及金额，不代表原申请的税额快照。</p>}
       <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
         <section className="rounded-xl border border-slate-200 bg-white p-5">
           <div>
@@ -252,13 +266,13 @@ export function DomesticInvoiceForm({ request }: { request: RequestData }) {
                 className="input bg-slate-50 text-slate-700"
               />
             </Field>
-            <Field label="税率（%）">
+            <Field label={request.mixedTaxRates?'综合税率（%，原明细保留各自税率）':'税率（%）'}>
               <input
                 name="taxRate"
                 type="number"
                 min="0"
                 max="100"
-                step="0.01"
+                step="any"
                 required
                 value={fields.taxRate}
                 onChange={(e) => update("taxRate", e.target.value)}
@@ -266,7 +280,7 @@ export function DomesticInvoiceForm({ request }: { request: RequestData }) {
               />
             </Field>
             <p className="sm:col-span-2 text-xs text-slate-500">
-              申请金额按不含税金额预填；修改不含税金额或税率后，税额与含税金额会自动重算。
+              申请总额为含税金额，已按申请明细拆分未税金额与税额，不会重复加税。修改未税金额或税率后将重新计算，请核对票面。
             </p>
           </div>
         </section>

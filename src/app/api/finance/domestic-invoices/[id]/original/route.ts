@@ -1,12 +1,15 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
-import { requireSession } from "@/lib/session";
+import { getSession } from "@/lib/session";
 import { isStaff } from "@/lib/permissions";
+import { domesticInvoiceOriginal } from "@/lib/domesticInvoiceUploadAccess";
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const session = await requireSession();
-  if (!isStaff(session.role)) return NextResponse.json({ error: "仅内部员工可以下载发票" }, { status: 403 });
+  const session = await getSession();
+  if(!session)return NextResponse.json({error:"请重新登录。"},{status:401});
+  const user=await prisma.user.findUnique({where:{id:session.userId},select:{role:true,status:true}});
+  if (!user || user.status!=="APPROVED" || !isStaff(user.role)) return NextResponse.json({ error: "仅已启用的内部账号可以下载发票" }, { status: 403 });
   const { id } = await params;
   const invoice = await prisma.invoice.findFirst({ where: { id, deletedAt: null, documentType: "DOMESTIC" }, select: { billingRequest: { select: { applicantId: true } }, domesticDocument: { select: { originalFileUrl: true } } } });
   if (!invoice) return NextResponse.json({ error: "发票不存在。" }, { status: 404 });
@@ -20,7 +23,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   }
   const fileUrl = invoice?.domesticDocument?.originalFileUrl;
   if (!fileUrl) return NextResponse.json({ error: "发票原件不存在。" }, { status: 404 });
-  const downloadUrl = new URL(fileUrl, request.url);
-  downloadUrl.searchParams.set("download", "1");
-  return NextResponse.redirect(downloadUrl);
+  try {
+    // Direct authorization via invoice/document also supports legacy rows without attachment metadata.
+    const file=await domesticInvoiceOriginal(fileUrl);
+    return new NextResponse(new Uint8Array(file.data),{headers:{"Content-Type":file.type,"Content-Disposition":`attachment; filename="invoice${file.type==='application/pdf'?'.pdf':'.'+file.name.split('.').at(-1)}"; filename*=UTF-8''${encodeURIComponent(file.name)}`,"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff"}});
+  } catch {return NextResponse.json({error:"发票原件不存在或当前不可读取。"},{status:404});}
 }

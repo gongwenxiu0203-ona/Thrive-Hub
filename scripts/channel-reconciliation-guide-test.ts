@@ -1,0 +1,11 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { CHANNEL_RECONCILIATION_GUIDE, CHANNEL_RECONCILIATION_WARNING } from "../src/lib/channelReconciliationGuide";
+const copy=CHANNEL_RECONCILIATION_GUIDE.map(item=>item.title+item.text).join("\n");
+for (const token of ["待确认", "客户级默认规则优先", "已核销到账", "4,400", "15%", "25%", "不是累进分段", "不会跨合同", "阈值币种", "3 个自然日", "不是自动打款", "防重复", "可以不选择关联票据"]) assert.ok(copy.includes(token),token);
+assert.match(CHANNEL_RECONCILIATION_WARNING,/不等于每客户每月全局汇总/);
+assert.match(CHANNEL_RECONCILIATION_WARNING,/不能.*直接付款/);
+const client=readFileSync("src/app/(app)/finance/FinanceClient.tsx","utf8");
+assert.match(client,/tab === "channels" && canViewChannelReconciliations/);
+assert.ok(client.indexOf("<ChannelReconciliationGuide />") < client.indexOf("<ChannelReconciliationTab\n"));
+console.log("Channel guide coverage and generation-scope warning tests passed; no financial data modified.");

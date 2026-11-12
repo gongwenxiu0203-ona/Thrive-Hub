@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { FileDown, Pencil } from "lucide-react";
 import { BackButton } from "@/components/BackButton";
+import { archivedFixedFeePercent } from "@/lib/channelArchiveRules";
 import { prisma } from "@/lib/prisma";
 import { requireSession, adminHasFeature } from "@/lib/session";
 import { FrameworkContractDetail } from "./FrameworkContractDetail";
@@ -387,7 +388,7 @@ export default async function ContractDetailPage({
             {contract.type === "BRAND" && (session.role === "ADMIN" || session.role === "USER") && (
               <Link href={`/contracts/${contract.id}/confirmations`} className="btn-secondary text-sm">项目确认书</Link>
             )}
-            {!isSimpleArchive && canConfigureSplitRule && contract.customerId && (
+            {(!isSimpleArchive || contract.type === "CHANNEL") && canConfigureSplitRule && contract.customerId && (
               <ChannelSplitRuleModal
                 customerId={contract.customerId}
                 contractId={contract.id}
@@ -438,7 +439,7 @@ export default async function ContractDetailPage({
                   partyBContact: c.partyBContact ?? "",
                   partyBPhone: c.partyBPhone ?? "",
                   partyBEmail: c.partyBEmail ?? "",
-                  fixedFeeRate: contract.splitRule ? String(contract.splitRule.fixedFeeRate * 100) : "",
+                  fixedFeeRate: contract.splitRule ? String(contract.splitRule.fixedFeeRate * 100) : String(archivedFixedFeePercent(contract.specialCommissionTerms) ?? ""),
                 }}
               />
             )}
@@ -726,9 +727,9 @@ export default async function ContractDetailPage({
             <Field label="乙方联系方式" value={[c.partyBPhone, c.partyBEmail].filter(Boolean).join(" · ") || "—"} />
             <Field label="合同开始时间" value={contract.startDate ? formatDate(contract.startDate) : "—"} />
             <Field label="合同截止时间" value={contract.endDate ? formatDate(contract.endDate) : "—"} />
-            <Field label="固定月度服务费渠道合作费 · 乙方比例" value={contract.splitRule ? `${(contract.splitRule.fixedFeeRate * 100).toFixed(2).replace(/\.00$/, "")}%` : "—"} />
+            <Field label="固定月度服务费渠道合作费 · 乙方比例" value={contract.splitRule ? `${(contract.splitRule.fixedFeeRate * 100).toFixed(2).replace(/\.00$/, "")}%` : archivedFixedFeePercent(contract.specialCommissionTerms) !== null ? `${archivedFixedFeePercent(contract.specialCommissionTerms)}%（合同记录，待确认）` : "—"} />
           </dl>
-          <div className="mt-5 border-t border-slate-200 pt-4"><h3 className="text-sm font-semibold text-slate-800">联盟运营佣金渠道合作费</h3><p className="mt-2 text-sm text-slate-600">{contract.splitRule ? <>低于 USD {contract.splitRule.commissionThresholdAmount.toLocaleString()} 按 {(contract.splitRule.commissionBelowRate * 100).toFixed(0)}%；达到或超过该金额按 {(contract.splitRule.commissionAtOrAboveRate * 100).toFixed(0)}%。</> : "尚未设置分账规则"}</p></div>
+          <div className="mt-5 border-t border-slate-200 pt-4"><h3 className="text-sm font-semibold text-slate-800">联盟运营佣金渠道合作费</h3><p className="mt-2 text-sm text-slate-600">{contract.splitRule ? <>低于 USD {contract.splitRule.commissionThresholdAmount.toLocaleString()} 按 {(contract.splitRule.commissionBelowRate * 100).toFixed(0)}%；达到或超过该金额按 {(contract.splitRule.commissionAtOrAboveRate * 100).toFixed(0)}%。</> : "尚未设置生效分账规则，请由管理员或已获分账权限的内部员工核对后设置。"}</p>{!contract.splitRule && contract.specialCommissionTerms && <p className="mt-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{contract.specialCommissionTerms}</p>}</div>
         </section>
       )}
 

@@ -3,24 +3,16 @@ import { prisma } from "@/lib/prisma";
 import { extractDomesticInvoice } from "@/lib/domesticInvoiceExtract";
 import {
   FeaturePermissionError,
-  requireFeaturePermission,
 } from "@/lib/permissionGuard";
-import { requireSession } from "@/lib/session";
-
-const ALLOWED = new Set([
-  "application/pdf",
-  "image/png",
-  "image/jpeg",
-  "image/webp",
-]);
+import { domesticInvoiceUploader } from "@/lib/domesticInvoiceUploadAccess";
+import { domesticInvoiceForm, domesticInvoiceFile, DomesticUploadError } from "@/lib/domesticInvoiceUpload";
 
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const session = await requireSession();
-    await requireFeaturePermission(session, "finance.domestic_invoices", "EDIT");
+    await domesticInvoiceUploader();
     const { id } = await params;
     const billing = await prisma.billingRequest.findFirst({
       where: { id, documentType: "DOMESTIC", status: "PROCESSING" },
@@ -31,18 +23,8 @@ export async function POST(
         { error: "国内发票申请不存在或尚未受理。" },
         { status: 404 },
       );
-    const form = await request.formData();
-    const file = form.get("file");
-    if (
-      !(file instanceof File) ||
-      !ALLOWED.has(file.type) ||
-      file.size > 20 * 1024 * 1024
-    ) {
-      return NextResponse.json(
-        { error: "请选择不超过 20MB 的 PDF、JPG、PNG 或 WebP 发票文件。" },
-        { status: 400 },
-      );
-    }
+    const form = await domesticInvoiceForm(request);
+    const file = await domesticInvoiceFile(form.get("file"));
     const result = await extractDomesticInvoice(file);
     const recognized = Object.values(result.fields).filter(
       (value) => value !== undefined && value !== "",
@@ -55,7 +37,7 @@ export async function POST(
         : "未识别到结构化字段，请手工填写。",
     });
   } catch (error) {
-    console.error("[domestic-invoice-extract]", error);
+    if (error instanceof DomesticUploadError) return NextResponse.json({error:error.message},{status:error.status});
     if (error instanceof FeaturePermissionError)
       return NextResponse.json(
         { error: "无权限识别国内发票。" },
@@ -64,7 +46,7 @@ export async function POST(
     return NextResponse.json(
       {
         error:
-          error instanceof Error ? error.message : "发票识别失败，请手工填写。",
+          "发票识别暂时不可用，请手工填写后继续归档。",
       },
       { status: 500 },
     );

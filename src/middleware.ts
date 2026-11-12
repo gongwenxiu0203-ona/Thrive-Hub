@@ -103,5 +103,5 @@ export const config = {
   // These upload routes authenticate and authorize inside the route/action.
   // Excluding them here is intentional: Next middleware buffers/replays
   // multipart bodies, which can strip fields or break large-file streaming.
-  matcher: ["/((?!api/sales/parse|api/contracts/framework-submit|_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!api/sales/parse|api/contracts/framework-submit|api/finance/billing/[^/]+/domestic(?:/extract)?/?$|_next/static|_next/image|favicon.ico).*)"],
 };

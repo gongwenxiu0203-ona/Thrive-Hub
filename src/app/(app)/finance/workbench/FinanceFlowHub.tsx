@@ -1773,6 +1773,7 @@ function splitUrls(value: string) {
 function visibleBillingNote(value: string | null | undefined) {
   const note = value?.trim();
   if (!note) return "";
+  if(note.startsWith('DOMESTIC_META:')||note.startsWith('开票资料:'))return '';
   const prefix = "INVOICE_META:";
   if (!note.startsWith(prefix)) return note;
   try {

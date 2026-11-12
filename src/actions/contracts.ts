@@ -18,6 +18,8 @@ import { syncContractProgressToProjects } from "@/actions/projects";
 import { contractScope, creationReferenceCustomerScope } from "@/lib/dataScope";
 import type { PermLevel } from "@/lib/featurePermissions";
 import { requireFeaturePermission } from "@/lib/permissionGuard";
+import { resolveUserPermission } from "@/lib/permissionResolver";
+import { archivedSplitTerms, canActivateArchivedSplit, shouldUpdateArchivedSplit } from "@/lib/channelArchiveRules";
 import { writeAdminAudit } from "@/lib/adminObservability";
 import {
   closeContractReconciliationPlans,
@@ -978,6 +980,7 @@ export async function uploadTransactionalContract(
 export async function uploadChannelContract(fd: FormData): Promise<ContractSaveResult> {
   try {
     const session = await requireContractsPermission("EDIT");
+    if (session.role !== "ADMIN" && session.role !== "USER") return { ok: false, error: "仅有合同编辑权限的内部员工可以归档渠道商合同" };
     const customerId = str(fd, "customerId");
     const ownerId = str(fd, "ownerId") || session.userId;
     const partyBCompany = str(fd, "partyBCompany");
@@ -994,7 +997,7 @@ export async function uploadChannelContract(fd: FormData): Promise<ContractSaveR
     if (!startDate || !endDate) return { ok: false, error: "请填写有效的合同开始时间和截止时间" };
     if (startDate > endDate) return { ok: false, error: "合同截止时间不能早于开始时间" };
     if (!Number.isFinite(fixedFeePercent) || fixedFeePercent < 0 || fixedFeePercent > 100) return { ok: false, error: "固定月度服务费渠道合作费的乙方比例需在 0% 至 100% 之间" };
-    await requireFeaturePermission(session, "finance.channel_split_rules", "EDIT");
+    const canActivateSplit = canActivateArchivedSplit(session.role, await resolveUserPermission(session.userId, "finance.channel_split_rules"));
     await requireCustomerRow(customerId, session);
     await requireApprovedInternalOwner(ownerId);
     const saved = await saveUploadedFile(file);
@@ -1034,11 +1037,11 @@ export async function uploadChannelContract(fd: FormData): Promise<ContractSaveR
               commissionRate: "低于 USD 4,400：15%；达到或超过：25%",
               thresholdAmount: "4400",
               thresholdCurrency: "USD",
-              specialCommissionTerms: "联盟运营佣金渠道合作费：低于 USD 4,400 按 15%；达到或超过 USD 4,400 按 25%",
+              specialCommissionTerms: archivedSplitTerms(fixedFeePercent, canActivateSplit),
             },
             select: { id: true },
           });
-          await tx.channelSplitRule.create({ data: {
+          if (canActivateSplit) await tx.channelSplitRule.create({ data: {
             customerId,
             contractId: created.id,
             ruleType: "A",
@@ -1054,6 +1057,12 @@ export async function uploadChannelContract(fd: FormData): Promise<ContractSaveR
           await tx.attachment.create({ data: {
             fileName: saved.fileName, fileUrl: saved.fileUrl, fileSize: saved.fileSize,
             entityType: "CONTRACT", entityId: created.id, uploadedById: session.userId,
+          } });
+          await tx.financeAuditLog.create({ data: {
+            entityType: "CONTRACT", entityId: created.id, action: "ARCHIVE_CHANNEL_CONTRACT",
+            actorId: session.userId, toStatus: "COMPLETED",
+            note: canActivateSplit ? "合同归档并由授权人员设置分账规则" : "合同原件已归档；分账尚未生效，需有权限人员另行确认",
+            metadata: JSON.stringify({ splitRuleActivated: canActivateSplit, archivedFixedFeePercent: fixedFeePercent }),
           } });
           return created;
         });
@@ -1093,6 +1102,7 @@ export async function updateArchiveContract(fd: FormData): Promise<ContractSaveR
     const isChannel = current.uploadType === "CHANNEL_ARCHIVE" || current.type === "CHANNEL";
     const isTransactional = current.uploadType === "TRANSACTIONAL" || current.type === "TRANSACTIONAL";
     if (!isChannel && !isTransactional) return { ok: false, error: "该操作仅适用于渠道商或事务性归档合同" };
+    const canActivateSplit = isChannel && canActivateArchivedSplit(session.role, await resolveUserPermission(session.userId, "finance.channel_split_rules"));
 
     const startDate = parseDateOnlyUtc(str(fd, "startDate"));
     const endDate = parseDateOnlyUtc(str(fd, "endDate"));
@@ -1116,6 +1126,10 @@ export async function updateArchiveContract(fd: FormData): Promise<ContractSaveR
         return { ok: false, error: "固定月度服务费渠道合作费的乙方比例需在 0% 至 100% 之间" };
       }
       Object.assign(contractData, { partyBCompany, partyBContact, partyBPhone, partyBEmail });
+      if (!canActivateSplit && current.splitRule && (current.splitRule.fixedFeeRate !== fixedFeePercent / 100 || current.endDate?.getTime() !== endDate.getTime())) {
+        return { ok: false, error: "修改生效分账比例或分账截止日期需要分账设置权限；可保留原比例和截止日期，仅修改合同资料或重新上传原件" };
+      }
+      if (!current.splitRule) contractData.specialCommissionTerms = archivedSplitTerms(fixedFeePercent, false);
     }
 
     const before = {
@@ -1127,6 +1141,7 @@ export async function updateArchiveContract(fd: FormData): Promise<ContractSaveR
       partyBEmail: current.partyBEmail,
       fixedFeeRate: current.splitRule?.fixedFeeRate ?? null,
       fileUrl: current.fileUrl,
+      specialCommissionTerms: current.specialCommissionTerms,
     };
     const after = {
       startDate: startDate.toISOString(),
@@ -1135,8 +1150,9 @@ export async function updateArchiveContract(fd: FormData): Promise<ContractSaveR
       partyBContact: isChannel ? str(fd, "partyBContact") : current.partyBContact,
       partyBPhone: isChannel ? str(fd, "partyBPhone") : current.partyBPhone,
       partyBEmail: isChannel ? str(fd, "partyBEmail") : current.partyBEmail,
-      fixedFeeRate: isChannel ? (fixedFeePercent as number) / 100 : current.splitRule?.fixedFeeRate ?? null,
+      fixedFeeRate: isChannel && shouldUpdateArchivedSplit(canActivateSplit, !!current.splitRule) ? (fixedFeePercent as number) / 100 : current.splitRule?.fixedFeeRate ?? null,
       fileUrl: hasFile ? "REPLACED" : current.fileUrl,
+      specialCommissionTerms: contractData.specialCommissionTerms ?? current.specialCommissionTerms,
     };
     const changedFields = Object.keys(after).filter((key) => JSON.stringify(before[key as keyof typeof before]) !== JSON.stringify(after[key as keyof typeof after]));
     if (changedFields.length === 0) return { ok: false, error: "未检测到需要保存的修改" };
@@ -1145,19 +1161,12 @@ export async function updateArchiveContract(fd: FormData): Promise<ContractSaveR
     if (saved) Object.assign(contractData, { fileUrl: saved.fileUrl, generatedDocUrl: saved.fileUrl });
     await prisma.$transaction(async (tx) => {
       await tx.contract.update({ where: { id: contractId }, data: contractData });
-      if (isChannel && fixedFeePercent !== null) {
+      if (isChannel && shouldUpdateArchivedSplit(canActivateSplit, !!current.splitRule) && fixedFeePercent !== null) {
         if (current.splitRule) {
           await tx.channelSplitRule.update({
             where: { id: current.splitRule.id },
             data: { splitEndDate: endDate, fixedFeeRate: fixedFeePercent / 100 },
           });
-        } else if (current.customerId) {
-          await tx.channelSplitRule.create({ data: {
-            customerId: current.customerId, contractId, ruleType: "A", splitEndDate: endDate,
-            fixedFeeRate: fixedFeePercent / 100, commissionRate: 0.15,
-            commissionThresholdAmount: 4400, commissionThresholdCurrency: "USD",
-            commissionBelowRate: 0.15, commissionAtOrAboveRate: 0.25, createdById: session.userId,
-          } });
         }
       }
       if (saved) await tx.attachment.create({ data: {

@@ -7,6 +7,7 @@ import { isStaff } from "@/lib/permissions";
 import { financePayeeDetails } from "@/lib/financePayee";
 import { paymentTypeLabel } from "@/lib/financePaymentLabels";
 import { FinanceWorkbenchClient } from "./FinanceWorkbenchClient";
+import { resolveDomesticBillingDetails } from "@/lib/domesticBillingDetails";
 import { FinanceFlowHub, type ProfileCategory } from "./FinanceFlowHub";
 import { UnifiedFinancePanel } from "./UnifiedFinancePanel";
 import { FinanceWorkspaceSections } from "./FinanceWorkspaceSections";
@@ -299,6 +300,7 @@ export default async function FinanceWorkbenchPage({
       }),
     ]);
   const financeUserMap = new Map(financeUsers.map((row) => [row.id, row.name]));
+  const domesticDetailsById = new Map(await Promise.all(billingRequests.filter(row=>row.documentType==='DOMESTIC').map(async row=>[row.id,await resolveDomesticBillingDetails(prisma,row.applicantNote,row.customerId)] as const)));
   const visibleBillingIds = billingRequests.map((row) => row.id);
   const visiblePaymentIds = paymentRequests.map((row) => row.id);
   const visibleExpenseIds = expenseClaims.map((row) => row.id);
@@ -404,6 +406,7 @@ export default async function FinanceWorkbenchPage({
                 ),
                 sourceType: row.sourceType,
                 applicantNote: row.applicantNote,
+                domesticDetails: domesticDetailsById.get(row.id) ?? null,
                 attachmentUrls: requestAttachments.filter((file) => file.entityType === "BILLING_REQUEST" && file.entityId === row.id).map((file) => file.fileUrl),
                 status:
                   row.status === "PROCESSING" && issuedAmount > 0

@@ -19,6 +19,7 @@ import {
 import { ChannelReconciliationDetailModal, type ChannelReconciliationRecord, type CRPeriod } from "./ChannelReconciliationDetailModal";
 import { ScopeToggle } from "@/components/ScopeToggle";
 import { AffiliateReconciliationTab, type AffiliateRec } from "./AffiliateReconciliationTab";
+import { ChannelReconciliationGuide } from "./ChannelReconciliationGuide";
 
 type Settlement = {
   id: string;
@@ -493,10 +494,13 @@ export function FinanceClient({
         <TrashTab trashed={trashedReconciliations} />
       )}
       {tab === "channels" && canViewChannelReconciliations && (
+        <div className="space-y-4">
+        <ChannelReconciliationGuide />
         <ChannelReconciliationTab
           channelReconciliations={channelReconciliations}
           channelUsers={channelUsers}
         />
+        </div>
       )}
       {tab === "affiliates" && canViewAffiliateReconciliations && (
         <AffiliateReconciliationTab

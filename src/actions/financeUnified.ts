@@ -10,6 +10,8 @@ import { createTwoStageFinanceApproval, normalizeFinanceUrls } from "@/lib/finan
 import { createPayeeSnapshot, isPayeeCategoryAllowed } from "@/lib/financePayee";
 import { validateOptionalPaymentReferences } from "@/lib/paymentReferences";
 import { linkBillingRequestAttachments } from "@/lib/billingRequestAttachments";
+import { resolveDomesticBillingDetails } from "@/lib/domesticBillingDetails";
+import { domesticMetadata } from "@/lib/domesticBilling";
 
 const round = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 const refNo = (prefix: string) => `${prefix}-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 6).toUpperCase()}`;
@@ -82,12 +84,20 @@ export async function submitManualBillingRequest(input: {
     const currencies = new Set(normalized.map((item) => item.currency));
     if (currencies.size !== 1) return { ok: false, error: "一张普通开票申请的明细币种必须一致。" };
     const requestedAmount = round(normalized.reduce((sum, item) => sum + item.amount, 0));
+    let applicantNote=input.note?.trim() || null;
+    if(input.documentType==='DOMESTIC') {
+      const meta=domesticMetadata(input.note);
+      if(!['NORMAL','SPECIAL','VAT_ORDINARY','VAT_SPECIAL'].includes(meta.invoiceKind||''))return {ok:false,error:'请选择普票或专票。'};
+      const details=await resolveDomesticBillingDetails(prisma,input.note,input.customerId,true);
+      if(!details)return {ok:false,error:'请选择有效的客户开票资料。'};
+      applicantNote='DOMESTIC_META:'+JSON.stringify({profileId:meta.profileId,invoiceKind:meta.invoiceKind,snapshot:{...details,source:'SNAPSHOT'}});
+    }
     const request = await prisma.$transaction(async (tx) => {
       const created = await tx.billingRequest.create({ data: {
         requestNo: refNo("BR"), applicantId: session.userId, customerId: customer.id,
         contractId: input.contractId || null, legalEntityKey: customer.brandName,
         documentType: input.documentType, mergeMode: "MERGED", currency: normalized[0].currency,
-        requestedAmount, sourceType: "MANUAL", applicantNote: input.note?.trim() || null,
+        requestedAmount, sourceType: "MANUAL", applicantNote,
         manualItems: { create: normalized.map((item) => ({ description: item.description, feeType: item.feeType, currency: item.currency, periodType: item.periodType, periodLabel: item.periodLabel.trim(), promoPlatform: item.promoPlatform?.trim() || null, targetSite: item.targetSite?.trim() || null, affiliatePlatform: item.affiliatePlatform?.trim() || null, quantity: item.quantity, unitPrice: item.unitPrice, amount: item.amount, serviceMonths: item.serviceMonths, netAmount: item.netAmount, taxRate: item.taxRate, taxAmount: item.taxAmount, grossAmount: item.grossAmount, remark: item.remark?.trim() || null, sortOrder: item.sortOrder })) }
       }, select: { id: true, requestNo: true } });
       await linkBillingRequestAttachments(tx, session.userId, created.id, input.attachmentUrls);

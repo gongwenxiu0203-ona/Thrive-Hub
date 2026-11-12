@@ -1,5 +1,21 @@
 # Thrive Hub Handover
 
+## 2026-11-12 国内发票与渠道合同归档修复（待用户手动部署）
+
+- 国内发票详情/审核/继续开票增加抬头、税号、普票/专票、地址电话及银行等信息；新申请由服务端读取所选资料并保存快照，旧申请按原资料ID回读并明确提示为当前资料、开票前核对。不重算已开票历史。
+- 修复将含税申请总额再次当作未税额加税：优先保持原逐行未税/税额和混合税率，示例净额18439.00、税184.39、总额18623.39；归档校验申请汇总与分摊尾差。
+- 国内发票multipart上传从精确middleware路径排除body重放，两个API独立验证已启用内部账号及功能权限；损坏请求中文400、大小/类型/签名校验。原件下载改为独立鉴权后直接读文件，兼容没有FinanceAttachment索引的旧记录，含路径realpath边界校验。
+- 渠道合同归档不再要求finance.channel_split_rules EDIT；无分账授权的内部合同编辑者可归档，比例只存待确认文本，不生成生效规则。生效规则仍仅管理员/明确授权内部员工设置；已有规则的比例和截止日期保留权限保护，不新增FINANCE角色。
+- 渠道分账页增加ChannelReconciliationGuide，解释自动生成/到账释放/阈值/币种/确认/凭证/付款/防重要求。明确当前累计是来源合同与周期，不是跨合同每客户每月全局汇总；本次没有修改分账算法，该差异后续需独立处理。
+- 核心文件：src/lib/domesticBilling{,Details}.ts、src/components/finance/DomesticBillingInfo.tsx、国内发票页面及API、financeUnified.ts、contracts.ts、channelArchiveRules.ts、ChannelReconciliationGuide.tsx、channelReconciliationGuide.ts及相应测试脚本。
+- 数据隔离：只用backups/finance-domestic-20261112-01/{engine,ui}.db，before.db为回滚副本；engine与before字节SHA一致、integrity/FK通过。ui仅添加example.invalid虚构账号/申请用于HTTP验收，飞书配送关闭。未改真实dev.db/生产数据/Schema/migration。
+- 四组专项测试（domestic-billing-rules、domestic-invoice-upload、channel-archive-permission、channel-reconciliation-guide）通过。完整构建/HTTP归档下载验收正在收尾，结果后续追加；不得预称完成。浏览器登录虚构账号后自动化超时，未完成视觉验收，不能声称截图检查通过。
+- 本轮未commit/push/部署。私有配置、output/private.zip、旧临时脚本等无关dirty文件保留，不要全量git add。
+- 最终验证：独立typecheck通过；本机权限环境next build成功（编译约13分钟，86/86页面，exit0；先前沙箱编译中止未当成通过）。真实HTTP在3002验证未登录401、损坏multipart中文400、归档201、正确净/税/总额/逐行分配/抬头/应收、重复归档拒绝、审核人及申请人原件下载与上传字节一致，均通过。
+- 仍有明确限制：PDF自动识别在Next运行时对测试件返回500中文手填提示（独立pdf-parse能解析，同文件上传归档下载字节完好，故不能声称识别已修复）。HTTP脚本首次在识别断言停止；后一次先完成所有归档下载断言，随后仍在识别断言失败。脚本已改为明确报告识别fallback及LIMITATION，不把失败识别算成识别成功；虚构申请已COMPLETED，脚本禁止重置复用。后续需要新虚构fixture才能重新跑完整归档。
+- 最终再次核对before/engine字节SHA一致，before/engine/ui三库integrity/FK均通过；没有迁移。测试3002已停止，恢复本地3001的生产构建预览，仍使用ui副本及关闭飞书。视觉验收未完成，待用户手动核对。
+- 用户随后要求commit并提供完整手动部署代码（不代部署），本轮仅提交相关源码/测试/交接，不提交私有配置或数据库。只读核对生产仍42f76d0，最新每日备份2026-11-12 03:01:55 +0800、1506578432 bytes、integrity=ok。部署须git快进拉取、停止并确认PM2 stopped、运行npm run build自动备份迁移、仅成功后重启并验证login200；失败保持停服，不直接restart掩盖错误。没有执行生产pull/stop/build/重启。
+
 ## 2026-11-06 飞书通知已部署并启用：c0ba617（包含65874c6）
 
 - 用户明确确认提交并部署，业务65874c6和独立state签名修正c0ba617均已push并上线。生产86/86页构建exit0，主库79/项目库3迁移最新。新迁移只新增两个空表；没有创建生产测试账号/绑定/业务通知，没有发送真实飞书消息，用户仍需自行绑定并测试。
