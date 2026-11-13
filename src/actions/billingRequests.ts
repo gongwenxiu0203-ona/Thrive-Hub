@@ -8,6 +8,7 @@ import { requireSession } from "@/lib/session";
 import { createTwoStageFinanceApproval } from "@/lib/financeApproval";
 import { captureFinanceRevision, recordFinanceEvent } from '@/lib/financeRequestHistory';
 import { confirmationSubmissionIssue } from "@/lib/reconciliationConfirmation";
+import { retireUnpaidInvoiceReceivable } from '@/lib/invoiceVoidLifecycle';
 
 const REQUEST_STATUSES = ["SUBMITTED", "PROCESSING"];
 
@@ -279,7 +280,7 @@ export async function getBillingRequestInvoiceIds(id: string) {
         orderBy: { sortOrder: "asc" },
         select: { reconciliationId: true, projectConfirmationId: true },
       },
-      invoices: { where: { deletedAt: null }, take: 1, select: { id: true } },
+      invoices: { where: { deletedAt: null,status:{not:'VOID'} }, take: 1, select: { id: true } },
     },
   });
   if (!request)
@@ -343,10 +344,10 @@ export async function deleteBillingRequest(id: string, reason?: string) {
       where: { id },
       include: {
         invoices: {
-          where: { deletedAt: null },
           select: {
             id: true,
             status: true,
+            deletedAt: true,
             accountsReceivableId: true,
             receiptAllocations: {
               where: { status: "ACTIVE" },
@@ -363,16 +364,20 @@ export async function deleteBillingRequest(id: string, reason?: string) {
     if (confirmed && cleanReason.length < 2)
       return { ok: false, error: "受理或确认后的记录必须填写删除原因。" };
     const invoiceIds = billing.invoices.map((invoice) => invoice.id);
-    if (invoiceIds.length || billing.invoices.some((invoice) => invoice.receiptAllocations.length > 0))
+    if (billing.invoices.some(invoice=>(!invoice.deletedAt&&invoice.status!=='VOID')||invoice.receiptAllocations.length>0))
       return { ok: false, error: "该申请已产生发票、应收或收款记录，不能删除；请改用作废流程。" };
     await prisma.$transaction(async (tx) => {
-      await tx.billingRequest.update({
-        where: { id },
+      const linked=await tx.invoice.findMany({where:{billingRequestId:id},select:{id:true,status:true,deletedAt:true}});
+      if(linked.some(invoice=>!invoice.deletedAt&&invoice.status!=='VOID'))throw new Error('申请仍有关联的有效票据，请刷新后核对。');
+      for(const invoice of linked)if(invoice.status==='VOID')await retireUnpaidInvoiceReceivable(tx,invoice.id);
+      const changed=await tx.billingRequest.updateMany({
+        where: { id,status:billing.status },
         data: {
           status: "CANCELLED",
           rejectionReason: cleanReason || "管理员删除",
         },
       });
+      if(changed.count!==1)throw new Error('申请状态已变化，请刷新后重试。');
       await tx.financeAuditLog.create({
         data: {
           entityType: "BILLING_REQUEST",

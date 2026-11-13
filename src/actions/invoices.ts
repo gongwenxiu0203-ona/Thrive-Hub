@@ -1,4 +1,5 @@
 "use server";
+import { retireUnpaidInvoiceReceivable } from '@/lib/invoiceVoidLifecycle';
 
 import { Prisma } from "@prisma/client";
 import { deletedInvoiceNumber, releaseDeletedInvoiceNumber } from "@/lib/businessNumberRelease";
@@ -282,8 +283,10 @@ async function refreshBillingRequestStatus(
     },
   });
   if (!request) return;
+  if(request.status==='CANCELLED')return;
   const issuedAmount = roundMoney(request.invoices.reduce((sum, invoice) => sum + invoice.totalAmount, 0));
   const completed = issuedAmount + 0.01 >= request.requestedAmount;
+  if(!completed)await tx.financeApprovalStep.updateMany({where:{entityType:'BILLING_REQUEST',entityId:billingRequestId,stepNo:2,status:'APPROVED'},data:{status:'PENDING',operatorId:null,actedAt:null,comment:'票据作废后等待重新开票'}});
   await tx.billingRequest.update({
     where: { id: billingRequestId },
     data: completed
@@ -713,6 +716,7 @@ export async function getInvoiceFormOptions(
     }),
     prisma.accountsReceivable.findMany({
       where: {
+        status:{not:'CANCELLED'},
         customerId: { not: null },
         customer: { deletedAt: null, ...receivableCustomerScope },
       },
@@ -1609,6 +1613,7 @@ export async function setInvoiceStatus(
       return { ok: false, error: "仅已开具的 Invoice 可以作废" };
     }
     const updated = await prisma.$transaction(async (tx) => {
+      if(status==='VOID')await retireUnpaidInvoiceReceivable(tx,id);
       const result = await tx.invoice.updateMany({
         where: {
           id,
@@ -1632,6 +1637,8 @@ export async function setInvoiceStatus(
           { id: issuedInvoice.id, invoiceNo: issuedInvoice.invoiceNo },
         );
       } else {
+        await tx.domesticInvoiceDocument.updateMany({where:{invoiceId:id},data:{voidedAt:new Date()}});
+        await tx.financeAuditLog.create({data:{entityType:'INVOICE',entityId:id,action:'VOID_INVOICE',actorId:session.userId,fromStatus:'ISSUED',toStatus:'VOID',note:'票据作废，无收款应收同步撤销，历史保留'}});
         await refreshBillingRequestStatus(
           tx,
           existing.billingRequestId,
@@ -1645,6 +1652,7 @@ export async function setInvoiceStatus(
     }
     revalidatePath("/invoices");
     revalidatePath(`/invoices/${id}`);
+    revalidatePath('/finance/workbench');
     return { ok: true, id, invoiceNo: existing.invoiceNo };
   } catch (error) {
     return { ok: false, error: errorMessage(error) };
@@ -1661,17 +1669,24 @@ export async function softDeleteInvoice(
       select: { id: true, invoiceNo: true, status: true },
     });
     if (!existing) return { ok: false, error: "Invoice 不存在" };
-    if (existing.status !== "DRAFT") {
+    if (!["DRAFT","VOID"].includes(existing.status)) {
       return { ok: false, error: "已开具的 Invoice 请使用作废，不可删除" };
     }
-    const deleted = await prisma.invoice.updateMany({
-      where: { id, deletedAt: null, status: "DRAFT", ...invoiceScope(session) },
-      data: { deletedAt: new Date(), invoiceNo: deletedInvoiceNumber(existing.invoiceNo, existing.id), pdfUrl: null },
+    const deleted = await prisma.$transaction(async tx=>{
+      if(existing.status==='VOID')await retireUnpaidInvoiceReceivable(tx,id);
+      const result=await tx.invoice.updateMany({
+        where:{id,deletedAt:null,status:existing.status,...invoiceScope(session)},
+        data:{deletedAt:new Date(),invoiceNo:existing.status==='DRAFT'?deletedInvoiceNumber(existing.invoiceNo,existing.id):existing.invoiceNo,pdfUrl:null},
+      });
+      if(result.count!==1)throw new Error('票据状态已变化，请刷新后重试。');
+      await tx.financeAuditLog.create({data:{entityType:'INVOICE',entityId:id,action:'DELETE_INVOICE',actorId:session.userId,note:'软删除票据，原始记录及审计保留',metadata:JSON.stringify({invoiceNo:existing.invoiceNo,status:existing.status})}});
+      return result;
     });
     if (deleted.count !== 1) {
       return { ok: false, error: "Invoice 状态已变更，请刷新后重试" };
     }
     revalidatePath("/invoices");
+    revalidatePath('/finance/workbench');
     return { ok: true, id, invoiceNo: existing.invoiceNo };
   } catch (error) {
     return { ok: false, error: errorMessage(error) };

@@ -222,7 +222,7 @@ export function InvoiceListClient({
                           作废
                         </button>
                       )}
-                      {canManage && invoice.status === "DRAFT" && (
+                      {canManage && ["DRAFT","VOID"].includes(invoice.status) && (
                         <button
                           type="button"
                           onClick={() => remove(invoice.id)}

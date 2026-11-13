@@ -1,5 +1,14 @@
 # Thrive Hub Handover
 
+## 2026-11-13 作废票据/应收/申请删除联动（用户要求提交推送，手动部署）
+
+- 用户要求AM每月5号提醒追加及时提交开票申请，已补通知正文；不补发历史真实消息。
+- 根因：Invoice作废仅改status、未撤销AR；申请删除对所有未软删票据一刀切阻止（包含VOID）；国内归档检查也包含VOID且CN申请号重复。新增invoiceVoidLifecycle统一校验有效核销、AR到账/日期、共享有效票据，只有无事实才将AR.status置CANCELLED，不删除金额、原件或财务历史。作废事务同步AR、国内voidedAt和审计，未完成申请财务处理step重开PENDING。
+- 草稿/作废票据可软删，已开具仍要求先作废；保留作废票号。删除申请事务再次检查有效票据并处理旧VOID对应无收款AR，保留审计、CAS及历史，不物理清理生产记录。工作台应收仅显示有效已开具票据对应款项，撤销AR不再可选/可登记到账。国内重开允许旧VOID并生成R序号避免原编号冲突。
+- 新scripts/invoice-void-lifecycle-test.ts及invoice-void-actions-test.ts使用全新虚构隔离副本，验证无收款AR撤销/有到账及共享票据保护/历史金额保留/提醒文案；真实action链验证有效票据阻止申请删除、作废重开财务处理步骤、申请取消及票据软删审计；国内归档POST用现场生成虚构PDF验证旧VOID不阻止重开且R2编号无冲突，均通过。仅mock身份/权限/框架边界，不代表浏览器点击验收；独立typecheck通过。没有Schema/migration变化。
+- 用户明确要求只commit/push并提供完整手动部署命令，不代部署、不执行生产记录清理。只读确认生产5ce98a1、最新每日备份2026-11-13 03:01:47 +0800 integrity=ok。没有生产pull/stop/build/迁移/重启或真实通知。仍须用户上线验收；不提交私有配置、数据库、output及无关临时文件。通用部署检查双库存在，停PM2确认stopped后build自动备份/迁移，成功后restart/login200；勿复用首次迁移专用deploy-finance-am.sh。
+- 最终next build在隔离主库及临时项目库、FEISHU_NOTIFY_ENABLED=false下通过：编译24.5分钟、87/87页面、exit0。独立typecheck通过（构建内置类型/lint跳过不代替独立检查），Browserslist数据过期警告不影响本次构建。未完成浏览器视觉/点击验收。
+
 ## 2026-11-12 AM交互位置调整（本地完成，未提交/未发布）
 
 - 用户随后明确要求commit/push并手动部署。发布前只读确认生产c103c07、80迁移最新、AM cron已有1条；本次无新增迁移，不能重复使用首次迁移专用deploy-finance-am.sh（其4新表空表断言不适用于后续发布）。使用通用停PM2→build自动备份→成功restart流程，保留既有env/cron/业务数据。最近每日备份2026-11-12 03:01:55 +0800完整性正常。仅提交AM相关组件/页面/测试/本交接，私有配置及测试数据库不提交。

@@ -42,7 +42,7 @@ export async function createCustomerReceipt(input: {
     if (invoiceMap.size !== new Set(invoiceIds).size) throw new Error("部分票据不存在或不属于该客户");
 
     const arIds = input.allocations.flatMap((row) => row.accountsReceivableId ? [row.accountsReceivableId] : []);
-    const receivables = arIds.length ? await tx.accountsReceivable.findMany({ where: { id: { in: arIds }, customerId: input.customerId } }) : [];
+    const receivables = arIds.length ? await tx.accountsReceivable.findMany({ where: { id: { in: arIds }, customerId: input.customerId,status:{not:'CANCELLED'} } }) : [];
     const arMap = new Map(receivables.map((row) => [row.id, row]));
     if (arMap.size !== new Set(arIds).size) throw new Error("部分应收账款不存在或不属于该客户");
 

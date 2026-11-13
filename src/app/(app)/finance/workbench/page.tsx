@@ -131,12 +131,12 @@ export default async function FinanceWorkbenchPage({
       ? prisma.accountsReceivable.findMany({
           where: {
             status: { in: ["NOT_DUE", "PARTIAL", "OVERDUE"] },
-            invoices: { some: { deletedAt: null } },
+            invoices: { some: { deletedAt: null,status:'ISSUED' } },
           },
           include: {
             customer: { select: { brandName: true } },
             invoices: {
-              where: { deletedAt: null },
+              where: { deletedAt: null,status:'ISSUED' },
               select: {
                 id: true,
                 invoiceNo: true,

@@ -67,7 +67,7 @@ export async function POST(
         customer:{select:{brandName:true}},
         lines: { orderBy: { sortOrder: "asc" } },
         manualItems: { orderBy: { sortOrder: "asc" } },
-        invoices: { where: { deletedAt: null }, take: 1 },
+        invoices: { where: { deletedAt: null,status:{not:'VOID'} }, take: 1 },
       },
     });
     if (!billing)
@@ -95,9 +95,12 @@ export async function POST(
     const allocated=allocateDomesticAmounts(sourceItems,netAmount,taxAmount,taxRate);
     const domesticLines = sourceItems.map((item,index) => ({ description:item.description,quantity:item.quantity,unitPrice:item.unitPrice,...allocated[index],serviceMonths:item.serviceMonths,sortOrder:item.sortOrder }));
     const invoice = await prisma.$transaction(async (tx) => {
+      const current=await tx.billingRequest.findUnique({where:{id:billing.id},select:{status:true}});
+      if(current?.status!=='PROCESSING'||await tx.invoice.count({where:{billingRequestId:billing.id,deletedAt:null,status:{not:'VOID'}}}))throw new DomesticUploadError('申请状态已变化或已经开票，请刷新后重试。',409);
+      const previousCount=await tx.invoice.count({where:{billingRequestId:billing.id}});
       const created = await tx.invoice.create({
         data: {
-          invoiceNo: `CN-${billing.requestNo}`,
+          invoiceNo: `CN-${billing.requestNo}${previousCount?`-R${previousCount+1}`:''}`,
           customerId: billing.customerId,
           contractId: billing.contractId,
           billingRequestId: billing.id,

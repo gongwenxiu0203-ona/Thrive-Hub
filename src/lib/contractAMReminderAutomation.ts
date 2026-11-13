@@ -14,7 +14,7 @@ export async function runContractAMReminders(now=new Date()){
         if(!assignment)return false;
         const key={contractId:assignment.contractId,targetUserId:assignment.userId,yearMonth:clock.yearMonth};
         if(await tx.contractAMMonthlyDispatch.findUnique({where:{contractId_targetUserId_yearMonth:key}}))return false;
-        const reminder=await tx.reminder.create({data:{targetId:assignment.userId,createdById:assignment.assignedById,title:`请确认客户付款情况：${assignment.contract.customer?.brandName||assignment.contract.contractNo}`,content:`${clock.yearMonth} AM月度提醒：请核实客户付款情况并跟进未到账款项。合同：${assignment.contract.contractNo}\n[[href:/contracts/${assignment.contractId}]]`,type:"AM_PAYMENT_CHECK",remindDate:now}});
+        const reminder=await tx.reminder.create({data:{targetId:assignment.userId,createdById:assignment.assignedById,title:`请确认客户付款情况：${assignment.contract.customer?.brandName||assignment.contract.contractNo}`,content:`${clock.yearMonth} AM月度提醒：请核实客户付款情况并跟进未到账款项，同时请及时提交开票申请。合同：${assignment.contract.contractNo}\n[[href:/contracts/${assignment.contractId}]]`,type:"AM_PAYMENT_CHECK",remindDate:now}});
         await tx.contractAMMonthlyDispatch.create({data:{...key,reminderId:reminder.id}});return true;
       });
       if(sent)created++;else skipped++;
