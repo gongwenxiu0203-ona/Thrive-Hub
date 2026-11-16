@@ -1,3 +1,5 @@
+import { OperationPermissionNotice } from "@/components/OperationPermissionNotice";
+
 export function PageHeader({
   title,
   description,
@@ -10,7 +12,10 @@ export function PageHeader({
   return (
     <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
       <div>
-        <h1 className="text-[26px] font-semibold leading-8 text-slate-900">{title}</h1>
+        <div className="flex items-start gap-1">
+          <h1 className="text-[26px] font-semibold leading-8 text-slate-900">{title}</h1>
+          <OperationPermissionNotice />
+        </div>
         {description && (
           <p className="mt-1.5 text-sm text-slate-500">{description}</p>
         )}

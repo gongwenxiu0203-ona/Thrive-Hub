@@ -55,9 +55,11 @@ function formatFileSize(bytes: number) {
 export function UploadPanel({
   batches,
   customers,
+  canDeleteBatch,
 }: {
   batches: Batch[];
   customers: CustomerOption[];
+  canDeleteBatch: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [transitionPending, startTransition] = useTransition();
@@ -235,7 +237,8 @@ export function UploadPanel({
   }
 
   function onDelete(id: string) {
-    if (!confirm("确认删除该批次？该批次下的所有销售记录将一并删除。")) return;
+    if (!canDeleteBatch) return;
+    if (!confirm("确认将该批次移入回收站？该批次下的销售记录将不再参与 BI 展示与统计，恢复批次后可重新显示。")) return;
     startTransition(async () => {
       try {
         await deleteBatch(id);
@@ -531,6 +534,8 @@ export function UploadPanel({
         <h2 className="mb-4 font-semibold text-slate-900">
           数据批次管理（{batches.length}）
         </h2>
+        <p className="mb-3 text-sm text-slate-600">删除批次：管理员和拥有“批量操作与数据清理”编辑及以上权限的内部员工可操作。批次移入回收站后，其数据不再参与统计。</p>
+        {!canDeleteBatch && <p className="mb-3 text-sm text-amber-800">当前账号无批次删除权限，请联系管理员检查该功能授权。</p>}
         {batches.length === 0 ? (
           <p className="py-6 text-center text-sm text-slate-400">
             暂无上传批次
@@ -555,7 +560,8 @@ export function UploadPanel({
                 </div>
                 <button
                   className="btn-danger btn-sm"
-                  disabled={busy}
+                  disabled={busy || !canDeleteBatch}
+                  title={canDeleteBatch ? "移入回收站" : "需要内部账号及 BI 数据管理编辑权限"}
                   onClick={() => onDelete(b.id)}
                 >
                   <Trash2 className="h-3.5 w-3.5" /> 删除批次

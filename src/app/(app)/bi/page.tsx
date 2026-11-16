@@ -14,6 +14,7 @@ import { AsinMappingPanel } from "./AsinMappingPanel";
 import { SalesDetailTable, type SalesDetailRecord } from "./SalesDetailTable";
 import { formatCurrencyWith, formatCurrency, getCurrencyCode, currencySymbol, formatNumber, formatDateTime, cn } from "@/lib/utils";
 import { requireSession } from "@/lib/session";
+import { hasBiPermission } from "@/lib/biAuthorization";
 import {
   buildSalesRecordWhereFromParams,
   csvFilterValues,
@@ -1033,6 +1034,8 @@ function buildPageUrl(
 }
 
 async function UploadTab() {
+  const session = await requireSession();
+  const canDeleteBatch = isStaff(session.role) && await hasBiPermission(session.userId, "bi.manage", "EDIT");
   const [batches, customers] = await Promise.all([
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (prisma.salesBatch.findMany as any)({
@@ -1052,6 +1055,7 @@ async function UploadTab() {
   ]);
   return (
     <UploadPanel
+      canDeleteBatch={canDeleteBatch}
       batches={batches.map((b) => ({
         id: b.id,
         fileName: b.fileName,

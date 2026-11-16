@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { OperationPermissionNotice } from "@/components/OperationPermissionNotice";
 import { Fragment, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -459,7 +460,10 @@ export function FinanceWorkbenchClient({
           <p className="text-sm font-medium text-brand-600">
             Finance Workbench
           </p>
-          <h1 className="text-2xl font-bold text-slate-900">财务工作台</h1>
+          <div className="flex items-start gap-1">
+            <h1 className="text-2xl font-bold text-slate-900">财务工作台</h1>
+            <OperationPermissionNotice />
+          </div>
           <p className="mt-1 text-sm text-slate-500">
             统一处理开票、客户收款核销、渠道凭证与付款。
           </p>

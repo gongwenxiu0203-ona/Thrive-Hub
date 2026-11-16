@@ -1,5 +1,16 @@
 # Thrive Hub Handover
 
+## 2026-11-16 BI删除权限及模块权限说明（本地未提交/未部署）
+
+- 后续按用户要求：取消AppShell整块说明栏，OperationPermissionNotice改为小问号tooltip，通过PageHeader放在各模块首页标题右上侧；财务工作台自定义标题单独接入。内容Portal到body固定定位并限制视口宽高，支持hover/键盘聚焦/点击打开、移出/失焦/Escape/点外关闭。不修改权限或数据库；详情页没有共享PageHeader的不会自动插入图标。
+
+- 用户明确要求内部员工也可删除BI批次、清理BI数据。原批次删除/清理要求bi.manage MANAGE，默认USER只有EDIT。两入口现改为内部ADMIN/USER且bi.manage EDIT及以上；显式READ/NONE继续拒绝，品牌/渠道账号即使误授功能也不放开。不改角色表/用户覆盖/Schema/迁移。
+- 上传批次删除按钮由服务端按实际权限传canDeleteBatch，无权限禁用并显示说明；确认文案说明软删除进回收站、统计排除、可恢复。清理仍要求筛选、预览令牌/数量校验、审计及软删除。没有执行任何真实BI删除/清理。
+- OperationPermissionNotice经PageHeader及财务工作台自定义标题，在BI、合同/模板、Invoice、财务、回收站、联盟资源、管理员模块显示小问号与具体管理员专属事项及条件限制；非每个按钮逐一加标签。Impeccable沿用现有紧凑说明样式；用户明确暂不更新技能。无授权放宽除本次BI需求。
+- 独立typecheck、diff check及bi-delete-access-test通过（权限默认/显式禁用与服务端保护接线断言，不是实际删除或HTTP/浏览器验收）。未运行完整build/浏览器测试、未commit/push/生产部署；无关私有配置/临时文件保留。后续若要求逐按钮标识，需要继续把模块级说明细化到操作控件。
+- 发布收尾：用户明确要求commit/push、自己手动部署。只读生产当前1b91836，最新每日备份2026-11-16 03:01:45 +0800、integrity=ok，无本次生产写入。npm run build使用隔离engine.db及临时projects.db、关闭飞书；首次被缺少外置PROJECT_DATA_BACKUP_DIR安全检查拦截，补本地临时备份目录后重跑，两库备份成功且主库80/项目3迁移均无待执行。没有新增迁移，扫描器提及DROP仅为已执行历史迁移，不代表本次新迁移。
+- 最终完整npm run build通过（编译6.1分钟、87/87页、exit0），独立typecheck及bi-delete-access-test通过。没有执行实际删除验收，也未做鼠标悬浮视觉验收。仅发布9个相关文件，不包含私有设置/数据库/临时脚本。生产手动部署沿用双库存在检查、停PM2确认stopped、build自动备份、成功后restart及login200；不要复用首次AM迁移部署脚本，不执行任何业务清理SQL。
+
 ## 2026-11-13 作废票据/应收/申请删除联动（用户要求提交推送，手动部署）
 
 - 用户要求AM每月5号提醒追加及时提交开票申请，已补通知正文；不补发历史真实消息。

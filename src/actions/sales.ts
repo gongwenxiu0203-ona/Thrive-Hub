@@ -100,7 +100,8 @@ async function salesWhereFromFilterParams(
 
 export async function deleteBatch(batchId: string) {
   const session = await requireSession();
-  await requireBi(session.userId, "MANAGE");
+  if (session.role !== "ADMIN" && session.role !== "USER") throw new Error("仅管理员或内部员工可以删除 BI 批次");
+  await requireBi(session.userId, "EDIT");
   const batch = await prisma.salesBatch.findFirst({
     where: {
       id: batchId,

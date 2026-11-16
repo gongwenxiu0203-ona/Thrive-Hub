@@ -53,7 +53,7 @@ export async function POST(req: Request) {
   if (!isStaff(session.role)) {
     return NextResponse.json({ error: "无权清理 BI 数据" }, { status: 403 });
   }
-  if (!(await hasBiPermission(session.userId, "bi.manage", "MANAGE"))) {
+  if (!(await hasBiPermission(session.userId, "bi.manage", "EDIT"))) {
     return NextResponse.json({ error: "无权清理 BI 数据" }, { status: 403 });
   }
 
