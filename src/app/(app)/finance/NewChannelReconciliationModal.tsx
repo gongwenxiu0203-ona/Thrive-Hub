@@ -11,6 +11,8 @@ import {
 import { Modal } from "@/components/ui/Modal";
 
 export type ChannelSplitRuleOption = {
+  sourceContractId?: string | null;
+  sourceContractNo?: string | null;
   id: string;
   ruleType: "A" | "B";
   splitEndDate: string;
@@ -22,6 +24,7 @@ export type ChannelSplitRuleOption = {
 };
 
 export type ChannelReconciliationContractOption = {
+  ruleError?: string | null;
   id: string;
   contractNo: string;
   startDate: string | null;
@@ -76,8 +79,8 @@ export function NewChannelReconciliationModal({
   const selectable = useMemo(() => customers.filter((customer) => customer.channelUser), [customers]);
   const selected = selectable.find((customer) => customer.id === customerId);
   const selectedContract = selected?.contracts.find((contract) => contract.id === contractId);
-  const effectiveRule = selected?.splitRule ?? selectedContract?.splitRule ?? null;
-  const ruleSource = selected?.splitRule ? "\u5ba2\u6237\u89c4\u5219" : selectedContract?.splitRule ? "\u5408\u540c\u89c4\u5219" : null;
+  const effectiveRule = selectedContract?.splitRule ?? null;
+  const ruleSource = effectiveRule ? (effectiveRule.sourceContractId ? `合同管理 · ${effectiveRule.sourceContractNo ?? effectiveRule.sourceContractId}` : '客户管理 · 客户默认规则') : null;
 
   function applyContract(
     contract: ChannelReconciliationContractOption | undefined,
@@ -85,7 +88,7 @@ export function NewChannelReconciliationModal({
   ) {
     setContractId(contract?.id ?? "");
     setPeriodStart(dateValue(contract?.startDate));
-    setPeriodEnd(dateValue(customer?.splitRule?.splitEndDate ?? contract?.splitRule?.splitEndDate));
+    setPeriodEnd(dateValue(contract?.splitRule?.splitEndDate));
   }
 
   function selectCustomer(nextCustomerId: string) {
@@ -107,6 +110,7 @@ export function NewChannelReconciliationModal({
 
   async function create(confirmDuplicate = false) {
     if (!selected?.channelUser) return setError("该客户尚未关联已审核渠道商。");
+    if (selectedContract?.ruleError) return setError(selectedContract.ruleError);
     if (!effectiveRule) return setError("该客户尚未配置分账规则。");
     if (!selectedContract) return setError("请选择关联合同。");
     if (!periodStart || !periodEnd) return setError("请填写分账开始和结束时间。");
@@ -249,10 +253,11 @@ export function NewChannelReconciliationModal({
                 {!selected.channelUser
                   ? "客户未关联有效渠道商，暂不能创建。"
                   : !effectiveRule
-                    ? "客户未配置分账规则，暂不能创建。"
+                    ? (selectedContract?.ruleError ?? "尚无生效规则。请先到合同详情设置：初始为 A 基础规则 USD 4,400 / 15% / 25%，可修改数值或切换 B，授权保存后再生成分账。")
                     : "客户暂无有效合同，暂不能创建。"}
               </div>
             )}
+            {selectedContract && !effectiveRule && <a className="mt-2 inline-block text-sm text-brand-700 underline" href={`/contracts/${selectedContract.id}`} target="_blank" rel="noreferrer">到合同详情设置分账规则</a>}
           </section>
 
           <section className="rounded-xl border border-slate-200 p-4">

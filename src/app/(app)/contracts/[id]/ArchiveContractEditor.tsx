@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { FileUp, Pencil } from "lucide-react";
 import { updateArchiveContract } from "@/actions/contracts";
 import { Modal } from "@/components/ui/Modal";
+import { ChannelContractRuleFields, type ChannelContractRuleInitial } from '@/components/ChannelContractRuleFields';
 
 type InitialValues = {
   startDate: string;
@@ -14,6 +15,7 @@ type InitialValues = {
   partyBPhone?: string;
   partyBEmail?: string;
   fixedFeeRate?: string;
+  splitRule?: ChannelContractRuleInitial | null;
 };
 
 export function ArchiveContractEditor({ contractId, type, initial }: {
@@ -72,7 +74,8 @@ export function ArchiveContractEditor({ contractId, type, initial }: {
         </div>
         {type === "CHANNEL" ? <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
           <p className="text-sm font-medium text-slate-800">联盟运营佣金渠道合作费</p>
-          <p className="mt-1 text-sm text-slate-600">低于 USD 4,400 按 15%；达到或超过 USD 4,400 按 25%。</p>
+          <ChannelContractRuleFields initial={initial.splitRule} />
+          <p className="mt-2 text-xs text-slate-600">没有分账设置权限时只保存待确认合同文字，不会自动启用。已有历史业务的规则修改须遵循后台保护校验。</p>
           <label className="mt-4 block space-y-2 text-sm font-medium text-slate-700">重新上传已签署原件（可选）
             <input name="file" type="file" className={`block w-full rounded-lg border bg-white px-3 py-2 text-sm ${uploadIntent ? "border-purple-400 ring-2 ring-purple-100" : "border-slate-200"}`} />
           </label>

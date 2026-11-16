@@ -1,5 +1,17 @@
 # Thrive Hub Handover
 
+## 2026-11-16 渠道合同自定义A/B与规则来源（本地未提交/未部署）
+
+- 用户随后要求commit/push并完整手动部署代码，不代部署。只读生产24921d9，最新每日备份2026-11-16 03:01:45 +0800 integrity=ok。发布构建使用engine/临时projects隔离库并关闭飞书，双库预构建备份完成，80+3迁移均无待执行。只提交本次相关源码/测试/交接，保留私有配置及临时文件；手动部署须停PM2确认stopped后再build，成功后重启/login200，不执行业务清理或规则回填脚本。
+- 本轮发布最终npm run build通过：编译6.0分钟、87/87页、exit0；独立typecheck、四组纯/源码回归及真实SQLite选择查询/integrity/FK复验通过。构建内置跳过类型/lint不代替独立typecheck；没有真实付款、自动核销全链路或浏览器视觉验收。25个相关文件提交发布，未代部署生产。
+
+- 用户确认A到账门槛整档/B确认GMV累进阶梯，合同优先客户兜底；补确认同客户唯一有效CHANNEL合同自动匹配、多份冲突暂停。无规则仅表单默认A4400/15/25可改或切B，需授权保存生效，不能无规则自动产生付款依据。没有Schema/migration变化。
+- channelRuleInput统一严格解析，B从0连续覆盖至∞且比例0..1。上传/归档编辑、合同列表/详情、共用客户/合同规则modal均接自定义；合同规则不再因客户有默认而禁止保存。无授权归档仅pending文本及CHANNEL_RULE_JSON机器载荷，展示剥离载荷、编辑/激活保留pending值，不能隐式激活。
+- channelRuleSelection优先业务合同直接有效rule→同客户唯一有效已签署CHANNEL合同rule→客户默认。自动释放按完整对账周期；手工新建/重绑按业务合同开始日匹配，范围截到规则/业务合同/规则来源合同最早结束日，尚不支持手工指定任意起始月份匹配；不要宣称全周期动态匹配。冲突不猜选。
+- 自动同合同/周期/费用流已有绑定时后续到账继续旧rule，多个绑定报异常，不因新增合同拆散累计。已有任何分账账单引用的规则参数/截止日期保守冻结（不是仅已付款），暂不支持版本化修改；upsert及archive事务重读并发保护。重绑已渠道确认/审核/付款/录入周期拦截。历史不自动回填、重算或换规则。
+- 渠道分账guide标注优先级/唯一匹配/周期边界；详情按实际绑定splitRule.contractId显示合同管理+来源合同号或客户管理默认，区分业务合同与来源合同；主新建候选及详情候选共用解析器，无规则给合同设置入口。无绑定MANUAL/历史明确未知，不推测来源。
+- 验证：独立typecheck、channel-rule-input、channel-rule-selection(A边界/B金额)、channel-rule-selection-db（新虚构SQLite副本，真实查询/事务/来源/冲突/终止删除兜底/integrity/FK）、channel-archive-permission及channel-reconciliation-guide均通过；diff check通过。首次DB测试遗漏虚构createdBy已修复并以全新副本重跑成功。未做全build、真实上传/自动到账全链路或浏览器视觉验收；未生产读写、未commit/push。多agent早期exec yield误判导致延迟，后已通过wait恢复；不把只读审查当作功能验收。
+
 ## 2026-11-16 BI删除权限及模块权限说明（本地未提交/未部署）
 
 - 后续按用户要求：取消AppShell整块说明栏，OperationPermissionNotice改为小问号tooltip，通过PageHeader放在各模块首页标题右上侧；财务工作台自定义标题单独接入。内容Portal到body固定定位并限制视口宽高，支持hover/键盘聚焦/点击打开、移出/失焦/Escape/点外关闭。不修改权限或数据库；详情页没有共享PageHeader的不会自动插入图标。

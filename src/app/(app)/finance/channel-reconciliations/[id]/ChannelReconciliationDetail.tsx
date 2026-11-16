@@ -66,6 +66,8 @@ export interface DetailRecord {
   commissionPushedToChannel: boolean;
   splitRule: {
     id: string;
+    sourceContractId: string | null;
+    sourceContractNo: string | null;
     ruleType: string;
     splitEndDate: string;
     fixedFeeRate: number;
@@ -1923,15 +1925,18 @@ export function ChannelReconciliationDetail({
           <p className="mt-1 text-[11px] text-slate-400">
             {record.splitRule?.ruleType === "B"
               ? `B 阶梯（${tieredRules.length} 档）`
-              : `A 单一比例 ${fmtPct(record.splitRule?.commissionRate ?? record.commissionShareRate)}`}
+              : record.splitRule ? `A 到账佣金阈值整档选比例` : `手工/历史比例 ${fmtPct(record.commissionShareRate)}`}
           </p>
         </div>
       </div>
 
       {/* Rule snapshot */}
+      {!record.splitRule && <p className="rounded-lg border border-slate-200 p-4 text-sm text-slate-600">规则来源：此手工／历史记录未绑定生效规则，按记录自身金额核对；不能将当前客户或合同规则当作历史实际来源。</p>}
       {record.splitRule && (
         <div className="card p-4">
-          <p className="mb-2 text-sm font-semibold text-slate-700">分账规则</p>
+          <p className="mb-2 text-sm font-semibold text-slate-700">实际绑定的分账规则</p>
+          <p className="mb-2 text-sm text-slate-700">规则来源：{record.splitRule.sourceContractId ? `合同管理 · ${record.splitRule.sourceContractNo ?? record.splitRule.sourceContractId}` : "客户管理 · 客户默认规则"}</p>
+          <p className="mb-3 text-xs text-slate-600">新生成按合同规则优先、客户默认兜底。此处展示该记录实际绑定的规则，业务合同可能与规则来源合同不同；历史记录不会自动切换到当前新规则。</p>
           <div className="grid gap-3 text-sm sm:grid-cols-3">
             <div>
               <p className="text-[11px] text-slate-400">类型</p>

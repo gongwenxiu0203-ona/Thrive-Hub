@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { FileUp, Upload } from "lucide-react";
 import { uploadChannelContract } from "@/actions/contracts";
 import { PARTY_B_COMPANIES } from "@/lib/partyB";
+import { ChannelContractRuleFields } from "@/components/ChannelContractRuleFields";
 
 type CustomerOption = { id: string; brandName: string; channelAccount?: { id: string; name: string; email: string } | null };
 
@@ -85,7 +86,7 @@ export function ChannelUploadForm({ customers, users, currentUserId, presetCusto
     <section className="space-y-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
       <div><h2 className="text-sm font-semibold text-slate-800">返佣分账规则</h2><p className="mt-1 text-sm text-slate-600">请按合同原件录入。没有分账设置权限也可保存合同；此时比例仅作为合同记录，须由管理员或已获分账权限的内部员工另行确认后才生效。</p></div>
       <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_180px] sm:items-end"><div><p className="text-sm font-medium text-slate-700">固定月度服务费渠道合作费</p><p className="mt-1 text-xs text-slate-500">按品牌方已确认的月度服务费计算</p></div><label className="space-y-1 text-xs font-medium text-slate-500">乙方比例 *<div className="flex items-center gap-2"><input name="fixedFeeRate" className="input bg-white" type="number" min="0" max="100" step="0.01" value={fixedFeeRate} onChange={(event) => setFixedFeeRate(event.target.value)} /><span>%</span></div></label></div>
-      <div className="border-t border-slate-200 pt-4"><p className="text-sm font-medium text-slate-700">联盟运营佣金渠道合作费</p><div className="mt-3 grid gap-3 sm:grid-cols-3"><label className="space-y-1 text-xs font-medium text-slate-500">佣金到账阈值（USD）<input className="input bg-white" value="4400" readOnly /></label><label className="space-y-1 text-xs font-medium text-slate-500">低于阈值的乙方比例<input className="input bg-white" value="15%" readOnly /></label><label className="space-y-1 text-xs font-medium text-slate-500">达到或超过阈值的乙方比例<input className="input bg-white" value="25%" readOnly /></label></div><p className="mt-3 rounded-md bg-white px-3 py-2 text-xs text-slate-600">当前规则：低于 USD 4,400 按 15%；达到或超过 USD 4,400 按 25%。</p></div>
+      <ChannelContractRuleFields />
     </section>
 
     <label className="flex min-h-40 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-200 bg-slate-50 p-6 text-center hover:border-brand-300"><Upload className="mb-3 h-7 w-7 text-slate-400" /><span className="text-sm font-medium text-slate-700">{file?.name ?? "点击上传已签署的渠道商返佣合同原件"}</span><span className="mt-1 text-xs text-slate-500">保存后直接标记为签署完成，并保留原件下载</span><input name="file" type="file" className="hidden" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /></label>

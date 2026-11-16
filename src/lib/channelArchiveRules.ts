@@ -6,9 +6,12 @@ export function shouldUpdateArchivedSplit(canConfigure: boolean, hasExistingRule
   // Ordinary archive edits are never an implicit approval of a pending rule.
   return canConfigure && hasExistingRule;
 }
-export function archivedSplitTerms(percent: number, active: boolean): string {
+export function archivedSplitTerms(percent: number, active: boolean, ruleDescription = '低于 USD 4,400 按 15%；达到或超过 USD 4,400 按 25%', ruleValues?: object): string {
   if (!Number.isFinite(percent) || percent < 0 || percent > 100) throw new Error("乙方比例无效");
-  return `合同归档记录（${active ? "分账已授权设置" : "待有分账权限的人员确认，非生效分账规则"}）；固定月度服务费渠道合作费：乙方 ${percent}%；联盟运营佣金渠道合作费：低于 USD 4,400 按 15%；达到或超过 USD 4,400 按 25%`;
+  return `合同归档记录（${active ? "分账已授权设置" : "待有分账权限的人员确认，非生效分账规则"}）；固定月度服务费渠道合作费：乙方 ${percent}%；联盟运营佣金渠道合作费：${ruleDescription}${ruleValues ? '\nCHANNEL_RULE_JSON:'+JSON.stringify(ruleValues) : ''}`;
+}
+export function archivedRuleValues(terms: string | null | undefined): import('./channelRuleInput').ChannelRuleValues | null {
+  try { const value=terms?.split('\nCHANNEL_RULE_JSON:')[1]; return value ? JSON.parse(value) : null; } catch { return null; }
 }
 export function archivedFixedFeePercent(terms: string | null | undefined): number | null {
   if (!terms?.startsWith("合同归档记录（")) return null;

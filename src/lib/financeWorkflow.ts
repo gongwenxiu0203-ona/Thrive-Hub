@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { resolveApplicableChannelRule } from '@/lib/channelRuleSelection';
 import type { Prisma } from "@prisma/client";
 import { calcArRiskLevel, calcArStatus } from "@/lib/financeOperations";
 import { calculateShareAmount, calcTieredCommission, formatShanghaiDay, parseTieredRules, selectBasicCommissionRate } from "@/lib/channelSplit";
@@ -138,8 +139,12 @@ async function releaseChannelPayableForAllocation(tx: Prisma.TransactionClient, 
     if (!reconciliation.customer.channelUserId) return auditException("客户未关联渠道商");
     const channelUser = await tx.user.findFirst({ where: { id: reconciliation.customer.channelUserId, role: "CHANNEL", status: "APPROVED" }, select: { id: true } });
     if (!channelUser) return auditException("关联渠道商不存在或未审核通过");
-    if (reconciliation.customer.splitRules.length > 1) return auditException("客户存在多条默认分账规则，无法确定应使用哪一条");
-    const rule = reconciliation.customer.splitRules[0] ?? reconciliation.contract.splitRule;
+    let rule;
+    const boundRecords = await tx.channelReconciliation.findMany({where:{customerId:reconciliation.customerId,contractId:reconciliation.contractId,recordMode:'RULE_DRIVEN',deletedAt:null,periods:{some:{streamType:input.feeType,periodStart:reconciliation.periodStart,periodEnd:reconciliation.periodEnd}}},include:{splitRule:true}});
+    const boundRuleIds = new Set(boundRecords.map(row=>row.splitRuleId));
+    if (boundRuleIds.size > 1 || (boundRecords.length && !boundRecords[0].splitRule)) return auditException('同一合同周期已绑定多个或缺失的分账规则，请人工核对，不能继续拆分到账。');
+    try { rule = boundRecords.length ? boundRecords[0].splitRule : await resolveApplicableChannelRule(tx, { customerId: reconciliation.customerId, businessContractId: reconciliation.contractId, periodStart: reconciliation.periodStart, periodEnd: reconciliation.periodEnd }); }
+    catch (error) { return auditException(error instanceof Error ? error.message : '分账规则匹配失败'); }
     if (!rule) return auditException("客户及合同均未配置有效分账规则");
     if (!reconciliation.contract.startDate) return auditException("合同缺少开始日期");
     const rangeEnd = rule.splitEndDate ?? reconciliation.contract.endDate;

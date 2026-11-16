@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import {parseChannelRuleForm,describeChannelRule} from '../src/lib/channelRuleInput';
+import {archivedRuleValues,archivedSplitTerms} from '../src/lib/channelArchiveRules';
+const form=(values:Record<string,string|undefined>)=>{const fd=new FormData();for(const [k,v] of Object.entries(values))if(v!==undefined)fd.set(k,v);return fd;};
+assert.equal(parseChannelRuleForm(form({})).commissionThresholdAmount,4400);
+const custom=parseChannelRuleForm(form({commissionThresholdAmount:'5200',commissionBelowPercent:'12.5',commissionAtOrAbovePercent:'32'}));
+assert.equal(custom.commissionBelowRate,.125);
+assert.equal(custom.commissionAtOrAboveRate,.32);
+assert.match(describeChannelRule(custom),/5200/);
+const b=parseChannelRuleForm(form({splitRuleType:'B',tieredRules:JSON.stringify([{gmvMin:0,gmvMax:10,rate:.1},{gmvMin:10,gmvMax:null,rate:.2}])}));
+assert.equal(b.ruleType,'B');assert.deepEqual(archivedRuleValues(archivedSplitTerms(30,false,describeChannelRule(b),b)),b);
+for(const values of [{commissionBelowPercent:'101'},{commissionThresholdAmount:''},{splitRuleType:'C'},{splitRuleType:'B',tieredRules:'[{"gmvMin":1,"gmvMax":null,"rate":0.2}]'}])assert.throws(()=>parseChannelRuleForm(form(values)));
+console.log('PASS custom A/B parsing, invalid inputs and pending archive roundtrip; no DB writes.');

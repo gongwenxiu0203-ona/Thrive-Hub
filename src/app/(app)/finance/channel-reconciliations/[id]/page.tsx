@@ -67,7 +67,7 @@ export default async function ChannelReconciliationDetailPage({
       customer: { select: { id: true, brandName: true } },
       contract: { select: { id: true, contractNo: true } },
       channelUser: { select: { id: true, name: true } },
-      splitRule: true,
+      splitRule: { include: { contract: { select: { id: true, contractNo: true } } } },
       periods: {
         orderBy: { periodIndex: "asc" },
         include: {
@@ -165,27 +165,31 @@ export default async function ChannelReconciliationDetailPage({
           splitRules: { where: { contractId: null }, take: 1, select: { splitEndDate: true } },
           contracts: {
             where: { status: "COMPLETED", deletedAt: null },
-            select: { id: true, contractNo: true, startDate: true, splitRule: { select: { splitEndDate: true } } },
+            select: { id: true, contractNo: true, startDate: true, endDate: true, splitRule: { select: { splitEndDate: true } } },
             orderBy: { createdAt: "desc" },
           },
         },
         orderBy: { brandName: "asc" },
       })
     : [];
+  const ruleOptions = await Promise.all(adminCustomerOptions.map(async customer => ({
+    id: customer.id, brandName: customer.brandName,
+    splitEndDate: toShanghaiDateString(customer.splitRules[0]?.splitEndDate ?? null),
+    contracts: await (async () => {
+      const { selectApplicableChannelRule } = await import('@/lib/channelRuleSelection');
+      const rules = await prisma.channelSplitRule.findMany({where:{customerId:customer.id},include:{contract:{select:{id:true,contractNo:true,status:true,deletedAt:true,startDate:true,endDate:true,type:true}}}});
+      return customer.contracts.map(contract => {
+      let selected = null;
+      try { if (contract.startDate) selected = selectApplicableChannelRule(rules, { businessContractId: contract.id, periodStart: contract.startDate }); } catch { /* Ambiguity is rejected again by create API; never guess. */ }
+      const end=selected ? new Date(Math.min(selected.splitEndDate.getTime(), ...(contract.endDate?[contract.endDate.getTime()]:[]), ...(selected.contract?.endDate?[selected.contract.endDate.getTime()]:[]))) : null;
+      return { id: contract.id, contractNo: contract.contractNo, startDate: toShanghaiDateString(contract.startDate), splitEndDate: toShanghaiDateString(end) };
+      });
+    })(),
+  })));
   return (
     <ChannelReconciliationDetail
       isAdmin={canManage}
-      adminCustomerOptions={adminCustomerOptions.map((customer) => ({
-        id: customer.id,
-        brandName: customer.brandName,
-        splitEndDate: toShanghaiDateString(customer.splitRules[0]?.splitEndDate ?? null),
-        contracts: customer.contracts.map((contract) => ({
-          id: contract.id,
-          contractNo: contract.contractNo,
-          startDate: toShanghaiDateString(contract.startDate),
-          splitEndDate: toShanghaiDateString(customer.splitRules[0]?.splitEndDate ?? contract.splitRule?.splitEndDate ?? null),
-        })),
-      }))}
+      adminCustomerOptions={ruleOptions}
       isStaff={isStaff(session.role)}
       isChannel={session.role === "CHANNEL"}
       record={{
@@ -223,6 +227,8 @@ export default async function ChannelReconciliationDetailPage({
         commissionPushedToChannel: rec.commissionPushedToChannel,
         splitRule: rec.splitRule ? {
           id: rec.splitRule.id,
+          sourceContractId: rec.splitRule.contractId,
+          sourceContractNo: rec.splitRule.contract?.contractNo ?? null,
           ruleType: rec.splitRule.ruleType,
           splitEndDate: toShanghaiDateString(rec.splitRule.splitEndDate)!,
           fixedFeeRate: rec.splitRule.fixedFeeRate,

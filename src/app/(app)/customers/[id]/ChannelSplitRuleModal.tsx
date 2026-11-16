@@ -39,19 +39,21 @@ export function ChannelSplitRuleModal({
   canDelete,
   existing,
   inheritedCustomerRule = null,
+  initialDraft = null,
 }: {
   customerId: string;
   contractId?: string;
   canDelete: boolean;
   existing: ExistingRule | null;
   inheritedCustomerRule?: ExistingRule | null;
+  initialDraft?: Omit<ExistingRule, 'id'> | null;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const isInherited = Boolean(contractId && inheritedCustomerRule);
-  const displayedRule = inheritedCustomerRule ?? existing;
+  const isInherited = false; // Customer defaults never prevent an authorized contract override.
+  const displayedRule = existing ?? initialDraft ?? inheritedCustomerRule;
 
   const initialTiers: Tier[] = (() => {
     if (!displayedRule) return [{ gmvMin: 0, gmvMax: 100000, rate: 0.15 }, { gmvMin: 100000, gmvMax: null, rate: 0.2 }];

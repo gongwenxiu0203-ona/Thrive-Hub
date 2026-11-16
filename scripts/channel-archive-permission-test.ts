@@ -26,7 +26,7 @@ assert.ok(upload.includes('if (canActivateSplit) await tx.channelSplitRule.creat
 const edit=source.slice(source.indexOf("export async function updateArchiveContract"),source.indexOf("export async function",source.indexOf("export async function updateArchiveContract")+25));
 assert.ok(edit.includes('shouldUpdateArchivedSplit(canActivateSplit, !!current.splitRule)'));
 assert.ok(!edit.includes('tx.channelSplitRule.create'));
-assert.ok(edit.includes('archivedSplitTerms(fixedFeePercent, false)'));
+assert.ok(edit.includes('archivedSplitTerms(fixedFeePercent, false, describeChannelRule'));
 assert.ok(edit.includes('!canActivateSplit && current.splitRule'));
 const detail=readFileSync("src/app/(app)/contracts/[id]/page.tsx","utf8");
 assert.ok(detail.includes('(!isSimpleArchive || contract.type === "CHANNEL") && canConfigureSplitRule && contract.customerId'));

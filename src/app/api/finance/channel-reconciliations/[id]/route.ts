@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { resolveApplicableChannelRule } from '@/lib/channelRuleSelection';
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { channelReconciliationScope, financeDataView, isStaff } from "@/lib/dataScope";
@@ -96,6 +97,7 @@ export async function PATCH(
     }
 
     if (existing.recordMode === "RULE_DRIVEN" && ("customerId" in body || "contractId" in body)) {
+      if (existing.periods.some(p => p.channelReviewStatus !== 'DRAFT' && p.channelReviewStatus !== 'DISPUTED')) return NextResponse.json({ error: '已有渠道确认或审核中的周期，不能更换业务合同或规则来源。' }, { status: 409 });
       await requireFeaturePermission(session, "finance.channel_reconciliation", "MANAGE");
       if (!isStaff(session.role)) return NextResponse.json({ error: "仅内部员工可重新编辑主记录" }, { status: 403 });
       const reason = typeof body.correctionReason === "string" ? body.correctionReason.trim() : "";
@@ -105,13 +107,16 @@ export async function PATCH(
       if (!contractId) return NextResponse.json({ error: "请选择关联合同" }, { status: 400 });
       const customer = await prisma.customer.findFirst({ where: { id: customerId, deletedAt: null }, select: { channelUserId: true, splitRules: { where: { contractId: null }, take: 1 } } });
       if (!customer?.channelUserId) return NextResponse.json({ error: "\u5ba2\u6237\u7f3a\u5c11\u6e20\u9053\u5546" }, { status: 400 });
-      const contract = await prisma.contract.findFirst({ where: { id: contractId, customerId, status: "COMPLETED", deletedAt: null }, select: { id: true, startDate: true, splitRule: true } });
-      const splitRule = customer.splitRules[0] ?? contract?.splitRule ?? null;
+      const contract = await prisma.contract.findFirst({ where: { id: contractId, customerId, status: "COMPLETED", deletedAt: null }, select: { id: true, startDate: true, endDate: true, splitRule: true } });
+      if (!contract?.startDate) return NextResponse.json({ error: '合同不存在或缺少开始时间' }, { status: 400 });
+      let splitRule;
+      try { splitRule = await resolveApplicableChannelRule(prisma, { customerId, businessContractId: contract.id, periodStart: contract.startDate }); }
+      catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : '分账规则匹配失败' }, { status: 409 }); }
       if (!splitRule) return NextResponse.json({ error: "\u8be5\u5ba2\u6237\u53ca\u6240\u9009\u5408\u540c\u5747\u672a\u914d\u7f6e\u5206\u8d26\u89c4\u5219" }, { status: 400 });
       if (!contract?.startDate) return NextResponse.json({ error: "合同不存在或缺少开始时间" }, { status: 400 });
       if (existing.periods.some((p) => p.fixedFeePaidAt || p.commissionPaidAt)) return NextResponse.json({ error: "已有付款记录，不能重新编辑主记录" }, { status: 409 });
       if (existing.periods.some((p) => p.fixedFeeReceived != null || p.commissionReceived != null || p.fixedFeeShareAmount != null || p.commissionShareAmount != null || p.confirmedGmv != null)) return NextResponse.json({ error: "已有分账录入，不能重建服务周期" }, { status: 409 });
-      const start = contract.startDate; const end = splitRule.splitEndDate;
+      const start = contract.startDate; const end = new Date(Math.min(splitRule.splitEndDate.getTime(), contract.endDate?.getTime() ?? Infinity, splitRule.contract?.endDate?.getTime() ?? Infinity));
       if (end.getTime() < start.getTime()) return NextResponse.json({ error: "分账规则截止时间早于合同开始时间" }, { status: 400 });
       const updated = await prisma.channelReconciliation.update({ where: { id }, data: { customerId, contractId, channelUserId: customer.channelUserId!, splitRuleId: splitRule.id, periodStart: start, periodEnd: end, totalPeriods: existing.periods.length, note: typeof body.note === "string" ? body.note.trim() || null : existing.note, auditLog: appendAuditEntry(existing.auditLog, { type: "MASTER_EDIT", actorId: session.userId, at: new Date().toISOString(), reason, before: { customerId: existing.customerId, contractId: existing.contractId, periodStart: existing.periodStart, periodEnd: existing.periodEnd }, after: { customerId, contractId, periodStart: start, periodEnd: end } }) } });
       return NextResponse.json(updated);

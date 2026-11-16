@@ -279,6 +279,16 @@ export default async function FinancePage() {
       : null,
   }));
 
+  const { selectApplicableChannelRule } = await import('@/lib/channelRuleSelection');
+  const resolvedChannelCustomers = await Promise.all(channelReconciliationCustomers.map(async customer => {
+    const rules = await prisma.channelSplitRule.findMany({where:{customerId:customer.id},include:{contract:{select:{id:true,contractNo:true,status:true,deletedAt:true,startDate:true,endDate:true,type:true}}}});
+    return {...customer, contracts: customer.contracts.map(contract => {
+      let rule = null, ruleError: string | null = null;
+      try { if (contract.startDate) rule = selectApplicableChannelRule(rules,{businessContractId:contract.id,periodStart:new Date(contract.startDate)}); }
+      catch (error) { ruleError = error instanceof Error ? error.message : '规则匹配失败'; }
+      return {...contract, ruleError, splitRule: rule ? {id:rule.id,ruleType:rule.ruleType as 'A'|'B',splitEndDate:toShanghaiDateString(new Date(Math.min(rule.splitEndDate.getTime(),contract.endDate ? new Date(contract.endDate).getTime() : Infinity,rule.contract?.endDate?.getTime() ?? Infinity)))!,fixedFeeRate:rule.fixedFeeRate,commissionThresholdAmount:rule.commissionThresholdAmount,commissionThresholdCurrency:rule.commissionThresholdCurrency,commissionBelowRate:rule.commissionBelowRate,commissionAtOrAboveRate:rule.commissionAtOrAboveRate,sourceContractId:rule.contractId,sourceContractNo:rule.contract?.contractNo ?? null} : null};
+    })};
+  }));
   return (
     <FinanceClient
       reconciliations={reconciliations}
@@ -287,7 +297,7 @@ export default async function FinancePage() {
       channelReconciliations={channelReconciliations}
       customers={customers}
       channelUsers={channelUsers}
-      channelReconciliationCustomers={channelReconciliationCustomers}
+      channelReconciliationCustomers={resolvedChannelCustomers}
       affiliateReconciliations={affiliateReconciliations}
       canToggleScope={false}
       currentView="all"

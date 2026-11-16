@@ -437,7 +437,7 @@ export default async function ContractsPage({
                 <td className="px-4 py-3 text-slate-700">{ct.amAssignments.map(row=>row.user.name||row.user.email).join("、")||"—"}</td>
                 <td className="px-4 py-3 text-slate-700">{ct.owner?.name||"—"}</td>
                 <td className="px-4 py-3 text-slate-700">{rule ? `${(rule.fixedFeeRate * 100).toFixed(2).replace(/\.00$/, '')}%` : '—'}</td>
-                <td className="px-4 py-3 text-xs text-slate-600">{rule ? <>低于 USD {rule.commissionThresholdAmount.toLocaleString()}：{(rule.commissionBelowRate * 100).toFixed(0)}%；达到或超过：{(rule.commissionAtOrAboveRate * 100).toFixed(0)}%</> : '—'}</td>
+                <td className="px-4 py-3 text-xs text-slate-600">{rule ? rule.ruleType === 'B' ? 'B · 按 GMV 累进阶梯' : <>A · 低于 USD {rule.commissionThresholdAmount.toLocaleString()}：{(rule.commissionBelowRate * 100).toFixed(2).replace(/\.00$/, '')}%；达到或超过：{(rule.commissionAtOrAboveRate * 100).toFixed(2).replace(/\.00$/, '')}%</> : '未设置生效规则'}</td>
                 <td className="px-4 py-3"><Badge className={CONTRACT_STATUS_COLORS[ct.status]}>{labelOf(CONTRACT_STATUS_LABELS, ct.status)}</Badge></td>
                 <td className="px-4 py-3">{ct.fileUrl ? <a href={ct.fileUrl} download className="font-medium text-brand-700 hover:underline">下载原件</a> : <span className="text-slate-400">未上传</span>}</td>
               </tr>;

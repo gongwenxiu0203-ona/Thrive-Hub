@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
+import { parseChannelRuleForm } from "@/lib/channelRuleInput";
 import { requireSession } from "@/lib/session";
 import { channelReconciliationScope, financeDataView, financeReferenceCustomerScope } from "@/lib/dataScope";
 import { FeaturePermissionError, requireFeaturePermission } from "@/lib/permissionGuard";
@@ -51,8 +52,7 @@ function validateInput(input: SplitRuleInput): string | null {
       return "佣金分账比例需在 0~100% 之间";
     }
   } else {
-    const list = parseTieredRules(input.tieredRules ?? []);
-    if (list.length === 0) return "请至少配置一档阶梯比例";
+    try { const fd=new FormData();fd.set('splitRuleType','B');fd.set('tieredRules',JSON.stringify(input.tieredRules ?? []));parseChannelRuleForm(fd); } catch(error) { return error instanceof Error ? error.message : '阶梯规则无效'; }
   }
   return null;
 }
@@ -114,14 +114,17 @@ export async function upsertChannelSplitRule(input: SplitRuleInput): Promise<Res
     const existing = input.contractId
       ? await prisma.channelSplitRule.findUnique({ where: { contractId: input.contractId } })
       : await prisma.channelSplitRule.findFirst({ where: { customerId: input.customerId, contractId: null } });
-    rule = existing
-      ? await prisma.channelSplitRule.update({ where: { id: existing.id }, data, select: { id: true } })
-      : await prisma.channelSplitRule.create({ data, select: { id: true } });
+    rule = await prisma.$transaction(async tx => {
+      const current=existing ? await tx.channelSplitRule.findUnique({where:{id:existing.id}}) : null;
+      if (existing && (!current || JSON.stringify(current)!==JSON.stringify(existing))) throw new Error('规则已被其他操作更新，请刷新后重试。');
+      if (current && Object.entries(data).some(([key,value]) => key !== 'createdById' && JSON.stringify(current[key as keyof typeof current]) !== JSON.stringify(value)) && await tx.channelReconciliation.count({where:{splitRuleId:current.id}})) throw new Error('该规则已被分账账单使用，为保护历史金额暂不可直接修改；请联系管理员制定规则版本变更方案。');
+      return existing ? tx.channelSplitRule.update({where:{id:existing.id},data,select:{id:true}}) : tx.channelSplitRule.create({data,select:{id:true}});
+    });
   } catch (error) {
     if (isDatabaseBusy(error)) {
       return { ok: false, error: "当前有 BI 数据正在导入，数据库繁忙，请稍后重试保存分账规则" };
     }
-    throw error;
+    return {ok:false,error:error instanceof Error ? error.message : '保存分账规则失败'};
   }
 
   revalidatePath(`/customers/${input.customerId}`);

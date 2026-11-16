@@ -19,7 +19,8 @@ import { contractScope, creationReferenceCustomerScope } from "@/lib/dataScope";
 import type { PermLevel } from "@/lib/featurePermissions";
 import { requireFeaturePermission } from "@/lib/permissionGuard";
 import { resolveUserPermission } from "@/lib/permissionResolver";
-import { archivedSplitTerms, canActivateArchivedSplit, shouldUpdateArchivedSplit } from "@/lib/channelArchiveRules";
+import { archivedSplitTerms, archivedRuleValues, canActivateArchivedSplit, shouldUpdateArchivedSplit } from "@/lib/channelArchiveRules";
+import { parseChannelRuleForm, describeChannelRule } from "@/lib/channelRuleInput";
 import { writeAdminAudit } from "@/lib/adminObservability";
 import {
   closeContractReconciliationPlans,
@@ -990,6 +991,7 @@ export async function uploadChannelContract(fd: FormData): Promise<ContractSaveR
     const startDate = parseDateOnlyUtc(str(fd, "startDate"));
     const endDate = parseDateOnlyUtc(str(fd, "endDate"));
     const fixedFeePercent = Number(str(fd, "fixedFeeRate"));
+    const splitValues = parseChannelRuleForm(fd);
     const file = fd.get("file");
     if (!customerId) return { ok: false, error: "请选择关联客户" };
     if (!(file instanceof File)) return { ok: false, error: "请上传渠道商合同文件" };
@@ -1033,25 +1035,20 @@ export async function uploadChannelContract(fd: FormData): Promise<ContractSaveR
               startDate,
               endDate,
               feeCycle: "月度",
-              commissionType: "THRESHOLD",
-              commissionRate: "低于 USD 4,400：15%；达到或超过：25%",
-              thresholdAmount: "4400",
+              commissionType: splitValues.ruleType === 'A' ? "THRESHOLD" : "TIERED",
+              commissionRate: describeChannelRule(splitValues),
+              thresholdAmount: String(splitValues.commissionThresholdAmount),
               thresholdCurrency: "USD",
-              specialCommissionTerms: archivedSplitTerms(fixedFeePercent, canActivateSplit),
+              specialCommissionTerms: archivedSplitTerms(fixedFeePercent, canActivateSplit, describeChannelRule(splitValues), splitValues),
             },
             select: { id: true },
           });
           if (canActivateSplit) await tx.channelSplitRule.create({ data: {
             customerId,
             contractId: created.id,
-            ruleType: "A",
+            ...splitValues,
             splitEndDate: endDate,
             fixedFeeRate: fixedFeePercent / 100,
-            commissionRate: 0.15,
-            commissionThresholdAmount: 4400,
-            commissionThresholdCurrency: "USD",
-            commissionBelowRate: 0.15,
-            commissionAtOrAboveRate: 0.25,
             createdById: session.userId,
           } });
           await tx.attachment.create({ data: {
@@ -1112,6 +1109,7 @@ export async function updateArchiveContract(fd: FormData): Promise<ContractSaveR
     const file = fd.get("file");
     const hasFile = file instanceof File && file.size > 0;
     const contractData: Prisma.ContractUpdateInput = { startDate, endDate };
+    const splitValues = isChannel ? (fd.has('splitRuleType') ? parseChannelRuleForm(fd) : current.splitRule ? {ruleType:current.splitRule.ruleType as 'A'|'B',commissionThresholdAmount:current.splitRule.commissionThresholdAmount,commissionThresholdCurrency:current.splitRule.commissionThresholdCurrency,commissionBelowRate:current.splitRule.commissionBelowRate,commissionAtOrAboveRate:current.splitRule.commissionAtOrAboveRate,commissionRate:current.splitRule.commissionRate,tieredRules:current.splitRule.tieredRules} : archivedRuleValues(current.specialCommissionTerms) ?? parseChannelRuleForm(fd)) : null;
     let fixedFeePercent: number | null = null;
     if (isChannel) {
       const partyBCompany = str(fd, "partyBCompany");
@@ -1126,10 +1124,13 @@ export async function updateArchiveContract(fd: FormData): Promise<ContractSaveR
         return { ok: false, error: "固定月度服务费渠道合作费的乙方比例需在 0% 至 100% 之间" };
       }
       Object.assign(contractData, { partyBCompany, partyBContact, partyBPhone, partyBEmail });
-      if (!canActivateSplit && current.splitRule && (current.splitRule.fixedFeeRate !== fixedFeePercent / 100 || current.endDate?.getTime() !== endDate.getTime())) {
+      const ruleChanged = !!current.splitRule && (current.splitRule.fixedFeeRate !== fixedFeePercent / 100 || current.endDate?.getTime() !== endDate.getTime() || Object.entries(splitValues!).some(([key,value]) => JSON.stringify(current.splitRule![key as keyof typeof current.splitRule]) !== JSON.stringify(value)));
+      if (!canActivateSplit && current.splitRule && ruleChanged) {
         return { ok: false, error: "修改生效分账比例或分账截止日期需要分账设置权限；可保留原比例和截止日期，仅修改合同资料或重新上传原件" };
       }
-      if (!current.splitRule) contractData.specialCommissionTerms = archivedSplitTerms(fixedFeePercent, false);
+      if (ruleChanged && await prisma.channelReconciliation.count({where:{splitRuleId:current.splitRule!.id}})) return {ok:false,error:'该规则已被分账账单使用，为保护历史金额暂不可直接修改；请先联系管理员制定规则版本变更方案。'};
+      if (!current.splitRule) contractData.specialCommissionTerms = archivedSplitTerms(fixedFeePercent, false, describeChannelRule(splitValues!), splitValues!);
+      else if (canActivateSplit) Object.assign(contractData,{commissionType:splitValues!.ruleType==='A'?'THRESHOLD':'TIERED',commissionRate:describeChannelRule(splitValues!),thresholdAmount:String(splitValues!.commissionThresholdAmount),specialCommissionTerms:archivedSplitTerms(fixedFeePercent,true,describeChannelRule(splitValues!))});
     }
 
     const before = {
@@ -1142,6 +1143,7 @@ export async function updateArchiveContract(fd: FormData): Promise<ContractSaveR
       fixedFeeRate: current.splitRule?.fixedFeeRate ?? null,
       fileUrl: current.fileUrl,
       specialCommissionTerms: current.specialCommissionTerms,
+      splitValues: current.splitRule ? Object.fromEntries(Object.keys(splitValues ?? {}).map(key=>[key,current.splitRule![key as keyof typeof current.splitRule]])) : null,
     };
     const after = {
       startDate: startDate.toISOString(),
@@ -1153,6 +1155,7 @@ export async function updateArchiveContract(fd: FormData): Promise<ContractSaveR
       fixedFeeRate: isChannel && shouldUpdateArchivedSplit(canActivateSplit, !!current.splitRule) ? (fixedFeePercent as number) / 100 : current.splitRule?.fixedFeeRate ?? null,
       fileUrl: hasFile ? "REPLACED" : current.fileUrl,
       specialCommissionTerms: contractData.specialCommissionTerms ?? current.specialCommissionTerms,
+      splitValues: splitValues && canActivateSplit && current.splitRule ? splitValues : before.splitValues,
     };
     const changedFields = Object.keys(after).filter((key) => JSON.stringify(before[key as keyof typeof before]) !== JSON.stringify(after[key as keyof typeof after]));
     if (changedFields.length === 0) return { ok: false, error: "未检测到需要保存的修改" };
@@ -1160,12 +1163,17 @@ export async function updateArchiveContract(fd: FormData): Promise<ContractSaveR
     const saved = hasFile ? await saveUploadedFile(file as File) : null;
     if (saved) Object.assign(contractData, { fileUrl: saved.fileUrl, generatedDocUrl: saved.fileUrl });
     await prisma.$transaction(async (tx) => {
+      if (isChannel && current.splitRule) {
+        const latestRule = await tx.channelSplitRule.findUnique({where:{id:current.splitRule.id}});
+        if (!latestRule || latestRule.updatedAt.getTime() !== current.splitRule.updatedAt.getTime()) throw new Error('分账规则已由其他人员更新，请刷新页面后再保存。');
+      }
+      if (isChannel && current.splitRule && splitValues && (Object.entries(splitValues).some(([key,value])=>JSON.stringify(current.splitRule![key as keyof typeof current.splitRule])!==JSON.stringify(value)) || current.splitRule.fixedFeeRate !== fixedFeePercent! / 100 || current.splitRule.splitEndDate.getTime() !== endDate.getTime()) && await tx.channelReconciliation.count({where:{splitRuleId:current.splitRule.id}})) throw new Error('该规则已被分账账单使用，不能直接修改历史规则。');
       await tx.contract.update({ where: { id: contractId }, data: contractData });
       if (isChannel && shouldUpdateArchivedSplit(canActivateSplit, !!current.splitRule) && fixedFeePercent !== null) {
         if (current.splitRule) {
           await tx.channelSplitRule.update({
             where: { id: current.splitRule.id },
-            data: { splitEndDate: endDate, fixedFeeRate: fixedFeePercent / 100 },
+            data: { splitEndDate: endDate, fixedFeeRate: fixedFeePercent / 100, ...splitValues! },
           });
         }
       }

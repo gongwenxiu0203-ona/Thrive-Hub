@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { ContractAMPanel } from "@/components/contracts/ContractAMPanel";
 import { FileDown, Pencil } from "lucide-react";
 import { BackButton } from "@/components/BackButton";
-import { archivedFixedFeePercent } from "@/lib/channelArchiveRules";
+import { archivedFixedFeePercent, archivedRuleValues } from "@/lib/channelArchiveRules";
 import { prisma } from "@/lib/prisma";
 import { requireSession, adminHasFeature } from "@/lib/session";
 import { FrameworkContractDetail } from "./FrameworkContractDetail";
@@ -396,6 +396,7 @@ export default async function ContractDetailPage({
                 contractId={contract.id}
                 canDelete={canDeleteSplitRule}
                 existing={toExistingRule(contract.splitRule)}
+                initialDraft={!contract.splitRule && archivedRuleValues(contract.specialCommissionTerms) ? {...archivedRuleValues(contract.specialCommissionTerms)!,splitEndDate:contract.endDate?.toISOString() ?? '',fixedFeeRate:(archivedFixedFeePercent(contract.specialCommissionTerms) ?? 15)/100} : null}
                 inheritedCustomerRule={toExistingRule(customerSplitRule)}
               />
             )}
@@ -442,6 +443,7 @@ export default async function ContractDetailPage({
                   partyBPhone: c.partyBPhone ?? "",
                   partyBEmail: c.partyBEmail ?? "",
                   fixedFeeRate: contract.splitRule ? String(contract.splitRule.fixedFeeRate * 100) : String(archivedFixedFeePercent(contract.specialCommissionTerms) ?? ""),
+                  splitRule: contract.splitRule ? {ruleType: contract.splitRule.ruleType, commissionThresholdAmount: contract.splitRule.commissionThresholdAmount, commissionBelowRate: contract.splitRule.commissionBelowRate, commissionAtOrAboveRate: contract.splitRule.commissionAtOrAboveRate, tieredRules:contract.splitRule.tieredRules} : archivedRuleValues(contract.specialCommissionTerms),
                 }}
               />
             )}
@@ -731,7 +733,7 @@ export default async function ContractDetailPage({
             <Field label="合同截止时间" value={contract.endDate ? formatDate(contract.endDate) : "—"} />
             <Field label="固定月度服务费渠道合作费 · 乙方比例" value={contract.splitRule ? `${(contract.splitRule.fixedFeeRate * 100).toFixed(2).replace(/\.00$/, "")}%` : archivedFixedFeePercent(contract.specialCommissionTerms) !== null ? `${archivedFixedFeePercent(contract.specialCommissionTerms)}%（合同记录，待确认）` : "—"} />
           </dl>
-          <div className="mt-5 border-t border-slate-200 pt-4"><h3 className="text-sm font-semibold text-slate-800">联盟运营佣金渠道合作费</h3><p className="mt-2 text-sm text-slate-600">{contract.splitRule ? <>低于 USD {contract.splitRule.commissionThresholdAmount.toLocaleString()} 按 {(contract.splitRule.commissionBelowRate * 100).toFixed(0)}%；达到或超过该金额按 {(contract.splitRule.commissionAtOrAboveRate * 100).toFixed(0)}%。</> : "尚未设置生效分账规则，请由管理员或已获分账权限的内部员工核对后设置。"}</p>{!contract.splitRule && contract.specialCommissionTerms && <p className="mt-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{contract.specialCommissionTerms}</p>}</div>
+          <div className="mt-5 border-t border-slate-200 pt-4"><h3 className="text-sm font-semibold text-slate-800">联盟运营佣金渠道合作费</h3><p className="mt-2 text-sm text-slate-600">{contract.splitRule ? contract.splitRule.ruleType === 'B' ? <>B 特殊规则：按确认 GMV 累进阶梯计算，以实际到账佣金为上限；请在分账规则中查看各档。</> : <>A 基础规则：低于 USD {contract.splitRule.commissionThresholdAmount.toLocaleString()} 按 {(contract.splitRule.commissionBelowRate * 100).toFixed(2).replace(/\.00$/, '')}%；达到或超过该金额按 {(contract.splitRule.commissionAtOrAboveRate * 100).toFixed(2).replace(/\.00$/, '')}%，整档计算。</> : "尚未设置生效分账规则，请由管理员或已获分账权限的内部员工核对后设置。"}</p>{!contract.splitRule && contract.specialCommissionTerms && <p className="mt-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{contract.specialCommissionTerms.split('\nCHANNEL_RULE_JSON:')[0]}</p>}</div>
         </section>
       )}
 

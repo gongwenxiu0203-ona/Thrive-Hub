@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { resolveApplicableChannelRule } from '@/lib/channelRuleSelection';
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import {
@@ -86,7 +87,10 @@ export async function POST(req: Request) {
         { status: 404 },
       );
     }
-    const splitRule = customer.splitRules[0] ?? contract.splitRule;
+    if (!contract.startDate) return NextResponse.json({ error: '所选合同尚未填写合作开始时间' }, { status: 400 });
+    let splitRule;
+    try { splitRule = await resolveApplicableChannelRule(prisma, { customerId, businessContractId: contract.id, periodStart: contract.startDate }); }
+    catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : '分账规则匹配失败' }, { status: 409 }); }
     if (!splitRule) {
       return NextResponse.json({ error: "\u8be5\u5ba2\u6237\u53ca\u6240\u9009\u5408\u540c\u5747\u672a\u914d\u7f6e\u5206\u8d26\u89c4\u5219" }, { status: 400 });
     }
@@ -97,7 +101,7 @@ export async function POST(req: Request) {
     // Server-authoritative range: contract start -> split-rule end.
     // Request dates and master currencies are intentionally ignored.
     const start = contract.startDate;
-    const end = splitRule.splitEndDate;
+    const end = new Date(Math.min(splitRule.splitEndDate.getTime(), contract.endDate?.getTime() ?? Infinity, splitRule.contract?.endDate?.getTime() ?? Infinity));
 
     const channelUser = await prisma.user.findFirst({
       where: { id: customer.channelUserId, role: "CHANNEL", status: "APPROVED" },
