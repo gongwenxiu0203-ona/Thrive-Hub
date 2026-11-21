@@ -66,6 +66,9 @@ type ReceivableRow = {
   currency: string;
   invoiceAmount?: number;
   receivedAmount?: number;
+  allocatedAmount: number;
+  lastReceiptNo: string | null;
+  lastReceivedAt: string | null;
   balance: number;
   dueDate: string;
   status: string;
@@ -123,6 +126,27 @@ type OutgoingRow = {
 };
 type BillingFilter =
   "ALL" | "SUBMITTED" | "PROCESSING" | "PARTIAL" | "COMPLETED" | "REJECTED";
+type BillingScope = "all" | "related" | "applied" | "reviewed" | "to_review";
+type BillingPagination = {
+  page: number;
+  pageSize: number;
+  total: number;
+  pageCount: number;
+  scope: BillingScope;
+  status: string;
+  from: string;
+  to: string;
+  applicantId: string;
+  reviewerId: string;
+};
+type ReceivablePagination = {
+  status: "open" | "paid";
+  page: number;
+  pageSize: number;
+  total: number;
+  pageCount: number;
+  month: string;
+};
 
 function OutgoingDetails({ row }: { row: OutgoingRow }) {
   return <div className="space-y-3 text-sm">
@@ -182,7 +206,11 @@ export function FinanceWorkbenchClient({
   canEditPayment,
   isAdmin,
   billingRequests,
+  billingPagination,
+  billingStatusCounts,
+  billingFilterUsers,
   receivables,
+  receivablePagination,
   unallocatedReceipts,
   channelPeriods,
   payableExceptions,
@@ -197,7 +225,11 @@ export function FinanceWorkbenchClient({
   canEditPayment: boolean;
   isAdmin: boolean;
   billingRequests: BillingRow[];
+  billingPagination: BillingPagination;
+  billingStatusCounts: Record<string, number>;
+  billingFilterUsers: Array<{ id: string; label: string; email: string }>;
   receivables: ReceivableRow[];
+  receivablePagination: ReceivablePagination;
   unallocatedReceipts: ReceiptRow[];
   channelPeriods: ChannelRow[];
   payableExceptions: PayableExceptionRow[];
@@ -211,10 +243,6 @@ export function FinanceWorkbenchClient({
   const [mainTab, setMainTab] = useState<"BILLING" | "PAYMENT">(
     searchParams.get("mainTab") === "PAYMENT" || !canViewBilling ? "PAYMENT" : "BILLING",
   );
-  const [billingFilter, setBillingFilter] =
-    useState<BillingFilter>(focusedBillingRequestId ? "ALL" : "SUBMITTED");
-  const [fromDate, setFromDate] = useState("");
-  const [toDate, setToDate] = useState("");
   const [embeddedUrl, setEmbeddedUrl] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState("");
@@ -228,16 +256,31 @@ export function FinanceWorkbenchClient({
   const [reviewReason, setReviewReason] = useState("");
   const [deleteReason, setDeleteReason] = useState("");
   const [selectedReceivables, setSelectedReceivables] = useState<string[]>([]);
-  const currentReceivableMonth = new Date().toISOString().slice(0, 7);
-  const [receivableMonth, setReceivableMonth] = useState(
-    currentReceivableMonth,
-  );
   const [selectedOutgoing, setSelectedOutgoing] = useState<string[]>([]);
   const [expandedOutgoing, setExpandedOutgoing] = useState<string | null>(focusedRequestId);
   const [batchDialog, setBatchDialog] = useState<"REJECT" | "DELETE" | null>(null);
   const [batchReason, setBatchReason] = useState("");
   const [paying, setPaying] = useState<OutgoingRow | null>(null);
   const [uploadingProof, setUploadingProof] = useState(false);
+  function updateQuery(
+    updates: Record<string, string | number | null>,
+    reset: "billing" | "receivable" | null = null,
+  ) {
+    const next = new URLSearchParams(searchParams.toString());
+    for (const [key, value] of Object.entries(updates)) {
+      if (value === null || value === "") next.delete(key);
+      else next.set(key, String(value));
+    }
+    if (reset === "billing") {
+      next.set("billingPage", "1");
+      setSelectedBilling([]);
+    }
+    if (reset === "receivable") {
+      next.set("arPage", "1");
+      setSelectedReceivables([]);
+    }
+    router.push(`?${next.toString()}`);
+  }
   const [paymentError, setPaymentError] = useState("");
   const [paymentForm, setPaymentForm] = useState({ paidAt: new Date().toISOString().slice(0, 10), transactionNo: "", proofUrls: "", comment: "" });
   const [outgoingFilter, setOutgoingFilter] = useState<
@@ -253,18 +296,7 @@ export function FinanceWorkbenchClient({
           : row.kind !== "EXPENSE" && row.category === outgoingFilter)) &&
       (outgoingStatus === "ALL" || row.status === outgoingStatus),
   );
-  const receivableMonths = [
-    ...new Set([
-      currentReceivableMonth,
-      ...receivables.map((row) => row.dueDate.slice(0, 7)),
-    ]),
-  ]
-    .sort()
-    .reverse();
-  const filteredReceivables = receivables.filter(
-    (row) =>
-      receivableMonth === "ALL" || row.dueDate.startsWith(receivableMonth),
-  );
+  const filteredReceivables = receivables;
   const arSummary = filteredReceivables.reduce<
     Record<string, { total: number; received: number; balance: number }>
   >((acc, row) => {
@@ -412,16 +444,9 @@ export function FinanceWorkbenchClient({
       setUploadingProof(false);
     }
   }
-  const billingBucket = (row: BillingRow) => row.status === "SUBMITTED" && ["APPROVED", "SKIPPED"].includes(row.approvalStatus ?? "") ? "PROCESSING" : row.status;
-  const filteredBilling = billingRequests.filter((row) => {
-    if (billingFilter !== "ALL" && billingBucket(row) !== billingFilter) return false;
-    const day = row.submittedAt.slice(0, 10);
-    return (!fromDate || day >= fromDate) && (!toDate || day <= toDate);
-  });
+  const filteredBilling = billingRequests;
   const billingCount = (status: BillingFilter) =>
-    status === "ALL"
-      ? billingRequests.length
-      : billingRequests.filter((row) => billingBucket(row) === status).length;
+    billingStatusCounts[status] ?? 0;
   const displayBillingStatus = (row: BillingRow) => {
     if (row.status === "SUBMITTED" && row.approvalStatus === "SKIPPED") return "无需审核 · 待开票";
     if (row.status === "SUBMITTED" && row.approvalStatus === "APPROVED") return "审核通过 · 待开票";
@@ -483,10 +508,13 @@ export function FinanceWorkbenchClient({
         {canViewBilling && (
           <>
             <Metric
-              label="待审核 / 待开票"
-              value={`${billingCount("SUBMITTED")} 条`}
+              label="当前开票申请"
+              value={`${billingPagination.total} 条`}
             />
-            <Metric label="未完成应收" value={`${receivables.length} 条`} />
+            <Metric
+              label={receivablePagination.status === "paid" ? "已收款历史" : "未完成应收"}
+              value={`${receivablePagination.total} 条`}
+            />
             <Metric
               label="待分配到账"
               value={`${unallocatedReceipts.length} 笔`}
@@ -525,7 +553,7 @@ export function FinanceWorkbenchClient({
                   受理后直接进入已预填的 Invoice 或国内发票页面。
                 </p>
               </div>
-              <div className="flex flex-wrap gap-1">
+              <div className="flex flex-wrap items-end justify-end gap-2">
                 <button type="button" className="btn-primary btn-sm" disabled={pending || !selectedBilling.length || selectedBilling.some((id) => billingRequests.find((row) => row.id === id)?.reviewerId !== currentUserId)} onClick={() => batchBilling("APPROVE")}>批量通过</button>
                 <button type="button" className="btn-secondary btn-sm text-rose-700" disabled={pending || !selectedBilling.length || selectedBilling.some((id) => billingRequests.find((row) => row.id === id)?.reviewerId !== currentUserId)} onClick={() => { setBillingBatchReason(""); setBillingBatchDialog("REJECT"); }}>批量退回</button>
                 {isAdmin && <button type="button" className="btn-secondary btn-sm text-rose-700" disabled={pending || !selectedBilling.length} onClick={() => { setBillingBatchReason(""); setBillingBatchDialog("DELETE"); }}>批量删除</button>}
@@ -533,16 +561,46 @@ export function FinanceWorkbenchClient({
                   aria-label="申请开始日期"
                   type="date"
                   className="input h-8 w-36 text-xs"
-                  value={fromDate}
-                  onChange={(event) => setFromDate(event.target.value)}
+                  value={billingPagination.from}
+                  onChange={(event) => updateQuery({ billingFrom: event.target.value }, "billing")}
                 />
                 <input
                   aria-label="申请结束日期"
                   type="date"
                   className="input h-8 w-36 text-xs"
-                  value={toDate}
-                  onChange={(event) => setToDate(event.target.value)}
+                  value={billingPagination.to}
+                  onChange={(event) => updateQuery({ billingTo: event.target.value }, "billing")}
                 />
+                <select
+                  aria-label="记录范围"
+                  className="input h-8 w-32 text-xs"
+                  value={billingPagination.scope}
+                  onChange={(event) => updateQuery({ billingScope: event.target.value }, "billing")}
+                >
+                  <option value="all">全部记录</option>
+                  <option value="related">与我相关</option>
+                  <option value="applied">我发起的</option>
+                  <option value="reviewed">我审核过的</option>
+                  <option value="to_review">待我审核</option>
+                </select>
+                <select
+                  aria-label="申请人"
+                  className="input h-8 w-32 text-xs"
+                  value={billingPagination.applicantId}
+                  onChange={(event) => updateQuery({ billingApplicant: event.target.value }, "billing")}
+                >
+                  <option value="">全部申请人</option>
+                  {billingFilterUsers.map((user) => <option key={`applicant-${user.id}`} value={user.id}>{user.label}</option>)}
+                </select>
+                <select
+                  aria-label="审核人"
+                  className="input h-8 w-32 text-xs"
+                  value={billingPagination.reviewerId}
+                  onChange={(event) => updateQuery({ billingReviewer: event.target.value }, "billing")}
+                >
+                  <option value="">全部审核人</option>
+                  {billingFilterUsers.map((user) => <option key={`reviewer-${user.id}`} value={user.id}>{user.label}</option>)}
+                </select>
                 {(
                   [
                     "SUBMITTED",
@@ -555,11 +613,11 @@ export function FinanceWorkbenchClient({
                 ).map((status) => (
                   <button
                     key={status}
-                    onClick={() => setBillingFilter(status)}
-                    className={`rounded-full px-3 py-1.5 text-xs font-medium ${billingFilter === status ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-600 hover:text-slate-900"}`}
+                    onClick={() => updateQuery({ billingStatus: status }, "billing")}
+                    className={`rounded-full px-3 py-1.5 text-xs font-medium ${billingPagination.status === status ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-600 hover:text-slate-900"}`}
                   >
-                    {status === "ALL" ? "全部" : billingLabels[status]}{" "}
-                    {billingCount(status)}
+                    {status === "ALL" ? "全部" : billingLabels[status]}
+                    {billingCount(status) !== null ? ` ${billingCount(status)}` : ""}
                   </button>
                 ))}
               </div>
@@ -696,37 +754,49 @@ export function FinanceWorkbenchClient({
                 </p>
               )}
             </div>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-3 text-xs text-slate-600">
+              <span>共 {billingPagination.total} 条，第 {billingPagination.page} / {billingPagination.pageCount} 页；复选框仅选择当前页。</span>
+              <div className="flex items-center gap-2">
+                <select
+                  aria-label="开票申请每页数量"
+                  className="input h-8 w-24 text-xs"
+                  value={billingPagination.pageSize}
+                  onChange={(event) => updateQuery({ billingPageSize: event.target.value }, "billing")}
+                >
+                  {[20, 50, 100].map((size) => <option key={size} value={size}>{size} 条/页</option>)}
+                </select>
+                <button type="button" className="btn-secondary btn-sm" disabled={billingPagination.page <= 1} onClick={() => updateQuery({ billingPage: billingPagination.page - 1 })}>上一页</button>
+                <button type="button" className="btn-secondary btn-sm" disabled={billingPagination.page >= billingPagination.pageCount} onClick={() => updateQuery({ billingPage: billingPagination.page + 1 })}>下一页</button>
+              </div>
+            </div>
           </section>
           <section className="card overflow-hidden">
             <div className="flex items-center justify-between border-b border-slate-100 p-5">
               <div>
                 <h2 className="font-semibold text-slate-900">应收账款汇总</h2>
                 <p className="mt-1 text-xs text-slate-500">
-                  登记到账时可直接关联应收、Invoice 和客户对账。
+                  {receivablePagination.status === "paid"
+                    ? "足额到账的应收移入已收款历史，记录和核销关系不会删除。"
+                    : "登记到账时可直接关联应收、Invoice 和客户对账。"}
                 </p>
               </div>
               <div className="flex flex-wrap items-end justify-end gap-3">
-                <label className="block min-w-44">
+                <div className="flex rounded-md bg-slate-100 p-1" aria-label="应收状态视图">
+                  <button type="button" className={`rounded px-3 py-1.5 text-xs font-medium ${receivablePagination.status === "open" ? "bg-white text-brand-700" : "text-slate-600"}`} onClick={() => updateQuery({ arStatus: "open" }, "receivable")}>待收款</button>
+                  <button type="button" className={`rounded px-3 py-1.5 text-xs font-medium ${receivablePagination.status === "paid" ? "bg-white text-brand-700" : "text-slate-600"}`} onClick={() => updateQuery({ arStatus: "paid" }, "receivable")}>已收款历史</button>
+                </div>
+                <label className="block min-w-40">
                   <span className="mb-1 block text-xs font-medium text-slate-600">
                     应收月份
                   </span>
-                  <select
+                  <input
+                    type="month"
                     className="input"
-                    value={receivableMonth}
-                    onChange={(event) => {
-                      setReceivableMonth(event.target.value);
-                      setSelectedReceivables([]);
-                    }}
-                  >
-                    <option value="ALL">全部月份</option>
-                    {receivableMonths.map((month) => (
-                      <option key={month} value={month}>
-                        {month}
-                      </option>
-                    ))}
-                  </select>
+                    value={receivablePagination.month}
+                    onChange={(event) => updateQuery({ arMonth: event.target.value }, "receivable")}
+                  />
                 </label>
-              {canEditReceipt && (
+              {canEditReceipt && receivablePagination.status === "open" && (
                 <button
                   type="button"
                   className="btn-primary"
@@ -738,26 +808,6 @@ export function FinanceWorkbenchClient({
               </div>
             </div>
             <div className="grid gap-3 border-b border-slate-100 bg-slate-50/40 p-5 md:grid-cols-2">
-              <label className="hidden">
-                <span className="mb-1 block text-xs font-medium text-slate-600">
-                  应收月份
-                </span>
-                <select
-                  className="input"
-                  value={receivableMonth}
-                  onChange={(event) => {
-                    setReceivableMonth(event.target.value);
-                    setSelectedReceivables([]);
-                  }}
-                >
-                  <option value="ALL">全部月份</option>
-                  {receivableMonths.map((month) => (
-                    <option key={month} value={month}>
-                      {month}
-                    </option>
-                  ))}
-                </select>
-              </label>
               {(["USD", "CNY"] as const).map((currencyCode) => {
                 const value = arSummary[currencyCode] ?? {
                   total: 0,
@@ -797,7 +847,7 @@ export function FinanceWorkbenchClient({
                     <th>系统单号</th>
                     <th>到期日</th>
                     <th>状态</th>
-                    <th className="text-right">应收余额</th>
+                    <th className="text-right">{receivablePagination.status === "paid" ? "原应收 / 已收" : "应收余额"}</th>
                     <th className="px-5 text-right">操作</th>
                   </tr>
                 </thead>
@@ -828,12 +878,21 @@ export function FinanceWorkbenchClient({
                       <td>
                         {new Date(row.dueDate).toLocaleDateString("zh-CN")}
                       </td>
-                      <td>{row.status}</td>
+                      <td>
+                        <span>{row.status === "PAID" ? "已收款" : row.status}</span>
+                        {receivablePagination.status === "paid" && row.lastReceivedAt && <p className="mt-1 text-xs text-slate-500">最后到账 {new Date(row.lastReceivedAt).toLocaleDateString("zh-CN")}</p>}
+                        {receivablePagination.status === "paid" && row.lastReceiptNo && <p className="text-xs text-slate-500">流水 {row.lastReceiptNo}</p>}
+                      </td>
                       <td className="text-right font-medium">
-                        {money(row.balance, row.currency)}
+                        {receivablePagination.status === "paid" ? (
+                          <>
+                            <p>{money(row.invoiceAmount ?? 0, row.currency)}</p>
+                            <p className="text-xs font-normal text-emerald-700">已收 {money(row.allocatedAmount || row.receivedAmount || 0, row.currency)}</p>
+                          </>
+                        ) : money(row.balance, row.currency)}
                       </td>
                       <td className="px-5 text-right">
-                        {canEditReceipt ? (
+                        {canEditReceipt && receivablePagination.status === "open" ? (
                           <>
                             <button
                               type="button"
@@ -909,9 +968,19 @@ export function FinanceWorkbenchClient({
               </div>
               {!filteredReceivables.length && (
                 <p className="p-10 text-center text-sm text-slate-500">
-                  暂无待收款应收。
+                  {receivablePagination.status === "paid" ? "暂无已收款历史。" : "暂无待收款应收。"}
                 </p>
               )}
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-3 text-xs text-slate-600">
+              <span>共 {receivablePagination.total} 条，第 {receivablePagination.page} / {receivablePagination.pageCount} 页。</span>
+              <div className="flex items-center gap-2">
+                <select aria-label="应收每页数量" className="input h-8 w-24 text-xs" value={receivablePagination.pageSize} onChange={(event) => updateQuery({ arPageSize: event.target.value }, "receivable")}>
+                  {[20, 50, 100].map((size) => <option key={size} value={size}>{size} 条/页</option>)}
+                </select>
+                <button type="button" className="btn-secondary btn-sm" disabled={receivablePagination.page <= 1} onClick={() => updateQuery({ arPage: receivablePagination.page - 1 })}>上一页</button>
+                <button type="button" className="btn-secondary btn-sm" disabled={receivablePagination.page >= receivablePagination.pageCount} onClick={() => updateQuery({ arPage: receivablePagination.page + 1 })}>下一页</button>
+              </div>
             </div>
           </section>
         </div>

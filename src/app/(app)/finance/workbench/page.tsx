@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { hasPermissionLevel } from "@/lib/permissionGuard";
@@ -19,6 +20,44 @@ import {
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "财务工作台 · Thraive" };
+
+const BILLING_PAGE_SIZE = 50;
+const BILLING_PAGE_SIZE_MAX = 100;
+const BILLING_SCOPES = ["all", "related", "applied", "reviewed", "to_review"] as const;
+const BILLING_STATUSES = ["ALL", "SUBMITTED", "PROCESSING", "PARTIAL", "COMPLETED", "REJECTED", "CANCELLED"] as const;
+type BillingScope = (typeof BILLING_SCOPES)[number];
+
+function positiveInteger(value: string | undefined, fallback: number, max: number) {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, max) : fallback;
+}
+
+function billingScope(value: string | undefined, fallback: BillingScope): BillingScope {
+  return BILLING_SCOPES.includes(value as BillingScope)
+    ? (value as BillingScope)
+    : fallback;
+}
+
+function dateAtStart(value: string | undefined) {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return undefined;
+  const [year, month, day] = value.split("-").map(Number);
+  if (
+    year < 1000 ||
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > new Date(Date.UTC(year, month, 0)).getUTCDate()
+  ) return undefined;
+  const date = new Date(`${value}T00:00:00+08:00`);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
+function dateAfterEnd(value: string | undefined) {
+  const date = dateAtStart(value);
+  if (!date) return undefined;
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date;
+}
 
 function auditMetadata(value: string): Record<string, unknown> {
   try {
@@ -61,10 +100,25 @@ function contractInvoiceAccounts(value: string | null | undefined) {
 export default async function FinanceWorkbenchPage({
   searchParams,
 }: {
-  searchParams: Promise<{ focusBillingRequest?: string }>;
+  searchParams: Promise<{
+    focusBillingRequest?: string;
+    billingPage?: string;
+    billingPageSize?: string;
+    billingStatus?: string;
+    billingFrom?: string;
+    billingTo?: string;
+    billingApplicant?: string;
+    billingReviewer?: string;
+    billingScope?: string;
+    arStatus?: string;
+    arPage?: string;
+    arPageSize?: string;
+    arMonth?: string;
+  }>;
 }) {
   const session = await requireSession();
-  const focusedBillingRequestId = (await searchParams).focusBillingRequest;
+  const params = await searchParams;
+  const focusedBillingRequestId = params.focusBillingRequest;
   if (!isStaff(session.role)) redirect("/finance");
   const [invoicePermission, receivablePermission, channelPermission, paymentPermission, expensePermission, profilePermission] =
     await Promise.all([
@@ -81,6 +135,178 @@ export default async function FinanceWorkbenchPage({
   const canViewChannel = hasPermissionLevel(channelPermission, "READ") || hasPermissionLevel(paymentPermission, "READ") || hasPermissionLevel(expensePermission, "READ");
   const canManageBilling = hasPermissionLevel(invoicePermission, "MANAGE");
   if (!canViewBilling && !canViewChannel) redirect("/finance");
+  const requestedBillingPage = positiveInteger(params.billingPage, 1, Number.MAX_SAFE_INTEGER);
+  const billingPageSize = positiveInteger(
+    params.billingPageSize,
+    BILLING_PAGE_SIZE,
+    BILLING_PAGE_SIZE_MAX,
+  );
+  const selectedBillingScope = billingScope(
+    params.billingScope,
+    "all",
+  );
+  const submittedFrom = dateAtStart(params.billingFrom);
+  const submittedBefore = dateAfterEnd(params.billingTo);
+
+  const scopeStepWhere: Prisma.FinanceApprovalStepWhereInput | null =
+    selectedBillingScope === "related"
+      ? {
+          entityType: "BILLING_REQUEST",
+          OR: [{ assigneeId: session.userId }, { operatorId: session.userId }],
+        }
+      : selectedBillingScope === "reviewed"
+        ? {
+            entityType: "BILLING_REQUEST",
+            stepNo: 1,
+            operatorId: session.userId,
+            actedAt: { not: null },
+          }
+        : selectedBillingScope === "to_review"
+          ? {
+              entityType: "BILLING_REQUEST",
+              stepNo: 1,
+              assigneeId: session.userId,
+              status: "PENDING",
+            }
+          : null;
+  const [scopeSteps, reviewerSteps, readyBillingSteps] = await Promise.all([
+    scopeStepWhere
+      ? prisma.financeApprovalStep.findMany({
+          where: scopeStepWhere,
+          select: { entityId: true },
+          distinct: ["entityId"],
+        })
+      : Promise.resolve([]),
+    params.billingReviewer
+      ? prisma.financeApprovalStep.findMany({
+          where: {
+            entityType: "BILLING_REQUEST",
+            stepNo: 1,
+            assigneeId: params.billingReviewer,
+          },
+          select: { entityId: true },
+          distinct: ["entityId"],
+        })
+      : Promise.resolve([]),
+    canViewBilling
+      ? prisma.financeApprovalStep.findMany({
+          where: {
+            entityType: "BILLING_REQUEST",
+            stepNo: 1,
+            status: { in: ["APPROVED", "SKIPPED"] },
+          },
+          select: { entityId: true },
+          distinct: ["entityId"],
+        })
+      : Promise.resolve([]),
+  ]);
+  const scopeEntityIds = scopeSteps.map((step) => step.entityId);
+  const reviewerEntityIds = reviewerSteps.map((step) => step.entityId);
+  const readyBillingEntityIds = readyBillingSteps.map((step) => step.entityId);
+  const effectiveBillingStatus = focusedBillingRequestId
+    ? "ALL"
+    : BILLING_STATUSES.includes(
+          params.billingStatus as (typeof BILLING_STATUSES)[number],
+        )
+      ? params.billingStatus!
+      : "SUBMITTED";
+  const statusWhereFor = (status: string): Prisma.BillingRequestWhereInput =>
+    status === "PARTIAL"
+      ? {
+          status: "PROCESSING",
+          invoices: { some: { deletedAt: null, status: "ISSUED" } },
+        }
+      : status === "PROCESSING"
+        ? {
+            OR: [
+              { status: "SUBMITTED", id: { in: readyBillingEntityIds } },
+              {
+                status: "PROCESSING",
+                invoices: { none: { deletedAt: null, status: "ISSUED" } },
+              },
+            ],
+          }
+        : status === "SUBMITTED"
+          ? { status: "SUBMITTED", id: { notIn: readyBillingEntityIds } }
+        : status !== "ALL"
+          ? { status }
+          : {};
+  const billingBaseFilters: Prisma.BillingRequestWhereInput[] = [
+    params.billingApplicant ? { applicantId: params.billingApplicant } : {},
+    submittedFrom || submittedBefore
+      ? {
+          submittedAt: {
+            ...(submittedFrom ? { gte: submittedFrom } : {}),
+            ...(submittedBefore ? { lt: submittedBefore } : {}),
+          },
+        }
+      : {},
+    params.billingReviewer ? { id: { in: reviewerEntityIds } } : {},
+    selectedBillingScope === "applied"
+      ? { applicantId: session.userId }
+      : selectedBillingScope === "related"
+        ? {
+            OR: [
+              { applicantId: session.userId },
+              { id: { in: scopeEntityIds } },
+            ],
+          }
+        : selectedBillingScope === "reviewed" || selectedBillingScope === "to_review"
+          ? { id: { in: scopeEntityIds } }
+          : {},
+  ];
+  const billingWhere: Prisma.BillingRequestWhereInput = focusedBillingRequestId
+    ? { id: focusedBillingRequestId }
+    : {
+        AND: [
+          statusWhereFor(effectiveBillingStatus),
+          ...billingBaseFilters,
+        ],
+      };
+  const countStatuses = ["SUBMITTED", "PROCESSING", "PARTIAL", "COMPLETED", "REJECTED", "ALL"] as const;
+  const focusedBillingTotal = canViewBilling && focusedBillingRequestId
+    ? await prisma.billingRequest.count({ where: billingWhere })
+    : 0;
+  const billingStatusCountValues = canViewBilling && !focusedBillingRequestId
+    ? await Promise.all(countStatuses.map((status) => prisma.billingRequest.count({
+        where: { AND: [statusWhereFor(status), ...billingBaseFilters] },
+      })))
+    : countStatuses.map((status) => status === effectiveBillingStatus ? focusedBillingTotal : 0);
+  const billingStatusCounts = Object.fromEntries(
+    countStatuses.map((status, index) => [status, billingStatusCountValues[index]]),
+  );
+  const billingTotal = billingStatusCounts[effectiveBillingStatus] ?? 0;
+  const billingPageCount = Math.max(1, Math.ceil(billingTotal / billingPageSize));
+  const billingPage = Math.min(requestedBillingPage, billingPageCount);
+  const arStatus = params.arStatus === "paid" ? "paid" : "open";
+  const arMonth = /^\d{4}-\d{2}$/.test(params.arMonth ?? "")
+    ? params.arMonth!
+    : "";
+  const arMonthStart = arMonth ? dateAtStart(`${arMonth}-01`) : undefined;
+  const arMonthEnd = arMonth
+    ? (() => {
+        const [year, month] = arMonth.split("-").map(Number);
+        const nextYear = month === 12 ? year + 1 : year;
+        const nextMonth = month === 12 ? 1 : month + 1;
+        return dateAtStart(`${nextYear}-${String(nextMonth).padStart(2, "0")}-01`);
+      })()
+    : undefined;
+  const requestedArPage = positiveInteger(params.arPage, 1, Number.MAX_SAFE_INTEGER);
+  const arPageSize = positiveInteger(params.arPageSize, 50, BILLING_PAGE_SIZE_MAX);
+  const receivableWhere: Prisma.AccountsReceivableWhereInput = {
+    status: arStatus === "paid"
+      ? "PAID"
+      : { in: ["NOT_DUE", "PARTIAL", "OVERDUE"] },
+    invoices: { some: { deletedAt: null, status: "ISSUED" } },
+    ...(arMonthStart && arMonthEnd
+      ? { dueDate: { gte: arMonthStart, lt: arMonthEnd } }
+      : {}),
+  };
+  const receivableTotal = canViewBilling
+    ? await prisma.accountsReceivable.count({ where: receivableWhere })
+    : 0;
+  const arPageCount = Math.max(1, Math.ceil(receivableTotal / arPageSize));
+  const arPage = Math.min(requestedArPage, arPageCount);
   const [
     billingRequests,
     receivables,
@@ -90,7 +316,7 @@ export default async function FinanceWorkbenchPage({
   ] = await Promise.all([
     canViewBilling
       ? prisma.billingRequest.findMany({
-          where: focusedBillingRequestId ? { id: focusedBillingRequestId } : {},
+          where: billingWhere,
           include: {
             customer: { select: { brandName: true } },
             applicant: { select: { id: true, name: true } },
@@ -124,15 +350,13 @@ export default async function FinanceWorkbenchPage({
             },
           },
           orderBy: { submittedAt: "desc" },
-          take: 200,
+          skip: focusedBillingRequestId ? 0 : (billingPage - 1) * billingPageSize,
+          take: focusedBillingRequestId ? 1 : billingPageSize,
         })
       : Promise.resolve([]),
     canViewBilling
       ? prisma.accountsReceivable.findMany({
-          where: {
-            status: { in: ["NOT_DUE", "PARTIAL", "OVERDUE"] },
-            invoices: { some: { deletedAt: null,status:'ISSUED' } },
-          },
+          where: receivableWhere,
           include: {
             customer: { select: { brandName: true } },
             invoices: {
@@ -146,9 +370,20 @@ export default async function FinanceWorkbenchPage({
               },
               take: 1,
             },
+            receiptAllocations: {
+              where: { status: "ACTIVE" },
+              select: {
+                allocatedAmount: true,
+                receipt: { select: { receiptNo: true, receivedAt: true } },
+              },
+              orderBy: { createdAt: "desc" },
+            },
           },
-          orderBy: { dueDate: "asc" },
-          take: 200,
+          orderBy: arStatus === "paid"
+            ? [{ actualReceivedDate: "desc" }, { updatedAt: "desc" }]
+            : { dueDate: "asc" },
+          skip: (arPage - 1) * arPageSize,
+          take: arPageSize,
         })
       : Promise.resolve([]),
     canViewBilling
@@ -468,6 +703,27 @@ export default async function FinanceWorkbenchPage({
                   })),
               };
             })}
+            billingPagination={{
+              page: billingPage,
+              pageSize: billingPageSize,
+              total: billingTotal,
+              pageCount: billingPageCount,
+              scope: selectedBillingScope,
+              status: effectiveBillingStatus,
+              from: params.billingFrom ?? "",
+              to: params.billingTo ?? "",
+              applicantId: params.billingApplicant ?? "",
+              reviewerId: params.billingReviewer ?? "",
+            }}
+            billingStatusCounts={billingStatusCounts}
+            receivablePagination={{
+              status: arStatus,
+              page: arPage,
+              pageSize: arPageSize,
+              total: receivableTotal,
+              pageCount: arPageCount,
+              month: arMonth,
+            }}
             receivables={receivables.map((row) => ({
               id: row.id,
               customerId: row.customerId,
@@ -482,6 +738,15 @@ export default async function FinanceWorkbenchPage({
               currency: row.currency,
               invoiceAmount: row.invoiceAmount,
               receivedAmount: row.receivedAmount,
+              allocatedAmount: row.receiptAllocations.reduce(
+                (sum, allocation) => sum + allocation.allocatedAmount,
+                0,
+              ),
+              lastReceiptNo: row.receiptAllocations[0]?.receipt.receiptNo ?? null,
+              lastReceivedAt:
+                row.receiptAllocations[0]?.receipt.receivedAt.toISOString() ??
+                row.actualReceivedDate?.toISOString() ??
+                null,
               balance: Math.max(0, row.invoiceAmount - row.receivedAmount),
               dueDate: row.dueDate.toISOString(),
               status: row.status,
@@ -629,6 +894,11 @@ export default async function FinanceWorkbenchPage({
                 kind: "EXPENSE" as const,
               })),
             ]}
+            billingFilterUsers={financeUsers.map((user) => ({
+              id: user.id,
+              label: user.name,
+              email: user.email,
+            }))}
             reviewerOptions={financeUsers
               .filter((user) => session.role === "ADMIN" || user.id !== session.userId)
               .map((user) => ({ id: user.id, label: user.name, email: user.email }))}
