@@ -104,9 +104,10 @@ async function requireContractRow(id: string, required: PermLevel) {
   const session = await requireContractsPermission(required);
   const row = await prisma.contract.findFirst({
     where: { id, ...contractScope(session, session.role === "ADMIN" ? "all" : "mine"), deletedAt: null },
-    select: { id: true },
+    select: { id: true, uploadType: true },
   });
   if (!row) throw new Error("合同不存在或无权访问");
+  if (row.uploadType === "RESERVED" && required !== "MANAGE") throw new Error("请先选择系统创建或上传已有合同，补齐预留草稿");
   return session;
 }
 
@@ -187,7 +188,7 @@ export type ContractSaveResult = {
 async function nextContractNoByPrefix(prefix: string): Promise<string> {
   const year = new Date().getFullYear();
   const existing = await prisma.contract.findMany({
-    where: { contractNo: { startsWith: `${prefix}-${year}-` }, deletedAt: null },
+    where: { contractNo: { startsWith: `${prefix}-${year}-` } },
     select: { contractNo: true },
   });
   let max = 0;
@@ -205,7 +206,7 @@ export async function nextContractNo(prefix: "LYNQ" | "THRAIVE"): Promise<string
   const like = `${prefix}-${year}-%`;
   // Find the highest sequence number used this year for this prefix.
   const existing = await prisma.contract.findMany({
-    where: { contractNo: { startsWith: `${prefix}-${year}-` }, deletedAt: null },
+    where: { contractNo: { startsWith: `${prefix}-${year}-` } },
     select: { contractNo: true },
   });
   let max = 0;
@@ -341,7 +342,7 @@ export async function deleteContract(id: string) {
   if (session.role !== "ADMIN") throw new Error("仅管理员可删除合同");
   const contract = await prisma.contract.findUnique({
     where: { id },
-    select: { id: true, contractNo: true, customerId: true },
+    select: { id: true, contractNo: true, customerId: true, uploadType: true },
   });
   if (!contract) throw new Error("合同不存在");
   const now = new Date();
@@ -349,7 +350,7 @@ export async function deleteContract(id: string) {
   const result = await prisma.$transaction(async (tx) => {
     await tx.contract.update({
       where: { id },
-      data: { deletedAt: now, contractNo: deletedContractNumber(contract.contractNo, contract.id) },
+      data: { deletedAt: now, contractNo: contract.uploadType === "RESERVED" ? contract.contractNo : deletedContractNumber(contract.contractNo, contract.id) },
     });
     const cancelledReconciliations = await tx.customerReconciliation.updateMany({
       where: { contractId: id, deletedAt: null, status: { not: "CONFIRMED" }, planStatus: { not: "CANCELLED" } },
@@ -926,6 +927,10 @@ export async function uploadTransactionalContract(
   fd: FormData,
 ): Promise<ContractSaveResult> {
   const session = await requireContractsPermission("EDIT");
+  if (str(fd, "reservedContractId")) {
+    if (!["ADMIN", "USER"].includes(session.role)) return { ok: false, error: "仅内部员工可以处理预留草稿" };
+    await requireFeaturePermission(session, "contracts.create_upload", "EDIT");
+  }
   const file = fd.get("file");
   const ownerId = str(fd, "ownerId") || session.userId;
   const type = str(fd, "type") || "TRANSACTIONAL";
@@ -944,34 +949,34 @@ export async function uploadTransactionalContract(
   const saved = await saveUploadedFile(file);
   await requireApprovedInternalOwner(ownerId);
   const contractNo = await nextContractNoByPrefix("COMPANY");
-  const contract = await prisma.contract.create({
-    data: {
-      contractNo,
-      customerId: null,
-      type: "TRANSACTIONAL",
-      status: "COMPLETED",
-      ownerId,
-      reviewerId: null,
-      createdById: session.userId,
-      fileUrl: saved.fileUrl,
-      generatedDocUrl: saved.fileUrl,
-      fillMethod: "TRANSACTIONAL_UPLOAD",
-      uploadType: "TRANSACTIONAL",
-      uploadArchiveMode: "SIGNED_ARCHIVE",
-      extractedBy: null,
-      startDate,
-      endDate,
-    },
-  });
-  await prisma.attachment.create({
+  const reservedContractId = str(fd, "reservedContractId");
+  const contract = await prisma.$transaction(async tx => {
+    const reserved = reservedContractId ? await tx.contract.findFirst({ where: { id: reservedContractId, ...contractScope(session, "all"), type: "TRANSACTIONAL", status: "DRAFT", uploadType: "RESERVED", deletedAt: null } }) : null;
+    if (reservedContractId && !reserved) throw new Error("预留草稿已处理或类型不匹配");
+    if (reserved) {
+      const claim = await tx.contract.updateMany({ where: { id: reserved.id, uploadType: "RESERVED", status: "DRAFT" }, data: { uploadType: "CONVERTING" } });
+      if (claim.count !== 1) throw new Error("草稿已被处理，请刷新");
+    }
+    const data = {
+      contractNo: reserved?.contractNo || contractNo,
+      customerId: reserved?.customerId ?? null,
+      type: "TRANSACTIONAL", status: "COMPLETED", ownerId, reviewerId: null,
+      createdById: reserved?.createdById || session.userId,
+      fileUrl: saved.fileUrl, generatedDocUrl: saved.fileUrl,
+      fillMethod: "TRANSACTIONAL_UPLOAD", uploadType: "TRANSACTIONAL", uploadArchiveMode: "SIGNED_ARCHIVE", extractedBy: null, startDate, endDate,
+    };
+    const created = reserved ? await tx.contract.update({ where: { id: reserved.id }, data }) : await tx.contract.create({ data });
+    await tx.attachment.create({
     data: {
       fileName: saved.fileName,
       fileUrl: saved.fileUrl,
       fileSize: saved.fileSize,
       entityType: "CONTRACT",
-      entityId: contract.id,
+      entityId: created.id,
       uploadedById: session.userId,
     },
+    });
+    return created;
   });
 
   revalidatePath("/contracts");
@@ -982,6 +987,7 @@ export async function uploadChannelContract(fd: FormData): Promise<ContractSaveR
   try {
     const session = await requireContractsPermission("EDIT");
     if (session.role !== "ADMIN" && session.role !== "USER") return { ok: false, error: "仅有合同编辑权限的内部员工可以归档渠道商合同" };
+    if (str(fd, "reservedContractId")) await requireFeaturePermission(session, "contracts.create_upload", "EDIT");
     const customerId = str(fd, "customerId");
     const ownerId = str(fd, "ownerId") || session.userId;
     const partyBCompany = str(fd, "partyBCompany");
@@ -1009,9 +1015,15 @@ export async function uploadChannelContract(fd: FormData): Promise<ContractSaveR
       try {
         const contractNo = await nextContractNoByPrefix("CHANNEL");
         contract = await prisma.$transaction(async (tx) => {
-          const created = await tx.contract.create({
-            data: {
-              contractNo,
+          const reservedContractId = str(fd, "reservedContractId");
+          const reserved = reservedContractId ? await tx.contract.findFirst({ where: { id: reservedContractId, ...contractScope(session, "all"), type: "CHANNEL", customerId, status: "DRAFT", uploadType: "RESERVED", deletedAt: null } }) : null;
+          if (reservedContractId && !reserved) throw new Error("预留草稿已处理或客户不匹配");
+          if (reserved) {
+            const claim = await tx.contract.updateMany({ where: { id: reserved.id, status: "DRAFT", uploadType: "RESERVED" }, data: { uploadType: "CONVERTING" } });
+            if (claim.count !== 1) throw new Error("草稿已被处理，请刷新");
+          }
+          const createData = {
+              contractNo: reserved?.contractNo || contractNo,
               customerId,
               type: "CHANNEL",
               status: "COMPLETED",
@@ -1040,9 +1052,10 @@ export async function uploadChannelContract(fd: FormData): Promise<ContractSaveR
               thresholdAmount: String(splitValues.commissionThresholdAmount),
               thresholdCurrency: "USD",
               specialCommissionTerms: archivedSplitTerms(fixedFeePercent, canActivateSplit, describeChannelRule(splitValues), splitValues),
-            },
-            select: { id: true },
-          });
+          };
+          const created = reserved
+            ? await tx.contract.update({ where: { id: reserved.id }, data: { ...createData, createdById: reserved.createdById }, select: { id: true } })
+            : await tx.contract.create({ data: createData, select: { id: true } });
           if (canActivateSplit) await tx.channelSplitRule.create({ data: {
             customerId,
             contractId: created.id,
@@ -1347,7 +1360,7 @@ export async function createContractV4(
   const year = new Date().getFullYear();
   const computeNextNo = async () => {
     const existing = await prisma.contract.findMany({
-      where: { contractNo: { startsWith: `THRAIVE-${year}-` }, deletedAt: null },
+      where: { contractNo: { startsWith: `THRAIVE-${year}-` } },
       select: { contractNo: true },
     });
     let max = 0;

@@ -1,5 +1,6 @@
 ﻿import Link from "next/link";
 import { FilePlus } from "lucide-react";
+import { ReservedDraftButton } from "./ReservedDraftButton";
 import { ContractAMSelectionProvider,ContractAMCheckbox,ContractAMBulkActions } from "@/components/contracts/ContractAMSelection";
 import { adminHasFeature } from "@/lib/session";
 import { Fragment } from "react";
@@ -206,6 +207,7 @@ export default async function ContractsPage({
         actions={
           <div className="flex items-center gap-2">
             {isStaff(session.role) && <ScopeToggle />}
+            {isStaff(session.role) && await adminHasFeature(session,"contracts.create_upload","EDIT") && <ReservedDraftButton customers={customers.map(c=>({id:c.id,brandName:c.brandName,businessOwnerId:c.businessOwnerId,backendOwnerId:c.backendOwnerId}))} users={users.filter(u=>["ADMIN","USER"].includes(u.role)).map(u=>({id:u.id,name:u.name}))} currentUserId={session.userId}/>}
             {isStaff(session.role) && <Link href="/contracts/new" className="btn-primary flex items-center gap-1.5 text-sm"><FilePlus className="h-4 w-4" /> 新建合同</Link>}
             <ContractAMBulkActions />
           </div>
@@ -352,7 +354,7 @@ export default async function ContractsPage({
                     </Badge>
                   </td>
                   <td className="px-4 py-3">
-                    {missingFields.length > 0 ? (
+                    {ct.uploadType === "RESERVED" ? <Badge className="border border-slate-200 bg-slate-50 text-slate-600">待完善</Badge> : missingFields.length > 0 ? (
                       <Badge className="border border-rose-200 bg-rose-50 text-rose-700">
                         字段不全（{missingFields.length}）
                       </Badge>

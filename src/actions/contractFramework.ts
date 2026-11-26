@@ -95,10 +95,17 @@ export async function createFrameworkContract(form: FormData): Promise<Result> {
         const created = await prisma.$transaction(async (tx) => {
           const year = new Intl.DateTimeFormat("en", { timeZone: "Asia/Shanghai", year: "numeric" }).format(new Date());
           const prefix = `THRAIVE-${year}-`;
-          const existing = await tx.contract.findMany({ where: { contractNo: { startsWith: prefix }, deletedAt: null }, select: { contractNo: true } });
+          const existing = await tx.contract.findMany({ where: { contractNo: { startsWith: prefix } }, select: { contractNo: true } });
           const max = existing.reduce((value, row) => Math.max(value, Number.parseInt(row.contractNo.slice(prefix.length), 10) || 0), 0);
           const contractNo = `${prefix}${String(max + 1).padStart(3, "0")}`;
-          const contract = await tx.contract.create({ data: {
+          const reservedContractId = text(form, "reservedContractId");
+          const reserved = reservedContractId ? await tx.contract.findFirst({ where: { id: reservedContractId, status: "DRAFT", uploadType: "RESERVED", deletedAt: null, type: "BRAND", customerId } }) : null;
+          if (reservedContractId && !reserved) throw new Error("预留草稿已处理或与当前客户不匹配");
+          if (reserved) {
+            const claimed = await tx.contract.updateMany({ where: { id: reserved.id, status: "DRAFT", uploadType: "RESERVED" }, data: { uploadType: "CONVERTING" } });
+            if (claimed.count !== 1) throw new Error("草稿已被其他操作处理，请刷新");
+          }
+          const contractData = {
             contractNo, contractMode: "FRAMEWORK", customerId, type: "BRAND", status: createFromTemplate ? "DRAFT" : "COMPLETED",
             ownerId, reviewerId: reviewer?.id ?? null, createdById: session.userId, fileUrl: saved.fileUrl, templateId: template?.id ?? null, uploadType: createFromTemplate ? "WEBSITE_CREATE" : "EXISTING",
             uploadArchiveMode: createFromTemplate ? null : "SIGNED_ARCHIVE", extractedBy: "MANUAL",
@@ -110,7 +117,10 @@ export async function createFrameworkContract(form: FormData): Promise<Result> {
             partyBEmail: text(form, "partyBEmail") || partyB.email, partyBBankAccounts: "[]", remark: text(form, "remark") || null,
             ...(saved.fileUrl ? { versions: { create: { versionNo: 1, fileUrl: saved.fileUrl, fileType: ext.slice(1), reason: "主格式合同签署原件归档", createdById: session.userId } } } : {}),
             receivingAccounts: { create: accounts.map((account, position) => ({ financeProfileId: account.id, snapshot: snapshotAccount(account), position })) },
-          }, select: { id: true } });
+          };
+          const contract = reserved
+            ? await tx.contract.update({ where: { id: reserved.id }, data: { ...contractData, contractNo: reserved.contractNo, createdById: reserved.createdById }, select: { id: true } })
+            : await tx.contract.create({ data: contractData, select: { id: true } });
           await tx.financeAuditLog.create({ data: { entityType: "CONTRACT", entityId: contract.id, action: "CREATE_FRAMEWORK", fromStatus: null, toStatus: createFromTemplate ? "DRAFT" : "COMPLETED", actorId: session.userId, note: createFromTemplate ? "网站创建品牌方合同" : "上传已有品牌方合同并直接归档为签署完成", metadata: JSON.stringify({ reviewerId: reviewer?.id ?? null, flow: createFromTemplate ? "create" : "upload" }) } });
           return contract;
         });

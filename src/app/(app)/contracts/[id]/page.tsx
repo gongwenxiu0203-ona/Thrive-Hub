@@ -117,6 +117,12 @@ export default async function ContractDetailPage({
     }
   }
 
+  if (contract.uploadType === "RESERVED" && contract.status === "DRAFT") {
+    const canContinue = ["ADMIN","USER"].includes(session.role) && await adminHasFeature(session,"contracts.create_upload","EDIT");
+    const query = `reservedContractId=${encodeURIComponent(contract.id)}`;
+    const mode = contract.type === "CHANNEL" ? "channel" : contract.type === "TRANSACTIONAL" ? "transactional" : "framework";
+    return <div className="space-y-6"><Link href="/contracts" className="text-sm text-brand-600">返回合同管理</Link><section className="card space-y-4 p-6"><p className="text-sm text-brand-600">合同草稿 · 已预留编号</p><h1 className="text-xl font-semibold">{contract.contractNo}</h1><p className="text-sm">关联客户：{contract.customer?.brandName || "—"}　合同负责人：{contract.owner?.name || "—"}</p><p className="text-sm text-slate-500">尚未提交审核，不触发签署、对账或付款。后续操作沿用当前编号。</p>{canContinue&&<div className="flex flex-wrap gap-2">{contract.type === "BRAND"&&<Link className="btn-primary" href={`/contracts/new?mode=${mode}&flow=create&${query}`}>从系统创建合同</Link>}<Link className="btn-secondary" href={`/contracts/new?mode=${mode}&flow=upload&${query}`}>上传已有合同</Link></div>}{contract.type !== "BRAND"&&<p className="text-xs text-slate-500">该合同类型沿用现有上传归档流程。</p>}</section></div>;
+  }
   if (contract.contractMode === "FRAMEWORK") {
     const internal = session.role === "ADMIN" || session.role === "USER";
     const canCreateConfirmation = internal && await adminHasFeature(session, "contracts.records", "EDIT");

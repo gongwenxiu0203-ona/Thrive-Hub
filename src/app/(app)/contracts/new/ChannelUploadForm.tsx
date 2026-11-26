@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { FileUp, Upload } from "lucide-react";
 import { uploadChannelContract } from "@/actions/contracts";
 import { PARTY_B_COMPANIES } from "@/lib/partyB";
@@ -13,6 +13,7 @@ export function ChannelUploadForm({ customers, users, currentUserId, presetCusto
   customers: CustomerOption[]; users: { id: string; name: string }[]; currentUserId: string; presetCustomerId?: string;
 }) {
   const router = useRouter();
+  const query = useSearchParams();
   const [customerId, setCustomerId] = useState(presetCustomerId ?? "");
   const [ownerId, setOwnerId] = useState(currentUserId);
   const [partyBCompany, setPartyBCompany] = useState("");
@@ -40,6 +41,7 @@ export function ChannelUploadForm({ customers, users, currentUserId, presetCusto
   function submit(formElement: HTMLFormElement) {
     setError(null);
     const fd = new FormData(formElement);
+    if (query.get("reservedContractId")) fd.set("reservedContractId", query.get("reservedContractId")!);
     const selectedCustomerId = String(fd.get("customerId") ?? "").trim();
     const selectedOwnerId = String(fd.get("ownerId") ?? "").trim();
     const selectedStartDate = String(fd.get("startDate") ?? "").trim();

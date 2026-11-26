@@ -23,10 +23,14 @@ export default async function NewContractPage({ searchParams }: { searchParams: 
   if (session.role === "BRAND" || session.role === "CHANNEL") redirect("/dashboard");
 
   const sp = await searchParams;
-  const customerId = sp.customerId;
+  const reservedContractId = sp.reservedContractId;
+  const reserved = reservedContractId ? await prisma.contract.findFirst({ where: { id: reservedContractId, status: "DRAFT", uploadType: "RESERVED", deletedAt: null, ...contractScope(session, "all") } }) : null;
+  if (reservedContractId && !reserved) notFound();
+  if (reserved) await requireFeaturePermission(session, "contracts.create_upload", "EDIT");
+  const customerId = reserved?.customerId || sp.customerId;
   const contractId = sp.contractId;
-  const mode: Mode = ["brand", "framework", "new", "upload", "channel", "transactional"].includes(sp.mode ?? "") ? sp.mode as Mode : null;
-  const frameworkFlow = sp.flow === "upload" ? "upload" : "create";
+  const mode: Mode = reserved ? (reserved.type === "CHANNEL" ? "channel" : reserved.type === "TRANSACTIONAL" ? "transactional" : "framework") : ["brand", "framework", "new", "upload", "channel", "transactional"].includes(sp.mode ?? "") ? sp.mode as Mode : null;
+  const frameworkFlow = sp.flow === "upload" || sp.mode === "upload" ? "upload" : "create";
   let customer: { id: string; brandName: string } | null = null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let existingContract: any = null;
@@ -102,7 +106,7 @@ export default async function NewContractPage({ searchParams }: { searchParams: 
     return <div className="mx-auto max-w-4xl space-y-6"><div><h1 className="text-xl font-bold text-slate-900">编辑合同</h1><p className="mt-1 text-sm text-slate-500">合同编号：{existingContract.contractNo}</p></div><ContractV4Form customers={customers} users={users} templates={templates} presetCustomerId={customer?.id} presetCustomerName={customer?.brandName} currentUserId={session.userId} existingContract={existingContract} /></div>;
   }
 
-  const customerQuery = customer?.id ? `&customerId=${customer.id}` : "";
+  const customerQuery = `${customer?.id ? `&customerId=${customer.id}` : ""}${reserved ? `&reservedContractId=${reserved.id}` : ""}`;
   if (mode === "new" || mode === "upload") redirect(`/contracts/new?mode=framework&flow=${mode === "upload" ? "upload" : "create"}${customerQuery}`);
   if (!mode) {
     return <div className="mx-auto max-w-3xl space-y-6"><div><h1 className="text-xl font-bold text-slate-900">新建合同</h1><p className="mt-1 text-sm text-slate-500">请选择合同类型</p></div><div className="grid gap-4 sm:grid-cols-3">
@@ -128,11 +132,11 @@ export default async function NewContractPage({ searchParams }: { searchParams: 
       orderBy: [{ legalEntity: "asc" }, { name: "asc" }],
     });
     const partyBOptions = Object.values(PARTY_B_COMPANIES).map(({ key, label, name }) => ({ key, label, name }));
-    return <div className="mx-auto max-w-5xl space-y-6"><PageHeader title={frameworkFlow === "upload" ? "上传已有主格式合同" : "新建主格式合同"} description="新建与上传已有使用同一套双方资料、联系人和收款账户字段；项目合作与计费规则在确认书维护" backHref={`/contracts/new?mode=brand${customerQuery}`} backLabel="返回品牌方合同" /><FrameworkContractForm mode={frameworkFlow} presetCustomerId={customer?.id} templates={frameworkTemplates} customers={customers} users={users.filter((item) => ["ADMIN", "USER"].includes(item.role))} accounts={accounts} currentUserId={session.userId} defaultReviewerId={defaultReviewerId} partyBOptions={partyBOptions} /></div>;
+    return <div className="mx-auto max-w-5xl space-y-6"><PageHeader title={frameworkFlow === "upload" ? "上传已有主格式合同" : "新建主格式合同"} description={reserved ? `沿用预留合同编号：${reserved.contractNo}；完善资料后再进入现有合同流程。` : "新建与上传已有使用同一套双方资料、联系人和收款账户字段；项目合作与计费规则在确认书维护"} backHref={reserved ? `/contracts/${reserved.id}` : `/contracts/new?mode=brand${customerQuery}`} backLabel={reserved ? "返回合同草稿" : "返回品牌方合同"} /><FrameworkContractForm mode={frameworkFlow} reservedContractId={reserved?.id} presetOwnerId={reserved?.ownerId || undefined} presetCustomerId={customer?.id} templates={frameworkTemplates} customers={customers} users={users.filter((item) => ["ADMIN", "USER"].includes(item.role))} accounts={accounts} currentUserId={session.userId} defaultReviewerId={defaultReviewerId} partyBOptions={partyBOptions} /></div>;
   }
 
-  if (mode === "transactional") return <div className="mx-auto max-w-3xl space-y-6"><PageHeader title="事务性合同" description="填写合同起止时间并上传已签署原件；保存后直接标记签署完成" backHref="/contracts/new" backLabel="返回合同类型" /><TransactionalUploadForm currentUserId={session.userId} /></div>;
-  if (mode === "channel") return <div className="mx-auto max-w-5xl space-y-6"><PageHeader title="渠道商返佣合同" description="填写合同专属字段与返佣规则，上传已签署原件后直接归档" backHref="/contracts/new" backLabel="返回合同类型" /><ChannelUploadForm customers={customers} users={users} currentUserId={session.userId} presetCustomerId={customer?.id} /></div>;
+  if (mode === "transactional") return <div className="mx-auto max-w-3xl space-y-6"><PageHeader title="事务性合同" description={reserved ? `沿用预留合同编号：${reserved.contractNo}；上传签署原件并补齐资料。` : "填写合同起止时间并上传已签署原件；保存后直接标记签署完成"} backHref={reserved ? `/contracts/${reserved.id}` : "/contracts/new"} backLabel={reserved ? "返回合同草稿" : "返回合同类型"} /><TransactionalUploadForm currentUserId={reserved?.ownerId || session.userId} /></div>;
+  if (mode === "channel") return <div className="mx-auto max-w-5xl space-y-6"><PageHeader title="渠道商返佣合同" description={reserved ? `沿用预留合同编号：${reserved.contractNo}；填写返佣规则后上传签署原件归档。` : "填写合同专属字段与返佣规则，上传已签署原件后直接归档"} backHref={reserved ? `/contracts/${reserved.id}` : "/contracts/new"} backLabel={reserved ? "返回合同草稿" : "返回合同类型"} /><ChannelUploadForm customers={customers} users={users} currentUserId={reserved?.ownerId || session.userId} presetCustomerId={customer?.id} /></div>;
   return <div className="mx-auto max-w-4xl space-y-6"><PageHeader title="新建品牌方合同" description="基于合同模板创建" backHref={`/contracts/new?mode=brand${customerQuery}`} backLabel="返回品牌方合同" /><ContractV4Form customers={customers} users={users} templates={templates} presetCustomerId={customer?.id} presetCustomerName={customer?.brandName} currentUserId={session.userId} existingContract={existingContract} /></div>;
 }
 

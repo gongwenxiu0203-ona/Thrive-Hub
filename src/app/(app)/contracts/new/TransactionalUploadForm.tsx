@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { FileUp, Upload } from "lucide-react";
 import { uploadTransactionalContract } from "@/actions/contracts";
 
@@ -11,6 +11,7 @@ export function TransactionalUploadForm({
   currentUserId: string;
 }) {
   const router = useRouter();
+  const query = useSearchParams();
   const [ownerId, setOwnerId] = useState(currentUserId);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -21,6 +22,7 @@ export function TransactionalUploadForm({
   function submit(formElement: HTMLFormElement) {
     setError(null);
     const fd = new FormData(formElement);
+    if (query.get("reservedContractId")) fd.set("reservedContractId", query.get("reservedContractId")!);
     const submittedOwnerId = String(fd.get("ownerId") ?? "").trim();
     const submittedStartDate = String(fd.get("startDate") ?? "").trim();
     const submittedEndDate = String(fd.get("endDate") ?? "").trim();

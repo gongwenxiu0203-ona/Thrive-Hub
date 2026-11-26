@@ -17,10 +17,10 @@ export async function releaseDeletedContractNumber(
 ): Promise<boolean> {
   const existing = await tx.contract.findUnique({
     where: { contractNo },
-    select: { id: true, deletedAt: true },
+    select: { id: true, deletedAt: true, uploadType: true },
   });
   if (!existing || existing.id === excludeId) return true;
-  if (!existing.deletedAt) return false;
+  if (!existing.deletedAt || existing.uploadType === "RESERVED") return false;
   await tx.contract.update({
     where: { id: existing.id },
     data: { contractNo: tombstone("CONTRACT", existing.id, contractNo) },

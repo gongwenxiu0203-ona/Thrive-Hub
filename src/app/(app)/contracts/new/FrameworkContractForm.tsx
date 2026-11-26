@@ -2,15 +2,18 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { defaultContractAccountIds } from "@/lib/contractAccountSelection";
 
 type Account = { id: string; name: string; legalEntity: string; legalEntityKey?: string | null; accountName: string; accountNumber: string; currency: string; status?: string };
 export type FrameworkInitial = { id: string; updatedAt: string; customerId: string | null; ownerId: string | null; reviewerId: string | null; templateId: string | null; partyBCompany: string | null; receivingAccountIds: string[] } & Partial<Record<"partyA" | "partyACreditCode" | "partyAAddress" | "partyAContact" | "partyAPhone" | "partyAEmail" | "partyBContact" | "partyBEmail" | "partyBPhone" | "remark", string | null>>;
-type Props = { mode: "create" | "upload"; existing?: FrameworkInitial; presetCustomerId?: string; templates: { id: string; name: string }[]; customers: Array<{ id: string; brandName: string }>; users: Array<{ id: string; name: string; email: string; phone: string | null }>; accounts: Account[]; currentUserId: string; defaultReviewerId?: string; partyBOptions: Array<{ key: string; label: string; name: string }> };
+type Props = { mode: "create" | "upload"; reservedContractId?: string; presetOwnerId?: string; existing?: FrameworkInitial; presetCustomerId?: string; templates: { id: string; name: string }[]; customers: Array<{ id: string; brandName: string }>; users: Array<{ id: string; name: string; email: string; phone: string | null }>; accounts: Account[]; currentUserId: string; defaultReviewerId?: string; partyBOptions: Array<{ key: string; label: string; name: string }> };
 
-export function FrameworkContractForm({ mode, existing, presetCustomerId, templates, customers, users, accounts, currentUserId, defaultReviewerId, partyBOptions }: Props) {
+export function FrameworkContractForm({ mode, reservedContractId, presetOwnerId, existing, presetCustomerId, templates, customers, users, accounts, currentUserId, defaultReviewerId, partyBOptions }: Props) {
   const router = useRouter();
+  const query = useSearchParams();
+  reservedContractId = reservedContractId || query.get("reservedContractId") || undefined;
   const [pending, startTransition] = useTransition();
   const [partyB, setPartyB] = useState(existing?.partyBCompany || partyBOptions[0]?.key || "");
   const [error, setError] = useState("");
@@ -37,6 +40,7 @@ export function FrameworkContractForm({ mode, existing, presetCustomerId, templa
     // signed contract upload) to arrive at the server without their text and
     // checkbox fields.
     const form = new FormData(formElement);
+    if (reservedContractId) form.set("reservedContractId", reservedContractId);
     if (!existing) {
       const missing = [
         !String(form.get("customerId") ?? "").trim() ? "关联客户" : null,
@@ -75,7 +79,7 @@ export function FrameworkContractForm({ mode, existing, presetCustomerId, templa
     <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-4"><div><h2 className="font-semibold text-slate-900">主合同资料</h2><p className="mt-1 max-w-2xl text-sm text-slate-500">两个入口使用同一套字段。合作范围、国家站点、平台及收费条款不在主合同重复填写。</p></div><a href="/contracts/templates?scope=brand" target="_blank" rel="noreferrer" className="text-sm text-brand-700 hover:underline">查看 / 上传品牌方模板 ↗</a></div>
     <section className="space-y-4"><h3 className="text-sm font-semibold text-slate-800">基本信息</h3><div className="grid gap-4 md:grid-cols-2">
       <Field label="关联客户 *"><select name="customerId" disabled={!!existing} defaultValue={existing?.customerId || presetCustomerId || ""} required className="input"><option value="">请选择</option>{customers.map((item) => <option key={item.id} value={item.id}>{item.brandName}</option>)}</select></Field>
-      <Field label="合同负责人 *"><select name="ownerId" defaultValue={existing?.ownerId || currentUserId} required className="input">{users.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field>
+      <Field label="合同负责人 *"><select name="ownerId" defaultValue={existing?.ownerId || presetOwnerId || currentUserId} required className="input">{users.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field>
       {(existing || mode === "create") && <Field label="审核人 *"><select name="reviewerId" defaultValue={existing?.reviewerId || defaultReviewerId || ""} required className="input"><option value="">请选择审核人</option>{users.map((item) => <option key={item.id} value={item.id}>{item.name}{item.email ? ` · ${item.email}` : ""}</option>)}</select><span className="block text-xs font-normal text-slate-500">网站创建合同默认 Shallow Wan，可手动改选其他内部账号。</span></Field>}
     </div></section>
     <section className="space-y-4"><h3 className="text-sm font-semibold text-slate-800">甲方信息</h3><div className="grid gap-4 md:grid-cols-2">

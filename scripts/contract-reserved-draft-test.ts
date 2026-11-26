@@ -1,0 +1,95 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import Module from 'node:module';
+import { randomUUID } from 'node:crypto';
+
+async function main() {
+  const file = path.resolve(`backups/reserved-draft-test-${randomUUID()}.db`);
+  fs.copyFileSync(path.resolve('backups/finance-am-workflow-20261112-01/engine.db'),file,fs.constants.COPYFILE_EXCL);
+  process.env.DATABASE_URL='file:'+file.replaceAll('\\','/');
+  process.env.FEISHU_NOTIFY_ENABLED='false';
+  let identity={userId:'',role:'ADMIN'};
+  const loader=Module as unknown as {_load:(name:string,...args:unknown[])=>unknown};
+  const original=loader._load;
+  loader._load=function(name,...args){
+    if(name==='next/cache')return {revalidatePath:()=>{}};
+    if(name==='@/lib/session')return {requireSession:async()=>identity};
+    if(name==='@/lib/permissionGuard')return {requireFeaturePermission:async()=> 'MANAGE'};
+    if(name==='@/lib/upload')return {saveUploadedFile:async()=>({fileUrl:'/uploads/fictional-reserved.pdf',fileName:'fictional.pdf',fileSize:20})};
+    if(name==='@/lib/permissionResolver')return {resolveUserPermission:async()=> 'NONE'};
+    return original.call(this,name,...args);
+  };
+  const {prisma:db}=await import('../src/lib/prisma');
+  try {
+    const {createReservedContractDraft:create}=await import('../src/actions/contractDrafts');
+    const tag=randomUUID();
+    const user=await db.user.create({data:{email:`draft-${tag}@example.invalid`,name:'Fictional draft owner',passwordHash:'not-login',role:'ADMIN'}});
+    identity.userId=user.id;
+    const customer=await db.customer.create({data:{brandName:`Fictional draft ${tag}`,businessOwnerId:user.id}});
+    const beforeReminders=await db.reminder.count();
+    const ids:string[]=[];
+    for(const type of ['BRAND','CHANNEL','TRANSACTIONAL']) {
+      const result=await create({type,customerId:customer.id});
+      assert.equal(result.ok,true,JSON.stringify(result));
+      if(!result.id) throw Error('Missing draft id');
+      ids.push(result.id);
+      const row=await db.contract.findUniqueOrThrow({where:{id:result.id}});
+      assert.equal(row.status,'DRAFT');assert.equal(row.uploadType,'RESERVED');assert.equal(row.ownerId,user.id);
+      assert.equal(row.contractMode,null);assert.equal(row.fileUrl,null);
+      assert.match(row.contractNo,new RegExp(`^${type==='BRAND'?'THRAIVE':type==='CHANNEL'?'CHANNEL':'COMPANY'}-`));
+      assert.equal(await db.contractReview.count({where:{contractId:row.id}}),0);
+      assert.equal(await db.customerReconciliation.count({where:{contractId:row.id}}),0);
+    }
+    assert.equal(await db.reminder.count(),beforeReminders);
+    assert.equal((await create({type:'INVALID',customerId:customer.id})).ok,false);
+    assert.equal((await create({type:'BRAND',customerId:'missing'})).ok,false);
+    identity.role='BRAND';assert.equal((await create({type:'BRAND',customerId:customer.id})).ok,false);identity.role='ADMIN';
+    const {createFrameworkContract}=await import('../src/actions/contractFramework');
+    const account=await db.financeAccountProfile.create({data:{profileNo:`DRAFT-${tag}`,name:'Fixture company',accountType:'COMPANY_BANK',legalEntity:'Fixture',accountName:'Fixture',accountNumber:'TEST',currency:'USD',createdById:user.id}});
+    const template=await db.contractTemplate.create({data:{name:'Fixture master',documentType:'FRAMEWORK_MASTER',templateKey:'FIXED',fileUrl:'/fixture.docx',uploadedById:user.id}});
+    const form=new FormData();
+    for(const [key,value] of Object.entries({reservedContractId:ids[0],customerId:customer.id,ownerId:user.id,reviewerId:user.id,partyBCompany:'THRAIVE',partyA:'Fixture company',flow:'create',templateId:template.id}))form.set(key,value);
+    form.append('receivingAccountIds',account.id);
+    const originalRow=await db.contract.findUniqueOrThrow({where:{id:ids[0]}});
+    const converted=await createFrameworkContract(form);assert.equal(converted.ok,true,JSON.stringify(converted));
+    if(converted.ok)assert.equal(converted.id,ids[0]);
+    const row=await db.contract.findUniqueOrThrow({where:{id:ids[0]}});
+    assert.equal(row.contractNo,originalRow.contractNo);assert.equal(row.status,'DRAFT');assert.equal(row.contractMode,'FRAMEWORK');
+    assert.equal(await db.contractReview.count({where:{contractId:row.id}}),0);
+    assert.equal((await createFrameworkContract(form)).ok,false,'Repeated conversion rejected');
+    const uploadDraft=await create({type:'BRAND',customerId:customer.id});assert.ok(uploadDraft.id);
+    const uploadedBefore=await db.contract.findUniqueOrThrow({where:{id:uploadDraft.id}});
+    form.set('reservedContractId',uploadDraft.id!);form.set('flow','upload');form.set('signedConfirmed','true');
+    for(const key of ['partyACreditCode','partyAAddress','partyAContact','partyAPhone','partyBContact','partyBPhone'])form.set(key,'Fixture');
+    form.set('partyAEmail','a@example.invalid');form.set('partyBEmail','b@example.invalid');
+    form.set('file',new File(['%PDF-1.4 fictional fixture'],'fixture.pdf',{type:'application/pdf'}));
+    const upload=await createFrameworkContract(form);assert.equal(upload.ok,true,JSON.stringify(upload));
+    const uploaded=await db.contract.findUniqueOrThrow({where:{id:uploadDraft.id}});
+    assert.equal(uploaded.contractNo,uploadedBefore.contractNo);assert.equal(uploaded.status,'COMPLETED');assert.equal(uploaded.uploadType,'EXISTING');
+    assert.equal(await db.contractVersion.count({where:{contractId:uploaded.id}}),1);
+    assert.equal((await createFrameworkContract(form)).ok,false);
+    const {uploadTransactionalContract,uploadChannelContract,deleteContract,submitForReview}=await import('../src/actions/contracts');
+    await assert.rejects(()=>submitForReview(ids[1]),/预留草稿/);
+    const txForm=new FormData();txForm.set('reservedContractId',ids[2]);txForm.set('ownerId',user.id);txForm.set('type','TRANSACTIONAL');txForm.set('startDate','2026-11-01');txForm.set('endDate','2026-12-01');txForm.set('file',new File(['fixture'],'fixture.txt'));
+    const txBefore=await db.contract.findUniqueOrThrow({where:{id:ids[2]}});
+    const txResult=await uploadTransactionalContract(txForm);assert.equal(txResult.ok,true,JSON.stringify(txResult));assert.equal(txResult.contractId,ids[2]);
+    const txAfter=await db.contract.findUniqueOrThrow({where:{id:ids[2]}});assert.equal(txAfter.contractNo,txBefore.contractNo);assert.equal(txAfter.customerId,customer.id);assert.equal(txAfter.status,'COMPLETED');
+    assert.equal(await db.attachment.count({where:{entityId:ids[2],entityType:'CONTRACT'}}),1);
+    const channelBefore=await db.contract.findUniqueOrThrow({where:{id:ids[1]}});
+    await assert.rejects(()=>deleteContract(ids[1]),/NEXT_REDIRECT/);
+    const deleted=await db.contract.findUniqueOrThrow({where:{id:ids[1]}});assert.ok(deleted.deletedAt);assert.equal(deleted.contractNo,channelBefore.contractNo);
+    const {releaseDeletedContractNumber}=await import('../src/lib/businessNumberRelease');
+    assert.equal(await db.$transaction(tx=>releaseDeletedContractNumber(tx,channelBefore.contractNo)),false);
+    const channelDraft=await create({type:'CHANNEL',customerId:customer.id});assert.ok(channelDraft.id);
+    const channelRow=await db.contract.findUniqueOrThrow({where:{id:channelDraft.id}});
+    const channelForm=new FormData();for(const [k,v] of Object.entries({reservedContractId:channelDraft.id!,customerId:customer.id,ownerId:user.id,partyBCompany:'Fixture channel',partyBContact:'Fixture',partyBPhone:'123',partyBEmail:'fixture@example.invalid',startDate:'2026-11-01',endDate:'2026-12-01',fixedFeeRate:'10'}))channelForm.set(k,v);
+    channelForm.set('file',new File(['fixture'],'fixture.txt'));
+    const channelResult=await uploadChannelContract(channelForm);assert.equal(channelResult.ok,true,JSON.stringify(channelResult));assert.equal(channelResult.contractId,channelDraft.id);
+    const channelAfter=await db.contract.findUniqueOrThrow({where:{id:channelDraft.id}});assert.equal(channelAfter.contractNo,channelRow.contractNo);assert.equal(channelAfter.status,'COMPLETED');
+    assert.equal(await db.channelSplitRule.count({where:{contractId:channelDraft.id}}),0,'No split authority means no activation');
+    assert.equal((await uploadChannelContract(channelForm)).ok,false);
+    console.log('PASS: three draft types, numbering, owner, no review/reminder/reconciliation, validation, external denial, same-ID same-number framework conversion and duplicate prevention. Fictional isolated SQLite only.');
+  } finally {loader._load=original;await db.$disconnect();}
+}
+main().catch(e=>{console.error(e);process.exitCode=1;});
